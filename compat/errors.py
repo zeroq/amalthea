@@ -5,7 +5,9 @@ from rest_framework.response import Response
 from rest_framework.views import exception_handler
 
 
-def thehive_exception_handler(exc: Exception, context: dict | None = None) -> Response | None:
+def thehive_exception_handler(
+    exc: Exception, context: dict[str, object] | None = None
+) -> Response | None:
     response = exception_handler(exc, context)
     if response is None:
         return Response(

@@ -15,7 +15,10 @@ User = get_user_model()
 ph = PasswordHasher()
 
 
-class ApiKeyAuthentication(BaseAuthentication):
+# DRF ships no stubs, so `BaseAuthentication` resolves to `Any` and strict mode rejects the
+# subclass. Overriding it with `ignore_missing_imports` (pyproject) does not help here: the
+# base is genuinely untyped. Narrow, documented ignore rather than weakening strict mode.
+class ApiKeyAuthentication(BaseAuthentication):  # type: ignore[misc]
     def authenticate(self, request: Request) -> tuple[Any, Any] | None:
         auth = request.META.get("HTTP_AUTHORIZATION", "")
         if not auth or not auth.startswith("Bearer "):

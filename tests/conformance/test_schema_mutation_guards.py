@@ -31,15 +31,16 @@ only durable while the mechanism that produced it runs on every `pytest` invocat
 """
 
 import pytest
-from django.db import IntegrityError, connection
+from django.db import IntegrityError, connection, transaction
 
+from observables.models import Observable, ObservableType
 from tests.conformance import (
     test_fk_audit,
     test_indexes,
-    test_integrity,
     test_introspection,
     test_phase3_schema,
 )
+from tests.conformance._mutation import schema_mutation
 
 
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
@@ -84,15 +85,12 @@ def test_mutation_3_indexes_detects_a_redundant_index():
     from cases.models import Case
 
     redundant = models.Index(fields=["status_id"], name="case_status_idx_mutated")
-    with connection.schema_editor() as editor:
-        editor.add_index(Case, redundant)
-    try:
+    # add_index() verifies the index reached sqlite_master; the block removes it again on exit.
+    with schema_mutation("case_record", label="add redundant (status_id) index") as m:
+        m.add_index(Case, redundant)
         with pytest.raises(AssertionError) as excinfo:
             test_indexes.test_no_index_is_left_prefix_covered_by_a_wider_one()
         print("MUTATION-3 ASSERTION:", str(excinfo.value))
-    finally:
-        with connection.schema_editor() as editor:
-            editor.remove_index(Case, redundant)
 
 
 @pytest.mark.django_db
@@ -116,42 +114,79 @@ def test_mutation_4_phase3_schema_detects_a_nullable_login():
         login.null, login.blank = original_null, original_blank
 
 
+def _duplicate_insert_raises(marker: str) -> bool:
+    """Try to store two identical observables. Return True if the second was rejected.
+
+    Self-contained and rolled back: it must not depend on another test's fixtures, and it must not
+    leave rows behind, or they collide with the *next* guard's remade table.
+    """
+    other = ObservableType.objects.get(name="other")
+    try:
+        with transaction.atomic():
+            Observable.objects.create(data_type=other, data=marker, normalized_data=marker)
+            Observable.objects.create(data_type=other, data=marker, normalized_data=marker)
+            transaction.set_rollback(True)
+        return False
+    except IntegrityError:
+        return True
+
+
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
 def test_mutation_5_integrity_detects_a_dropped_unique_constraint():
-    """Remove `uniq_obs_dtype_hash` and expect the behavioural duplicate test to stop raising.
+    """Drop `uniq_obs_dtype_hash` for real, and prove both that it went and that it mattered.
 
-    Closes the gap this file previously had. A `UNIQUE` constraint declared in the table
-    definition is backed on SQLite by `sqlite_autoindex_<table>_N`, **not** by an index named
-    after the constraint — so mutations 1-4's `DROP INDEX IF EXISTS "<name>"` technique is a
-    **silent no-op** against a UniqueConstraint, and reported a verdict for a schema that had
-    never changed.
+    Guards the REVIEW **H3** fix — moving observable uniqueness off the unbounded `normalized_data`
+    onto `data_hash`, which bounds the btree index tuple and removes the collation dependence that
+    made case-sensitive dedupe wrong on a non-`C` collation. That constraint is the entire safety net
+    of the change, and it was previously unguarded.
 
-    That left the REVIEW H3 fix — moving the unique constraint from the unbounded
-    `normalized_data` to `data_hash` — with no guard at all. Nothing would have noticed if the
-    constraint had been dropped, which is the whole safety net of that change.
-
-    The mutation is therefore done the only way SQLite permits: `schema_editor.remove_constraint`,
-    which remakes the table without the constraint. We then assert on *behaviour* — a duplicate
-    insert must now succeed where it previously raised `IntegrityError` — rather than on an index
-    name. Behavioural assertions are engine-independent and test the contract, not the way the
-    contract happens to be implemented.
+    **This guard was itself vacuous the first time it was written** (round-2 finding C-1): it called
+    `schema_editor.remove_constraint()`, which on SQLite is `_remake_table(model)` — a rebuild from
+    *current model state*. The constraint was still in `_meta.constraints`, so it was written straight
+    back out; duplicates were rejected throughout while the test printed `duplicate insert accepted`
+    and reported a pass. `schema_mutation` makes that failure structurally impossible now, and
+    `detach_constraint` supplies the technique SQLite actually requires.
     """
-    from observables.models import Observable
+    with schema_mutation("observable", label="drop uniq_obs_dtype_hash") as m:
+        m.detach_constraint(Observable, "uniq_obs_dtype_hash")
+        m.assert_ddl_delta(missing=["uniq_obs_dtype_hash"])
+        assert not _duplicate_insert_raises("mut5"), (
+            "duplicate was still rejected — the constraint is somehow still enforced"
+        )
 
-    constraint = next(c for c in Observable._meta.constraints if c.name == "uniq_obs_dtype_hash")
+    assert _duplicate_insert_raises("mut5-restored"), (
+        "constraint was restored but duplicates are accepted again — restore did not take effect"
+    )
+    print("MUTATION-5: uniq_obs_dtype_hash absent from DDL, duplicate accepted, then restored")
 
-    with connection.schema_editor() as editor:
-        editor.remove_constraint(Observable, constraint)
-    try:
-        # The constraint really is gone: the duplicate that `test_duplicate_observable_raises`
-        # insists must raise no longer raises. Without this, the guard below would be vacuous
-        # for the same reason the original four ACs were.
-        test_integrity.test_duplicate_observable_raises()
-    finally:
-        with connection.schema_editor() as editor:
-            editor.add_constraint(Observable, constraint)
 
-    # Restored: the duplicate must raise again, so the suite is meaningful afterwards.
-    with pytest.raises(IntegrityError):
-        test_integrity.test_duplicate_observable_raises()
-    print("MUTATION-5 ASSERTION: duplicate insert accepted while uniq_obs_dtype_hash was absent")
+@pytest.mark.django_db(transaction=True, serialized_rollback=True)
+def test_mutation_6_enum_contract_detects_a_dropped_check_constraint():
+    """Drop a CHECK constraint and prove the enum guard stops rejecting out-of-range values.
+
+    Closes round-2 finding **H-2**: the six CHECK constraints behind `H5`/`L1` were name-only.
+    Mutation 4's own docstring conceded that `remove_constraint` is "a deliberate no-op" for CHECK on
+    SQLite — so the database-level half of the enum validation could have been deleted with no test
+    failing. These are the last line of defence for `severity`/`tlp`/`pap`, making this the guard that
+    matters most for data integrity.
+    """
+    other = ObservableType.objects.get(name="other")
+
+    def out_of_range_tlp(marker: str) -> bool:
+        try:
+            with transaction.atomic():
+                Observable.objects.create(
+                    data_type=other, data=marker, normalized_data=marker, tlp=99
+                )
+                transaction.set_rollback(True)
+            return False
+        except IntegrityError:
+            return True
+
+    with schema_mutation("observable", label="drop observable_tlp_range") as m:
+        m.detach_constraint(Observable, "observable_tlp_range")
+        m.assert_ddl_delta(missing=["observable_tlp_range"])
+        assert not out_of_range_tlp("mut6"), "tlp=99 still rejected — the CHECK is somehow enforced"
+
+    assert out_of_range_tlp("mut6-restored"), "CHECK restored but tlp=99 is accepted again"
+    print("MUTATION-6: observable_tlp_range absent from DDL, tlp=99 accepted, then restored")

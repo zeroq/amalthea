@@ -106,7 +106,7 @@ mutation file's own docstring.
 
 ```python
 def declared_on_delete_is_explicit(field):
-    return "on_delete" in field.deconstruct()[3]      # line 67
+    return "on_delete" in field.deconstruct()[3]  # line 67
 ```
 
 Django **omits** `on_delete` from `deconstruct()` when the value equals `CASCADE`. So `CASCADE` is
