@@ -1,0 +1,33 @@
+# Local backing services. The Docker daemon is NOT currently running on this machine,
+# so `manage.py` works against SQLite + the in-memory channel layer without it.
+# Postgres is still mandatory for CI and for any JSONB / index work (PLAN R4, AC3.7).
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: amalthea
+      POSTGRES_PASSWORD: amalthea
+      POSTGRES_DB: amalthea
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amalthea -d amalthea"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    # Appendonly so queued Celery tasks survive a restart.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    volumes: ["redisdata:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  redisdata:

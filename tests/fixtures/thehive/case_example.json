@@ -1,0 +1,42 @@
+{
+  "_id": "~98112",
+  "_type": "Case",
+  "_createdBy": "alice@example.com",
+  "_createdAt": 1745539200000,
+  "_updatedBy": "alice@example.com",
+  "_updatedAt": 1745625600000,
+  "number": 412,
+  "title": "Suspicious Ransomware Activity",
+  "severity": 3,
+  "severityLabel": "High",
+  "startDate": 1745539200000,
+  "tags": [
+    "ransomware",
+    "file-encryption",
+    "TheOrganization"
+  ],
+  "flag": true,
+  "tlp": 3,
+  "tlpLabel": "Red",
+  "pap": 2,
+  "papLabel": "Amber",
+  "status": "InProgress",
+  "stage": "InProgress",
+  "assignee": "alice@example.com",
+  "access": {
+    "_kind": "OrganisationAccessKind"
+  },
+  "customFields": [],
+  "extraData": {
+    "taskStats": {
+      "Waiting": 1,
+      "InProgress": 4,
+      "Completed": 4,
+      "Cancel": 0
+    },
+    "shareCount": 2
+  },
+  "newDate": 1745539200000,
+  "inProgressDate": 1745542800000,
+  "timeToDetect": 0
+}

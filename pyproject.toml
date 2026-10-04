@@ -1,0 +1,113 @@
+[project]
+name = "amalthea"
+version = "0.1.0"
+description = "Security Case Management and Orchestration platform with a TheHive-compatible API"
+requires-python = ">=3.12"
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+
+# NOTE: runtime dependencies are PINNED in requirements/base.txt, not declared here.
+# A single source of truth avoids version drift between packaging metadata and the
+# verified lock set. `scripts/lock.sh` regenerates them.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["."]
+extend-exclude = [".venv", "*/migrations/*", "staticfiles"]
+
+[tool.ruff.lint]
+select = [
+  "E", "W",    # pycodestyle
+  "F",         # pyflakes
+  "I",         # isort
+  "N",         # pep8-naming
+  "UP",        # pyupgrade
+  "B",         # bugbear
+  "C4",        # comprehensions
+  "DJ",        # flake8-django
+  "S",         # bandit security
+  "RUF",
+]
+ignore = [
+  "E501",    # line length handled by the formatter
+  "S101",    # assert — used in tests
+  "RUF012",  # mutable class attrs; noisy on Django models
+]
+
+[tool.ruff.lint.per-file-ignores]
+"*/migrations/*" = ["E501", "F401", "I001"]
+"tests/**" = ["S105", "S106", "S311"]  # tokens/fixtures, random is fine in tests
+
+[tool.ruff.lint.isort]
+known-first-party = ["amalthea"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "amalthea.settings.test"
+python_files = ["test_*.py", "tests.py"]
+addopts = [
+  "--strict-markers",
+  "--import-mode=importlib",
+  "-ra",
+  "--strict-config",
+]
+markers = [
+  "conformance: TheHive API contract tests (golden corpus)",
+  "interop: runs a real third-party client (TheHive4py) against a live server",
+  "slow: excluded from the fast inner loop",
+]
+filterwarnings = ["error::DeprecationWarning:amalthea.*"]
+
+[tool.coverage.run]
+branch = true
+source = ["amalthea", "core", "identity", "compat", "cases", "alerts", "observables", "ingest", "automation", "realtime", "services"]
+omit = ["*/migrations/*", "*/tests/*", "manage.py", "*/asgi.py"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["mypy_django_plugin.main"]
+strict = true
+warn_unreachable = true
+disallow_untyped_decorators = false
+
+[tool.django-stubs]
+django_settings_module = "amalthea.settings.test"
+
+# Per-module overrides only. Global strictness (`strict = true`, `warn_unreachable`) is
+# deliberately NOT relaxed: each override below is a stub artefact in a third-party
+# integration point, not a hole in our own code.
+[[tool.mypy.overrides]]
+# celery ships no py.typed marker and no official stubs.
+module = ["celery", "celery.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# channels' `URLRouter` is a re-export of django.urls.URLRouter; its stubs declare the
+# ASGI-application argument instead, so `AuthMiddlewareStack(URLRouter(...))` and
+# `URLRouter(websocket_urlpatterns)` are rejected on a type that is identical at runtime.
+module = ["realtime.routing", "amalthea.asgi"]
+disable_error_code = ["arg-type"]
+
+[[tool.mypy.overrides]]
+# django-stubs declares every field generic in a `_ST` bound (`IntegerField[_ST]`) while
+# the runtime classes are plain classes that cannot be subscripted, so a custom field
+# cannot satisfy the bound at the point of definition.
+module = ["cases.numbering", "observables.hashing"]
+disallow_any_generics = false
+
+
+
+[tool.bandit]
+exclude_dirs = [".venv", "*/migrations/*", "tests"]
+# B113: request timeout — outbound playbook HTTP must always set one, enforced by our own guard,
+# so the raw requests call site is still reviewed.
+skips = ["B113"]
+
+[tool.cookiecutter]
+placeholder = "amalthea"
