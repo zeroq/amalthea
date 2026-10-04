@@ -155,3 +155,9 @@ reported.
   been demonstrated.*
 - [x] **Tracking established** — `TODO.md` / `COMPLETED.md`, with every item cross-referenced to its
   source (AC number, review finding ID, or decision ID) and gated items marked with what they block
+- [x] **Local git repository initialised** — `git init -b main`, 156 tracked files, commit `14d4fc2`
+  capturing the verified baseline. Pre-commit checks confirmed `.venv/`, caches, `.env`, and
+  `*.sqlite3` excluded, no oversized files, and no secrets in staged content. Promotion to a GitHub
+  remote is deferred by decision and tracked in TODO §4.5 — including the two things that must be
+  resolved first: **`AGENTS.md` calls the project open-source but no `LICENSE` file exists**, and the
+  default repo visibility needs confirming against that intent.

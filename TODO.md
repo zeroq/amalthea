@@ -156,9 +156,29 @@ agent never reported). `185 passed`, `mypy` **0 errors**, `manage.py check` 0 is
   Any packaging/build step fails. Needs a real README: what Amalthea is, quickstart, the TheHive
   compatibility statement, and pointers to the plan and ADRs.
 
-- [ ] **4.2 — Not a git repository**
-  The whole workflow assumes version control (deviations recorded, gates reviewed, ACs verified).
-  `git init`, commit the Phase 0–3 state as a baseline, add `docs/` and lock files.
+- [x] **4.2 — Local git repository** — **DONE**
+  `git init -b main`, 156 tracked files, 804K, clean working tree. Commit `14d4fc2` captures the
+  planner-verified state (185 tests pass, mypy clean, ruff clean, migrations in sync), so every
+  subsequent gate is now auditable against a known-good baseline and recoverable after an interrupted
+  agent. Verified before committing: `.venv/`, `__pycache__`, `.env`, `*.sqlite3`, and all tool caches
+  excluded; no file over 200KB; no secrets in staged content (`.env.example` holds only placeholders).
+  **Caveat to fix:** `user.name` was unset, so a repo-local identity was derived from your global
+  email (`zero-q <zero-q@iname.com>`). Repo-local only — global config was not touched. To correct
+  the author afterwards: `git commit --amend --reset-author --author="Your Name <you@example.com>"`.
+
+- [ ] **4.5 — Move to a real GitHub-hosted remote** · **deferred by decision 2026-10-03**
+  The repo is intentionally local for now; promoting it to GitHub is a later, separate task. When done:
+  1. Confirm the target org/repo name and visibility (**public** is the likely intent — AGENTS.md says
+     "open-source, developer-friendly"; a private repo contradicts that, and the commit history contains
+     `docs/reviews/` and `TODO.md`, which are candid about open risks and unfinished work).
+  2. Add `LICENSE` — **absent today.** AGENTS.md declares the project open-source but no licence file
+     exists, which is a real blocker for outside contributions.
+  3. Add a `.gitattributes` and confirm no CRLF/filemode churn.
+  4. `git remote add origin <url>` then push `main`.
+  5. Consider branch protection on `main` and a PR workflow, since gates are the project's main quality
+     control — a gate is far less meaningful if anyone can push straight to `main`.
+  6. Decide whether `TODO.md` / `COMPLETED.md` / `docs/reviews/` stay public. They are honest and
+     useful, but they narrate internal process; keeping them is defensible, hiding them is not.
 
 - [ ] **4.3 — Hash-pin the requirements** `R9`, plan §5
   Versions are pinned and the closure is verified byte-reproducible (95 packages), but
