@@ -31,9 +31,15 @@ only durable while the mechanism that produced it runs on every `pytest` invocat
 """
 
 import pytest
-from django.db import connection
+from django.db import IntegrityError, connection
 
-from tests.conformance import test_fk_audit, test_indexes, test_introspection, test_phase3_schema
+from tests.conformance import (
+    test_fk_audit,
+    test_indexes,
+    test_integrity,
+    test_introspection,
+    test_phase3_schema,
+)
 
 
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
@@ -108,3 +114,44 @@ def test_mutation_4_phase3_schema_detects_a_nullable_login():
         print("MUTATION-4 ASSERTION:", str(excinfo.value))
     finally:
         login.null, login.blank = original_null, original_blank
+
+
+@pytest.mark.django_db(transaction=True, serialized_rollback=True)
+def test_mutation_5_integrity_detects_a_dropped_unique_constraint():
+    """Remove `uniq_obs_dtype_hash` and expect the behavioural duplicate test to stop raising.
+
+    Closes the gap this file previously had. A `UNIQUE` constraint declared in the table
+    definition is backed on SQLite by `sqlite_autoindex_<table>_N`, **not** by an index named
+    after the constraint — so mutations 1-4's `DROP INDEX IF EXISTS "<name>"` technique is a
+    **silent no-op** against a UniqueConstraint, and reported a verdict for a schema that had
+    never changed.
+
+    That left the REVIEW H3 fix — moving the unique constraint from the unbounded
+    `normalized_data` to `data_hash` — with no guard at all. Nothing would have noticed if the
+    constraint had been dropped, which is the whole safety net of that change.
+
+    The mutation is therefore done the only way SQLite permits: `schema_editor.remove_constraint`,
+    which remakes the table without the constraint. We then assert on *behaviour* — a duplicate
+    insert must now succeed where it previously raised `IntegrityError` — rather than on an index
+    name. Behavioural assertions are engine-independent and test the contract, not the way the
+    contract happens to be implemented.
+    """
+    from observables.models import Observable
+
+    constraint = next(c for c in Observable._meta.constraints if c.name == "uniq_obs_dtype_hash")
+
+    with connection.schema_editor() as editor:
+        editor.remove_constraint(Observable, constraint)
+    try:
+        # The constraint really is gone: the duplicate that `test_duplicate_observable_raises`
+        # insists must raise no longer raises. Without this, the guard below would be vacuous
+        # for the same reason the original four ACs were.
+        test_integrity.test_duplicate_observable_raises()
+    finally:
+        with connection.schema_editor() as editor:
+            editor.add_constraint(Observable, constraint)
+
+    # Restored: the duplicate must raise again, so the suite is meaningful afterwards.
+    with pytest.raises(IntegrityError):
+        test_integrity.test_duplicate_observable_raises()
+    print("MUTATION-5 ASSERTION: duplicate insert accepted while uniq_obs_dtype_hash was absent")
