@@ -49,39 +49,73 @@ agent never reported). `185 passed`, `mypy` **0 errors**, `manage.py check` 0 is
       New `observables/hashing.py` (`DataHashField`, `canonical_value`); constraint is now
       `(data_type, data_hash)`.
 
-- [ ] **1.12 — The mutation guards cannot mutate UNIQUE constraints on SQLite** (found by planner probe)
+- [ ] **1.12 — The mutation guards cannot mutate UNIQUE/CHECK constraints** (found by planner probe,
+  **fix attempted and FAILED — superseded by 1.13**)
   A `UNIQUE` constraint declared in a table definition is backed on SQLite by an auto-index named
-  `sqlite_autoindex_<table>_N`, **not** by the constraint's own name. So `DROP INDEX IF EXISTS
-  "uniq_obs_dtype_hash"` — and the same trick for any `UniqueConstraint` — is a **silent no-op**, and the
-  guard reports "caught" or "not caught" for a mutation that never happened.
-  Consequence: `test_schema_mutation_guards.py` proves non-vacuity for **named** indexes, columns, and
-  model metadata, but nothing currently proves the suite would notice a **dropped or weakened UNIQUE
-  constraint** — including `(data_type, data_hash)`, which is the entire point of the `H3` fix.
-  Fix: a guard that rebuilds the table (create-copy-drop-rename) or asserts the uniqueness *behaviourally*
-  (attempt a duplicate insert, expect `IntegrityError`) rather than by name. Behavioural assertion is
-  preferable — it is engine-independent and tests the contract rather than the implementation.
-  Also: `scripts/lock.sh` reports `runtime=48`, which is the **declared-pin count**, not the
-  `pip freeze` closure (96 = 48 base + 48 dev). Confirmed healthy via `pip check`; not a regression,
-  but the two numbers are easy to misread as a dependency loss.
+  `sqlite_autoindex_<table>_N`, **not** by the constraint's own name, so `DROP INDEX IF EXISTS
+  "<name>"` is a **silent no-op** against a `UniqueConstraint`.
+  Attempted fix: mutation 5 using `schema_editor.remove_constraint`. **This did not work** — see 1.13.
 
-### Remaining before the re-gate
-- [ ] **1.9 — Decide the fate of `test_mutation_probe.py`** — **RULED: keep, permanently** ✅ *done*
-  Renamed `tests/conformance/test_schema_mutation_guards.py`; "TEMPORARY"/"deleted after" framing
-  removed; docstring now cites R11 and explains that deleting the file would delete the evidence. The
-  `ruff W292` is fixed. **See 1.12 for a gap in its coverage.**
+- [ ] **1.13 — Mutation 5 is a no-op; the guard lies about itself** `round2 C-1` · **CRITICAL** ·
+  **Blocks any honest `H3` sign-off**
+  Django's SQLite `remove_constraint()` is `self._remake_table(model)`, which rebuilds the table **from
+  current model state**. The constraint is still in `_meta.constraints`, so it is written straight back
+  out. Planner-verified: DDL contains `uniq_obs_dtype_hash` both before and after. Duplicates are still
+  rejected throughout, yet the guard printed `MUTATION-5 ASSERTION: duplicate insert accepted` and
+  reported `5 passed`. **That output was false — it was a string I wrote, not observed behaviour.**
+  This is precisely the R11 failure the file exists to prevent, committed by the planner.
+  Fix: temporarily remove the entry from `Observable._meta.constraints` **first**, then `_remake_table`.
+  Same defect applies to **CHECK constraints** (`round2 H-2`), so `H5`/`L1`'s DB-level validation is
+  also currently unguarded. **A guard must assert the schema changed before asserting anything else** —
+  read the DDL back from `sqlite_master` and compare, as the first statement of any future guard.
 
-- [ ] **1.10 — Confirm the "also fix" batch landed** — **ALL CONFIRMED** ✅ *done*
-  `H4` (`CASE_SENSITIVE_TYPES = ('file',)`), `H6` (UUID PKs, `login` unique+non-blank,
-  `prefix` unique), `M4` (`(case, custom_field)` / `(alert, custom_field)` uniqueness),
-  `M6` (`case_record`, consistent across models/migrations), `M10` (all three seed migrations use
-  `RunPython.noop` — **no data loss on rollback**), `M12` (`imported` → `Imported`),
-  `M14` (`playbook` FK + `playbook_name` snapshot), `L4` (`closed_date` on transition),
-  `L5` (`start_date`/`date` NOT NULL with `default=timezone.now`). Planner-verified by direct
-  inspection, not by the agent's report.
+- [ ] **1.14 — FK `on_delete` audit is blind to `CASCADE`** `round2 C-2` · **CRITICAL**
+  `test_fk_audit.py:67` tests `"on_delete" in field.deconstruct()[3]`, but Django **omits** `on_delete`
+  from `deconstruct()` when it is `CASCADE`, and the policy assertion pins only `PROTECT`. Three
+  mutations passed clean: `Alert.case` SET_NULL→CASCADE, `Case.assignee` SET_NULL→CASCADE (both delete
+  cases), and `Task.case` CASCADE→SET_NULL (orphans tasks).
+  This **retracts round 1's L3 verdict** that `Alert.case` SET_NULL was "verified sound" — the policy
+  was unverifiable, not correct. Fix: assert against `field.remote_field.on_delete` directly and assert
+  the **full expected policy per relation**, including every `CASCADE`, not just `PROTECT`.
 
-- [ ] **1.11 — Re-run the `db-postgres` gate**
-  Every Critical must be independently re-verified, including against a mutated schema. Blocked items
-  `H3`/`C2`/`C4` can only be *partially* confirmed on SQLite (§3.1). Include **1.12** in its scope.
+- [ ] **1.15 — `M1` over-pruned: two indexes are still needed** `round2 H-5`
+  `cases/models.py:214-222` justifies `db_index=False` by claiming `custom_field` is a left prefix of
+  `(case, custom_field)` — it is the **right** column. Live plan: `WHERE case_id=?` seeks;
+  `WHERE custom_field_id=?` **SCANs**. Also: 29 FK columns exist, not the 31 previously claimed.
+  This is the risk I flagged in TODO §2.5 when the prune was ordered, realised.
+
+- [ ] **1.16 — Postgres-only corruption: sequence not advanced for explicit numbers** `round2 H-6`
+  `numbering.py` deliberately supports a caller-supplied number (the TheHive import path), but
+  `case_number_seq` is never advanced to match. SQLite's `MAX()+1` self-heals, so all 186 tests are
+  structurally blind. On Postgres the next auto-numbered Case raises
+  `duplicate key ... case_record_number_uniq`. Fix: `setval()` when an explicit number is accepted.
+  **Untestable until Postgres (§3.1)** — write the test anyway; it must fail loudly there.
+
+- [ ] **1.17 — `data_hash` backfill uses a different hash function than the runtime** `round2 H-7`
+  The `0003` migration hashes raw `normalized_data`; the runtime hashes `canonical_value()`. A migrated
+  uppercase `hash` row therefore carries a digest the runtime would never produce, so the duplicate
+  slips past the only constraint meant to stop it. Fix the backfill, and assert backfilled rows satisfy
+  the same invariant as runtime-created ones.
+
+- [ ] **1.18 — Pin a runnable static-analysis command; "mypy clean" was not one** `round2`
+  I reported `mypy amalthea` → 0 errors. That scopes to **10 files**. `mypy .` gives **93 errors in 28
+  files** (26 excluding migrations). "mypy 0 errors" named no runnable command and was misleading.
+  Fix: pin the intended scope in `pyproject.toml`/`Makefile` so the claim is reproducible, and state
+  which scope the DoD gate uses.
+  Similarly, coverage `fail_under = 80` makes `pytest --cov` **exit 1**, so the "green baseline" only
+  holds because coverage is not run in the default command. `core/events.py`, all of `realtime/`, and
+  all five `compat/mappers/*` sit at **0%** — and that zero-coverage event surface is exactly what
+  `C2`/`C4` depend on.
+
+- [ ] **1.19 — Smaller round-2 items** `round2 H-1`, `H-3`, `H-4`
+  `ar_pending_idx` partial predicate unguarded (`H-1`) · `AutomationRun.idempotency_key` uniqueness
+  untested (`H-3`) · `IngestionSource.slug` uniqueness untested (`H-4`).
+  Plus 9 Medium / 4 Low in §3 of the report.
+
+- [ ] **1.11 — Re-run the `db-postgres` gate** *(round 2 done: FAIL — 2 Critical, 7 High, 9 Medium, 4 Low)*
+  Round 2 confirmed `C3`, `H2`, `H4`, `H6`, `M2`, `M3`, `M4`, `M6`, `M10`, `M14` — **`M10` genuinely
+  clean**: with analyst rows deliberately sharing seeded names (`Contained`, `Imported`, `hash`), all 10
+  reversal/re-apply steps changed zero rows. Round 3 required after 1.13–1.18.
 
 ---
 
