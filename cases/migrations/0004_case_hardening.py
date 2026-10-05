@@ -37,7 +37,7 @@ class Migration(migrations.Migration):
     dependencies = [
         ('cases', '0003_seed'),
         ('identity', '0003_identity_hardening'),
-        ('observables', '0002_seed'),
+        ('observables', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

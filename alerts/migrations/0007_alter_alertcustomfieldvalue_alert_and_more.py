@@ -22,7 +22,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('alerts', '0006_alerttaglink_alter_alert_tags'),
-        ('observables', '0002_seed'),
+        ('observables', '0001_initial'),
     ]
 
     operations = [

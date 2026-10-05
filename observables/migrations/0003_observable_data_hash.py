@@ -67,7 +67,6 @@ def backfill_data_hash(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('cases', '0004_case_hardening'),
         ('observables', '0002_seed'),
     ]
 

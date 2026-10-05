@@ -32,10 +32,10 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('alerts', '0003_seed'),
-        ('cases', '0003_seed'),
+        ('cases', '0002_initial'),
         ('identity', '0003_identity_hardening'),
         ('ingest', '0002_ingestion_source_hardening'),
-        ('observables', '0002_seed'),
+        ('observables', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

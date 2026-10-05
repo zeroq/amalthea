@@ -43,8 +43,8 @@ class Migration(migrations.Migration):
     dependencies = [
         ('alerts', '0004_alert_hardening'),
         ('automation', '0002_initial'),
-        ('cases', '0003_seed'),
-        ('observables', '0002_seed'),
+        ('cases', '0002_initial'),
+        ('observables', '0001_initial'),
     ]
 
     operations = [

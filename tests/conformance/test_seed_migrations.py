@@ -113,6 +113,116 @@ def test_m10_rolling_back_a_seed_migration_deletes_no_rows(app_label: str, name:
     )
 
 
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("app_label", "name", "parent"),
+    [
+        ("cases", "0003_seed", "0002_initial"),
+        ("observables", "0002_seed", "0001_initial"),
+    ],
+)
+def test_h3_2_rolling_back_a_seed_unapplies_nothing_in_another_app(
+    app_label: str, name: str, parent: str
+) -> None:
+    """Rolling back a seed must not unapply another app's migrations.
+
+    Round-3 **H3-2**. `test_m10_rolling_back_a_seed_migration_deletes_no_rows` above passed while
+    `migrate observables 0001_initial` **dropped the entire `case_record` table**. It passed because
+    it only read `ObservableType` rows and asserted nothing about the schema those rows sat in --
+    the same shape of gap as the round-1 and round-2 guard failures this project has hit twice.
+
+    The cause was four dependency edges that were never needed:
+
+    * `cases/0004_case_hardening`, `alerts/0007` and `alerts/0008` each declared a dependency on
+      `observables/0002_seed`. They only reference the `observable` *table* (via
+      `case_observable.observable` and `alert_observable.observable`), which `0001_initial` creates.
+      Depending on a *seed* is what chained the rollback across apps.
+    * `observables/0003_observable_data_hash` declared a dependency on `cases/0004_case_hardening`.
+      It alters only `Observable` fields and constraints; it never touches `cases`.
+
+    With the seed mid-chain, unapplying it forced Django to unapply everything depending on it,
+    transitively -- 13 migrations across three apps, including the ones that create `case_record`.
+    Pinning the edges lower cannot help; the edges have to *mean* something.
+
+    `alerts/0003_seed` is deliberately *not* listed. Its rollback still unapplies
+    `automation/0003_automation_hardening`, but through the legitimate `automation:0003 ->
+    alerts/0004_alert_hardening` edge -- automation's FKs genuinely point at `alerts.alert`, so
+    hardening built on top of alerts hardening has to come down with it. That is Django's model
+    working correctly, not a seed being dragged across apps, and `test_every_seed_migration_has_a
+    _safe_reverse` plus the graph test below cover the property that does matter. Recorded rather
+    than silently widened.
+
+    This asserts the **plan**, not the executed schema, and that is deliberate. Executing the
+    rollback is order-fragile in this file: `migrate(cases, 0002)` renames `case_record` back to
+    `case`, and re-applying forward leaves `automation_run`'s SQLite foreign key pointing at the
+    old name, so a restore-forward breaks the *next* test's teardown flush with "no such table:
+    main.case". A plan is deterministic, needs no DB mutation, and states the invariant directly. The
+    executed behaviour was confirmed by hand: `case_record` survives once the edges are corrected.
+    """
+    plan = MigrationExecutor(connection).migration_plan([(app_label, parent)])
+
+    unapplied = sorted({f"{app}.{mig}" for app, mig in plan})
+    foreign = [entry for entry in unapplied if not entry.startswith(f"{app_label}.")]
+
+    assert not foreign, (
+        f"H3-2: rolling back {app_label}/{name} would unapply {foreign} from another app. A seed "
+        f"rollback must stay inside its own app; full plan was {unapplied}."
+    )
+
+
+@pytest.mark.django_db(transaction=True, serialized_rollback=True)
+@pytest.mark.parametrize(
+    ("app_label", "child"),
+    [
+        # Every cross-app dependency that targets a seed must be a leaf-safe one, or rolling the
+        # seed back reaches into another app's migrations.
+        ("observables", "0003_observable_data_hash"),
+        ("cases", "0004_case_hardening"),
+        ("alerts", "0007_alter_alertcustomfieldvalue_alert_and_more"),
+        ("alerts", "0008_alter_alertobservable_alert_and_more"),
+        ("alerts", "0004_alert_hardening"),
+        ("automation", "0003_automation_hardening"),
+    ],
+)
+def test_h3_2_no_migration_depends_on_another_apps_seed(app_label: str, child: str) -> None:
+    """No migration may depend on a *seed* in another app; that is what makes rollback cascade.
+
+    Depending on your own app's preceding migration is normal — migrations are sequential within an
+    app, so `observables/0003` depending on `observables/0002_seed` is expected and harmless. The
+    defect is reaching across an app boundary to a seed, which puts unrelated schema between the
+    operator and the thing they asked to reverse.
+
+    A seed is data, and every migration above it in the chain becomes un-unapplyable by accident:
+    Django must unapply dependents before the seed, so a request to reverse one seed quietly
+    reverses real schema work in another app. Depending on the table-creating migration
+    (`0001_initial`) is both sufficient and safe.
+    """
+    seed_apps = {app for app, name in SEED_MIGRATIONS}
+    graph = MigrationLoader(connection).graph
+
+    node = None
+    for candidate in graph.nodes:
+        if candidate[0] == app_label and candidate[1] == child:
+            node = candidate
+            break
+    assert node is not None, f"{app_label}/{child} not found in the migration graph"
+
+    for dependency in graph.node_map[node].parents:
+        cross_app_seed = (
+            dependency[0] in seed_apps
+            and dependency[0] != app_label
+            and dependency[1] in _seed_names(dependency[0])
+        )
+        assert not cross_app_seed, (
+            f"H3-2: {app_label}/{child} depends on seed {dependency[0]}/{dependency[1]} in another "
+            "app; depend on the table-creating migration instead"
+        )
+
+
+def _seed_names(app_label: str) -> set[str]:
+    return {name for seed_app, name in SEED_MIGRATIONS if seed_app == app_label}
+
+
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
 def test_m10_a_seed_neither_overwrites_nor_deletes_a_pre_existing_row() -> None:
     """The exact scenario the old reverse destroyed.
