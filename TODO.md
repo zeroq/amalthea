@@ -132,7 +132,41 @@ agent never reported). `185 passed`, `mypy` **0 errors**, `manage.py check` 0 is
   `AlterField` (the autodetector cannot emit `through=`). **The 9 Medium / 4 Low of report §3 remain
   open** and are folded into the round-3 review agenda.
 
-- [ ] **1.11 — Re-run the `db-postgres` gate** *(round 2 done: FAIL — 2 Critical, 7 High, 9 Medium, 4 Low)*
+- [ ] **1.20 — Round-3 Highs** `round3 H3-1`, `H3-2`, `H3-3`, `H3-4`, `H3-5` — **round 3 FAILED**
+  Report: `docs/reviews/REVIEW-2026-10-05-phase3-schema-gate-round3.md`. All eight in-scope round-2
+  items verified **closed**; the C-1 evidence defect did not recur (15/15 mutation guards land real
+  DDL). Five findings remain:
+
+  - **`H3-1` (High) — a vocabulary change silently invalidates every stored digest.**
+    `ObservableType.is_case_sensitive` feeds `canonical_value()` → `data_hash`, but nothing observes
+    a change to it: `DataHashField.pre_save` recomputes only for rows being written, and ADR-002 §D4
+    makes the vocabulary user-extensible. **Reproduced:** create `/Tmp/A.bin` under the case-sensitive
+    `file` type, flip the flag to case-insensitive (permitted by §D4), then insert `/tmp/a.bin` —
+    the unique constraint **admits the duplicate**; two rows now denote one artifact because the
+    first row's on-disk digest is stale. Same stale-derived-state class as `H-7`, one level out.
+    Needs a signal on `ObservableType.save()` that re-hashes affected rows, plus a backfill path when
+    two rows collide post-rec canonicalisation.
+  - **`H3-2` (High) — the `alerts/0007`+`0008` dependency pins are inert, and their comments were
+    false.** Round-3 A/B: committed pin and autodetector pin unapply the **same 13 migrations** and
+    drop `case_record` in **both**. What the pin actually changes is rollback *order* — with it the
+    corruption is **loud** (9 test errors), without it **silent**. It converts a loud failure into a
+    quiet one. The comments also credited `observables/0004` with altering `AlertObservable` FKs; it
+    touches `ObservableTagLink` only (0 matches). Comments corrected in place and the false
+    `case_record`-cascade safety claim retracted. **The underlying gap is real:** `observables/0003` +
+    `alerts/0004` cannot be reversed cleanly on SQLite, so the seed-rollback tests fail under either
+    pin. That is a forward-only-migration problem, not a dependency-ordering one.
+  - **`H3-3` — `test_mutation_standard.py` enforces R11 by substring match.** A `test_mutation_*`
+    guard that mutates nothing passes by merely mentioning `_meta`. The standard's own enforcement is
+    weaker than the standard.
+  - **`H3-4` / `H3-5`** — round-2 `M-1` (`correlation_key` never derived) and `M-6`
+    (coverage 76.36% vs `fail_under=80`) still open.
+  - Also: `TODO.md:183` claims SQLite drops `DESC`, which is false; `L-1`, `L-4` unchanged.
+  - **Postgres-only, quarantined in report §6.** Notably `sync_case_number_sequence` (my 1.16 fix) is
+    a non-atomic read-modify-write whose `GREATEST` does **not** prevent backwards sequence movement
+    under concurrent imports. My 1.16 fix is therefore correct but not concurrency-safe; treat as
+    unproven until AC3.7 runs on Postgres.
+
+- [ ] **1.11 — Re-run the `db-postgres` gate** *(round 2 FAIL 2C/7H/9M/4L; **round 3 FAIL — 0 Critical, 5 High**, all 8 round-2 items closed)*
   Round 2 confirmed `C3`, `H2`, `H4`, `H6`, `M2`, `M3`, `M4`, `M6`, `M10`, `M14` — **`M10` genuinely
   clean**: with analyst rows deliberately sharing seeded names (`Contained`, `Imported`, `hash`), all 10
   reversal/re-apply steps changed zero rows. Round 3 required after 1.13–1.18.

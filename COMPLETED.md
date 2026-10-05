@@ -199,3 +199,24 @@ reported.
   around. Both dependencies re-pinned to `observables/0002_seed`, the newest state actually required.
 - [x] **Gate green: 286 passed, 1 skipped** (up from 214), ruff clean, `mypy` 0 errors across 73 files
   with a cold cache, migrations synchronized, Django system check clean.
+
+## 2026-10-05 — Phase 3 gate round 3 (independent review)
+
+- [x] **Round-3 gate run against `bda16e5`.** Verdict **FAIL — 0 Critical, 5 High.** Report:
+  `docs/reviews/REVIEW-2026-10-05-phase3-schema-gate-round3.md`. Critically, **all eight in-scope
+  round-2 items were independently verified closed**, and the round-1 `C-1` evidence defect did not
+  recur — all 15 mutation guards land real DDL changes and produce concrete failure text. The two
+  prior rounds' Criticals are genuinely gone.
+- [x] **Two reviewer claims independently re-tested rather than accepted.** My first attempt to
+  reproduce `H3-1` used `data_hash(o.normalized_data)` instead of `data_hash(canonical_value(o))`,
+  which showed no staleness and would have led me to wrongly reject a valid High; a second attempt
+  inserted a value the constraint happened to still catch. Re-reading the code and testing the
+  single-row case showed the reviewer right: with one row present, flipping `is_case_sensitive` and
+  re-inserting the same artifact **is admitted as a duplicate**.
+- [x] **`H3-2` verified by direct A/B experiment.** My dependency-pin comment claimed the pin
+  prevented a `case_record` cascade. Both pins unapply the **same 13 migrations**; the pin only
+  changes rollback *order*, turning a loud corruption into a silent one. Comments rewritten with the
+  measured behaviour and the false safety claim explicitly retracted.
+- [x] **Honest status:** the seed-rollback path is broken on SQLite under *any* dependency choice,
+  because `observables/0003` + `alerts/0004` are not cleanly reversible. That is now tracked as its
+  own finding rather than papered over by a comment that claimed a fix it never provided.
