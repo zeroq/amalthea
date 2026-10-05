@@ -25,6 +25,7 @@ from django.utils import timezone
 from alerts.models import Alert, AlertStatus
 from ingest.models import IngestionSource
 
+from .mapping import extract_correlation_key
 from .references import resolve_source_ref
 
 #: Severity an unmapped alert gets, with a warning (plan §14 Q1, provisional).
@@ -87,6 +88,17 @@ def store_ingested_alert(
     source_ref, ref_warning = resolve_source_ref(mapped_source_ref, payload)
     if ref_warning:
         warnings.append(ref_warning)
+
+    # Derive correlation_key from ingestion_source mapping if not explicitly provided
+    if ingestion_source is not None and not correlation_key:
+        try:
+            derived = extract_correlation_key(ingestion_source.mapping_config, payload)
+            if derived:
+                correlation_key = derived
+        except Exception:
+            warnings.append(
+                "correlation_key_derived_failed: failed to derive correlation_key from mapping_config"
+            )
 
     status = _resolve_default_status(warnings)
 
