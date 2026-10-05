@@ -44,6 +44,17 @@ def data_hash(normalized_data: str) -> str:
     return hashlib.sha256(normalized_data.encode("utf-8")).hexdigest()
 
 
+def canonical_value_under(normalized_data: str, *, case_sensitive: bool) -> str:
+    """The canonical form of a value under an **explicit** case rule.
+
+    Split out from :func:`canonical_value` so that recomputing digests after a vocabulary change
+    cannot read a *stale* `data_type` from a cached relation. `canonical_value` answers "what is
+    this row's digest given its type as loaded?"; this answers "what would it be if the rule were
+    exactly this?", which is what a re-hash needs while the flag is being flipped.
+    """
+    return normalized_data if case_sensitive else normalized_data.casefold()
+
+
 def canonical_value(instance: models.Model) -> str:
     """The value the identity digest is taken over.
 
@@ -58,9 +69,9 @@ def canonical_value(instance: models.Model) -> str:
     if data_type is None and data_type_id is not None:
         observable_type = apps.get_model("observables", "ObservableType")
         data_type = observable_type.objects.filter(pk=data_type_id).first()
-    if data_type is not None and not data_type.is_case_sensitive:
-        return normalized.casefold()
-    return normalized
+    return canonical_value_under(
+        normalized, case_sensitive=bool(data_type is not None and data_type.is_case_sensitive)
+    )
 
 
 class DataHashField(models.CharField):

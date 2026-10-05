@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from django.db import models
+from django.db import models, transaction
 
 from core.enums import (
     PAP_CHOICES,
@@ -31,6 +31,49 @@ class ObservableType(UUIDModel, TimeStampedModel):
 
     def __str__(self) -> str:
         return self.name
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Re-hash this type's observables when the case rule changes (round-3 **H3-1**).
+
+        `is_case_sensitive` is an input to `Observable.data_hash`, and ADR-002 §D4 makes the
+        vocabulary analyst-extensible. Nothing else observed a change to it: `Observable.save()`
+        recomputes when the *row's* `normalized_data` or `data_type` changes, but a row that is not
+        itself saved keeps the digest computed under the old rule. That left the unique constraint
+        blind — flipping `file` to case-insensitive and re-inserting the same path admitted a
+        duplicate, because the pre-existing row's digest still described the old spelling.
+
+        So the flip is intercepted here and the affected rows are re-hashed. It happens *after*
+        `super().save()` so that a refusal (two rows that would collapse into one artifact) leaves
+        the flag itself unchanged — the analyst gets an error naming the collision, not a vocabulary
+        that silently stopped matching its data. Both writes share one `atomic` block so that
+        "unchanged" is true in autocommit too, not only inside a caller's transaction.
+
+        Only the flag is intercepted. `name` changes are cosmetic, and `is_attachment` feeds no
+        derived state.
+        """
+        from .rehash import rehash_for_type
+
+        # Read the persisted value before writing, so this is a no-op on INSERT and on a save that
+        # does not touch the flag (the overwhelming majority).
+        previous: bool | None = None
+        if not self._state.adding:
+            previous = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values_list("is_case_sensitive", flat=True)
+                .first()
+            )
+        needs_rehash = previous is not None and previous != self.is_case_sensitive
+        if not needs_rehash:
+            super().save(*args, **kwargs)
+            return
+
+        # One transaction for the flag and the rows it describes. Without this, autocommit would
+        # persist the new flag and only *then* discover a collision, leaving a vocabulary that no
+        # longer matches its data — the exact defect this hook exists to prevent.
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            rehash_for_type(self, case_sensitive=self.is_case_sensitive)
 
 
 class Observable(UUIDModel, TimeStampedModel):
