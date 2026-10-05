@@ -196,10 +196,16 @@ def case_task_create(request: Request, case_id: str) -> Response:
     )
 
 
-@api_view(["GET"])
+@api_view(["GET", "POST"])
 @renderer_classes([JSONRenderer])
 def case_task_list(request: Request, case_id: str) -> Response:
-    """`GET /api/v1/case/{idOrNumber}/task`."""
+    """`GET` lists a case's tasks; `POST` adds one.
+
+    Both verbs share the route *and* the view, so `?status=` filtering on the list and task creation
+    cannot drift apart, and so a single `path()` entry serves the collection.
+    """
+    if request.method == "POST":
+        return case_task_create(request, case_id)
     case = _resolve_case(case_id)
     if case is None:
         return _not_found("Case")

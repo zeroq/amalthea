@@ -16,9 +16,11 @@ from . import views
 
 urlpatterns = [
     # Sub-resources first: they are more specific than the bare `{idOrNumber}` segment.
+    # One entry per collection. `case_task_list` dispatches GET/POST itself: two `path()` entries for
+    # the same pattern means Django resolves the first one for *both* verbs, so the create view is
+    # unreachable and POST silently 405s.
     path("case/<str:case_id>/task", views.case_task_list, name="case-task-list"),
-    path("case/<str:case_id>/task", views.case_task_create, name="case-task-create"),
-    path("case/<str:case_id>/task/", views.case_task_create, name="case-task-create-slash"),
+    path("case/<str:case_id>/task/", views.case_task_list, name="case-task-list-slash"),
     path("case/<str:case_id>/observable", views.case_observable_list, name="case-observable-list"),
     path("case/<str:case_id>/observable/", views.case_observable_add, name="case-observable-add"),
     path("case/<str:case_id>/timeline", views.case_timeline, name="case-timeline"),

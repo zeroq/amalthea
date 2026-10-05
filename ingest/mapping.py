@@ -11,22 +11,30 @@ from typing import Any
 
 try:
     from jsonpath_ng import parse as _parse  # type: ignore[import-untyped]
-except (ImportError, Exception):  # pragma: no cover
+except ImportError:  # pragma: no cover
+    # The package is a hard dependency; this branch exists so a missing wheel degrades the mapping
+    # to "no mapping" instead of taking the whole ingest app down at import time.
     _parse = None
 
 
-def _extract_by_jsonpath(path: str, payload: Any) -> Any | None:
-    """Extract a single value from payload using a JSONPath expression."""
+def extract_by_jsonpath(path: str, payload: Any) -> Any | None:
+    """First value at JSONPath `path` in `payload`, or `None`.
+
+    A bad path returns `None` rather than raising: `mapping_config` is operator-authored data and a
+    typo in it should produce an alert with a `severity_defaulted` warning, not a 500 that teaches
+    the sender to stop retrying.
+    """
     if _parse is None or not path:
         return None
     try:
-        expr = _parse(path)
-        matches = expr.find(payload)
-        if matches:
-            return matches[0].value
+        matches = _parse(path).find(payload)
     except Exception:
         return None
-    return None
+    return matches[0].value if matches else None
+
+
+# Retained for callers that predate the rename; `extract_by_jsonpath` is the public name.
+_extract_by_jsonpath = extract_by_jsonpath
 
 
 def extract_correlation_key(mapping_config: dict[str, Any] | None, payload: Any) -> str:
@@ -39,21 +47,21 @@ def extract_correlation_key(mapping_config: dict[str, Any] | None, payload: Any)
     if not mapping_config:
         return ""
 
+    # The first spelling that yields a value wins, so a source configured with both a legacy and a
+    # current key still correlates. Order is newest-convention-first.
     for key in (
         "correlation_key",
-        "correlation",
         "correlationKey",
-        "correlationKeyPath",
         "correlation_key_path",
+        "correlationKeyPath",
+        "correlation_id",
         "correlationId",
+        "correlation",
     ):
-        if key in mapping_config:
-            path = mapping_config[key]
-            if isinstance(path, str) and path.strip():
-                result = _extract_by_jsonpath(path.strip(), payload)
-                if result is not None:
-                    if isinstance(result, str):
-                        return result.strip()
-                    return str(result)
+        path = mapping_config.get(key)
+        if isinstance(path, str) and path.strip():
+            result = extract_by_jsonpath(path.strip(), payload)
+            if result is not None:
+                return result.strip() if isinstance(result, str) else str(result)
 
     return ""

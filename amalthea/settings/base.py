@@ -117,3 +117,29 @@ REST_FRAMEWORK = {
 }
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+# --- Ingestion limits (AC4.5 / AC4.7) ------------------------------------
+# These have named env vars in `.env.example` but were never read, so the documented knobs were
+# inert and every deployment silently ran on the view-module fallbacks. Reading them here makes the
+# documented limit the effective one.
+WEBHOOK_MAX_BODY_SIZE = int(os.getenv("AMALTHEA_MAX_WEBHOOK_BYTES", str(5 * 1024 * 1024)))
+# Guards the mapping engine's recursive walk over an attacker-supplied document.
+WEBHOOK_MAX_DEPTH = int(os.getenv("AMALTHEA_MAX_WEBHOOK_DEPTH", "30"))
+# Per-source and per-IP, per minute. A webhook is machine-to-machine, so DRF's `AnonRateThrottle`
+# does not apply (it keys on the authenticated user, which is `None` here); the receiver throttles
+# itself on these instead.
+WEBHOOK_RATE_SOURCE_PER_MIN = int(os.getenv("AMALTHEA_WEBHOOK_RATE_SOURCE", "60"))
+WEBHOOK_RATE_IP_PER_MIN = int(os.getenv("AMALTHEA_WEBHOOK_RATE_IP", "300"))
+
+# --- Cache ---------------------------------------------------------------
+# Backs the webhook rate limiter. `LocMemCache` is per-process, so a multi-process deployment
+# would enforce the limit once per worker — the setting names Redis explicitly so an operator can
+# move the counters somewhere shared, which is what production needs.
+CACHES = {
+    "default": {
+        "BACKEND": os.getenv(
+            "AMALTHEA_CACHE_BACKEND", "django.core.cache.backends.locmem.LocMemCache"
+        ),
+        "LOCATION": os.getenv("AMALTHEA_CACHE_LOCATION", "amalthea-webhook-throttle"),
+    }
+}
