@@ -96,6 +96,44 @@ def check_names(table: str) -> set[str]:
     return {name for name, spec in constraints.items() if spec.get("check")}
 
 
+def index_ddl(table: str, name: str) -> str:
+    """The raw ``CREATE INDEX`` statement for one index, or `""` if it is absent.
+
+    Django's introspection reports a partial index's columns but **not** its predicate, on
+    either engine — `get_constraints()` has no `condition` key for SQLite, and Postgres's
+    predicate is not surfaced by the Django backend at all. So anything that must assert on
+    `WHERE status = 'Pending'` (REVIEW-2026-10-04 **H-1**) has to read the catalog directly,
+    the same reason `table_ddl` exists in `_mutation`.
+    """
+    with connection.cursor() as cursor:
+        if connection.vendor == "postgresql":
+            cursor.execute(
+                "SELECT indexdef FROM pg_indexes WHERE tablename = %s AND indexname = %s",
+                [table, name],
+            )
+        else:
+            cursor.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = %s "
+                "AND name = %s",
+                [table, name],
+            )
+        row = cursor.fetchone()
+    return (row[0] or "") if row else ""
+
+
+def partial_index_predicate(table: str, name: str) -> str:
+    """The ``WHERE ...`` tail of a partial index's DDL, lower-cased. `""` if not partial.
+
+    Both engines spell the clause the same way, so no cross-engine normalisation is needed
+    beyond case: SQLite emits ``... ("created_at") WHERE "status" = 'Pending'`` and Postgres
+    ``... (created_at) WHERE (status::text = 'Pending'::text)``. Assertions therefore check
+    *what the predicate mentions*, not its exact text.
+    """
+    ddl = index_ddl(table, name).lower()
+    marker = ddl.rfind(" where ")
+    return ddl[marker + len(" where ") :] if marker != -1 else ""
+
+
 def columns(table: str) -> dict[str, str]:
     """`{column_name: declared SQL type}` as stored by the database."""
     with connection.cursor() as cursor:

@@ -30,17 +30,24 @@ throwaway probe to be deleted "after the evidence is captured" was wrong; the ev
 only durable while the mechanism that produced it runs on every `pytest` invocation.
 """
 
+from contextlib import contextmanager
+
 import pytest
-from django.db import IntegrityError, connection, transaction
+from django.db import IntegrityError, connection, models, transaction
 
 from observables.models import Observable, ObservableType
 from tests.conformance import (
+    test_enum_contracts,
     test_fk_audit,
     test_indexes,
+    test_integrity,
     test_introspection,
     test_phase3_schema,
 )
 from tests.conformance._mutation import schema_mutation
+from tests.conformance._schema import partial_index_predicate
+
+Skipped = pytest.skip.Exception
 
 
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
@@ -190,3 +197,259 @@ def test_mutation_6_enum_contract_detects_a_dropped_check_constraint():
 
     assert out_of_range_tlp("mut6-restored"), "CHECK restored but tlp=99 is accepted again"
     print("MUTATION-6: observable_tlp_range absent from DDL, tlp=99 accepted, then restored")
+
+
+# ---------------------------------------------------------------------------------------
+# Round-2 C-2 / H-1 / H-2 / H-3 / H-4 — TODO 1.14, 1.19 and §8.5.
+#
+# Each guard below applies the exact mutation REVIEW-2026-10-04 recorded, confirms it landed,
+# and requires the *real* assertion to raise. Every one of these mutations passed the whole
+# suite when it was applied by hand, which is precisely why the assertions are only worth
+# something now.
+# ---------------------------------------------------------------------------------------
+
+
+def _detected(func: object, *args: object) -> str:
+    """Run a real conformance assertion and **require it to fail**. Returns the failure text.
+
+    Not `pytest.raises(AssertionError)`: several of these contracts are enforced with
+    ``pytest.raises(IntegrityError)``, and when the database stops enforcing them that helper
+    raises ``Failed`` — which subclasses ``BaseException``, not ``Exception`` or
+    ``AssertionError``. Catching only ``AssertionError`` would report a *pass* for a mutation
+    that was detected perfectly well.
+
+    The exclusions matter too: ``Skipped`` is also an ``OutcomeException``, so a guard that
+    accepted any ``BaseException`` would count "this assertion did not run" as "this assertion
+    caught the mutation".
+    """
+    try:
+        func(*args)  # type: ignore[operator]
+    except (Skipped, KeyboardInterrupt, SystemExit) as exc:
+        raise AssertionError(
+            f"the guard proved nothing: {getattr(func, '__name__', func)} was SKIPPED ({exc!r}) "
+            f"rather than failing — the contract is untested, not detected"
+        ) from exc
+    except BaseException as exc:
+        return f"{type(exc).__name__}: {exc}"
+    raise AssertionError(
+        f"MUTATION NOT DETECTED: {getattr(func, '__name__', func)} passed while the schema it "
+        f"asserts was broken"
+    )
+
+
+@contextmanager
+def _swapped_on_delete(model: type[models.Model], field_name: str, replacement: object) -> object:
+    """Temporarily set ``field.remote_field.on_delete``. Self-verifying; caller asserts.
+
+    Not a metadata edit with no consequences: Django's deletion collector reads
+    ``remote_field.on_delete`` at delete time, so flipping it genuinely changes what
+    ``delete()`` does — which is why the behavioural assertions below break too.
+    """
+    field = model._meta.get_field(field_name)
+    original = field.remote_field.on_delete
+    assert original is not replacement, "the mutation would be a no-op"
+    field.remote_field.on_delete = replacement
+    try:
+        yield field
+    finally:
+        field.remote_field.on_delete = original
+
+
+@pytest.mark.django_db
+def test_mutation_7_on_delete_policy_detects_a_set_null_to_cascade_swap() -> None:
+    """`Alert.case` ``SET_NULL`` → ``CASCADE``: deleting a Case destroys its alerts.
+
+    Round-2 **C-2**. The old audit only rejected ``on_delete=None``, so this and the
+    `Case.assignee` twin both passed the entire suite. `EXPECTED_ON_DELETE` is now a full
+    29-entry table, so leaving the `PROTECT` subset is no longer enough to miss them.
+    """
+    from alerts.models import Alert
+
+    with _swapped_on_delete(Alert, "case", models.CASCADE):
+        assert Alert._meta.get_field("case").remote_field.on_delete is models.CASCADE
+        print(
+            "MUTATION-7 ASSERTION:",
+            _detected(test_fk_audit.test_every_fk_matches_the_declared_on_delete_policy),
+        )
+
+
+@pytest.mark.django_db
+def test_mutation_8_on_delete_policy_detects_a_cascade_to_set_null_swap() -> None:
+    """`Task.case` ``CASCADE`` → ``SET_NULL``: deleting a Case orphans its tasks.
+
+    The opposite direction — one a "reject every CASCADE" assertion alone would miss. AGENTS.md
+    §3 declares ``Case 1 —— 0..* Task``; a task with ``case_id IS NULL`` is not a lower
+    cardinality, it is simply unreachable from the case ledger.
+    """
+    from cases.models import Task
+
+    with _swapped_on_delete(Task, "case", models.SET_NULL):
+        assert Task._meta.get_field("case").remote_field.on_delete is models.SET_NULL
+        print(
+            "MUTATION-8 ASSERTION:",
+            _detected(test_fk_audit.test_every_fk_matches_the_declared_on_delete_policy),
+        )
+
+
+@pytest.mark.django_db
+def test_mutation_9_on_delete_policy_detects_a_protect_to_cascade_swap() -> None:
+    """`Observable.data_type` ``PROTECT`` → ``CASCADE``: deleting a type re-files artifacts.
+
+    The ``PROTECT`` subset the old audit *did* check — proving the replacement catches the
+    case the old one handled as well as the two it did not.
+    """
+    from observables.models import Observable as ObservableModel
+
+    with _swapped_on_delete(ObservableModel, "data_type", models.CASCADE):
+        assert ObservableModel._meta.get_field("data_type").remote_field.on_delete is (
+            models.CASCADE
+        )
+        print(
+            "MUTATION-9 ASSERTION:",
+            _detected(test_fk_audit.test_every_fk_matches_the_declared_on_delete_policy),
+        )
+
+
+@pytest.mark.django_db
+def test_mutation_10_on_delete_swap_breaks_the_delete_semantics_test() -> None:
+    """The same class of swap, caught *behaviourally* — by counting rows, not reading a string.
+
+    A table of intent is documentation until something is deleted against it.
+    """
+    from alerts.models import Alert, AlertStatus
+    from cases.models import CaseStatus
+
+    vocab = {
+        "case_status": CaseStatus.objects.get_or_create(
+            value="New", defaults={"stage": "New", "order": 1}
+        )[0],
+        "alert_status": AlertStatus.objects.get_or_create(
+            value="New", defaults={"stage": "New", "order": 1}
+        )[0],
+    }
+
+    with _swapped_on_delete(Alert, "case", models.CASCADE):
+        assert Alert._meta.get_field("case").remote_field.on_delete is models.CASCADE
+        print(
+            "MUTATION-10 ASSERTION:",
+            _detected(
+                test_fk_audit.test_delete_semantics_deleting_a_case_unlinks_alerts_and_automation_runs,
+                vocab,
+            ),
+        )
+    assert not Alert.objects.filter(source_ref="r1").exists(), (
+        "the CASCADE swap must actually have destroyed the alert"
+    )
+
+
+@pytest.mark.django_db(transaction=True, serialized_rollback=True)
+def test_mutation_11_severity_check_detects_a_neutered_range() -> None:
+    """Round-2 **H-2**, first half: a graded ``severity`` CHECK must be behavioural.
+
+    Detaching ``case_severity_range`` is the exact mutation the review ran against six
+    name-only constraints; every one of the six passed.
+    """
+    from cases.models import Case
+
+    with schema_mutation("case_record", label="drop case_severity_range") as m:
+        m.detach_constraint(Case, "case_severity_range")
+        m.assert_ddl_delta(missing=["case_severity_range"])
+        print(
+            "MUTATION-11 ASSERTION:",
+            _detected(
+                test_enum_contracts.test_h2_every_checked_enum_domain_is_refused_by_the_database,
+                "case_severity_range",
+                ("case_record", "severity", (-1, 5, 99)),
+            ),
+        )
+
+
+@pytest.mark.django_db(transaction=True, serialized_rollback=True)
+def test_mutation_12_pap_check_detects_a_neutered_range() -> None:
+    """Round-2 **H-2**, second half, and on the *narrowest* domain in the schema.
+
+    `pap` is 1..4, not 1..5 like `severity`/`tlp`, so an off-by-one in its bounds is the
+    defect most likely to be invisible — hence a separate guard rather than trusting the
+    parametrised sweep to have been run over it.
+    """
+    from alerts.models import Alert
+
+    with schema_mutation("alert", label="drop alert_pap_range") as m:
+        m.detach_constraint(Alert, "alert_pap_range")
+        m.assert_ddl_delta(missing=["alert_pap_range"])
+        print(
+            "MUTATION-12 ASSERTION:",
+            _detected(
+                test_enum_contracts.test_h2_every_checked_enum_domain_is_refused_by_the_database,
+                "alert_pap_range",
+                ("alert", "pap", (-1, 4, 99)),
+            ),
+        )
+
+
+@pytest.mark.django_db(transaction=True, serialized_rollback=True)
+def test_mutation_13_idempotency_key_unique_detects_a_deletion() -> None:
+    """Round-2 **H-3**: `AutomationRun.idempotency_key` unique=True removed + migrate.
+
+    AGENTS.md Module D's redelivery guarantee is this constraint, not application code: a
+    Celery task delivered twice must find its key taken and skip. Nothing else enforces it.
+    """
+    from automation.models import AutomationRun
+    from cases.models import Case, CaseStatus
+
+    case = Case.objects.create(
+        title="guard-13",
+        status=CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[
+            0
+        ],
+    )
+    with schema_mutation("automation_run", label="drop idempotency_key UNIQUE") as m:
+        m.detach_field_unique(AutomationRun, "idempotency_key")
+        m.assert_ddl_delta(missing=["UNIQUE"])
+        print(
+            "MUTATION-13 ASSERTION:",
+            _detected(test_integrity.test_h3_automation_run_idempotency_key_is_unique, case),
+        )
+
+
+@pytest.mark.django_db(transaction=True, serialized_rollback=True)
+def test_mutation_14_ingestion_source_slug_unique_detects_a_deletion() -> None:
+    """Round-2 **H-4**: `IngestionSource.slug` unique=True removed + migrate.
+
+    `POST /api/v1/alerts/webhook/{source_id}` resolves the source by slug, so two sources
+    sharing one makes the route non-deterministic — two mapping configs at one URL. The
+    endpoint is Phase 4 work; the key it will look up is Phase 3's to enforce.
+    """
+    from ingest.models import IngestionSource
+
+    with schema_mutation("ingestion_source", label="drop slug UNIQUE") as m:
+        m.detach_field_unique(IngestionSource, "slug")
+        m.assert_ddl_delta(missing=["UNIQUE"])
+        print(
+            "MUTATION-14 ASSERTION:",
+            _detected(test_integrity.test_h4_ingestion_source_slug_is_unique),
+        )
+
+
+@pytest.mark.django_db(transaction=True, serialized_rollback=True)
+def test_mutation_15_partial_index_predicate_detects_a_removal() -> None:
+    """Round-2 **H-1**: `ar_pending_idx` re-created without `condition=Q(status="Pending")`.
+
+    Django reports an index's *columns* and stops, so the predicate was never visible to any
+    assertion in the suite — yet it is the entire point of C2's index: without it the dispatch
+    beat scans and sorts every run instead of the pending ones.
+    """
+    from automation.models import AutomationRun
+
+    original = next(i for i in AutomationRun._meta.indexes if i.name == "ar_pending_idx")
+    mutated = models.Index(fields=["created_at"], name="ar_pending_idx")
+    with schema_mutation("automation_run", label="widen ar_pending_idx") as m:
+        m.replace_index(AutomationRun, original, mutated)
+        m.assert_ddl_delta(missing=["WHERE"])
+        print(
+            "MUTATION-15 ASSERTION:",
+            _detected(test_indexes.test_the_pending_run_index_predicate_is_still_partial),
+        )
+    assert partial_index_predicate("automation_run", "ar_pending_idx"), (
+        "the partial predicate must be back after the guard restores the index"
+    )

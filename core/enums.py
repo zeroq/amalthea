@@ -17,7 +17,7 @@ in dev (it is not one of the nine Postgres-only features listed in plan §12 R10
 
 This is the *domain* side of the wire contract; ``compat/enums.py`` derives its
 TheHive labels from these tuples so a label can never drift from the value the
-database accepts. `tests/conformance/test_enum_constraints.py` asserts that agreement.
+database accepts. `tests/conformance/test_enum_contracts.py` asserts that agreement.
 """
 
 from __future__ import annotations
@@ -80,6 +80,11 @@ AUTOMATION_RUN_STATUS_CHOICES: Final[tuple[tuple[str, str], ...]] = (
 CASE_STAGES: Final[tuple[str, ...]] = ("New", "InProgress", "Closed")
 #: ADR-002 §D4 lists `Imported` as a legal *alert* stage alongside New/InProgress/Closed.
 ALERT_STAGES: Final[tuple[str, ...]] = ("New", "InProgress", "Closed", "Imported")
+
+#: Django requires `(value, label)` pairs for `choices`. Derived from ALERT_STAGES so the model and
+#: `compat/enums.py` cannot disagree about which stages exist. The label is the value itself: the
+#: human-readable TheHive wording is applied at the wire boundary, not baked into the domain.
+ALERT_STAGE_CHOICES: Final[tuple[tuple[str, str], ...]] = tuple((s, s) for s in ALERT_STAGES)
 
 #: Plan §6.2 CustomField: one definition serves both case and alert values.
 CUSTOM_FIELD_TYPES: Final[tuple[tuple[str, str], ...]] = (

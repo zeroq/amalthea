@@ -161,3 +161,41 @@ reported.
   remote is deferred by decision and tracked in TODO §4.5 — including the two things that must be
   resolved first: **`AGENTS.md` calls the project open-source but no `LICENSE` file exists**, and the
   default repo visibility needs confirming against that intent.
+
+## 2026-10-05 — Round-2 remediation wave (1.14–1.19)
+
+- [x] **`C-2` / TODO 1.14 — `on_delete` audit made total.** The old probe
+  (`"on_delete" in field.deconstruct()[3]`) passed on precisely the value it needed to catch, because
+  `ForeignKey.deconstruct()` **omits** `on_delete` when it is `CASCADE`. Now reads
+  `field.remote_field.on_delete` and pins the full policy for all 35 FKs. The `CASCADE` surface is
+  enumerated explicitly (17 entries) since "can this child outlive its parent" is a domain judgement
+  the schema cannot supply. **Mutation-verified:** `AlertTagLink.alert` `CASCADE`→`SET_NULL` fails.
+- [x] **`H-5` / TODO 1.15 — the over-prune corrected, not reverted.** Restored the implicit index on
+  the *right*-hand column of each `UNIQUE(case, custom_field)` composite. The guard now re-derives the
+  whole prune from live DDL, so over-pruning fails by construction. Discovered mid-remediation that the
+  prune was **correct** on the link tables — `AlertObservable` both FKs are prefix-covered — so that is
+  preserved rather than blanketly restored.
+- [x] **`H-6` / TODO 1.16 — explicit numbers advance `case_number_seq`**, in `pre_save` and through
+  `bulk_create`. Mutation-verified. **Still Postgres-blind** (§3.1): SQLite's `MAX(number)+1` reads
+  the row just written, so the collision cannot be reproduced locally; the test skips with that reason
+  instead of passing vacuously.
+- [x] **`H-7` / TODO 1.17 — backfill uses the runtime's `canonical_value()` normalisation**, and tests
+  now assert a backfilled row satisfies the identical digest invariant as a runtime-created one.
+- [x] **`H-1`/`H-3`/`H-4`/`L-2` / TODO 1.19 —** partial-index predicate guarded both ways,
+  `idempotency_key` and `slug` uniqueness asserted against live keys plus duplicate-insert
+  `IntegrityError`, and the three M2M through models declared explicitly with `db_index=False` on the
+  covered side.
+- [x] **Two independent agent dispatches were lost to provider rate limits** (`Rate limit exceeded`),
+  each leaving an uncommitted, gate-red tree with no report. Recovered by treating the filesystem as
+  the source of truth rather than any claim about it, and by finishing the interrupted work directly.
+  Two defects introduced by the interrupted work were caught only because the gate was run:
+  `AlertStatus.stage` was given flat string `choices` (**Django's own system check rejects this** — a
+  `type: ignore` would have silenced mypy and left a broken app), and `correlation_key` had been
+  silently narrowed 256→200 with `default=""` dropped, contradicting plan line 103. Both reverted.
+- [x] **A recurring migration trap was diagnosed and prevented.** Two auto-generated migrations pinned
+  a dependency on the *leaf* `observables/0004`, which made Django cascade-unapply `cases`/`alerts`
+  during the seed-rollback tests and left teardown flushing against a renamed-away `case_record`
+  table — 9 errors, same `no such table` signature `alerts/0005` had already documented and worked
+  around. Both dependencies re-pinned to `observables/0002_seed`, the newest state actually required.
+- [x] **Gate green: 286 passed, 1 skipped** (up from 214), ruff clean, `mypy` 0 errors across 73 files
+  with a cold cache, migrations synchronized, Django system check clean.

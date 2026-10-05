@@ -24,7 +24,12 @@ from core.enums import (
 from core.models import TimeStampedModel, UUIDModel
 from identity.models import Organisation, User
 
-from .numbering import AllocatedNumberField, AllocatingQuerySet, allocate_case_number
+from .numbering import (
+    ALLOCATED_MARKER,
+    AllocatedNumberField,
+    AllocatingQuerySet,
+    allocate_case_number,
+)
 
 
 class CaseStatus(UUIDModel, TimeStampedModel):
@@ -96,7 +101,7 @@ class Case(UUIDModel, TimeStampedModel):
     assignee = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True, related_name="assigned_cases"
     )
-    tags = models.ManyToManyField(Tag, blank=True, related_name="cases")
+    tags = models.ManyToManyField(Tag, blank=True, related_name="cases", through="CaseTagLink")
     flag = models.BooleanField(default=False)
     tlp = models.SmallIntegerField(default=2, choices=list(TLP_CHOICES))
     pap = models.SmallIntegerField(default=2, choices=list(PAP_CHOICES))
@@ -139,6 +144,11 @@ class Case(UUIDModel, TimeStampedModel):
         number: int | None = self.number
         if number is None:
             self.number = allocate_case_number(using=router.db_for_write(type(self), instance=self))
+            # Tell the field's `pre_save` this number came from the sequence, so it does
+            # not issue a redundant `setval` on every single case write (REVIEW-2026-10-04
+            # H-6). A number that arrived *with* the caller is deliberately not marked:
+            # that is the case the sequence must be advanced for.
+            setattr(self, ALLOCATED_MARKER, True)
         self.stamp_closed_date()
         super().save(*args, **kwargs)
 
@@ -211,7 +221,12 @@ class TimelineEvent(UUIDModel, TimeStampedModel):
 
 
 class CaseCustomFieldValue(UUIDModel, TimeStampedModel):
-    # db_index=False on both FKs: the unique constraint below is a left prefix for each.
+    # REVIEW-2026-10-03 M1: `case` keeps db_index=False because uniq_case_custom_field
+    # below has it as its **left** prefix, so the composite serves `WHERE case_id = ?`.
+    # `custom_field` does NOT: it is the **right-hand** column of that constraint, so the
+    # composite cannot serve `WHERE custom_field_id = ?` — a lookup the plan's custom-field
+    # API needs ("every case carrying this field"). Dropping its implicit FK index turned
+    # that query into a sequential scan (round-2 H-5), so the index stays.
     case = models.ForeignKey(
         Case, on_delete=models.CASCADE, related_name="custom_field_values", db_index=False
     )
@@ -219,7 +234,6 @@ class CaseCustomFieldValue(UUIDModel, TimeStampedModel):
         CustomField,
         on_delete=models.CASCADE,
         related_name="case_values",
-        db_index=False,
     )
     order = models.IntegerField(default=0)
     value = models.JSONField(blank=True, default=dict)
@@ -269,3 +283,25 @@ class CaseObservable(UUIDModel, TimeStampedModel):
 
     def __str__(self) -> str:
         return f"CaseObs({self.case_id}:{self.observable_id})"
+
+
+class CaseTagLink(models.Model):
+    """The join row behind `Case.tags`. Declared explicitly so its indexes are controlled.
+
+    Django's implicit M2M table would give `case` a single-column index that is already
+    left-prefix-covered by the table's own `UNIQUE (case, tag)` — redundant write amplification on
+    a hot table (REVIEW-2026-10-04 **L-2**). `tag` keeps its index because the reverse lookup
+    ("every case carrying this tag") is not covered by the composite.
+    """
+
+    case = models.ForeignKey(
+        Case, on_delete=models.CASCADE, related_name="tag_links", db_index=False
+    )
+    tag = models.ForeignKey(Tag, on_delete=models.CASCADE, related_name="case_links")
+
+    class Meta:
+        db_table = "case_record_tags"
+        unique_together = (("case", "tag"),)
+
+    def __str__(self) -> str:
+        return f"{self.case_id}:{self.tag_id}"

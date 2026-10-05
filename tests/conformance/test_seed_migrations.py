@@ -18,7 +18,8 @@ be mistaken for the other.
 **H4 — `hash` was seeded `is_case_sensitive=True`,** inverting AC5.4.
 
 **M12 — the `Imported` alert status was seeded with a legal stage** but the compat mapper
-could not emit it (see `tests/unit` / `compat.enums.stage_from_alert_status`).
+could not emit it (see `compat.enums.stage_from_alert_status`, covered by
+`test_seed_migrations.py::test_m12_the_imported_stage_is_a_legal_alert_stage`).
 
 Review items: M10 (destructive reverse), M11 (unverifiable seeds), H4, M12.
 """

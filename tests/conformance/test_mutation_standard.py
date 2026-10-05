@@ -9,8 +9,12 @@ because the standard was violated three times in two gate rounds:
    SQLite ``remove_constraint()``, which is ``_remake_table()`` — a rebuild from *current model
    state* — so the constraint was still in ``_meta.constraints`` and was written straight back out.
    The guard printed ``duplicate insert accepted`` and reported ``5 passed``.
-3. **Round 2 (C-2)** — the FK ``on_delete`` audit checked ``deconstruct()``, but Django omits
-   ``on_delete`` when it is ``CASCADE``, so three data-loss mutations passed clean.
+3. **Round 2 (C-2)** — the FK ``on_delete`` audit checked ``deconstruct()`` for the presence of
+   the key rather than for the value behind it. (The original write-up blamed Django for
+   omitting ``on_delete`` on ``CASCADE``; that is not what happens. Measured on the pinned
+   Django 5.2.17, ``ForeignKey.deconstruct()`` always emits ``on_delete``, so the
+   ``"on_delete" in ...`` assertion was a tautology, not a detection — the three data-loss
+   swaps it was meant to catch passed either way.)
 
 In every case the defect was in the **evidence**, not the code under test. So the rule is enforced
 here, by failing the build:

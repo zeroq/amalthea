@@ -71,6 +71,27 @@ def index_names(*tables: str) -> set[str]:
     return out
 
 
+#: A constraint object that is deliberately **not** on any model's ``_meta``. Handed to
+#: ``remove_constraint``/``add_constraint`` purely to make the SQLite backend run
+#: ``_remake_table()`` — the rebuild that :meth:`Mutation.detach_field_unique` needs and the
+#: only way to change an inline ``UNIQUE``. Because it is not in ``_meta``, the rebuilt table
+#: never acquires it.
+_REBUILD = models.CheckConstraint(condition=models.Q(pk__isnull=True), name="mut_rebuild_only")
+
+
+def _set_unique(field: models.Field, value: bool) -> None:
+    """Set ``Field.unique`` for real.
+
+    ``Field.unique`` is a *cached property* over ``_unique``: the first read caches the result
+    in the instance ``__dict__``, after which assigning ``_unique`` changes nothing that
+    ``column_sql`` can see. Any code that toggles uniqueness in place has to assign the public
+    attribute, and should assign ``_unique`` too so ``deconstruct()`` agrees.
+    """
+    field._unique = value
+    field.unique = value
+    assert field.unique is value, f"{field.name}: unique did not take ({field.unique!r})"
+
+
 @dataclass
 class Mutation:
     """A schema edit whose occurrence is verified rather than assumed."""
@@ -115,6 +136,69 @@ class Mutation:
         model._meta.constraints = [c for c in model._meta.constraints if c.name != name]
         with connection.schema_editor() as editor:
             editor.remove_constraint(model, constraint)
+
+    def detach_field_unique(self, model: type[models.Model], field_name: str) -> None:
+        """Drop a ``unique=True`` on a plain field, which SQLite backs with an auto-index.
+
+        :meth:`detach_constraint` cannot help directly: ``unique=True`` is not a named entry in
+        ``_meta.constraints``, so there is nothing to detach, and ``DROP INDEX`` is a no-op for
+        ``sqlite_autoindex_<table>_N`` — round-1 mutation 5 learned that the hard way.
+
+        The mechanism is the same one :meth:`detach_constraint` uses. On SQLite both
+        ``remove_constraint`` and ``add_constraint`` funnel into ``_remake_table(model)``, a
+        rebuild from the *live* ``_meta``; so flipping ``_unique`` off and rebuilding is enough,
+        and the constraint object passed in only has to be one that does not already exist on
+        the table. :data:`_REBUILD` is a named CheckConstraint that is deliberately not on any
+        ``_meta``, so the rebuilt table never gains it.
+
+        ``alter_field`` would be the obvious API instead, and it is a trap twice over: it decides to
+        rebuild from ``_field_should_be_altered``, which compares two ``deconstruct()`` results,
+        and — worse — Django's ``Field.unique`` is a *cached property*, so writing ``_unique``
+        is silently discarded once anything has read ``field.unique``. ``_remake_table`` then
+        renders the column from the stale cached value and the UNIQUE never goes anywhere. Both
+        are avoided below by assigning ``field.unique`` itself.
+        """
+        field = model._meta.get_field(field_name)
+        assert field.unique, f"{model.__name__}.{field_name} is not unique — mutation is a no-op"
+        self._rebuilds = getattr(self, "_rebuilds", [])
+        self._rebuilds.append((model, field_name))
+        _set_unique(field, False)
+        with connection.schema_editor() as editor:
+            editor.remove_constraint(model, _REBUILD)
+        with connection.cursor() as cursor:
+            constraints = connection.introspection.get_constraints(cursor, model._meta.db_table)
+        still_unique = any(
+            detail["unique"] and detail["columns"] == [field.column]
+            for detail in constraints.values()
+        )
+        assert not still_unique, (
+            f"MUTATION DID NOT LAND: {model._meta.db_table}.{field.column} is still UNIQUE in "
+            f"sqlite_master after the rebuild."
+        )
+        # SQLite writes `UNIQUE` inline, so `assert_ddl_delta` *can* see this one — but the
+        # callers still call it, because they assert a *named* consequence and this check only
+        # proves the mechanism.
+        self._ddl_delta_checked = True
+
+    def replace_index(
+        self, model: type[models.Model], original: models.Index, mutated: models.Index
+    ) -> None:
+        """Swap a declared index for a different one under the same name.
+
+        The round-2 **H-1** mutation. Django reports an index's columns and stops, so deleting
+        ``condition=`` is invisible to every index assertion in the suite; it is visible here
+        only because the *DDL* is read back.
+        """
+        assert original.name == mutated.name, "replace_index keeps the name; use add_index to add"
+        with connection.schema_editor() as editor:
+            editor.remove_index(model, original)
+            editor.add_index(model, mutated)
+        assert f"{model._meta.db_table}.{mutated.name}" in index_names(model._meta.db_table), (
+            f"MUTATION DID NOT LAND: {mutated.name!r} is absent from sqlite_master."
+        )
+        self._ddl_delta_checked = True
+        self._replaced_indexes = getattr(self, "_replaced_indexes", [])
+        self._replaced_indexes.append((model, original, mutated))
 
     # -- the standard -------------------------------------------------------------------
     def assert_ddl_delta(
@@ -167,6 +251,15 @@ def schema_mutation(*tables: str, label: str = "") -> Iterator[Mutation]:
         for model, index in getattr(mutation, "_added_indexes", []):
             with connection.schema_editor() as editor:
                 editor.remove_index(model, index)
+        for model, original, mutated in getattr(mutation, "_replaced_indexes", []):
+            with connection.schema_editor() as editor:
+                editor.remove_index(model, mutated)
+                editor.add_index(model, original)
+        for model, field_name in getattr(mutation, "_rebuilds", []):
+            field = model._meta.get_field(field_name)
+            _set_unique(field, True)
+            with connection.schema_editor() as editor:
+                editor.add_constraint(model, _REBUILD)
         if mutation._constraint is not None and mutation._original_constraints is not None:
             opts, constraint = mutation._constraint
             opts.constraints = mutation._original_constraints

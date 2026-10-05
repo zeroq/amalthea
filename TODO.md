@@ -68,33 +68,45 @@ agent never reported). `185 passed`, `mypy` **0 errors**, `manage.py check` 0 is
   first, then remake). `Mutation.add_index()` verifies via `sqlite_master`, since an index does not
   alter the table's `CREATE` statement. Guard 5 now asserts the DDL delta **first**, then the behaviour.
 
-- [ ] **1.14 — FK `on_delete` audit is blind to `CASCADE`** `round2 C-2` · **CRITICAL**
-  `test_fk_audit.py:67` tests `"on_delete" in field.deconstruct()[3]`, but Django **omits** `on_delete`
-  from `deconstruct()` when it is `CASCADE`, and the policy assertion pins only `PROTECT`. Three
-  mutations passed clean: `Alert.case` SET_NULL→CASCADE, `Case.assignee` SET_NULL→CASCADE (both delete
-  cases), and `Task.case` CASCADE→SET_NULL (orphans tasks).
-  This **retracts round 1's L3 verdict** that `Alert.case` SET_NULL was "verified sound" — the policy
-  was unverifiable, not correct. Fix: assert against `field.remote_field.on_delete` directly and assert
-  the **full expected policy per relation**, including every `CASCADE`, not just `PROTECT`.
+- [x] **1.14 — FK `on_delete` audit is blind to `CASCADE`** `round2 C-2` · **CRITICAL** — **FIXED**
+  `tests/conformance/test_fk_audit.py` now reads `field.remote_field.on_delete` (the only unambiguous
+  source — `ForeignKey.deconstruct()` **omits** `on_delete` when it is `CASCADE`, which is why the old
+  `"on_delete" in deconstruct()[3]` probe passed on exactly the value it needed to catch) and pins the
+  **full** policy for every relation in `EXPECTED_ON_DELETE`, not a `PROTECT` subset.
+  `test_no_cascade_is_reachable_from_a_longer_lived_row` enumerates the whole `CASCADE` surface (17
+  entries) so a `PROTECT`-only check cannot hide a swap again. Inventory pinned at 35 FKs (29 + the 6
+  `*TagLink` join FKs from L-2), counted against `EXPECTED_ON_DELETE` in both directions so neither the
+  audit nor the table can be silently trimmed. **Verified by mutation:** `AlertTagLink.alert`
+  `CASCADE`→`SET_NULL` fails `test_every_fk_matches_the_declared_on_delete_policy`.
 
-- [ ] **1.15 — `M1` over-pruned: two indexes are still needed** `round2 H-5`
-  `cases/models.py:214-222` justifies `db_index=False` by claiming `custom_field` is a left prefix of
-  `(case, custom_field)` — it is the **right** column. Live plan: `WHERE case_id=?` seeks;
-  `WHERE custom_field_id=?` **SCANs**. Also: 29 FK columns exist, not the 31 previously claimed.
-  This is the risk I flagged in TODO §2.5 when the prune was ordered, realised.
+- [x] **1.15 — `M1` over-pruned: two indexes are still needed** `round2 H-5` — **FIXED**
+  Restored the implicit FK index on the **right**-hand column of each composite, in
+  `cases/migrations/0006_restore_custom_field_fk_indexes.py` and
+  `alerts/migrations/0005_restore_custom_field_fk_indexes.py`: `WHERE custom_field_id = ?` was a
+  sequential scan because `custom_field` is the *right* column of `UNIQUE (case, custom_field)`.
+  `test_every_unindexed_fk_is_a_left_prefix_of_a_composite_index` now re-derives the entire prune
+  from live DDL instead of a hand-written column list, so an over-prune fails by construction.
+  The prune itself was **correct** on the link tables and is preserved: `AlertObservable` now carries
+  `db_index=False` on both FKs (covered by `UNIQUE (alert, observable)` and
+  `alertobs_obs_alert_idx (observable, alert)` respectively), mirroring `CaseObservable`.
 
-- [ ] **1.16 — Postgres-only corruption: sequence not advanced for explicit numbers** `round2 H-6`
-  `numbering.py` deliberately supports a caller-supplied number (the TheHive import path), but
-  `case_number_seq` is never advanced to match. SQLite's `MAX()+1` self-heals, so all 186 tests are
-  structurally blind. On Postgres the next auto-numbered Case raises
-  `duplicate key ... case_record_number_uniq`. Fix: `setval()` when an explicit number is accepted.
-  **Untestable until Postgres (§3.1)** — write the test anyway; it must fail loudly there.
+- [x] **1.16 — Postgres-only corruption: sequence not advanced for explicit numbers** `round2 H-6` — **FIXED (SQLite-blind, see below)**
+  `CaseNumberField.pre_save` now calls `sync_case_number_sequence(current)` when a caller supplies an
+  explicit number on INSERT, so `case_number_seq` is advanced past it via `setval` and the next
+  auto-numbered Case cannot collide. Also wired through `allocate_case_numbers` for `bulk_create`
+  (`test_h6_bulk_create_with_explicit_numbers_syncs_too`).
+  **Verified by mutation** — removing the `pre_save` sync fails that test.
+  **Honest limitation:** still **unverified on Postgres** (§3.1). SQLite allocates `MAX(number)+1`,
+  which reads the row just written and self-heals, so the collision cannot be reproduced here; the
+  test skips with that reason rather than passing vacuously. AC3.7 must run it on Postgres.
 
-- [ ] **1.17 — `data_hash` backfill uses a different hash function than the runtime** `round2 H-7`
-  The `0003` migration hashes raw `normalized_data`; the runtime hashes `canonical_value()`. A migrated
-  uppercase `hash` row therefore carries a digest the runtime would never produce, so the duplicate
-  slips past the only constraint meant to stop it. Fix the backfill, and assert backfilled rows satisfy
-  the same invariant as runtime-created ones.
+- [x] **1.17 — `data_hash` backfill uses a different hash function than the runtime** `round2 H-7` — **FIXED**
+  `observables/migrations/0003_observable_data_hash.py` backfills with the same `canonical_value()`
+  normalisation the runtime `save()` uses, so a migrated uppercase `hash` row carries a digest the
+  runtime would have produced itself and the duplicate no longer slips past `uniq_obs_dtype_hash`.
+  New tests assert a backfilled row satisfies the identical invariant as a runtime-created one, and
+  that the digest is recomputed when `normalized_data` changes (`update_fields` must not become a
+  blanket full-row write).
 
 - [x] **1.18 — Pin a runnable static-analysis command; "mypy clean" was not one** `round2` — **FIXED**
   I reported `mypy amalthea` → 0 errors. That scopes to **10 files**. `mypy .` gave 93. A gate whose
@@ -110,10 +122,15 @@ agent never reported). `185 passed`, `mypy` **0 errors**, `manage.py check` 0 is
   `Makefile` now owns the Definition of Done, and coverage is a separate non-blocking `make coverage`
   target so `fail_under = 80` cannot make the baseline look red (or, worse, invite filler tests).
 
-- [ ] **1.19 — Smaller round-2 items** `round2 H-1`, `H-3`, `H-4`
-  `ar_pending_idx` partial predicate unguarded (`H-1`) · `AutomationRun.idempotency_key` uniqueness
-  untested (`H-3`) · `IngestionSource.slug` uniqueness untested (`H-4`).
-  Plus 9 Medium / 4 Low in §3 of the report.
+- [x] **1.19 — Smaller round-2 items** `round2 H-1`, `H-3`, `H-4`, `L-2` — **FIXED**
+  `H-1` `ar_pending_idx` partial predicate is guarded: asserted present when `status='Pending'` and
+  **absent** otherwise (`test_indexes.py`). `H-3` `AutomationRun.idempotency_key` uniqueness asserted
+  against live unique keys plus a duplicate-insert `IntegrityError` (`test_integrity.py`).
+  `H-4` `IngestionSource.slug` uniqueness likewise. `L-2` the three M2M through tables keep a redundant
+  left-FK index: `CaseTagLink`/`AlertTagLink`/`ObservableTagLink` are now declared explicitly with
+  `db_index=False` on the prefix-covered side, applied as state-only `SeparateDatabaseAndState` +
+  `AlterField` (the autodetector cannot emit `through=`). **The 9 Medium / 4 Low of report §3 remain
+  open** and are folded into the round-3 review agenda.
 
 - [ ] **1.11 — Re-run the `db-postgres` gate** *(round 2 done: FAIL — 2 Critical, 7 High, 9 Medium, 4 Low)*
   Round 2 confirmed `C3`, `H2`, `H4`, `H6`, `M2`, `M3`, `M4`, `M6`, `M10`, `M14` — **`M10` genuinely

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from django.db import models
 
 from core.enums import (
@@ -47,7 +49,9 @@ class Observable(UUIDModel, TimeStampedModel):
     data = models.TextField()
     normalized_data = models.TextField()
     data_hash = DataHashField()
-    tags = models.ManyToManyField("cases.Tag", blank=True, related_name="observables")
+    tags = models.ManyToManyField(
+        "cases.Tag", blank=True, related_name="observables", through="ObservableTagLink"
+    )
     ioc = models.BooleanField(default=False)
     sighted = models.BooleanField(default=False)
     sighted_at = models.DateTimeField(null=True, blank=True)
@@ -71,3 +75,50 @@ class Observable(UUIDModel, TimeStampedModel):
 
     def __str__(self) -> str:
         return self.data
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Keep `data_hash` in step when the caller saves only some columns.
+
+        `DataHashField.pre_save` recomputes the digest on every write, which is what makes
+        it safe for `normalized_data` to be caller-writable. But a save carrying
+        `update_fields` writes *only* those columns, so `o.save(update_fields=[
+        "normalized_data"])` left `data_hash` pointing at the previous value — and
+        `data_hash` is the right half of `uniq_obs_dtype_hash(data_type, data_hash)`, the
+        only constraint standing between a case file and a duplicate artifact. That made
+        the stale row collide with, or silently miss, a genuinely new artifact. Adding the
+        column here is what makes the field's promise hold for partial saves too.
+
+        `data_type` counts as a trigger as well, because `canonical_value()` case-folds
+        according to `data_type.is_case_sensitive`; moving a row between a case-sensitive
+        and a case-insensitive type changes its hash with `normalized_data` untouched.
+
+        Not covered, and not coverable here: `QuerySet.update()` never runs `pre_save` or
+        `save()`. Bulk-patching `normalized_data` must go through a save loop or recompute
+        the digest in the same expression.
+        """
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            touched = {f if isinstance(f, str) else f.name for f in update_fields}
+            if touched & {"normalized_data", "data_type"} and "data_hash" not in touched:
+                kwargs["update_fields"] = [*update_fields, "data_hash"]
+        super().save(*args, **kwargs)
+
+
+class ObservableTagLink(models.Model):
+    """The join row behind `Observable.tags`. See `cases.CaseTagLink` for why it is declared.
+
+    `observable` is the left prefix of `UNIQUE (observable, tag)`, so its implicit index is
+    redundant (REVIEW 2026-10-04 **L-2**); `tag` keeps its index for the reverse lookup.
+    """
+
+    observable = models.ForeignKey(
+        Observable, on_delete=models.CASCADE, related_name="tag_links", db_index=False
+    )
+    tag = models.ForeignKey("cases.Tag", on_delete=models.CASCADE, related_name="observable_links")
+
+    class Meta:
+        db_table = "observable_tags"
+        unique_together = (("observable", "tag"),)
+
+    def __str__(self) -> str:
+        return f"{self.observable_id}:{self.tag_id}"

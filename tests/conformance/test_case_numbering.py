@@ -13,18 +13,34 @@ original implementation ran ``CREATE SEQUENCE IF NOT EXISTS case_number_seq`` fr
    masked.
 
 Allocation now lives in the field's `pre_save`, which every INSERT path runs.
+
+REVIEW-2026-10-04 round-2 **H-6** (TODO 1.16) is the other half: `nextval` and `INSERT` are
+independent, so an explicitly supplied number (TheHive's migration path replays the
+original) left the sequence behind and the next auto-numbered case died on
+``duplicate key ... case_record_number_uniq``. **SQLite cannot express that failure** — its
+allocator is ``MAX(number) + 1``, which reads the row just written — so the end-to-end proof
+is Postgres-only and everything else here asserts the *logic* on every engine.
 """
 
 from __future__ import annotations
 
+import inspect
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 from django.db import connection, router
+from django.utils import timezone
 
 from cases.models import Case, CaseStatus
-from cases.numbering import SEQUENCE_NAME, AllocatedNumberField, allocate_case_number
+from cases.numbering import (
+    SEQUENCE_NAME,
+    SEQUENCE_SYNC_SQL,
+    AllocatedNumberField,
+    allocate_case_number,
+    sync_case_number_sequence,
+)
 
 
 @pytest.fixture
@@ -147,3 +163,199 @@ def test_allocate_case_number_uses_the_default_database(new_status: CaseStatus) 
     assert Case._meta.db_table == "case_record"
     number = allocate_case_number(using=router.db_for_write(Case))
     assert isinstance(number, int) and number >= 1
+
+
+# ---------------------------------------------------------------------------------------
+# Round-2 H-6 (TODO 1.16) — the sequence must advance past a caller-supplied number.
+#
+# `MAX(number) + 1` on SQLite heals itself, so *every* behavioural assertion about this
+# passes vacuously on the dev engine. That is precisely why the suite found nothing for two
+# rounds. The four tests below are therefore split: the three that run on every engine
+# assert the mechanism (which statement, which hook, which engine), and the one that
+# asserts the *consequence* is deliberately Postgres-only and says so out loud.
+# ---------------------------------------------------------------------------------------
+
+
+def test_h6_the_sync_statement_advances_the_sequence_monotonically() -> None:
+    """The fix is `setval(..., GREATEST(last_value, n), true)` and nothing weaker.
+
+    Asserted on the statement text, so this engine-independent test is what actually holds
+    the fix in place when the suite runs on SQLite. `setval` alone would let a re-import of
+    an *older* number walk the sequence backwards; `is_called = false` would hand the
+    explicit number itself out again on the very next insert.
+    """
+    assert "setval" in SEQUENCE_SYNC_SQL
+    assert "GREATEST" in SEQUENCE_SYNC_SQL, "the sync must be monotonic, not an assignment"
+    assert "last_value" in SEQUENCE_SYNC_SQL, "it must read the sequence's current position"
+    assert SEQUENCE_SYNC_SQL.rstrip().endswith("true)"), "is_called must be true"
+    assert SEQUENCE_NAME in SEQUENCE_SYNC_SQL
+    assert "%(number)s" in SEQUENCE_SYNC_SQL, "the number must be a bound parameter"
+    assert "CREATE SEQUENCE" not in SEQUENCE_SYNC_SQL, "C1: no DDL from the write path"
+
+
+def test_h6_the_sequence_sync_is_vendor_guarded() -> None:
+    """The guard must stay, and must be the vendor — not "does the sequence exist?".
+
+    Asserted against the function's own source so it cannot rot into an unconditional
+    `setval`, which would raise `ProgrammingError` on SQLite for every imported case.
+    """
+    source = inspect.getsource(sync_case_number_sequence)
+    assert "postgresql" in source, "the sync is a Postgres-only concept"
+    assert source.index("postgresql") < source.index("cursor.execute"), (
+        "the vendor check must come before the statement is issued"
+    )
+    assert "CREATE SEQUENCE" not in source, "the sequence is created by migration 0005"
+
+
+def test_h6_the_sync_is_a_noop_off_postgres() -> None:
+    """On this engine the call must do nothing at all — and must not raise."""
+    if connection.vendor == "postgresql":  # pragma: no cover - dev/CI run SQLite
+        pytest.skip("this assertion is about the SQLite no-op path")
+    sync_case_number_sequence(4242)  # must be silent
+
+
+@pytest.mark.django_db
+def test_h6_an_explicit_number_syncs_the_sequence_on_insert(
+    new_status: CaseStatus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sync is driven from `Field.pre_save`, so no INSERT path can skip it.
+
+    Three behaviours in one test, because they are three ways to get it wrong: an explicit
+    number must sync; an auto-allocated number must *not* (the sequence already moved, and a
+    redundant `setval` on every case write is write amplification); an UPDATE must not sync
+    either, because the number cannot have changed.
+    """
+    import cases.numbering as numbering
+
+    calls: list[int] = []
+    monkeypatch.setattr(
+        numbering, "sync_case_number_sequence", lambda number, using=None: calls.append(number)
+    )
+
+    imported = Case.objects.create(title="Imported", status=new_status, number=4242)
+    assert calls == [4242], f"an explicit number must advance the sequence, got {calls}"
+
+    calls.clear()
+    Case.objects.create(title="auto", status=new_status)
+    assert calls == [], "an auto-allocated number came from the sequence; re-syncing is waste"
+
+    calls.clear()
+    imported.title = "renamed"
+    imported.save()
+    assert calls == [], "an UPDATE cannot change the number; the sync would be pure overhead"
+
+
+@pytest.mark.django_db
+def test_h6_bulk_create_with_explicit_numbers_syncs_too(
+    new_status: CaseStatus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`bulk_create()` is a different INSERT path; it must not be a hole in the fix."""
+    import cases.numbering as numbering
+
+    calls: list[int] = []
+    monkeypatch.setattr(
+        numbering, "sync_case_number_sequence", lambda number, using=None: calls.append(number)
+    )
+    Case.objects.bulk_create(
+        [
+            Case(title="imp a", status=new_status, number=900),
+            Case(title="imp b", status=new_status, number=901),
+        ]
+    )
+    assert sorted(calls) == [900, 901], calls
+
+    calls.clear()
+    Case.objects.bulk_create([Case(title="auto", status=new_status)])
+    assert calls == [], "an auto-allocated batch must not re-sync"
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.skipif(
+    connection.vendor != "postgresql",
+    reason="H-6 is Postgres-only by construction: SQLite allocates MAX(number)+1, which reads "
+    "the row just written and therefore cannot reproduce the collision. Run this test on "
+    "Postgres (TODO 3.1) — deleting sync_case_number_sequence makes it fail there.",
+)
+def test_h6_on_postgres_the_next_auto_number_clears_an_imported_number(
+    new_status: CaseStatus,
+) -> None:
+    """The end-to-end consequence, on the only engine that can exhibit it.
+
+    Without the fix this raises ``IntegrityError: duplicate key value violates unique
+    constraint "case_record_number_uniq"`` at the ``Case.objects.create`` below.
+    """
+    Case.objects.create(title="imported at 500", status=new_status, number=500)
+    with connection.cursor() as cursor:
+        cursor.execute(f"SELECT last_value FROM {SEQUENCE_NAME}")  # noqa: S608 (module constant)
+        assert cursor.fetchone()[0] >= 500, "setval did not advance the sequence"
+
+    following = Case.objects.create(title="auto after import", status=new_status)
+    assert following.number > 500, f"nextval re-issued an imported number: {following.number}"
+    assert not Case.objects.filter(number=500).exclude(pk=following.pk).exists()
+
+
+# --------------------------------------------------------------------------------------
+# REVIEW-2026-10-04 round-2 **M-2** (TODO 1.19): `Case.stamp_closed_date` was never tested.
+#
+# Deleting the `self.stamp_closed_date()` call from `Case.save` left the whole suite green,
+# so TheHive's `closedDate` ledger field was written by an unverified branch. The two
+# properties that matter are "stamped exactly on entry to Closed" and "never clobbered
+# afterwards" — a naive `if stage == "Closed"` would pass the first and fail the second.
+# --------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def closed_status() -> CaseStatus:
+    return CaseStatus.objects.get_or_create(
+        value="Closed", defaults={"stage": "Closed", "order": 9}
+    )[0]
+
+
+@pytest.fixture
+def investigating_status() -> CaseStatus:
+    return CaseStatus.objects.get_or_create(
+        value="Investigating", defaults={"stage": "InProgress", "order": 2}
+    )[0]
+
+
+@pytest.mark.django_db
+def test_m2_a_closed_case_records_its_closed_date(new_status: CaseStatus, closed_status) -> None:
+    case = Case.objects.create(title="becomes closed", status=new_status)
+    assert case.closed_date is None, "an open case must not carry a closed_date"
+
+    case.status = closed_status
+    case.save()
+    case.refresh_from_db()
+    assert case.closed_date is not None, "entering the Closed stage must stamp closed_date"
+
+
+@pytest.mark.django_db
+def test_m2_closed_date_is_not_clobbered_by_a_later_write(
+    new_status: CaseStatus, closed_status: CaseStatus
+) -> None:
+    case = Case.objects.create(title="closed once", status=closed_status)
+    first_stamp = case.closed_date
+    assert first_stamp is not None, "creating an already-closed case must stamp it"
+
+    case.title = "closed once, then edited"
+    case.save()
+    case.refresh_from_db()
+    assert case.closed_date == first_stamp, "a later save must not move the original anchor"
+
+
+@pytest.mark.django_db
+def test_m2_a_pre_existing_closed_date_is_never_overwritten(
+    new_status: CaseStatus, closed_status
+) -> None:
+    sentinel = timezone.now() - timedelta(days=7)
+    case = Case.objects.create(title="imported with a historic date", status=new_status)
+    Case.objects.filter(pk=case.pk).update(closed_date=sentinel)
+
+    case.refresh_from_db()
+    case.status = closed_status
+    case.save()
+    case.refresh_from_db()
+    assert case.closed_date == sentinel, (
+        "the stamp is 'set once, on entry'. Overwriting a pre-existing value would destroy "
+        "the imported close time that `end_date` is reconciled against."
+    )

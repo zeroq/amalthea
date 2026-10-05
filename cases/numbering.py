@@ -21,14 +21,18 @@ Two backends, two strategies:
   IntegrityError, never a silently duplicated number). Production is Postgres.
 
 Why the allocation lives on the *field* and not only in ``Model.save()``:
-``bulk_create()`` never calls ``save()``, so a ``save()``-only guard can be bypassed
-and would insert ``NULL`` into a NOT NULL unique column. ``Field.pre_save()`` is the
-one hook every INSERT path goes through
-(``django.db.models.sql.compiler.SQLInsertCompiler.pre_save_val`` calls it for both
-``save()`` and ``bulk_create()``), so deriving the number there makes a null number
-structurally impossible. ``Case.save()`` keeps its own explicit guard — it lets the
-caller see the allocated number without a round trip, and it is what the reviewer
-asked to keep (see the comment there).
+``bulk_create()`` never calls ``save()``, so a ``save()``-only guard can be bypassed and
+would insert ``NULL`` into a NOT NULL unique column. ``Field.pre_save()`` is the one hook
+every INSERT path goes through (``django.db.models.sql.compiler.SQLInsertCompiler.pre_save_val``
+calls it for both ``save()`` and ``bulk_create()``), so a null number is structurally
+impossible. ``Field.pre_save()`` alone is *not* sufficient to give each row of a
+``bulk_create()`` batch a **distinct** number, though — Django renders the whole parameter
+list before executing the INSERT, so every row's ``pre_save`` would read the same
+``MAX(number)``. That is what :func:`allocate_case_numbers` plus
+:class:`AllocatingQuerySet` are for; see the note there. (An earlier revision of this
+docstring claimed ``pre_save`` covered that too. It does not — round-2 finding **M-4**.)
+``Case.save()`` keeps its own explicit guard — it lets the caller see the allocated number
+without a round trip, and it is what the reviewer asked to keep (see the comment there).
 """
 
 from __future__ import annotations
@@ -42,7 +46,25 @@ from django.db import DEFAULT_DB_ALIAS, connections, models, router, transaction
 #: The queryset mixin is generic in the model so `bulk_create` keeps its types.
 _CaseT = TypeVar("_CaseT", bound=models.Model)
 
+#: Set on an instance whose ``number`` this module *allocated*, so ``pre_save`` can tell an
+#: auto-allocated number (the sequence already moved — re-syncing it would be a wasted
+#: round trip on every case write) from a caller-supplied one (the sequence has not moved,
+#: so the next ``nextval`` will collide).
+ALLOCATED_MARKER = "_case_number_allocated"
+
 SEQUENCE_NAME = "case_number_seq"
+
+#: The statement that advances the sequence past a caller-supplied number.
+#:
+#: ``GREATEST(last_value, %(number)s)`` is monotonic in both directions: re-importing an
+#: older number must not walk the sequence backwards, and ``is_called = true`` means the
+#: next ``nextval()`` returns ``last_value + 1`` instead of reusing ``last_value`` itself.
+#: The number is a bound parameter; only the sequence name is interpolated, and that is a
+#: module constant — never request data, never a caller-supplied string.
+SEQUENCE_SYNC_SQL = (
+    f"SELECT setval('{SEQUENCE_NAME}', "  # noqa: S608 — constant name, bound parameter
+    f"GREATEST((SELECT last_value FROM {SEQUENCE_NAME}), %(number)s), true)"
+)
 
 
 def allocate_case_number(using: str | None = None) -> int:
@@ -61,6 +83,30 @@ def allocate_case_number(using: str | None = None) -> int:
     # ORM aggregate instead of hand-written SQL: same result, and the table name comes
     # from Case.Meta rather than a string literal here.
     return _max_existing_number(using) + 1
+
+
+def sync_case_number_sequence(number: int, using: str | None = None) -> None:
+    """Advance ``case_number_seq`` past a **caller-supplied** ``Case.number``.
+
+    REVIEW-2026-10-04 round-2 **H-6** (TODO 1.16). TheHive's migration path replays each
+    case's original ``number``, and :class:`AllocatedNumberField` deliberately supports it.
+    But ``nextval`` and ``INSERT`` are independent: writing ``number = 500`` by hand left
+    the sequence at its old value, so the next auto-numbered case was handed 500 too and
+    died on ``duplicate key value violates unique constraint "case_record_number_uniq"``.
+
+    **SQLite cannot express this bug.** Its allocator is ``MAX(number) + 1``, which reads
+    the row that was just written, so it heals itself on the next insert. That is why the
+    whole 214-test suite is structurally blind to it and why this needs a Postgres-only
+    guard rather than a behavioural test on the dev engine.
+
+    A no-op off Postgres, for the reason above — the vendor guard is the point, not a
+    convenience.
+    """
+    connection = connections[using or DEFAULT_DB_ALIAS]
+    if connection.vendor != "postgresql":
+        return
+    with connection.cursor() as cursor:
+        cursor.execute(SEQUENCE_SYNC_SQL, {"number": int(number)})
 
 
 def allocate_case_numbers(count: int, using: str | None = None) -> list[int]:
@@ -117,6 +163,7 @@ class AllocatingQuerySet(models.QuerySet[_CaseT]):
                 ):
                     if attname is not None:
                         setattr(obj, attname, number)
+                        setattr(obj, ALLOCATED_MARKER, True)
         return super().bulk_create(
             objs,
             batch_size=batch_size,
@@ -140,7 +187,19 @@ class AllocatedNumberField(models.IntegerField):
         return name, "cases.numbering.AllocatedNumberField", args, kwargs
 
     def pre_save(self, model_instance: models.Model, add: bool) -> Any:
-        if getattr(model_instance, self.attname) is None:
+        """Allocate, or advance the sequence past a number the caller supplied.
+
+        The one hook every INSERT path executes (``save()`` *and* ``bulk_create()``), so the
+        H-6 fix cannot be bypassed by writing the row through a different entry point.
+        """
+        current = getattr(model_instance, self.attname)
+        if current is None:
             alias = router.db_for_write(model_instance.__class__, instance=model_instance)
             setattr(model_instance, self.attname, allocate_case_number(using=alias))
+            setattr(model_instance, ALLOCATED_MARKER, True)
+        elif add and not getattr(model_instance, ALLOCATED_MARKER, False):
+            # An explicit number the caller chose: the sequence has not seen it. Only on
+            # INSERT — on UPDATE `add` is False and re-syncing would be pure overhead.
+            alias = router.db_for_write(model_instance.__class__, instance=model_instance)
+            sync_case_number_sequence(current, using=alias)
         return super().pre_save(model_instance, add)

@@ -10,10 +10,23 @@ Both halves are tested for every field: `full_clean` raising `ValidationError` (
 path) *and* the INSERT raising `IntegrityError` (the truth), because either alone leaves a
 hole.
 
-Review items: H5 (CHECK constraints), L1 (choices without constraints).
+REVIEW-2026-10-04 round-2 **H-2** is why this file is parametrised over *every*
+`CHOICE_FIELDS` entry rather than a hand-picked few. Six constraints —
+`case_status_stage_valid`, `alert_status_stage_valid`, `alert_tlp_range`, `alert_pap_range`,
+`observable_pap_range`, `ingestion_source_severity_range` — were name-only: replacing each
+with a vacuous same-named CHECK (`stage <> ''`) and regenerating the migration left the
+suite green, because no test ever wrote an out-of-range value through *that* constraint.
+`GRADED_DOMAIN` below closes it: every constraint in `CHOICE_FIELDS` gets a row to mutate
+and a value that must be refused.
+
+Review items: H5 (CHECK constraints), L1 (choices without constraints), round-2 H-2
+(name-only CHECKs).
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -22,6 +35,7 @@ from django.db import IntegrityError, transaction
 from alerts.models import Alert, AlertStatus
 from automation.models import AutomationRun, Playbook
 from cases.models import Case, CaseStatus, CustomField, Task
+from ingest.models import IngestionSource
 from observables.models import Observable, ObservableType
 
 #: The domain of every graded enum, as PLAN §6.1 defines it. `TLP` carries an extra
@@ -188,3 +202,121 @@ def test_every_choices_field_also_has_a_check_constraint() -> None:
             f"{table}: the CHECK constraint backing the choices field is called "
             f"{constraint!r} but the database reports {sorted(check_names(table))}"
         )
+
+
+# ---------------------------------------------------------------------------------------
+# Round-2 H-2 — every CHECK-backed field gets a value the database must actually refuse.
+#
+# One entry per `CHOICE_FIELDS` constraint, and the test below iterates the table rather than
+# a subset, so "replace this CHECK with a vacuous same-named one" cannot survive. The value
+# has to be impossible under the real domain: for a smallint range that is far out of it,
+# and for a `stage` vocabulary it is a name outside `CASE_STAGES`/`ALERT_STAGES`.
+# ---------------------------------------------------------------------------------------
+
+#: `db_table -> builder producing one saved row with in-range values`. Declared after the
+#: builders so the `task` row can reuse the `case_record` one.
+_SAMPLE_ROW: dict[str, Callable[[], Any]]
+
+
+def _case_status() -> Any:
+    return CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
+
+
+def _alert_status() -> Any:
+    return AlertStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
+
+
+def _alert() -> Alert:
+    return Alert.objects.create(
+        type="t", source="s", source_ref="enum-probe", title="a", status=_alert_status()
+    )
+
+
+_SAMPLE_ROW = {
+    "case_record": lambda: Case.objects.create(title="enum probe", status=_case_status()),
+    "case_status": _case_status,
+    "alert": _alert,
+    "alert_status": _alert_status,
+    "observable": lambda: Observable.objects.create(
+        data_type=ObservableType.objects.get_or_create(
+            name="other", defaults={"is_case_sensitive": False}
+        )[0],
+        data="enum-probe",
+        normalized_data="enum-probe",
+    ),
+    "task": lambda: Task.objects.create(case=_SAMPLE_ROW["case_record"](), title="t"),
+    "automation_run": lambda: AutomationRun.objects.create(
+        playbook=Playbook.objects.create(name="enum-probe", trigger_event="alert.created"),
+        playbook_name="enum-probe",
+        idempotency_key="enum-probe",
+    ),
+    "ingestion_source": lambda: IngestionSource.objects.create(
+        slug="enum-probe", name="enum probe"
+    ),
+    "custom_field": lambda: CustomField.objects.create(name="enum-probe", type="string"),
+    "identity_apikey": lambda: _apikey(),
+}
+
+
+def _apikey() -> Any:
+    from identity.models import ApiKey, User
+
+    return ApiKey.objects.create(
+        user=User.objects.create(username="enum-probe"), prefix="enumprobe", key_hash="x"
+    )
+
+
+#: `constraint name -> (row factory, field name, values the domain must refuse)`.
+GRADED_DOMAIN: dict[str, tuple[str, str, tuple[Any, ...]]] = {
+    "alert_severity_range": ("alert", "severity", (-1, 5, 99)),
+    "alert_tlp_range": ("alert", "tlp", (-1, 5, 99)),
+    "alert_pap_range": ("alert", "pap", (-1, 4, 99)),
+    "alert_status_stage_valid": ("alert_status", "stage", ("inprogres", "")),
+    "case_severity_range": ("case_record", "severity", (-1, 5, 99)),
+    "case_tlp_range": ("case_record", "tlp", (-1, 5, 99)),
+    "case_pap_range": ("case_record", "pap", (-1, 4, 99)),
+    "case_status_stage_valid": ("case_status", "stage", ("inprogres", "")),
+    "custom_field_type_valid": ("custom_field", "type", ("enum", "")),
+    "apikey_scope_valid": ("identity_apikey", "scope", ("root", "")),
+    "ingestion_source_severity_range": ("ingestion_source", "default_severity", (-1, 5, 99)),
+    "observable_tlp_range": ("observable", "tlp", (-1, 5, 99)),
+    "observable_pap_range": ("observable", "pap", (-1, 4, 99)),
+    "task_status_valid": ("task", "status", ("AlmostDone", "")),
+    "automation_run_status_valid": ("automation_run", "status", ("AlmostDone", "")),
+}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(("constraint", "spec"), sorted(GRADED_DOMAIN.items()))
+def test_h2_every_checked_enum_domain_is_refused_by_the_database(
+    constraint: str, spec: tuple[str, str, tuple[Any, ...]]
+) -> None:
+    """Round-2 H-2: no CHECK may be name-only.
+
+    Parametrised over all fifteen, so neutering any one of them — including the six the
+    review found were name-only — fails here rather than in production.
+    """
+    table, field, bad_values = spec
+    row = _SAMPLE_ROW[table]()
+    # Everything in the block is provisional. If the database *fails* to refuse a value the
+    # write succeeds, and an out-of-range row must not survive into the next test — or into
+    # a mutation guard's schema restore, which would then fail with an unrelated
+    # `CHECK constraint failed` and mask the defect the guard is demonstrating.
+    with transaction.atomic():
+        for bad in bad_values:
+            with pytest.raises(IntegrityError), transaction.atomic():
+                type(row).objects.filter(pk=row.pk).update(**{field: bad})
+        transaction.set_rollback(True)
+    row.refresh_from_db()
+    assert getattr(row, field) not in bad_values, (
+        f"{constraint}: an out-of-range {table}.{field} was accepted and stored"
+    )
+
+
+def test_h2_the_domain_table_covers_every_check_constraint() -> None:
+    """Guards the guard: a new CHECK must arrive with a behavioural test, or not at all."""
+    assert set(GRADED_DOMAIN) == set(CHOICE_FIELDS.values()), (
+        "every CHECK-backed choices field needs a GRADED_DOMAIN entry: "
+        f"missing={sorted(set(CHOICE_FIELDS.values()) - set(GRADED_DOMAIN))}, "
+        f"stale={sorted(set(GRADED_DOMAIN) - set(CHOICE_FIELDS.values()))}"
+    )
