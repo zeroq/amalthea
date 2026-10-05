@@ -203,9 +203,14 @@ def normalize(type_name: str, value: str, *, is_case_sensitive: bool) -> str:
     own `is_case_sensitive` — the *same* function `data_hash` is taken over, so normalization and
     identity cannot disagree.
     """
-    text = value.strip().strip(".,;:'\"")
+    text = value.strip()
     if type_name == "ip" and _is_ip(text):
+        # A *typed* `ip` observable is taken at face value and canonicalised through `ipaddress`, so
+        # the two spellings of one host are one artifact. Going via `ipaddress` (rather than
+        # `canonical_value_under`) is also what keeps IPv6 intact: the trailing-punctuation strip
+        # below eats `:`, so `::1` would otherwise be stored as `1`.
         return str(ipaddress.ip_address(text))
+    text = text.strip(".,;:'\"")
     if type_name in {"fqdn", "domain"}:
         host = text.split("://", 1)[-1].split("/", 1)[0].split("@", 1)[-1]
         return host.rstrip(".").lower()
@@ -291,12 +296,17 @@ def find_observables(*texts: str, types: dict[str, ObservableType]) -> list[Find
 
 @transaction.atomic
 def extract_into_case(case: Case, *texts: str) -> list[Observable]:
-    """Extract from `texts`, dedupe globally, and link every finding to `case`.
+    """Extract from `texts`, dedupe globally, link every finding to `case`, and fire the trigger.
 
     Re-running the extractor over the same text is idempotent: the second pass resolves the
     existing rows and adds nothing, because both the `Observable` and the `CaseObservable` link are
-    backed by unique constraints.
+    backed by unique constraints — and because the automation trigger fires only on a *newly created*
+    link, so re-extraction does not re-run every playbook on the case.
+
+    That is why the dispatch is here and not in a `post_save` receiver: `Observable.save()` fires
+    before the `CaseObservable` row exists, so a receiver would have no case to scope the event to.
     """
+    from automation.registry import dispatch_observable_linked
     from cases.models import CaseObservable
 
     vocabulary = {t.name: t for t in ObservableType.objects.all()}
@@ -306,12 +316,16 @@ def extract_into_case(case: Case, *texts: str) -> list[Observable]:
         canonical = canonical_value_under(
             finding.normalized, case_sensitive=obs_type.is_case_sensitive
         )
-        observable, _created = Observable.objects.get_or_create(
+        observable, created = Observable.objects.get_or_create(
             data_type=obs_type,
             normalized_data=canonical,
             defaults={"data": finding.raw},
         )
-        CaseObservable.objects.get_or_create(case=case, observable=observable, defaults={})
+        _link, link_created = CaseObservable.objects.get_or_create(
+            case=case, observable=observable, defaults={}
+        )
+        if created or link_created:
+            dispatch_observable_linked(observable, case.pk)
         linked.append(observable)
     return linked
 
@@ -332,8 +346,14 @@ def add_observable(case: Case, type_name: str, value: str) -> Observable | None:
         normalize(type_name, value, is_case_sensitive=obs_type.is_case_sensitive),
         case_sensitive=obs_type.is_case_sensitive,
     )
-    observable, _created = Observable.objects.get_or_create(
+    observable, created = Observable.objects.get_or_create(
         data_type=obs_type, normalized_data=canonical, defaults={"data": value.strip()}
     )
-    CaseObservable.objects.get_or_create(case=case, observable=observable, defaults={})
+    _link, link_created = CaseObservable.objects.get_or_create(
+        case=case, observable=observable, defaults={}
+    )
+    if created or link_created:
+        from automation.registry import dispatch_observable_linked
+
+        dispatch_observable_linked(observable, case.pk)
     return observable
