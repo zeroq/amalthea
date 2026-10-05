@@ -155,9 +155,24 @@ agent never reported). `185 passed`, `mypy` **0 errors**, `manage.py check` 0 is
     `case_record`-cascade safety claim retracted. **The underlying gap is real:** `observables/0003` +
     `alerts/0004` cannot be reversed cleanly on SQLite, so the seed-rollback tests fail under either
     pin. That is a forward-only-migration problem, not a dependency-ordering one.
-  - **`H3-3` — `test_mutation_standard.py` enforces R11 by substring match.** A `test_mutation_*`
-    guard that mutates nothing passes by merely mentioning `_meta`. The standard's own enforcement is
-    weaker than the standard.
+  - **`H3-3` — `test_mutation_standard.py` enforced R11 by substring match.** A `test_mutation_*`
+    guard that mutates nothing passed by merely mentioning `_meta`; the standard's own enforcement
+    was weaker than the standard. **FIXED:** `analyse_guard()` now judges guards from their **AST**,
+    requiring a located *mutation site* (verified DDL context manager, self-verifying helper, raw
+    `cursor.execute`, or an attribute assignment) **and** a located *verification site* (DDL
+    read-back, self-verifying helper, or an `assert` reading the mutated attribute back). It folds in
+    module-level helpers one level deep, because guards 7-10 legitimately delegate their mutation to
+    `_swapped_on_delete`. The file now carries **negative self-tests**: six deliberately-vacuous
+    guards — including the exact round-3 bypass and variants that fake the read-back from a string
+    literal or a comment — must each be rejected, and four sound guards must be accepted so the fix
+    cannot degenerate into rejecting everything. Two structural tests block regression: the analyser
+    may not bind any name from `inspect.getsource`, and `analyse_guard` may not gain a text
+    parameter.
+    **The standard immediately found a real gap in the guards themselves:** guards 2 and 4 mutated
+    `remote_field.related_name` / `login.null` without ever asserting the assignment took effect on
+    the object the real assertion reads. Both now prove their mutation landed before asserting the
+    consequence. **Mutation-verified:** neutering the analyser fails all 6 rejection cases; reverting
+    the read-back matcher to a raw substring test fails 6; dropping the helper folding fails 4.
   - **`H3-4` / `H3-5`** — round-2 `M-1` (`correlation_key` never derived) and `M-6`
     (coverage 76.36% vs `fail_under=80`) still open.
   - Also: `TODO.md:183` claims SQLite drops `DESC`, which is false; `L-1`, `L-4` unchanged.

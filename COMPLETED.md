@@ -220,3 +220,37 @@ reported.
 - [x] **Honest status:** the seed-rollback path is broken on SQLite under *any* dependency choice,
   because `observables/0003` + `alerts/0004` are not cleanly reversible. That is now tracked as its
   own finding rather than papered over by a comment that claimed a fix it never provided.
+
+## 2026-10-05 — H3-3: the R11 standard can no longer be satisfied by mentioning a keyword
+
+- [x] **`test_mutation_standard.py` was itself the loophole.** It enforced the standard with
+  `any(m in src for m in VERIFIED_MECHANISMS)` — a substring search over the guard's own source. A
+  `test_mutation_*` guard that mutated nothing and merely mentioned `_meta` passed. An enforcement
+  mechanism weaker than the standard it enforces is the one failure mode R11 exists to prevent, and
+  it survived two gate rounds undetected.
+- [x] **Rewritten around AST analysis.** `analyse_guard()` requires a *located mutation site*
+  (verified DDL context manager, self-verifying helper, raw `cursor.execute`, or an attribute
+  assignment) **and** a *located verification site* (DDL read-back, self-verifying helper, or an
+  `assert` reading the mutated attribute back). Matching on AST attribute nodes rather than substrings
+  is what stops a guard faking its read-back from a string literal or a comment — both are now
+  rejected cases.
+- [x] **Negative self-tests make the standard non-vacuous in its own right.** Six deliberately-broken
+  guards must be rejected (the exact round-3 bypass, a tautology, a bare local rebind, an unverified
+  attribute edit, and read-backs faked from a string and from a comment); four sound guards must be
+  accepted so the fix cannot degenerate into rejecting everything.
+- [x] **Two structural tests block regression to the old technique:** no name in the module may be
+  bound from `inspect.getsource`, and `analyse_guard` may not gain a text parameter.
+- [x] **The standard immediately caught a real gap in the guards, not just in itself.** Guards 2 and
+  4 mutated `remote_field.related_name` and `login.null`/`login.blank` and then asserted the
+  consequence — without ever asserting the assignment took effect on the object the real assertion
+  reads. Both now read the value back first. This is the first time the standard has flagged the
+  guards rather than the code under test, which is the behaviour R11 was written to produce.
+- [x] **`test_the_mutation_helper_still_verifies` was rewritten to be behavioural.** It previously
+  read `inspect.getsource(schema_mutation)` and grepped for the sentinel string — the very technique
+  this file forbids, used to protect the mechanism that forbids it, and it would have passed if the
+  string survived only in a comment. It now *executes* `schema_mutation` over an unchanged table and
+  requires the no-op to raise, with a positive control so the assertion cannot pass for the wrong
+  reason.
+- [x] **Mutation-verified, three ways.** Neutering `analyse_guard` fails all 6 rejection cases;
+  reverting the read-back matcher to a raw substring test fails 6 tests; dropping the helper folding
+  fails 4. Gate: **298 passed, 1 skipped** (was 286).

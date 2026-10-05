@@ -77,6 +77,11 @@ def test_mutation_2_fk_audit_detects_a_missing_related_name():
     original = field.remote_field.related_name
     field.remote_field.related_name = None
     try:
+        # R11: prove the mutation landed before asserting what it broke. `field` is the same
+        # object the audit re-fetches from `_meta`, so reading it back is a real check — without
+        # it this guard could be assigning to a detached object and reporting a failure mode for
+        # a schema it never touched (the round-3 H3-3 loophole, caught in the guards themselves).
+        assert field.remote_field.related_name is None, "the mutation did not land"
         with pytest.raises(AssertionError) as excinfo:
             test_fk_audit.test_every_fk_declares_a_related_name()
         print("MUTATION-2 ASSERTION:", str(excinfo.value))
@@ -114,6 +119,8 @@ def test_mutation_4_phase3_schema_detects_a_nullable_login():
     original_null, original_blank = login.null, login.blank
     login.null, login.blank = True, True
     try:
+        # R11 read-back, same reasoning as guard 2: `login` is the object the audit reads.
+        assert login.null is True and login.blank is True, "the mutation did not land"
         with pytest.raises(AssertionError) as excinfo:
             test_phase3_schema.test_h6_user_requires_a_distinct_login()
         print("MUTATION-4 ASSERTION:", str(excinfo.value))
