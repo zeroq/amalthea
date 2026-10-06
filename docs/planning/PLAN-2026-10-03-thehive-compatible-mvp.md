@@ -557,16 +557,35 @@ worker + Redis to prove the async path.
 
 ## 14. Open Questions
 
+Resolved 2026-10-06 per TODO §3; each decision is recorded with the rationale that settled it. The
+provisional answers proposed here held in every case — the code now implements them, so these are
+recorded decisions, not open questions.
+
 1. **Alert `severity` default** when a source declares none — `2` (Medium) or require explicit
-   mapping? *Proposed:* `2`, with a warning.
+   mapping? **DECIDED 2026-10-06: `2`, with a warning.** Implemented in `ingest/pipeline.py`
+   (`DEFAULT_SEVERITY = 2`, `severity_defaulted` warning appended to `ingestion_warnings`) and
+   `IngestionSource.default_severity`. A source that wants a different fallback configures it.
 2. **Correlation window** — AGENTS.md says 10 minutes for identical destination IP. Confirm this
    should be per-source configurable, and what the default is for multi-signal correlation.
+   **DECIDED 2026-10-06: per-source `correlation_key` with a configurable window; default
+   10 minutes.** The correlation engine correlates on the operator-authored `correlation_key`
+   (derived via JSON-path mapping, not a fixed attribute pair), over the `(correlation_key, date)`
+   index. Each `IngestionSource` can disable correlation (`correlation_enabled`). Multi-signal
+   correlation (same user + IP) is expressed by giving those signals the same `correlation_key` rule.
 3. **`Alert.type` vs `dataType`** — should Amalthea's `IngestionSource` map to TheHive's `alert.type`
-   taxonomy, or stay independent? *Proposed:* independent, exposed as a tag.
+   taxonomy, or stay independent? **DECIDED 2026-10-06: independent, exposed as a tag.**
+   `Alert.type` is Amalthea's own vocabulary; exact mapping onto TheHive's taxonomy is deferred to
+   the Phase 8 query surface where `dataType` filtering is exercised.
 4. **Organisation tenancy** — single-tenant for MVP, or multi-org from the start? TheHive's access
    model assumes orgs; deferring risks a later migration on every table.
+   **DECIDED 2026-10-06: single-tenant + nullable `Organisation` FK.** The nullable FK (already
+   implemented) keeps multi-org open without a per-table migration on day one; multi-org access
+   control is out of MVP scope.
 5. **Markdown dialect** — TheHive-flavored Markdown is a superset of CommonMark with mentions and
    attachments. Adopt it for wire compat, or CommonMark and accept divergence?
+   **DECIDED 2026-10-06: sanitized CommonMark.** Adopting the superset costs wire fidelity and
+   sanitizer complexity; `markdown-it-py` (CommonMark) is the pinned renderer. Recorded divergence
+   from TheHive's note dialect.
 
 ## 15. Handoff
 

@@ -254,3 +254,54 @@ reported.
 - [x] **Mutation-verified, three ways.** Neutering `analyse_guard` fails all 6 rejection cases;
   reverting the read-back matcher to a raw substring test fails 6 tests; dropping the helper folding
   fails 4. Gate: **298 passed, 1 skipped** (was 286).
+
+## 2026-10-06 — Phases 4–6 & 9: the MVP loop ships, end to end
+
+- [x] **`H3-1` — vocabulary changes no longer silently invalidate stored digests** (commit `7bea08a`).
+  `ObservableType.save()` re-hashes affected `Observable` rows when `is_case_sensitive` flips; a
+  backfill path handles post-re-canonicalisation collisions. Mutation-verified.
+- [x] **`H3-4`/`M-1` — `correlation_key` is derived** (commit `ac6c8b0`). `ingest/mapping.py`
+  extracts it from `correlation_key`/`correlationKey`/`correlation` JSON-path rules via jsonpath-ng;
+  the `(correlation_key, date)` index is now actually exercised.
+- [x] **Phase 4 — Webhook ingestion hardened** (commit `b3643ed`). Hasher-backed secret check,
+  non-object/depth refusal, per-request env limits (`WEBHOOK_MAX_BODY_SIZE`, `WEBHOOK_MAX_DEPTH`),
+  per-source + per-IP cache throttling, idempotent replay (201 new / 200 replay). 36 hardening tests.
+- [x] **Phase 5 — Escalation, observables, tasks, timeline.** Webhook → alert → case import/merge →
+  typed observable extraction with global dedupe → cross-case graph; `{idOrName}` by UUID or case
+  number. `test_mvp_loop.py` plus `test_case_numbering.py` cover the path.
+- [x] **Phase 6 — Orchestration gateway closes the MVP loop** (commits `f2788a4`, `b8fa95b`).
+  Domain events → Celery with `idempotency_key`, dispatched on `transaction.on_commit` (AC6.6
+  rollback safety), SSRF-guarded executor with redirect hop cap and output size cap, results written
+  to `AutomationRun.output_log` **and** the case timeline. **Real bug found by smoke test:** the
+  idempotency key was scoped to the observable alone, so linking a shared observable into a second
+  case reused case A's run — scoped per (observable, case) link instead. 22 executor tests + 6
+  loop tests.
+- [x] **Phase 9 — Minimal analyst UI** (commits `d150f01`, `dd2354d`). Server-rendered Django
+  templates + HTMX + dark keyboard-first CSS: dashboard, alert triage (escalate/merge), case ledger
+  (status, notes, tasks, artifacts, timeline), automation and sources pages. Session auth, POST-only
+  mutations, CSRF, WCAG-aware severity rendering (text + colour). Fixed `LOGIN_URL` so anonymous
+  visits land on `/login` instead of Django's stock 404. 25 UI-loop tests.
+- [x] **The AGENTS.md §4 MVP loop is proven live, not just in tests.** Real HTTP against a running
+  dev server: webhook 201 → UI login → escalate → `attacker@example.net` extracted → `enrich-mail`
+  playbook Success → timeline entry. Dev settings run Celery **eager** so no Redis is needed locally.
+- [x] Gate at this state: **429 passed, 1 skipped** (the skip is the Postgres-only H-6 sequence
+  collision test, TODO §3.1).
+
+## 2026-10-06 — Cheap closes
+
+- [x] **2.4/`M5` — reverse-direction link-table indexes were verified already present**
+  `caseobs_obs_case_idx (observable, case)` and `alertobs_obs_alert_idx (observable, alert)` exist in
+  live DDL and are asserted in `test_indexes.py` — declared during the round-2 H-5 work. TODO item
+  marked done.
+- [x] **2.2 — mypy strict is clean** — 88 source files, 0 errors, `make check` green. Residue items
+  from the earlier listing (celery stubs, channels arg-type, custom-field generic bounds) resolved
+  via documented per-module overrides.
+- [x] **4.1 — `README.md` written.** Quickstart, TheHive compatibility statement, architecture
+  summary, repo map, production notes, links to plan/ADRs/reviews. Unblocks `pyproject.toml`
+  packaging.
+- [x] **Decisions 3.2–3.6 recorded** in plan §14 (single-tenant + nullable org FK; sanitized
+  CommonMark; independent `Alert.type` taxonomy; severity default 2 + warning; per-source
+  `correlation_key` with 10-minute default window). Each matches the already-implemented code, so
+  these are recordings, not retrofits.
+- [x] **TODO.md rewritten** to reflect reality: Phases 4–6/9 marked done, round-3 highs resolved,
+  most 2.5 items closed, remaining open work re-scoped (Phase 7 next, Postgres gate, coverage 78%→80%).

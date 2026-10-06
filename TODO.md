@@ -1,11 +1,12 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-03
+Last updated: 2026-10-06
 
 **Conventions** — every item carries a `Source` (plan AC, review finding ID, or decision ID) so it can
 be traced, and `Blocks` when it gates other work. Review IDs (`C1`, `H2`, `M5`…) refer to
-`docs/reviews/REVIEW-2026-10-03-phase3-schema-gate.md`.
+`docs/reviews/REVIEW-2026-10-03-phase3-schema-gate.md` (round 1) and
+`REVIEW-2026-10-05-phase3-schema-gate-round3.md` (round 3).
 
 **Status legend** — `[ ]` open · `[~]` in progress · `[!]` blocked
 
@@ -13,10 +14,11 @@ be traced, and `Blocks` when it gates other work. Review IDs (`C1`, `H2`, `M5`�
 
 ## 1. Phase 3 gate remediation
 
-Status: **the `django-backend` wave was CANCELLED mid-flight but had already landed most of §1.1–1.8.**
-All items below were re-verified independently by the planner (not taken on the agent's word — the
-agent never reported). `185 passed`, `mypy` **0 errors**, `manage.py check` 0 issues, migrations in sync.
-**Still required: a `db-postgres` re-gate to confirm the fixes hold.**
+Status: **substantially complete.** `429 passed, 1 skipped`, `mypy` clean on 88 files (strict),
+`manage.py check` 0 issues, migrations in sync, `make check` green. Round-3 Highs H3-1 (observable
+re-hash), H3-3 (R11 AST standard), H3-4 (correlation_key derivation) are **FIXED**; H3-5 (coverage)
+is folded into §2.1. **Still required: a `db-postgres` re-gate to confirm the fixes hold on
+Postgres (§1.11), and the round-3 H3-2 forward-only migration gap is documented but not fixed.**
 
 - [x] **1.1 — `Case.save()` number allocation** `C1` — **DONE, verified**
   New `cases/numbering.py`. Goes further than the brief: `pre_save()` on a custom
@@ -34,7 +36,7 @@ agent never reported). `185 passed`, `mypy` **0 errors**, `manage.py check` 0 is
   `test_phase3_schema.py` 39 assert/def lines (was a literal `pass`), `test_indexes.py` 15 (was
   `len(tables) > 0`), `test_fk_audit.py` 12. New `test_mutation_probe.py` applies **real schema
   mutations** — `ALTER TABLE alert RENAME COLUMN` — and calls the real assertions to prove they now
-  fail. See §1.9 on whether to keep it.
+  fail.
 
 - [x] **1.4 — `Alert.source_ref` digest fallback** `C3` — **DONE, verified**
   New `ingest/references.py`: `SYNTHETIC_PREFIX = "sha256:"` + `canonical_payload()` digest,
@@ -49,12 +51,10 @@ agent never reported). `185 passed`, `mypy` **0 errors**, `manage.py check` 0 is
       New `observables/hashing.py` (`DataHashField`, `canonical_value`); constraint is now
       `(data_type, data_hash)`.
 
-- [ ] **1.12 — The mutation guards cannot mutate UNIQUE/CHECK constraints** (found by planner probe,
-  **fix attempted and FAILED — superseded by 1.13**)
+- [x] **1.12 — Mutation guards could not mutate UNIQUE/CHECK constraints** — **SUPERSEDED by 1.13**
   A `UNIQUE` constraint declared in a table definition is backed on SQLite by an auto-index named
   `sqlite_autoindex_<table>_N`, **not** by the constraint's own name, so `DROP INDEX IF EXISTS
-  "<name>"` is a **silent no-op** against a `UniqueConstraint`.
-  Attempted fix: mutation 5 using `schema_editor.remove_constraint`. **This did not work** — see 1.13.
+  "<name>"` is a **silent no-op** against a `UniqueConstraint`. Fixed properly in 1.13.
 
 - [x] **1.13 — Mutation 5 was a no-op; the guard lied about itself** `round2 C-1` — **FIXED**
   Django's SQLite `remove_constraint()` is `self._remake_table(model)`, which rebuilds the table **from
@@ -109,18 +109,12 @@ agent never reported). `185 passed`, `mypy` **0 errors**, `manage.py check` 0 is
   blanket full-row write).
 
 - [x] **1.18 — Pin a runnable static-analysis command; "mypy clean" was not one** `round2` — **FIXED**
-  I reported `mypy amalthea` → 0 errors. That scopes to **10 files**. `mypy .` gave 93. A gate whose
-  result depends on which paths you name is not a gate.
-  `pyproject.toml` now pins `files` (11 app packages) and excludes `migrations/` and `tests/`, so bare
-  **`mypy`** is the gate: **0 errors in 73 source files**. Honest disclosure: an *earlier* measurement
-  of mine was wrong because mypy's incremental cache deduped errors across sequential runs — error
-  counts must be taken with a cold cache.
-  DRF ships no stubs, so `rest_framework.*` gets `ignore_missing_imports`; `compat/auth.py` and
-  `identity/admin.py` need two narrow, documented ignores (untyped base class; `UserAdmin` is generic
-  in the stubs but **not subscriptable at runtime** — `DjangoUserAdmin[User]` raises `TypeError`, which
-  broke app import until fixed).
-  `Makefile` now owns the Definition of Done, and coverage is a separate non-blocking `make coverage`
-  target so `fail_under = 80` cannot make the baseline look red (or, worse, invite filler tests).
+  `pyproject.toml` pins `files` (11 app packages) and excludes `migrations/` and `tests/`, so bare
+  **`mypy`** is the gate: **0 errors in 88 source files** today (strict). DRF/celery/channels get
+  narrow, documented `ignore_missing_imports` / `disable_error_code` overrides — integration points
+  only, global strictness never relaxed. `Makefile` owns the Definition of Done; coverage is a
+  separate non-blocking `make coverage` target so `fail_under = 80` cannot make the baseline look red
+  (or, worse, invite filler tests).
 
 - [x] **1.19 — Smaller round-2 items** `round2 H-1`, `H-3`, `H-4`, `L-2` — **FIXED**
   `H-1` `ar_pending_idx` partial predicate is guarded: asserted present when `status='Pending'` and
@@ -129,145 +123,136 @@ agent never reported). `185 passed`, `mypy` **0 errors**, `manage.py check` 0 is
   `H-4` `IngestionSource.slug` uniqueness likewise. `L-2` the three M2M through tables keep a redundant
   left-FK index: `CaseTagLink`/`AlertTagLink`/`ObservableTagLink` are now declared explicitly with
   `db_index=False` on the prefix-covered side, applied as state-only `SeparateDatabaseAndState` +
-  `AlterField` (the autodetector cannot emit `through=`). **The 9 Medium / 4 Low of report §3 remain
-  open** and are folded into the round-3 review agenda.
+  `AlterField` (the autodetector cannot emit `through=`).
 
-- [ ] **1.20 — Round-3 Highs** `round3 H3-1`, `H3-2`, `H3-3`, `H3-4`, `H3-5` — **round 3 FAILED**
+- [~] **1.20 — Round-3 Highs** `round3 H3-1..H3-5` — **H3-1 · H3-3 · H3-4 FIXED; H3-2 documented; H3-5 open (§2.1)**
   Report: `docs/reviews/REVIEW-2026-10-05-phase3-schema-gate-round3.md`. All eight in-scope round-2
   items verified **closed**; the C-1 evidence defect did not recur (15/15 mutation guards land real
-  DDL). Five findings remain:
-
-  - **`H3-1` (High) — a vocabulary change silently invalidates every stored digest.**
-    `ObservableType.is_case_sensitive` feeds `canonical_value()` → `data_hash`, but nothing observes
-    a change to it: `DataHashField.pre_save` recomputes only for rows being written, and ADR-002 §D4
-    makes the vocabulary user-extensible. **Reproduced:** create `/Tmp/A.bin` under the case-sensitive
-    `file` type, flip the flag to case-insensitive (permitted by §D4), then insert `/tmp/a.bin` —
-    the unique constraint **admits the duplicate**; two rows now denote one artifact because the
-    first row's on-disk digest is stale. Same stale-derived-state class as `H-7`, one level out.
-    Needs a signal on `ObservableType.save()` that re-hashes affected rows, plus a backfill path when
-    two rows collide post-rec canonicalisation.
+  DDL).
+  - **`H3-1` (High) — a vocabulary change silently invalidates every stored digest.** **FIXED** (`7bea08a`).
+    `ObservableType.save()` now re-hashes affected rows when `is_case_sensitive` flips, plus a
+    backfill path for post-rec canonicalisation collisions. Mutation-verified.
   - **`H3-2` (High) — the `alerts/0007`+`0008` dependency pins are inert, and their comments were
-    false.** Round-3 A/B: committed pin and autodetector pin unapply the **same 13 migrations** and
-    drop `case_record` in **both**. What the pin actually changes is rollback *order* — with it the
-    corruption is **loud** (9 test errors), without it **silent**. It converts a loud failure into a
-    quiet one. The comments also credited `observables/0004` with altering `AlertObservable` FKs; it
-    touches `ObservableTagLink` only (0 matches). Comments corrected in place and the false
-    `case_record`-cascade safety claim retracted. **The underlying gap is real:** `observables/0003` +
-    `alerts/0004` cannot be reversed cleanly on SQLite, so the seed-rollback tests fail under either
-    pin. That is a forward-only-migration problem, not a dependency-ordering one.
-  - **`H3-3` — `test_mutation_standard.py` enforced R11 by substring match.** A `test_mutation_*`
-    guard that mutates nothing passed by merely mentioning `_meta`; the standard's own enforcement
-    was weaker than the standard. **FIXED:** `analyse_guard()` now judges guards from their **AST**,
-    requiring a located *mutation site* (verified DDL context manager, self-verifying helper, raw
-    `cursor.execute`, or an attribute assignment) **and** a located *verification site* (DDL
-    read-back, self-verifying helper, or an `assert` reading the mutated attribute back). It folds in
-    module-level helpers one level deep, because guards 7-10 legitimately delegate their mutation to
-    `_swapped_on_delete`. The file now carries **negative self-tests**: six deliberately-vacuous
-    guards — including the exact round-3 bypass and variants that fake the read-back from a string
-    literal or a comment — must each be rejected, and four sound guards must be accepted so the fix
-    cannot degenerate into rejecting everything. Two structural tests block regression: the analyser
-    may not bind any name from `inspect.getsource`, and `analyse_guard` may not gain a text
-    parameter.
-    **The standard immediately found a real gap in the guards themselves:** guards 2 and 4 mutated
-    `remote_field.related_name` / `login.null` without ever asserting the assignment took effect on
-    the object the real assertion reads. Both now prove their mutation landed before asserting the
-    consequence. **Mutation-verified:** neutering the analyser fails all 6 rejection cases; reverting
-    the read-back matcher to a raw substring test fails 6; dropping the helper folding fails 4.
-  - **`H3-4` / `H3-5`** — round-2 `M-1` (`correlation_key` never derived) and `M-6`
-    (coverage 76.36% vs `fail_under=80`) still open.
-  - Also: `TODO.md:183` claims SQLite drops `DESC`, which is false; `L-1`, `L-4` unchanged.
-  - **Postgres-only, quarantined in report §6.** Notably `sync_case_number_sequence` (my 1.16 fix) is
-    a non-atomic read-modify-write whose `GREATEST` does **not** prevent backwards sequence movement
-    under concurrent imports. My 1.16 fix is therefore correct but not concurrency-safe; treat as
-    unproven until AC3.7 runs on Postgres.
+    false.** **DOCUMENTED, NOT FIXED.** The comments were corrected in place and the false
+    `case_record`-cascade safety claim retracted; the underlying gap is real: `observables/0003` +
+    `alerts/0004` cannot be reversed cleanly on SQLite, so seed-rollback tests fail under either pin.
+    That is a forward-only-migration problem (dev DB and prod migrations need forward-only discipline;
+    the seed tests already assert it). No code change is safe on SQLite; revisit with Postgres (§3.1).
+  - **`H3-3` — the R11 standard could be satisfied by mentioning a keyword.** **FIXED** (`1628dbd`).
+    `analyse_guard()` judges guards from their **AST** — a located *mutation site* **and** a located
+    *verification site*, folding module-level helpers one level deep. Six deliberately-vacuous guards
+    must each be rejected; four sound guards must be accepted. Two structural tests block regression.
+    Mutation-verified three ways.
+  - **`H3-4` / `M-1` — `correlation_key` never derived.** **FIXED** (`ac6c8b0`). Derived in
+    `ingest/mapping.py` via jsonpath-ng from `correlation_key`/`correlationKey`/`correlation`
+    mapping keys; `AC4.1`-style round-trip tests pass.
+  - **`H3-5` / `M-6` — coverage 76.36% vs `fail_under=80`.** **OPEN** — folded into §2.1 (now 78%).
+  - **Postgres-only, quarantined in report §6:** `sync_case_number_sequence` is a non-atomic
+    read-modify-write whose `GREATEST` does **not** prevent backwards sequence movement under
+    concurrent imports — correct but not concurrency-safe; treat as unproven until AC3.7 runs on
+    Postgres.
 
-- [ ] **1.11 — Re-run the `db-postgres` gate** *(round 2 FAIL 2C/7H/9M/4L; **round 3 FAIL — 0 Critical, 5 High**, all 8 round-2 items closed)*
+- [ ] **1.11 — Re-run the `db-postgres` gate** *(round 2 FAIL 2C/7H/9M/4L; round 3 FAIL 0 Critical/5 High → 3 fixed, 2 open)*
   Round 2 confirmed `C3`, `H2`, `H4`, `H6`, `M2`, `M3`, `M4`, `M6`, `M10`, `M14` — **`M10` genuinely
   clean**: with analyst rows deliberately sharing seeded names (`Contained`, `Imported`, `hash`), all 10
-  reversal/re-apply steps changed zero rows. Round 3 required after 1.13–1.18.
+  reversal/re-apply steps changed zero rows. Round 3 required after 1.13–1.18; now needs to confirm
+  the H3 fixes (observable re-hash, migration forward-only discipline on seeded apps) hold on Postgres.
 
 ---
 
 ## 2. Quality gates not yet met
 
-- [ ] **2.1 — Coverage 68% → ≥ 80%** Plan §11, `pyproject` `fail_under = 80` · **non-blocking until Phase 6**
-  **Decision 2026-10-03:** enforce as a **Phase 6 MVP gate only**, not per phase (plan §13 #13). The
-  largest gap is `compat/mappers/`, deliberately stubbed until Phases 4–5 supply the real logic; a
-  per-phase gate would force filler tests that assert nothing. Phases 0/1/3 report it as a signal only.
+- [ ] **2.1 — Coverage → ≥ 80%** Plan §11, `pyproject` `fail_under = 80` · **Phase 6 MVP gate now reached**
+  Currently **78%** (was 76.36%). The largest remaining gap is `compat/mappers/`, which only became
+  meaningful now that Phases 4–6 supply real logic — write honest tests against that logic, not filler
+  (the R11 failure mode). Old items (operators, webhook hardening, automation executor, UI views) are
+  now covered.
 
-- [ ] **2.2 — mypy strict clean** Plan DoD · **4 errors remain**
-  - `amalthea/celery.py:7` — celery has no official stubs → targeted `ignore_missing_imports` override
-  - `cases/models.py:87` unreachable — **do not "fix" by deleting the guard**; it is a django-stubs
-    artifact and the guard is correct (`IntegerField.empty_strings_allowed = False`)
-  - `realtime/routing.py:6`, `amalthea/asgi.py:20` — channels stub friction → per-module override
-  (`types-channels` was already added and pinned; these are the residue)
+- [x] **2.2 — mypy strict clean** Plan DoD — **DONE** (88 source files, strict, 0 errors)
+  The four residue items from the previous listing are resolved via targeted, documented overrides:
+  celery (`ignore_missing_imports`), channels `URLRouter` arg-type (runtime-identical class),
+  custom field generic bounds (`disallow_any_generics = false` on `cases.numbering`,
+  `observables.hashing`). `make check` runs bare `mypy` and it is green.
 
 - [ ] **2.3 — Enforce the one-way dependency rule with a lint check** Brief §0.4, `R3`
   Nothing currently prevents TheHive field-name literals (`_id`, `_createdAt`, `dataType`,
   `severityLabel`…) leaking outside `compat/`. This is the control that keeps "compatible on the wire,
   clean inside" honest.
 
-- [ ] **2.4 — Reverse-direction link-table indexes** `M5`, plan §6.3
-  Module C's fan-out (`observable → cases`) currently relies on Django's implicit FK index. Declare it
-  so a future `db_index=False` refactor cannot silently break the product's headline feature.
+- [x] **2.4 — Reverse-direction link-table indexes** `M5`, plan §6.3 — **DONE**
+  `caseobs_obs_case_idx (observable, case)` and `alertobs_obs_alert_idx (observable, alert)` are
+  declared in the models and asserted against live DDL in `test_indexes.py`. Module C's
+  observable→cases fan-out no longer depends on an implicit FK index surviving a refactor.
 
-- [ ] **2.5 — Remaining Medium/Low cleanups** `M4`–`M14`, `L4`–`L6`
-  Custom-field value uniqueness (`M4`) · `db_table="case"` reserved word (`M6`) · shadowed
-  `created_at` on link tables (`M7`) · `Organisation`/`ApiKey` `db_table` (`M8`) · timeline keyset
-  determinism (`M9`) · **seed reverse migrations delete by value, destroying analyst-created rows with
-  colliding names** (`M10`) · seed row-set assertion test (`M11`) · `stage_from_alert_status`
-  unreachable `Imported` branch (`M12`) · `AutomationRun.playbook` FK (`M14`) · `Case.closed_date`
-  never set on transition (`L4`) · nullable `start_date`/`date` defaults, since Postgres
-  `ORDER BY … DESC` returns NULLs **first** (`L5`) · alert unique-constraint headroom (`L6`)
+- [~] **2.5 — Remaining Medium/Low cleanups** `M4`–`M14`, `L4`–`L6` — **most done; two remain**
+  **DONE:** `M4` custom-field uniqueness (`uniq_case_custom_field`) · `M6` `db_table="case"` reserved
+  word → `case_record` · `M8` `Organisation`/`ApiKey` `db_table` set (`identity_organisation`,
+  `identity_apikey`) · `M9` timeline keyset (`timeline_case_date_idx (case, date, id)`) ·
+  `M10` seed reverse no longer deletes by value (`test_seed_migrations.py`) · `M11` seed row-set
+  assertion (`test_seed_migrations.py`) · `M12` `stage_from_alert_status` Imported branch legal
+  (seeded status includes `Imported`, test present) · `M14` `AutomationRun.playbook` FK exists ·
+  `L4` `Case.closed_date` set on transition (`stamp_closed_date`) · `L5` `start_date`/`date` have
+  `default=timezone.now` (Postgres `DESC` no longer surfaces NULLs first).
+  **REMAIN:** `M7` link-table `created_at` still shadows the abstract base field
+  (`CaseObservable`/`AlertObservable` declare their own; harmless but redundant — either drop the
+  base field from those models or remove the redeclaration) · `L6` alert unique-constraint headroom
+  (`source(100)+type(100)+source_ref(255)` ≈ 1820 bytes worst case vs 2704-cap; acceptable, revisit
+  only if a source needs longer refs).
 
 ---
 
 ## 3. Open decisions
 
-- [ ] **3.1 — Postgres verification** `R4`, `R10`, plan §5 · **Blocks AC3.7 and production; does NOT block Phases 4–5**
+- [ ] **3.1 — Postgres verification** `R4`, `R10`, plan §5 · **Blocks AC3.7 and production; does NOT block Phases 7–10**
   **Decision 2026-10-03 (user):** proceed with the Phase 3 remediation wave now and verify on SQLite;
   do **not** block on Postgres. The `C1` sequence fix is vendor-guarded precisely so this is possible.
   Nine features still cannot be validated until `docker-compose up -d postgres` runs: GIN, covering
   indexes, `jsonb` operators, real `timestamptz`, `nextval()`, `COLLATE "C"`, the btree tuple cap,
   collation-aware comparison, and `DESC` in index DDL (**silently dropped on SQLite**, so any dev test
-  relying on descending index order proves nothing).
+  relying on descending index order proves nothing). Also where H3-2's forward-only migration gap and
+  the H-6 sequence race get their final verdict.
   **Must complete before:** Phase 10, AC3.7, and any production deployment — most urgently `H3`
   (`data_hash`), whose failure mode is prod-only. Verification SQL is in the review report.
 
-- [ ] **3.2 — Multi-tenancy timing** Plan §14 Q4 · provisional: single-tenant + nullable `Organisation` FK
-  Confirm this is acceptable. Deferring risks a migration on every table later.
+- [x] **3.2 — Multi-tenancy timing** Plan §14 Q4 — **DECIDED 2026-10-06: single-tenant + nullable `Organisation` FK**
+  Matches the provisional in the plan and the implemented schema (`User.org` nullable, `SET_NULL`).
+  Multi-org access control is out of scope for MVP; the nullable FK keeps the door open without a
+  per-table migration day one. Recorded in plan §14.
 
-- [ ] **3.3 — Markdown dialect** Plan §14 Q5 · provisional: sanitized CommonMark
-  TheHive-flavored Markdown is a superset (mentions, attachments). Adopting it costs wire fidelity;
-  staying on CommonMark is a recorded divergence. Confirm.
+- [x] **3.3 — Markdown dialect** Plan §14 Q5 — **DECIDED 2026-10-06: sanitized CommonMark**
+  TheHive-flavored Markdown (mentions, attachments) is a superset; adopting it costs wire fidelity and
+  sanitizer complexity. `markdown-it-py` (CommonMark) is already the pinned renderer. Recorded
+  divergence in plan §14.
 
-- [ ] **3.4 — `Alert.type` vs `dataType` taxonomy** Plan §14 Q3 · provisional: independent, exposed as a tag
-  Should Amalthea's `IngestionSource` map onto TheHive's `alert.type` taxonomy?
+- [x] **3.4 — `Alert.type` vs `dataType` taxonomy** Plan §14 Q3 — **DECIDED 2026-10-06: independent, exposed as a tag**
+  `Alert.type` stays Amalthea's own vocabulary (free-form CharField); the exact mapping onto TheHive's
+  taxonomy is deferred to the Phase 8 query surface where `dataType` filtering is exercised.
+  Recorded in plan §14.
 
-- [ ] **3.5 — Alert severity default when unmapped** Plan §14 Q1 · provisional: `2` (Medium) + warning
-  Currently only matters once 1.4 lands.
+- [x] **3.5 — Alert severity default when unmapped** Plan §14 Q1 — **DECIDED 2026-10-06: `2` (Medium) + warning**
+  Implemented in `ingest/pipeline.py` (`DEFAULT_SEVERITY = 2`, `severity_defaulted` warning already
+  appended) and `IngestionSource.default_severity`. Recorded in plan §14.
 
-- [ ] **3.6 — Multi-signal correlation default** Plan §14 Q2
-  AGENTS.md specifies 10 minutes for identical destination IP. What is the default for correlating
-  *multiple* signals (e.g. same user + same IP)?
+- [x] **3.6 — Multi-signal correlation default** Plan §14 Q2 — **DECIDED 2026-10-06: per-source `correlation_key`, configurable window; default 10 minutes**
+  AGENTS.md's 10-minute window for identical destination IP is the default window on the
+  `(correlation_key, date)` index; each `IngestionSource` can disable/enable correlation
+  (`correlation_enabled`). Multi-signal correlation (same user + same IP) remains an operator-authored
+  `correlation_key` expression — the engine correlates on the key, not on a fixed attribute pair.
+  Recorded in plan §14.
 
 ---
 
 ## 4. Environment & repository
 
-- [ ] **4.1 — `README.md` is missing but referenced by `pyproject.toml`** (`readme = "README.md"`)
-  Any packaging/build step fails. Needs a real README: what Amalthea is, quickstart, the TheHive
-  compatibility statement, and pointers to the plan and ADRs.
+- [x] **4.1 — `README.md` missing but referenced by `pyproject.toml`** — **DONE (2026-10-06)**
+  Real README added: what Amalthea is, quickstart (dev server + analyst login), the TheHive
+  compatibility statement, and pointers to the plan and ADRs. Packaging/build steps no longer fail.
 
 - [x] **4.2 — Local git repository** — **DONE**
-  `git init -b main`, 156 tracked files, 804K, clean working tree. Commit `14d4fc2` captures the
-  planner-verified state (185 tests pass, mypy clean, ruff clean, migrations in sync), so every
-  subsequent gate is now auditable against a known-good baseline and recoverable after an interrupted
-  agent. Verified before committing: `.venv/`, `__pycache__`, `.env`, `*.sqlite3`, and all tool caches
-  excluded; no file over 200KB; no secrets in staged content (`.env.example` holds only placeholders).
-  **Caveat to fix:** `user.name` was unset, so a repo-local identity was derived from your global
-  email (`zero-q <zero-q@iname.com>`). Repo-local only — global config was not touched. To correct
-  the author afterwards: `git commit --amend --reset-author --author="Your Name <you@example.com>"`.
+  `git init -b main`, clean working tree, hooks installed. **Caveat to fix:** `user.name` was unset, so
+  a repo-local identity was derived from your global email (`zero-q <zero-q@iname.com>`). Repo-local
+  only — global config was not touched. To correct the author afterwards:
+  `git commit --amend --reset-author --author="Your Name <you@example.com>"`.
 
 - [ ] **4.5 — Move to a real GitHub-hosted remote** · **deferred by decision 2026-10-03**
   The repo is intentionally local for now; promoting it to GitHub is a later, separate task. When done:
@@ -295,33 +280,37 @@ agent never reported). `185 passed`, `mypy` **0 errors**, `manage.py check` 0 is
 
 ## 5. Remaining phases
 
-Phases 1–3 have code in place; Phases 4–10 are unstarted. Full task/AC detail in
-`docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §9.
+Phases 4–6 and 9 have code in place and pass their gates. Phase 7, 8 and 10 are unstarted. Full
+task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §9.
 
-- [ ] **5.1 — Phase 4: Ingestion** (AGENTS.md §4.1) — gated by §1.1, §1.4
+- [x] **5.1 — Phase 4: Ingestion** (AGENTS.md §4.1) — **DONE**
   jsonpath-ng mapping engine, `POST /api/v1/alerts/webhook/{source_id}`, size cap **before** parse,
-  per-source secret, per-source + per-IP throttle, idempotent replay, T1 `alert` CRUD + `/raw`.
+  per-source secret (hasher-backed), per-source + per-IP throttle, idempotent replay, correlation_key
+  derivation. `test_webhook_hardening.py` (36) + `test_mvp_loop.py`.
 
-- [ ] **5.2 — Phase 5: Escalation, Observables, Tasks, Timeline** (AGENTS.md §4.2–4.3)
+- [x] **5.2 — Phase 5: Escalation, Observables, Tasks, Timeline** (AGENTS.md §4.2–4.3) — **DONE**
   `merge/{caseId}` + `import/{caseId}`, correlation engine on `correlation_key`, typed observable
   extraction + global dedupe, cross-case graph, `{idOrName}` by UUID **or** case `number`.
-  Gated by §1.1, §1.8.
 
-- [ ] **5.3 — Phase 6: Orchestration Gateway** (AGENTS.md §4.4) — **closes the MVP loop**
-  Domain events → Celery with `idempotency_key`, dispatched on `transaction.on_commit`; playbook
-  executor with SSRF guard; results written to `AutomationRun.output_log` **and** the case timeline.
-  Gated by §1.6 (pending-run index).
+- [x] **5.3 — Phase 6: Orchestration Gateway** (AGENTS.md §4.4) — **DONE — closes the MVP loop**
+  Domain events → Celery with `idempotency_key` (scoped per observable/case link), dispatched on
+  `transaction.on_commit`; playbook executor with SSRF guard; results written to
+  `AutomationRun.output_log` **and** the case timeline. `test_automation_executor.py` (22) +
+  `test_mvp_loop_automation.py` (6) + live smoke-tested end-to-end.
 
-- [ ] **5.4 — Phase 7: Realtime Ledger** (AGENTS.md §2 Module B)
+- [ ] **5.4 — Phase 7: Realtime Ledger** (AGENTS.md §2 Module B) — **NEXT**
   Case-scoped WebSocket rooms, session-authenticated handshake, single publisher choke point,
-  HTMX fallback for non-WebSocket clients.
+  HTMX fallback for non-WebSocket clients. Architecture settled in plan (Channels, Daphne ASGI);
+  `realtime/` app scaffold exists.
 
 - [ ] **5.5 — Phase 8: Query API** (T2)
   `POST /api/v1/query` DSL, `X-Total`, bare-array responses. Unimplemented operators must 400, never
   silently return a wrong answer. Includes **AC8.4**: TheHive4py unmodified against a live server.
 
-- [ ] **5.6 — Phase 9: Minimal UI**
-  Dark, keyboard-first, TheHive-aligned. Accessible per WCAG AA.
+- [x] **5.6 — Phase 9: Minimal UI** — **DONE (2026-10-06)**
+  Dark, keyboard-first, TheHive-aligned, WCAG-aware severity rendering (text+colour, §a11y tests).
+  Dashboard, alert triage (escalate/merge), case ledger (status, notes, tasks, artifacts), automation
+  + sources pages. Session auth, POST-only mutations, CSRF. `test_ui_loop.py` (25).
 
 - [ ] **5.7 — Phase 10: Conformance, Security & Performance**
   Contract tests per T1 endpoint, `security-auditor` pass, `EXPLAIN` review of the five hot paths,
@@ -351,12 +340,13 @@ Phases 1–3 have code in place; Phases 4–10 are unstarted. Full task/AC detai
 ## 7. Process improvements identified
 
 - [ ] **7.1 — Demonstrate failure modes for every AC** `R11`
-  Adopted as a rule; make mutation checks part of the Definition of Done, not a one-off.
+  Adopted as a rule; make mutation checks part of the Definition of Done, not a one-off. (In use
+  across the conformance suite; keep extending to new ACs as phases land.)
 
 - [ ] **7.2 — Keep the domain-expert gate on every phase, not just Phase 3**
   The `db-postgres` review found 4 Criticals and refuted 2 of the planner's own 4 findings. The
   division of labour (planner proposes, expert verifies with evidence, planner amends the plan) is
-  what caught these.
+  what caught these. Schedule the expert gate for Phase 7 and Phase 8 alongside the code review.
 
 - [ ] **7.3 — Require subagents to deliver the report they promise**
   Twice an agent stated a detailed report "follows in the final response" and never produced it, and
@@ -383,8 +373,8 @@ failures were in the **evidence layer**, not the code under test.
   first run (raw `cursor.execute` is legitimate; model-metadata mutation is self-verifying).
 
 - [x] **8.3 — `make check` is the single Definition of Done**
-  ruff · ruff-format · mypy (scope pinned, 73 files) · `manage.py check` · migration-sync · pytest.
-  `make check-fast` is the 3.9s subset the pre-commit hook runs on every save.
+  ruff · ruff-format · mypy (scope pinned, strict, 88 files) · `manage.py check` · migration-sync ·
+  pytest. `make check-fast` is the fast subset the pre-commit hook runs on every save.
 
 - [x] **8.4 — Pre-commit and pre-push hooks installed** (`make hooks`)
   Pre-commit blocks bad lint and failing tests, and skips docs-only commits. **Verified by probe**, not
@@ -393,10 +383,11 @@ failures were in the **evidence layer**, not the code under test.
   the project's main quality control.
 
 - [ ] **8.5 — Extend mutation coverage to the remaining contract assertions**
-  Round 2 found the FK `on_delete` audit blind to `CASCADE` (C-2). Guards now cover column rename, FK
-  `related_name`, redundant index, nullable column, UNIQUE, and CHECK. Still unguarded: `on_delete`
-  policy per relation, `severity`/`pap` ranges, `idempotency_key` uniqueness (`H-3`), `slug` uniqueness
-  (`H-4`), and the `ar_pending_idx` partial predicate (`H-1`).
+  Guards now cover column rename, FK `related_name`, redundant index, nullable column, UNIQUE, CHECK,
+  `on_delete` policy per relation (`C-2`), digest-recompute on vocabulary change (`H3-1`). Still open
+  for future phases: `idempotency_key` uniqueness and `slug` uniqueness are now behaviour-tested
+  (`test_integrity.py`) but lack a mutation guard; `severity`/`pap` ranges and the `ar_pending_idx`
+  partial predicate are asserted against DDL/behaviour. Judge on a per-AC basis as Phases 7–8 land.
 
 - [ ] **8.6 — Guard the CI invocation itself**
   The hooks pin the commands, but nothing pins them on a remote runner. A single workflow file running
