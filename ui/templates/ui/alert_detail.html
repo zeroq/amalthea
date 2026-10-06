@@ -1,0 +1,94 @@
+{% extends "ui/base.html" %}
+{% load ui_tags %}
+{% block title %}{{ alert.title }} · Amalthea{% endblock %}
+{% block heading %}
+  <span class="sev sev-{{ alert.severity|sev_class }}">{{ alert.severity|sev_label }}</span>
+  {{ alert.title }}
+{% endblock %}
+
+{% block actions %}
+  <a class="btn" href="{% url 'ui-alert-list' %}">Back to queue</a>
+  {% if alert.case %}
+    <a class="btn btn-primary" href="{% url 'ui-case-detail' alert.case.number %}">Open case #{{ alert.case.number }}</a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="cols">
+  <section class="card" aria-labelledby="h-meta">
+    <h2 id="h-meta">Alert</h2>
+    <dl class="meta">
+      <dt>Severity</dt><dd>{{ alert.severity|sev_label }} ({{ alert.severity }})</dd>
+      <dt>Status</dt><dd>{{ alert.status.value }}</dd>
+      <dt>Type</dt><dd class="mono">{{ alert.type }}</dd>
+      <dt>Source</dt><dd class="mono">{{ alert.source }}</dd>
+      <dt>Source ref</dt><dd class="mono">{{ alert.source_ref|default:"—" }}</dd>
+      <dt>Feed</dt><dd class="mono">{% if alert.ingestion_source %}{{ alert.ingestion_source.slug }}{% else %}—{% endif %}</dd>
+      <dt>Correlation key</dt><dd class="mono">{{ alert.correlation_key|default:"—" }}</dd>
+      <dt>Seen</dt><dd class="mono">{{ alert.date|date:"Y-m-d H:i:s" }}</dd>
+      <dt>Ingested</dt><dd class="mono">{{ alert.created_at|date:"Y-m-d H:i:s" }}</dd>
+      <dt>TLP / PAP</dt><dd>{{ alert.tlp }} / {{ alert.pap }}</dd>
+    </dl>
+
+    {% if alert.summary or alert.description %}
+      <h3>Description</h3>
+      <pre class="body">{{ alert.summary|default:alert.description }}</pre>
+    {% endif %}
+
+    {% if alert.ingestion_warnings.warnings %}
+      <h3>Ingestion warnings</h3>
+      <ul class="warns">
+        {% for warning in alert.ingestion_warnings.warnings %}<li>{{ warning }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+
+  <div class="stack">
+    {% if not alert.case %}
+      <section class="card" aria-labelledby="h-escalate">
+        <h2 id="h-escalate">Escalate</h2>
+        <p class="hint">
+          Promotes this alert into a new case, extracts artifacts from its payload, and fires any
+          playbook bound to <code>observable.created</code>.
+        </p>
+        <form method="post" action="{% url 'ui-alert-escalate' alert.id %}">{% csrf_token %}
+          <label for="f-title">Case title</label>
+          <input id="f-title" name="title" value="{{ alert.title }}" maxlength="500">
+
+          <label for="f-desc">Description</label>
+          <textarea id="f-desc" name="description" rows="3" placeholder="Optional investigation notes"></textarea>
+
+          <label class="check"><input type="checkbox" name="assign_me" checked> Assign to me</label>
+
+          <button type="submit" class="btn btn-primary">Escalate to case</button>
+        </form>
+      </section>
+
+      <section class="card" aria-labelledby="h-merge">
+        <h2 id="h-merge">Merge into an existing case</h2>
+        {% if merge_candidates %}
+          <form method="post" action="{% url 'ui-alert-merge' alert.id %}">{% csrf_token %}
+            <label for="f-case">Case</label>
+            <select id="f-case" name="case_id" required>
+              {% for case in merge_candidates %}
+                <option value="{{ case.number }}">#{{ case.number }} — {{ case.title }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="btn">Merge alert</button>
+          </form>
+        {% else %}
+          <p class="empty">No open cases to merge into.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+
+    <section class="card" aria-labelledby="h-raw">
+      <h2 id="h-raw">Raw payload</h2>
+      <details>
+        <summary>Show {{ alert.raw_payload|length }} bytes as sent</summary>
+        <pre class="body mono">{{ alert.raw_payload|pprint }}</pre>
+      </details>
+    </section>
+  </div>
+</div>
+{% endblock %}

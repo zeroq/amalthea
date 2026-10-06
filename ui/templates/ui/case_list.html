@@ -1,0 +1,41 @@
+{% extends "ui/base.html" %}
+{% load ui_tags %}
+{% block title %}Cases · Amalthea{% endblock %}
+{% block heading %}Cases{% endblock %}
+
+{% block actions %}
+  <nav class="tabs" aria-label="Case scope">
+    <a class="tab {% if not show_closed %}tab-on{% endif %}" href="{% url 'ui-case-list' %}"
+       {% if not show_closed %}aria-current="page"{% endif %}>Open</a>
+    <a class="tab {% if show_closed %}tab-on{% endif %}" href="{% url 'ui-case-list' %}?closed=1"
+       {% if show_closed %}aria-current="page"{% endif %}>All</a>
+  </nav>
+{% endblock %}
+
+{% block content %}
+{% if cases %}
+  <table class="grid">
+    <caption class="sr-only">Cases by severity, newest first</caption>
+    <thead>
+      <tr>
+        <th scope="col">Case</th><th scope="col">Severity</th><th scope="col">Status</th>
+        <th scope="col">Title</th><th scope="col">Assignee</th><th scope="col">Started</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for case in cases %}
+        <tr>
+          <td><a class="mono" href="{% url 'ui-case-detail' case.number %}">#{{ case.number }}</a></td>
+          <td><span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span></td>
+          <td>{{ case.status.value }}</td>
+          <td>{{ case.title }}</td>
+          <td>{{ case.assignee.login|default:"—" }}</td>
+          <td class="mono dim">{{ case.start_date|date:"Y-m-d H:i" }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="empty">No cases {% if not show_closed %}open{% endif %}.</p>
+{% endif %}
+{% endblock %}

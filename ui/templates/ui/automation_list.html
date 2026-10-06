@@ -1,0 +1,53 @@
+{% extends "ui/base.html" %}
+{% load ui_tags %}
+{% block title %}Automation · Amalthea{% endblock %}
+{% block heading %}Automation{% endblock %}
+
+{% block content %}
+<p class="hint">
+  Every run the orchestrator has made, newest first. A playbook fires on
+  <code>observable.created</code>, runs in a Celery worker after the transaction that produced the
+  artifact commits, and writes its result back onto the case timeline.
+</p>
+
+{% if playbooks %}
+  <section class="card" aria-labelledby="h-summary">
+    <h2 id="h-summary">Runs per playbook</h2>
+    <ul class="chips">
+      {% for row in playbooks %}<li class="chip">{{ row.playbook_name }} <span class="count">{{ row.n }}</span></li>{% endfor %}
+    </ul>
+  </section>
+{% endif %}
+
+{% if runs %}
+  <table class="grid">
+    <caption class="sr-only">Automation runs, newest first</caption>
+    <thead>
+      <tr>
+        <th scope="col">Playbook</th><th scope="col">Status</th><th scope="col">Trigger</th>
+        <th scope="col">Case</th><th scope="col">Queued</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for run in runs %}
+        <tr>
+          <td class="mono">{{ run.playbook_name }}</td>
+          <td>
+            <span class="pill pill-{{ run.status|lower }}">{{ run.status }}</span>
+            {% if run.error %}<pre class="tl-body error">{{ run.error }}</pre>{% endif %}
+          </td>
+          <td class="mono break">
+            {% if run.triggered_by_observable %}
+              {{ run.triggered_by_observable.data_type.name }} {{ run.triggered_by_observable.data }}
+            {% else %}—{% endif %}
+          </td>
+          <td>{% if run.case %}<a href="{% url 'ui-case-detail' run.case.number %}">#{{ run.case.number }}</a>{% else %}—{% endif %}</td>
+          <td class="mono dim">{{ run.created_at|date:"Y-m-d H:i:s" }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="empty">No runs recorded.</p>
+{% endif %}
+{% endblock %}

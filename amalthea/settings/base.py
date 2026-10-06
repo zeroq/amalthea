@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "automation",
     "realtime",
     "services",
+    "ui",
 ]
 
 MIDDLEWARE = [

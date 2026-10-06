@@ -1,0 +1,52 @@
+{% extends "ui/base.html" %}
+{% load ui_tags %}
+{% block title %}Alerts · Amalthea{% endblock %}
+{% block heading %}Alerts{% endblock %}
+
+{% block actions %}
+  <nav class="tabs" aria-label="Alert scope">
+    {% for value in scopes %}
+      <a class="tab {% if scope == value %}tab-on{% endif %}"
+         href="{% url 'ui-alert-list' %}?scope={{ value }}"
+         {% if scope == value %}aria-current="page"{% endif %}>{{ value }}</a>
+    {% endfor %}
+  </nav>
+{% endblock %}
+
+{% block content %}
+<p class="hint">
+  <kbd>a</kbd> alerts · <kbd>c</kbd> cases · <kbd>r</kbd> automation · <kbd>?</kbd> keys
+</p>
+
+{% if alerts %}
+  <table class="grid">
+    <caption class="sr-only">Alerts, newest first</caption>
+    <thead>
+      <tr>
+        <th scope="col">Severity</th><th scope="col">Title</th><th scope="col">Type</th>
+        <th scope="col">Source</th><th scope="col">Ref</th><th scope="col">Seen</th>
+        <th scope="col">State</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for alert in alerts %}
+        <tr>
+          <td><span class="sev sev-{{ alert.severity|sev_class }}">{{ alert.severity|sev_label }}</span></td>
+          <td><a href="{% url 'ui-alert-detail' alert.id %}">{{ alert.title }}</a></td>
+          <td class="mono">{{ alert.type }}</td>
+          <td class="mono">{{ alert.source }}{% if alert.ingestion_source %} <span class="dim">({{ alert.ingestion_source.slug }})</span>{% endif %}</td>
+          <td class="mono dim">{{ alert.source_ref|default:"—" }}</td>
+          <td class="mono dim">{{ alert.date|date:"Y-m-d H:i" }}</td>
+          <td>
+            {% if alert.case %}
+              <a href="{% url 'ui-case-detail' alert.case.number %}">#{{ alert.case.number }}</a>
+            {% else %}{{ alert.status.value }}{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="empty">No alerts in this scope.</p>
+{% endif %}
+{% endblock %}

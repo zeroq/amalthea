@@ -1,0 +1,162 @@
+{% extends "ui/base.html" %}
+{% load ui_tags %}
+{% block title %}Case #{{ case.number }} · Amalthea{% endblock %}
+{% block heading %}
+  <span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span>
+  #{{ case.number }} {{ case.title }}
+{% endblock %}
+
+{% block actions %}
+  <a class="btn" href="{% url 'ui-case-list' %}">All cases</a>
+{% endblock %}
+
+{% block content %}
+<section class="card" aria-labelledby="h-meta">
+  <div class="case-meta">
+    <dl class="meta meta-inline">
+      <dt>Status</dt><dd>{{ case.status.value }}</dd>
+      <dt>Assignee</dt><dd>{{ case.assignee.login|default:"Unassigned" }}</dd>
+      <dt>Started</dt><dd class="mono">{{ case.start_date|date:"Y-m-d H:i" }}</dd>
+      <dt>TLP / PAP</dt><dd>{{ case.tlp }} / {{ case.pap }}</dd>
+      {% if case.closed_date %}<dt>Closed</dt><dd class="mono">{{ case.closed_date|date:"Y-m-d H:i" }}</dd>{% endif %}
+    </dl>
+
+    <div class="case-actions">
+      <form method="post" action="{% url 'ui-case-status' case.number %}" class="inline-form">{% csrf_token %}
+        <label class="sr-only" for="f-stage">Case status</label>
+        <select id="f-stage" name="stage">
+          {% for stage in case_stages %}<option value="{{ stage }}" {% if case.status.stage == stage %}selected{% endif %}>{{ stage }}</option>{% endfor %}
+        </select>
+        <button type="submit" class="btn">Set status</button>
+      </form>
+
+      <form method="post" action="{% url 'ui-case-extract' case.number %}">{% csrf_token %}
+        <button type="submit" class="btn" title="Re-run extraction and dispatch automation for anything new">
+          Re-extract artifacts
+        </button>
+      </form>
+    </div>
+  </div>
+
+  {% if case.description %}<pre class="body">{{ case.description }}</pre>{% endif %}
+
+  {% if case.ingestion_warnings.warnings %}
+    <h3>Ingestion warnings</h3>
+    <ul class="warns">
+      {% for warning in case.ingestion_warnings.warnings %}<li>{{ warning }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+</section>
+
+<div class="cols">
+  <section class="card" aria-labelledby="h-timeline">
+    <h2 id="h-timeline">Timeline</h2>
+    <ol class="timeline">
+      {% for event in timeline %}
+        <li class="tl tl-{{ event.kind|slugify }}">
+          <p class="tl-title">{{ event.title }}</p>
+          {% if event.description %}<pre class="tl-body">{{ event.description }}</pre>{% endif %}
+          <p class="tl-meta">
+            <span class="mono">{{ event.date|date:"Y-m-d H:i:s" }}</span>
+            {% if event.actor %} · {{ event.actor.login }}{% endif %}
+            · <span class="dim">{{ event.kind }}</span>
+            {% if event.kind == "automation-run" and event.metadata.status %}
+              · <span class="pill pill-{{ event.metadata.status|lower }}">{{ event.metadata.status }}</span>
+            {% endif %}
+          </p>
+        </li>
+      {% empty %}
+        <li class="empty">No timeline entries yet.</li>
+      {% endfor %}
+    </ol>
+
+    <form method="post" action="{% url 'ui-case-comment' case.number %}" class="comment">{% csrf_token %}
+      <label for="f-comment">Add a note</label>
+      <textarea id="f-comment" name="body" rows="3" required placeholder="What did you find?"></textarea>
+      <button type="submit" class="btn btn-primary">Append note</button>
+    </form>
+  </section>
+
+  <div class="stack">
+    <section class="card" aria-labelledby="h-obs">
+      <h2 id="h-obs">Artifacts <span class="count">{{ observables|length }}</span></h2>
+      {% if observables %}
+        <table class="grid grid-tight">
+          <thead><tr><th scope="col">Type</th><th scope="col">Value</th><th scope="col">Seen in</th></tr></thead>
+          <tbody>
+            {% for link in observables %}
+              <tr>
+                <td>{{ link.observable.data_type.name }}</td>
+                <td class="mono break">{{ link.observable.data }}</td>
+                <td class="mono dim">{{ link.observable.case_observables.count }} case(s)</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="empty">No artifacts extracted yet. Use <em>Re-extract artifacts</em> above.</p>
+      {% endif %}
+    </section>
+
+    <section class="card" aria-labelledby="h-runs">
+      <h2 id="h-runs">Automation runs <span class="count">{{ runs|length }}</span></h2>
+      {% if runs %}
+        <table class="grid grid-tight">
+          <thead><tr><th scope="col">Playbook</th><th scope="col">Status</th><th scope="col">Output</th></tr></thead>
+          <tbody>
+            {% for run in runs %}
+              <tr>
+                <td class="mono">{{ run.playbook_name }}</td>
+                <td><span class="pill pill-{{ run.status|lower }}">{{ run.status }}</span></td>
+                <td>
+                  {% if run.output_log %}<pre class="tl-body">{{ run.output_log }}</pre>
+                  {% elif run.error %}<pre class="tl-body error">{{ run.error }}</pre>
+                  {% else %}<span class="dim">—</span>{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="empty">No playbook has run for this case.</p>
+      {% endif %}
+    </section>
+
+    <section class="card" aria-labelledby="h-tasks">
+      <h2 id="h-tasks">Tasks <span class="count">{{ tasks|length }}</span></h2>
+      {% if tasks %}
+        <ul class="tasks">
+          {% for task in tasks %}
+            <li class="task {% if task.status == 'Completed' %}task-done{% endif %}">
+              <form method="post" action="{% url 'ui-case-task-toggle' case.number task.id %}">{% csrf_token %}
+                {# `==` is a tag-only operator in Django templates; `{{ }}` cannot compare. #}
+                <button type="submit" class="tick"
+                        aria-pressed="{% if task.status == 'Completed' %}true{% else %}false{% endif %}"
+                        aria-label="{% if task.status == 'Completed' %}Reopen{% else %}Complete{% endif %} {{ task.title }}">
+                  {% if task.status == 'Completed' %}✓{% else %}○{% endif %}
+                </button>
+              </form>
+              <span class="task-title">{{ task.title }}</span>
+              <span class="dim mono">{{ task.status }}</span>
+              {% if task.assignee %}<span class="dim">{{ task.assignee.login }}</span>{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="empty">No tasks.</p>
+      {% endif %}
+
+      <form method="post" action="{% url 'ui-case-task-create' case.number %}" class="task-add">{% csrf_token %}
+        <label for="f-task">New task</label>
+        <input id="f-task" name="title" required maxlength="500" placeholder="Isolate the mailbox">
+        <label class="sr-only" for="f-assignee">Assignee</label>
+        <select id="f-assignee" name="assignee">
+          <option value="">Unassigned</option>
+          {% for person in assignees %}<option value="{{ person.login }}">{{ person.login }}</option>{% endfor %}
+        </select>
+        <button type="submit" class="btn">Add task</button>
+      </form>
+    </section>
+  </div>
+</div>
+{% endblock %}

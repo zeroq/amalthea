@@ -1,0 +1,26 @@
+{% extends "ui/base.html" %}
+{% comment %}
+Login is outside `_base_context`'s nav-badge contract on purpose: an unauthenticated visitor has no
+business seeing how many alerts are waiting, and rendering `nav_alert_count` here would leak queue
+depth to anyone who can reach the page. The rail still renders so the layout does not jump on sign-in.
+{% endcomment %}
+{% block title %}Sign in · Amalthea{% endblock %}
+{% block heading %}Sign in{% endblock %}
+
+{% block content %}
+<form method="post" class="card auth-card">
+  {% csrf_token %}
+  {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+  <label for="id_username">Username</label>
+  <input id="id_username" name="username" autocomplete="username" autofocus required>
+
+  <label for="id_password">Password</label>
+  <input id="id_password" name="password" type="password" autocomplete="current-password" required>
+
+  {% if form.errors %}
+    <p class="msg msg-error" role="alert">Those credentials were not accepted.</p>
+  {% endif %}
+
+  <button type="submit" class="btn btn-primary">Sign in</button>
+</form>
+{% endblock %}

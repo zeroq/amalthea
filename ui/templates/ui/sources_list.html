@@ -1,0 +1,51 @@
+{% extends "ui/base.html" %}
+{% block title %}Sources · Amalthea{% endblock %}
+{% block heading %}Ingestion sources{% endblock %}
+
+{% block content %}
+<p class="hint">
+  Each row is a configured feed. Point a sender at
+  <code>POST /api/v1/alerts/webhook/&lt;slug&gt;/</code> and its payloads become alerts.
+</p>
+
+{% if sources %}
+  <table class="grid">
+    <caption class="sr-only">Configured ingestion sources</caption>
+    <thead>
+      <tr>
+        <th scope="col">Slug</th><th scope="col">Name</th><th scope="col">Alerts</th>
+        <th scope="col">Secret</th><th scope="col">Correlation</th><th scope="col">Mapping</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for source in sources %}
+        <tr>
+          <td class="mono">{{ source.slug }}</td>
+          <td>{{ source.name }}</td>
+          <td class="mono">{{ source.alert_count }}</td>
+          <td>
+            {% if source.webhook_secret_hash %}
+              <span class="pill pill-on">required</span>
+            {% else %}
+              <span class="pill pill-off">open</span>
+            {% endif %}
+          </td>
+          <td>{{ source.correlation_enabled|yesno:"on,off" }}</td>
+          <td class="mono break">
+            {% if source.mapping_config %}
+              {% for key, value in source.mapping_config.items %}{{ key }}={{ value }}{% if not forloop.last %} {% endif %}{% endfor %}
+            {% else %}<span class="dim">none — literal keys only</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p class="hint">
+    A source marked <em>open</em> accepts unauthenticated posts. That is fine for a local trial and
+    wrong for anything reachable from the internet.
+  </p>
+{% else %}
+  <p class="empty">No ingestion sources configured.</p>
+{% endif %}
+{% endblock %}
