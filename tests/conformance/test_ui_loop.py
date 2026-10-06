@@ -120,7 +120,9 @@ def test_every_ui_page_requires_a_session(db: None) -> None:
         assert response.status_code == 302, (
             f"{name} served an anonymous visitor {response.status_code}"
         )
-        assert "/login" in response["Location"]
+        # Exact redirect target, not a substring: `/accounts/login/` contains `/login` and would
+        # have passed a loose check while landing the user on Django's stock 404.
+        assert response["Location"].startswith(reverse("login")), response["Location"]
 
 
 def test_an_anonymous_post_cannot_escalate(db: None) -> None:

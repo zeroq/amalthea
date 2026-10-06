@@ -95,6 +95,10 @@ MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "identity.User"
 
+# `@login_required` on the UI views must redirect to the analyst sign-in page, not Django's
+# stock `/accounts/login/`. The route is resolved by URL name so the setting survives URL moves.
+LOGIN_URL = "login"
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "compat.auth.ApiKeyAuthentication",
