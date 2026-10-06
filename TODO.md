@@ -285,7 +285,7 @@ Postgres (§1.11), and the round-3 H3-2 forward-only migration gap is documented
 
 ## 5. Remaining phases
 
-Phases 4–6 and 9 have code in place and pass their gates. Phase 7, 8 and 10 are unstarted. Full
+Phases 4–7 and 9 have code in place and pass their gates. Phase 8 and 10 are unstarted. Full
 task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §9.
 
 - [x] **5.1 — Phase 4: Ingestion** (AGENTS.md §4.1) — **DONE**
@@ -303,10 +303,19 @@ task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §9.
   `AutomationRun.output_log` **and** the case timeline. `test_automation_executor.py` (22) +
   `test_mvp_loop_automation.py` (6) + live smoke-tested end-to-end.
 
-- [ ] **5.4 — Phase 7: Realtime Ledger** (AGENTS.md §2 Module B) — **NEXT**
-  Case-scoped WebSocket rooms, session-authenticated handshake, single publisher choke point,
-  HTMX fallback for non-WebSocket clients. Architecture settled in plan (Channels, Daphne ASGI);
-  `realtime/` app scaffold exists.
+- [x] **5.4 — Phase 7: Realtime Ledger** (AGENTS.md §2 Module B) — **DONE (2026-10-06)**
+  `cases/ledger.py` is the only writer of a `TimelineEvent`: it creates the row and publishes it to
+  `case_{uuid}` on commit, and `events_after` is the same `(date, id)` keyset the client resyncs
+  from. All five briefed call sites migrated (+ an `assigned` event on assignment);
+  `CaseConsumer` refuses an unauthenticated handshake with 4401, serves
+  `{"type":"sync","after":…}` → `{"type":"timeline","events":[…]}`, and closes 4000 on anything
+  else. `_timeline_entry.html` + `hx-*` attributes on the comment form + `ui/static/ui/live.js`
+  (dedupe by `data-event-id`, 1s→15s backoff, re-sync on every open). `test_realtime.py` (10)
+  covers AC7.1–AC7.4 plus the mutation-guard scan; SQLite 440/3, Postgres 419/24.
+  Two gaps were recorded in plan §13. P7-1 (`alerts/escalation.py` writing `alert-imported` /
+  `alert-merged` outside the choke point) is **CLOSED** — both sites migrated and `SCANNED_APPS`
+  now includes `alerts/`. The other stands: the repo ships no htmx, so the new `hx-*` attributes
+  are inert until one is added.
 
 - [ ] **5.5 — Phase 8: Query API** (T2)
   `POST /api/v1/query` DSL, `X-Total`, bare-array responses. Unimplemented operators must 400, never

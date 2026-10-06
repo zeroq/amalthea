@@ -1,0 +1,12 @@
+<li class="tl tl-{{ event.kind|slugify }}" data-event-id="{{ event.id }}">
+  <p class="tl-title">{{ event.title }}</p>
+  {% if event.description %}<pre class="tl-body">{{ event.description }}</pre>{% endif %}
+  <p class="tl-meta">
+    <span class="mono">{{ event.date|date:"Y-m-d H:i:s" }}</span>
+    {% if event.actor %} · {{ event.actor.login }}{% endif %}
+    · <span class="dim">{{ event.kind }}</span>
+    {% if event.kind == "automation-run" and event.metadata.status %}
+      · <span class="pill pill-{{ event.metadata.status|lower }}">{{ event.metadata.status }}</span>
+    {% endif %}
+  </p>
+</li>

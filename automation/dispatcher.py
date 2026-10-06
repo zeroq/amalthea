@@ -24,6 +24,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from automation.models import AutomationRun, Playbook
+from cases.ledger import append_timeline_event
 from cases.models import TimelineEvent
 from core.events import AlertIngested, CaseStatusChanged, ObservableCreated, TaskCompleted
 
@@ -153,13 +154,16 @@ def record_result(run: AutomationRun, result: Any, *, subject_label: str = "") -
     run.finished_at = timezone.now()
     run.save(update_fields=["status", "output_log", "error", "finished_at", "updated_at"])
 
-    if run.case_id is None:
+    # The case is resolved through the descriptor rather than `case_id=`, because the ledger
+    # service takes the instance: it publishes `str(case.id)` on commit. A run whose case was
+    # cleared (`SET_NULL`, REVIEW M14) has nothing to write back to.
+    case = run.case
+    if case is None:
         raise ValueError(f"run {run.id} has no case to write its result back to")
 
     label = subject_label or (run.playbook_name)
-    return TimelineEvent.objects.create(
-        case_id=run.case_id,
-        date=timezone.now(),
+    return append_timeline_event(
+        case,
         title=f"Automation {run.status.lower()}: {label}",
         description=(run.output_log or run.error)[:4000],
         kind="automation-run",

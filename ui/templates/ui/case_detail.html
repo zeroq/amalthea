@@ -1,4 +1,5 @@
 {% extends "ui/base.html" %}
+{% load static %}
 {% load ui_tags %}
 {% block title %}Case #{{ case.number }} · Amalthea{% endblock %}
 {% block heading %}
@@ -51,26 +52,22 @@
 <div class="cols">
   <section class="card" aria-labelledby="h-timeline">
     <h2 id="h-timeline">Timeline</h2>
-    <ol class="timeline">
+    <ol class="timeline" id="timeline-events"
+        data-ws-url="{% if request.is_secure %}wss{% else %}ws{% endif %}://{{ request.get_host }}/ws/case/{{ case.id }}/">
       {% for event in timeline %}
-        <li class="tl tl-{{ event.kind|slugify }}">
-          <p class="tl-title">{{ event.title }}</p>
-          {% if event.description %}<pre class="tl-body">{{ event.description }}</pre>{% endif %}
-          <p class="tl-meta">
-            <span class="mono">{{ event.date|date:"Y-m-d H:i:s" }}</span>
-            {% if event.actor %} · {{ event.actor.login }}{% endif %}
-            · <span class="dim">{{ event.kind }}</span>
-            {% if event.kind == "automation-run" and event.metadata.status %}
-              · <span class="pill pill-{{ event.metadata.status|lower }}">{{ event.metadata.status }}</span>
-            {% endif %}
-          </p>
-        </li>
+        {% include "ui/_timeline_entry.html" %}
       {% empty %}
         <li class="empty">No timeline entries yet.</li>
       {% endfor %}
     </ol>
 
-    <form method="post" action="{% url 'ui-case-comment' case.number %}" class="comment">{% csrf_token %}
+    {# hx-* attributes are inert until an htmx is on the page; without it the form is the plain #}
+    {# POST it has always been, which is the fallback the design relies on (brief 6). #}
+    <form method="post" action="{% url 'ui-case-comment' case.number %}" class="comment"
+          hx-post="{% url 'ui-case-comment' case.number %}"
+          hx-target="#timeline-events"
+          hx-swap="beforeend"
+          hx-disabled-elt="this">{% csrf_token %}
       <label for="f-comment">Add a note</label>
       <textarea id="f-comment" name="body" rows="3" required placeholder="What did you find?"></textarea>
       <button type="submit" class="btn btn-primary">Append note</button>
@@ -159,4 +156,8 @@
     </section>
   </div>
 </div>
+
+{# Page-scoped, and deferred: the client only reads `#timeline-events`, so there is nothing to do
+   before the DOM exists. base.html carries the site-wide keys.js and no per-page script block. #}
+<script src="{% static 'ui/live.js' %}" defer></script>
 {% endblock %}

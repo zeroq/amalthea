@@ -555,6 +555,39 @@ worker + Redis to prove the async path.
 | 12 | `Alert.source_id` FK | `Alert.ingestion_source` FK | The field named `source_id` produced the column `source_id_id`. REVIEW M2 |
 | 13 | Coverage ≥ 80% per phase | Coverage ≥ 80% enforced at the **Phase 6 MVP gate** only | The largest uncovered block is `compat/mappers/`, which is intentionally stubbed until Phases 4–5 supply the real logic. A per-phase gate would force filler tests that assert nothing — the exact failure mode R11 warns about. Phase 0/1/3 still report coverage as a non-blocking signal. |
 
+### Phase 7 record — BRIEF-2026-10-06 (Realtime Ledger), 2026-10-06
+
+Filed here rather than in §12: §12 is the risk register and §13 is the register the plan itself
+points at (§6 and AC10.6 both say "§12"; the brief's cross-reference inherits that drift). Gate
+figures at the end.
+
+| # | Brief / plan said | We did | Why |
+|---|---|---|---|
+| P7-1 | "`TimelineEvent` is created at exactly these sites" — five, in `cases/ ui/ automation/` | **CLOSED 2026-10-06 (approved follow-up).** There were seven: `alerts/escalation.py` wrote two directly (`alert-imported`, `alert-merged`). Both now go through `append_timeline_event`, and the scan's `SCANNED_APPS` includes `alerts/`, so the audit covers every app that writes ledger rows | Left open initially because widening the guard would have changed an approved AC; the planner approved closing it — an analyst watching a case should see an alert imported or merged into it live, and a single publisher choke point is a task requirement. Titles, descriptions, kinds, actor and metadata are unchanged; only the construction moved, and `merge_alert_into_case` still returns its `TimelineEvent` |
+| P7-2 | Phase 9 / README: "HTMX for interactivity" | `hx-post`/`hx-target`/`hx-swap`/`hx-disabled-elt` added to the comment form as specified, but the repo ships **no htmx** — no script tag, no vendored file | T4's AC only requires the attributes. Without a library they are inert and the form is the plain POST it always was (the fallback the design depends on). Vendoring was not in the deliverables, so it is reported rather than smuggled in |
+| P7-3 | `sync` `after` is "the last event id the client has rendered" | A missing, stale or foreign `after` returns the **whole** case ledger; only a well-formed id belonging to the case applies the keyset. Malformed id → close `4000` | A gap in a timeline is unrecoverable by the client; a replay is not — the client dedupes on `data-event-id`. Keyset semantics for a valid anchor are unchanged |
+| P7-4 | Not specified: `HX-Request` POST with an empty body | HTTP `400`, plain text | HTMX swaps only 2xx, so a flash message would land nowhere and a redirect would inject a whole page into `<ol id="timeline-events">` |
+| P7-5 | Not specified: `case_id` in the WS URL | A non-UUID room id closes `4000` instead of joining | The publisher only ever names `case_<uuid>`; a group nobody writes to would leave the socket silently dead |
+
+**Test-harness note (not a product deviation):** `tests/conformance/test_realtime.py` patches
+`channels.db.close_old_connections` to a no-op for the module. It runs around every consumer
+dispatch and, inside pytest-django's never-committing transaction, closes the test's connection
+mid-run on Postgres — SQLite's in-memory `close` is a no-op, which is why the suite looked green
+without it. Channels' own `ApplicationCommunicator` patches the same function for the same reason;
+no product code is affected.
+
+**Gate (2026-10-06):** SQLite `make check` — **440 passed, 3 skipped**; Postgres
+`DJANGO_SETTINGS_MODULE=amalthea.settings.test_pg pytest -q` — **419 passed, 24 skipped**;
+`ruff check`, `ruff format --check`, `mypy` all clean. Both baselines in the brief (429 / 408) read
+one low; `test_realtime.py` contributes 10 tests and no other file's test count changed.
+
+**P7-1 follow-up gate (2026-10-06):** SQLite `make check` — **440 passed, 3 skipped**; Postgres
+`test_pg` — **419 passed, 24 skipped**; `ruff check` + `ruff format` clean on both edited files.
+No count moved: the two call sites were migrated in place and the scan test widened rather than
+duplicated. Failure mode demonstrated, per R11 — restoring a direct create in
+`alerts/escalation.py` fails `test_the_ledger_service_is_the_only_writer_of_timeline_rows` with
+`[PosixPath('alerts/escalation.py')]` in the diff.
+
 ## 14. Open Questions
 
 Resolved 2026-10-06 per TODO §3; each decision is recorded with the rationale that settled it. The

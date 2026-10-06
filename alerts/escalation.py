@@ -27,6 +27,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from alerts.models import Alert, AlertStatus
+from cases.ledger import append_timeline_event
 from cases.models import Case, CaseStatus, TimelineEvent
 from observables.extractor import extract_into_case, json_leaves
 
@@ -101,12 +102,11 @@ def import_alert_to_case(
         case, case.title, case.description, alert.title, json_leaves(alert.raw_payload)
     )
 
-    TimelineEvent.objects.create(
-        case=case,
-        date=timezone.now(),
+    append_timeline_event(
+        case,
         title=f"Alert imported: {alert.title}",
-        description=f"Source {alert.source}, type {alert.type}, ref {alert.source_ref}",
         kind="alert-imported",
+        description=f"Source {alert.source}, type {alert.type}, ref {alert.source_ref}",
         actor=actor,
         metadata={"alert_id": str(alert.id)},
     )
@@ -143,12 +143,11 @@ def merge_alert_into_case(
         case, alert.title, alert.summary, alert.description, json_leaves(alert.raw_payload)
     )
 
-    return TimelineEvent.objects.create(
-        case=case,
-        date=timezone.now(),
+    return append_timeline_event(
+        case,
         title=f"Alert merged: {alert.title}",
-        description=f"Source {alert.source}, type {alert.type}, ref {alert.source_ref}",
         kind="alert-merged",
+        description=f"Source {alert.source}, type {alert.type}, ref {alert.source_ref}",
         actor=actor,
         metadata={"alert_id": str(alert.id), "already_linked": already, "warnings": warnings},
     )

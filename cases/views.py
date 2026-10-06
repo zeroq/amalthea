@@ -5,8 +5,9 @@ because the MVP proof is "the playbook's output is visible on the case timeline"
 has to make four calls to see that is not much of a proof surface.
 
 Write paths are deliberately narrow: status transitions, task creation/status, and observable
-addition. Each one writes a `TimelineEvent` in the same transaction, so the ledger is never behind
-the data — a comment-only write that skipped the ledger would make the timeline a decoration.
+addition. Each one writes a ledger entry through `cases.ledger` in the same transaction, so the
+ledger is never behind the data — a comment-only write that skipped the ledger would make the
+timeline a decoration, and the choke point is what keeps it published as well as persisted.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from alerts.escalation import link_case_from_identifier, resolve_case_status
+from cases.ledger import append_timeline_event
 from cases.models import Case, Task, TimelineEvent
 from core.serializers import case_json, observable_json
 from observables.extractor import add_observable, extract_into_case
@@ -112,9 +114,8 @@ def _create_case(request: Request) -> Response:
     if payload.get("extract") or payload.get("observables"):
         texts.extend(str(v) for v in (payload.get("observables") or []))
     extract_into_case(case, *texts)
-    TimelineEvent.objects.create(
-        case=case,
-        date=timezone.now(),
+    append_timeline_event(
+        case,
         title="Case created",
         description=case.description[:500],
         kind="case-created",
@@ -129,6 +130,9 @@ def _update_case(request: Request, case: Case) -> Response:
     payload = request.data if isinstance(request.data, dict) else {}
     fields: list[str] = []
     previous_status = case.status.value if case.status_id else None
+    # Captured before the payload loop mutates `case`, so the assignment event below can tell an
+    # assignee that actually changed from a PATCH that merely restated the same one.
+    previous_assignee_id = case.assignee_id
     for key in ("title", "description", "summary", "severity", "tlp", "pap", "flag"):
         if key in payload:
             setattr(case, key, payload[key])
@@ -155,14 +159,22 @@ def _update_case(request: Request, case: Case) -> Response:
 
     new_status = case.status.value if case.status_id else None
     if new_status != previous_status:
-        TimelineEvent.objects.create(
-            case=case,
-            date=timezone.now(),
+        append_timeline_event(
+            case,
             title=f"Status changed: {previous_status} → {new_status}",
             description=str(payload.get("comment") or ""),
             kind="status-changed",
             actor=_actor(request),
             metadata={"from": previous_status, "to": new_status},
+        )
+    if case.assignee_id != previous_assignee_id:
+        login = case.assignee.login if case.assignee else None
+        append_timeline_event(
+            case,
+            title=f"Assigned to {login}" if login else "Unassigned",
+            kind="assigned",
+            actor=_actor(request),
+            metadata={"assignee": login},
         )
     return Response(case_json(case, detail=True))
 

@@ -44,7 +44,8 @@ from alerts.escalation import (
 )
 from alerts.models import Alert
 from automation.models import AutomationRun
-from cases.models import Case, CaseStatus, Task, TimelineEvent
+from cases.ledger import append_timeline_event
+from cases.models import Case, CaseStatus, Task
 from core.enums import SEVERITY_CHOICES
 from identity.models import User
 from ingest.models import IngestionSource
@@ -297,9 +298,8 @@ def case_set_status(request: HttpRequest, case_id: str) -> HttpResponse:
     else:
         case.closed_date = None
     case.save(update_fields=["status", "closed_date", "end_date", "updated_at"])
-    TimelineEvent.objects.create(
-        case=case,
-        date=timezone.now(),
+    append_timeline_event(
+        case,
         title=f"Status changed to {stage.value}",
         description="; ".join(warnings),
         kind="status-change",
@@ -313,20 +313,30 @@ def case_set_status(request: HttpRequest, case_id: str) -> HttpResponse:
 @login_required
 @require_POST
 def case_comment(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Append a note to the case ledger."""
+    """Append a note to the case ledger.
+
+    Two response shapes, one write. With `HX-Request` the browser already has the timeline on
+    screen, so the rendered `<li>` comes back for HTMX to append — no reload, and the WebSocket
+    clients see the same entry through the publish the write performs. Without HTMX the POST
+    redirects exactly as it did before: a non-JS client has no swap to feed, and a bare 200 would
+    strand it on a blank page (brief 6).
+    """
     case = _resolve_case(case_id)
     body = (request.POST.get("body") or "").strip()
     if not body:
+        # A 400, not a redirect: HTMX only swaps 2xx, so the flash error below would have nowhere
+        # to land and the analyst would see a silent no-op.
+        if request.headers.get("HX-Request"):
+            return HttpResponse("A note needs a body.", status=400)
         messages.error(request, "A note needs a body.")
         return redirect("ui-case-detail", case_id=case.number)
-    TimelineEvent.objects.create(
-        case=case,
-        date=timezone.now(),
-        title="Note added",
-        description=body[:10000],
-        kind="comment",
-        actor=request.user,
+    event = append_timeline_event(
+        case, title="Note added", description=body[:10000], kind="comment", actor=request.user
     )
+    if request.headers.get("HX-Request"):
+        # No flash on this path: it would render on the *next* full page load, announcing a note
+        # that is already on screen.
+        return render(request, "ui/_timeline_entry.html", {"event": event})
     messages.success(request, "Note added to the case timeline.")
     return redirect("ui-case-detail", case_id=case.number)
 
