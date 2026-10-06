@@ -217,6 +217,48 @@ def test_automation_fires_only_on_a_new_link(
     )
 
 
+def test_a_shared_observable_fires_one_run_per_case(
+    api: object, mail_playbook: Playbook, django_capture_on_commit_callbacks: object
+) -> None:
+    """An observable is shared (Module C): linking it into a second case must run the playbook
+    for *that* case, not collapse onto the first case's run.
+
+    The idempotency key binds to the (observable, case) link, so the unique constraint still
+    dedupes replays of the same link — but two different links are two different runs. This is
+    the behaviour that keeps the feedback loop closing on every case an artifact appears in.
+    """
+    from automation.dispatcher import dispatch
+    from core.events import ObservableCreated
+
+    observable_type = ObservableType.objects.get(name="mail")
+    observable = Observable.objects.create(
+        data_type=observable_type,
+        data="attacker@example.net",
+        normalized_data="attacker@example.net",
+    )
+    case_a = Case.objects.create(title="Case A", status=CaseStatus.objects.get(value="New"))
+    case_b = Case.objects.create(title="Case B", status=CaseStatus.objects.get(value="New"))
+    for case in (case_a, case_b):
+        CaseObservable.objects.create(case=case, observable=observable)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        dispatch(ObservableCreated(observable_id=str(observable.pk), case_id=str(case_a.pk)))
+    with django_capture_on_commit_callbacks(execute=True):
+        dispatch(ObservableCreated(observable_id=str(observable.pk), case_id=str(case_b.pk)))
+
+    runs_a = list(AutomationRun.objects.filter(case=case_a, playbook_name="enrich-mail"))
+    runs_b = list(AutomationRun.objects.filter(case=case_b, playbook_name="enrich-mail"))
+    assert len(runs_a) == 1, "the first case must get exactly one run"
+    assert len(runs_b) == 1, "the second case must get its own run, not the first case's"
+
+    # And replaying the same link still collapses (AC6.5 holds per link).
+    with django_capture_on_commit_callbacks(execute=True):
+        dispatch(ObservableCreated(observable_id=str(observable.pk), case_id=str(case_b.pk)))
+    assert AutomationRun.objects.filter(case=case_b).count() == 1, (
+        "a replayed link produced a second run despite the unique idempotency_key"
+    )
+
+
 def test_a_failing_action_records_failure_without_raising(
     api: object, django_capture_on_commit_callbacks: object
 ) -> None:

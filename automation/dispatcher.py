@@ -67,6 +67,27 @@ def _subject_id(event: object) -> str:
     raise TypeError(f"{type(event).__name__} carries no subject id")
 
 
+def _idempotent_subject(event: object) -> str:
+    """The identity a run's idempotency key binds to.
+
+    Most events are one-to-one with their subject (`alert.ingested` ↔ alert, `case.status_changed`
+    ↔ case). `observable.created` is not: an `Observable` is a *shared* entity (plan Module C), so
+    linking the same artifact into a second case must fire the playbook for that case, not collapse
+    onto the first case's run. The subject therefore includes the case: two links of one observable
+    into two cases produce two runs, while replaying the *same* link still collapses on the unique
+    `idempotency_key` (AC6.5).
+
+    Every subject string is formed from UUIDs, so the `:` separator cannot collide with a UUID
+    character set — each half parses unambiguously.
+    """
+    case_id = getattr(event, "case_id", None)
+    if isinstance(event, ObservableCreated):
+        if not case_id:
+            raise TypeError("ObservableCreated without a case_id cannot be dispatched")
+        return f"{_subject_id(event)}:{case_id}"
+    return _subject_id(event)
+
+
 def _case_id(event: object) -> str | None:
     value = getattr(event, "case_id", None)
     return str(value) if value else None
@@ -81,7 +102,7 @@ def dispatch(event: object) -> list[AutomationRun]:
     the insert is skipped rather than raced.
     """
     event_name = _event_name(event)
-    subject = _subject_id(event)
+    subject = _idempotent_subject(event)
     playbooks = list(Playbook.objects.filter(trigger_event=event_name, is_active=True))
     if not playbooks:
         return []
