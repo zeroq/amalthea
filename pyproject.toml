@@ -60,7 +60,7 @@ filterwarnings = ["error::DeprecationWarning:amalthea.*"]
 
 [tool.coverage.run]
 branch = true
-source = ["amalthea", "core", "identity", "compat", "cases", "alerts", "observables", "ingest", "automation", "realtime", "services"]
+source = ["amalthea", "core", "identity", "compat", "cases", "alerts", "observables", "ingest", "automation", "realtime", "services", "query"]
 omit = ["*/migrations/*", "*/tests/*", "manage.py", "*/asgi.py"]
 
 [tool.coverage.report]
@@ -88,6 +88,7 @@ files = [
     "realtime",
     "services",
     "compat",
+    "query",
 ]
 # Pinned scope (TODO 1.18). "mypy 0 errors" previously meant `mypy amalthea` — 10 files — while
 # `mypy .` gave 95. A gate that depends on which paths you name is not a gate. The DoD target is

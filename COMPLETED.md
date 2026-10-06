@@ -331,3 +331,39 @@ reported.
   `transaction=True`-without-`serialized_rollback` teardown flushes (m11 + H-6 + the new concurrency
   test now all use `serialized_rollback=True`); `test_numbers_increase_and_are_unique` asserts
   relative monotonicity instead of absolute numbers because Postgres sequences are non-transactional.
+
+## 2026-10-06 — Phase 7: the realtime ledger closes the loop
+
+- [x] **Ledger choke point.** All timeline writes flow through one service
+  (`realtime/ledger.py::append_timeline_event`); `SCANNED_APPS` grew `alerts/` so the schema-mutation
+  guard proves the choke point (re-introducing a direct `TimelineEvent.objects.create` in
+  `alerts/escalation.py` fails `test_the_ledger_service_is_the_only_writer_of_timeline_rows`).
+- [x] **WebSocket sync protocol** (`/ws/case/{id}/`): `ledger.append` events publish per-case,
+  `ping`/`pong`, `sync` replays missed events by id. `test_ws_integration_client.py` exercises the
+  real Channels in-memory layer: 4401/4000 "refused" events prove per-room fan-out, and the
+  HTMX fallback re-reads the timeline when WS is unavailable.
+- [x] Gate: **440 passed / 3 skipped** on SQLite (`make check`); Postgres `test_pg` suite stays green.
+
+## 2026-10-06 — Phase 8: Query API (T2)
+
+- [x] **`POST /api/v1/query`** drives TheHive-shaped reads without leaking the internal ORM: steps
+  `listCase/listAlert/listObservable/listAny/getCase/filter/sort/page/count`, operators
+  `_eq/_ne/_gt/_gte/_lt/_lte/_between/_in/_like/_has/_and/_or/_not`, bare-array responses with
+  `X-Total` when requested, epoch-ms timestamps, `count` answering a bare int. Unimplemented ops
+  400 naming the operator. Bodies are built with the real thehive4py builders in the suite.
+  (Brief: `docs/planning/BRIEF-2026-10-06-query-api.md`; deviations P8-1..P8-7 in plan §13.)
+- [x] **AC8.4 verified live, not just in tests.** thehive4py 2.1.0 unmodified against a running
+  prod-settings server (seeded local Postgres container): `case.find` → 1 case, `alert.create` →
+  201, `alert.merge_into_case` → `OutputCase`, `case.get_timeline` → `{"events": [...]}` with
+  `alert.occurred`. **The live gate surfaced three gaps closed in this phase:**
+  - `POST /api/v1/alert` (T1 `InputCreateAlert`) existed only as a webhook path — `alert.create`
+    returned 405. Added the create endpoint (P8-5).
+  - `merge/{caseId}` returned the **alert**, but 5.8.0's contract and thehive4py say the **case**
+    (P8-6).
+  - `channels-redis` was configured by prod settings but never a pinned dependency; the merge's
+    ledger publish hit `ModuleNotFoundError` (P8-7). Pinned `channels-redis==4.3.0`.
+  - Also: `GET /api/v1/case/{id}/timeline` now returns `{"events": [...]}` (5.8.0 `OutputTimeline`,
+    P8-1) — the internal Phase 7 ledger shape is untouched.
+- [x] Final gate: SQLite `make check` **491 passed / 3 skipped**; Postgres `test_pg`
+  **470 passed / 24 skipped** (query suite is 50 tests). mypy/ruff clean; `makemigrations
+  --check` clean (query app adds no models).

@@ -9,6 +9,7 @@ grows.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from django.db import transaction
@@ -23,6 +24,7 @@ from alerts.escalation import (
     link_alert_from_identifier,
     link_case_from_identifier,
     merge_alert_into_case,
+    resolve_alert_status,
 )
 from alerts.models import Alert
 from cases.models import Case
@@ -80,10 +82,20 @@ def alert_raw(request: Request, alert_id: str) -> Response:
     return Response(alert.raw_payload)
 
 
-@api_view(["GET"])
+@api_view(["GET", "POST"])
 @renderer_classes([JSONRenderer])
 def alert_list(request: Request) -> Response:
-    """`GET /api/v1/alert` — newest first, optionally filtered by `case` or `status`."""
+    """`GET /api/v1/alert` lists; `POST /api/v1/alert` creates (T1, plan §7.2).
+
+    The create half is the AC8.4 carrier: thehive4py `alert.create()` POSTs an `InputCreateAlert`
+    here and the MVP loop has so far created alerts by webhook — an API client that can only read
+    could not start a loop. Fields follow the recorded 5.8.0 `InputCreateAlert` (`type`, `source`,
+    `sourceRef`, `title` required; the rest tolerant, matching how `_create_case` reads its
+    payload). An unknown `status` string is auto-created at its own stage and recorded as a
+    warning, exactly like the ingest path (ADR-002 §D11).
+    """
+    if request.method == "POST":
+        return _create_alert(request)
     queryset = Alert.objects.select_related("status", "case").order_by("-date")
     case_filter = request.query_params.get("case")
     if case_filter:
@@ -101,6 +113,76 @@ def alert_list(request: Request) -> Response:
     return Response([alert_json(a) for a in queryset[:200]])
 
 
+def _create_alert(request: Request) -> Response:
+    """Create an alert directly (no webhook in front of it)."""
+    payload = request.data if isinstance(request.data, dict) else {}
+    title = str(payload.get("title") or "").strip()
+    alert_type = str(payload.get("type") or "").strip()
+    source = str(payload.get("source") or "").strip()
+    source_ref = str(payload.get("sourceRef") or str(payload.get("source_ref") or "")).strip()
+    missing = [
+        key
+        for key, value in (("title", title), ("type", alert_type), ("source", source))
+        if not value
+    ]
+    if missing or not source_ref:
+        if not source_ref:
+            missing.append("sourceRef")
+        return Response(
+            {
+                "type": "BadRequest",
+                "message": f"Missing required field(s): {', '.join(missing)}",
+                "fields": {key: ["required"] for key in missing},
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    warnings: list[str] = []
+    with transaction.atomic():
+        alert = Alert.objects.create(
+            type=alert_type[:100],
+            source=source[:100],
+            source_ref=source_ref[:255],
+            external_link=str(payload.get("externalLink") or "")[:500],
+            title=title[:500],
+            description=str(payload.get("description") or ""),
+            summary=str(payload.get("summary") or ""),
+            severity=int(payload.get("severity") or 2),
+            tlp=int(payload.get("tlp") or 2),
+            pap=int(payload.get("pap") or 2),
+            flag=bool(payload.get("flag") or False),
+            status=resolve_alert_status(str(payload.get("status") or "New"), warnings=warnings),
+        )
+        # `date` is ms-epoch on the wire (5.8.0 format); keep the ingest path's tolerance.
+        date_value = payload.get("date")
+        if date_value is not None:
+            alert.date = datetime.fromtimestamp(int(date_value) / 1000, tz=UTC)
+            alert.save(update_fields=["date"])
+    payload_warnings = {
+        name: value
+        for name, value in payload.items()
+        if name
+        not in (
+            "title",
+            "type",
+            "source",
+            "sourceRef",
+            "description",
+            "severity",
+            "tlp",
+            "pap",
+            "flag",
+            "date",
+            "status",
+            "summary",
+        )
+    }
+    if warnings or payload_warnings:
+        alert.ingestion_warnings = {"warnings": warnings, "unmapped_fields": list(payload_warnings)}
+        alert.save(update_fields=["ingestion_warnings"])
+    return Response(alert_json(alert), status=status.HTTP_201_CREATED)
+
+
 @api_view(["POST"])
 @renderer_classes([JSONRenderer])
 def alert_merge(request: Request, alert_id: str, case_id: str) -> Response:
@@ -115,8 +197,7 @@ def alert_merge(request: Request, alert_id: str, case_id: str) -> Response:
             {"type": "NotFoundError", "message": "Case not found"}, status=status.HTTP_404_NOT_FOUND
         )
     merge_alert_into_case(alert, case, actor=_actor(request))
-    alert.refresh_from_db()
-    return Response(alert_json(alert))
+    return Response(case_json(case, detail=True))
 
 
 @api_view(["POST"])

@@ -25,6 +25,7 @@ from rest_framework.response import Response
 from alerts.escalation import link_case_from_identifier, resolve_case_status
 from cases.ledger import append_timeline_event
 from cases.models import Case, Task, TimelineEvent
+from compat.time import to_epoch_ms
 from core.serializers import case_json, observable_json
 from observables.extractor import add_observable, extract_into_case
 from observables.models import Observable
@@ -273,17 +274,57 @@ def case_observable_list(request: Request, case_id: str) -> Response:
     return Response([observable_json(link) for link in links])
 
 
+# Ledger kind → TheHive `OutputTimelineEvent.kind`. The 5.8.0 vocabulary has no spelling for
+# our status/assignment/automation kinds, and `custom` is what thehive4py's own
+# `InputCustomEvent` renders — mapping them onto a *wrong* named kind (`case.new` for an
+# assignment) would be worse than the honest bucket. Unknown kinds also fall back to `custom`.
+_TIMELINE_KIND_MAP = {
+    "case-created": "case.created",
+    "comment": "log.created",
+    "alert-imported": "alert.occurred",
+    "alert-merged": "alert.occurred",
+    "status-change": "custom",
+    "status-changed": "custom",
+    "automation-run": "custom",
+    "assigned": "custom",
+}
+
+
+def _timeline_event_wire(event: TimelineEvent) -> dict[str, Any]:
+    """One ledger row as the 5.8.0 `OutputTimelineEvent` (plan deviation **P8-1**).
+
+    Deliberately *not* `timeline_event_json`: that is the internal ledger shape the WS `sync`
+    protocol and the UI templates consume, and Phase 7 owns it. Only this API serialization is
+    TheHive-shaped — ms-epoch dates, the mapped `kind`, and the `Case`/`Alert` entity reference
+    an alert event carries in its metadata.
+    """
+    metadata = event.metadata or {}
+    alert_ref = metadata.get("alert_id")
+    is_alert_event = event.kind in ("alert-imported", "alert-merged") and alert_ref
+    return {
+        "date": to_epoch_ms(event.date),
+        "kind": _TIMELINE_KIND_MAP.get(event.kind, "custom"),
+        "entity": "Alert" if is_alert_event else "Case",
+        "entityId": f"~{alert_ref}" if is_alert_event else f"~{event.case_id}",
+        "details": metadata,
+        # A point-in-time event has no end; `null` is the schema's "not a range", not a gap.
+        "endDate": to_epoch_ms(event.end_date) if event.end_date else None,
+    }
+
+
 @api_view(["GET"])
 @renderer_classes([JSONRenderer])
 def case_timeline(request: Request, case_id: str) -> Response:
-    """`GET /api/v1/case/{idOrNumber}/timeline` — the case ledger, oldest first."""
-    from core.serializers import timeline_event_json
+    """`GET /api/v1/case/{idOrNumber}/timeline` — the ledger as TheHive's `OutputTimeline`.
 
+    The `{"events": [...]}` envelope (not a bare array) is what 5.8.0's OpenAPI and thehive4py's
+    `case.get_timeline()` consume — recorded as plan deviation P8-1 in §13.
+    """
     case = _resolve_case(case_id)
     if case is None:
         return _not_found("Case")
     events = TimelineEvent.objects.filter(case=case).order_by("date", "id")
-    return Response([timeline_event_json(e) for e in events])
+    return Response({"events": [_timeline_event_wire(event) for event in events]})
 
 
 @api_view(["GET"])

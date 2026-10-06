@@ -10,5 +10,6 @@ urlpatterns = [
     path("api/v1/", include("ingest.urls")),
     path("api/v1/", include("alerts.urls")),
     path("api/v1/", include("cases.urls")),
+    path("api/v1/", include("query.urls")),
     path("api/v1/", include("compat.urls")),
 ]

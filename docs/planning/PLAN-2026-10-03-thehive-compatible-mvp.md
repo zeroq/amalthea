@@ -588,6 +588,58 @@ duplicated. Failure mode demonstrated, per R11 — restoring a direct create in
 `alerts/escalation.py` fails `test_the_ledger_service_is_the_only_writer_of_timeline_rows` with
 `[PosixPath('alerts/escalation.py')]` in the diff.
 
+### Phase 8 record — BRIEF-2026-10-06 (Query API), 2026-10-06
+
+| # | Brief / plan said | We did | Why |
+|---|---|---|---|
+| P8-1 | `GET /api/v1/case/{caseId}/timeline` returns "→ ordered TimelineEvent[]" (plan §7.2) | The response is now `{"events": [...]}` — 5.8.0 `OutputTimeline`: ms-epoch `date`, mapped `kind` (`case.created`/`log.created`/`alert.occurred`/`custom`), `entity`/`entityId` (`Case`/`Alert` + `~<id>`), `details` from event metadata, `endDate: null` | The recorded 5.8.0 OpenAPI and thehive4py `case.get_timeline()` consume the envelope; AC8.4 requires reading the timeline through thehive4py unmodified. Internal `timeline_event_json` (Phase 7 WS `sync`/UI) is untouched — only the API serialization changed, via `_timeline_event_wire` |
+| P8-2 | Errors go through `compat.errors.thehive_exception_handler` (400 `BadRequest`) | The query view builds the 400 envelope inline (`_bad_request`), exactly as the existing T1 `_not_found`/`_create_case` do | `compat.errors` flattens every 400's `message` to the literal "Bad request" and parks the detail in `fields`; AC8.3 demands the response *name* the offending operator/field. The envelope shape (`type`/`message`) is unchanged — only the message survives |
+| P8-3 | `excludeFields` is an optional array; `None` presumably means "no exclusions" | `excludeFields: []` is treated as **exclude nothing** (`[]` is not `None`) | thehive4py `query.run(query, exclude_fields=[])` always sends `excludeFields: []`; `[]` must not mean "exclude everything". Pinned by `test_thehive4py_query_run_with_explicit_empty_exclusions` |
+| P8-4 | `getCase` resolves one case (reuse `_resolve_case`); miss unspecified | A miss threading `Case.objects.none()` → HTTP 200 with a bare `[]`, and every later step (`count` included) answers over the empty set | `_resolve_case` returns `None` (→ 404), but the query engine resolves via `alerts/escalation.link_case_from_identifier` which raises `DoesNotExist`; the "empty result set" reading matches how every other step threads "no rows", so `listCase → getCase ~missing → count` answers 0 rather than erroring mid-chain |
+
+**Read-the-docstring notes (not wire deviations):** `listAny` is three branches, not one UNION —
+a field a kind lacks is "cannot match" (`_NO_MATCH`), so under `_eq` the kind drops out of the
+result and under `_not` it drops *in*; only a field on **no** active whitelist 400s. Every sort
+appends an ascending `_id` tie-break (matching `_sort_rows`), so paging is deterministic whether
+or not the set materialised. `_between` is `_from` inclusive / `_to` exclusive on every field
+type, which is what makes adjacent pages disjoint. None of these change the wire shape recorded
+in the brief.
+
+**Test-harness note:** `tests/conformance/test_query_api.py` imports `thehive4py` (a pinned dev
+dependency) to build AC8.4's request bodies with the client's own query builders, then POSTs them
+through the DRF `APIClient` — the live HTTP hop stays the planner's AC8.4 verification, exactly
+like AC1.3/AC1.4. The file also carries an autouse `cache.clear()` fixture: DRF's UserRateThrottle
+(1000/min) keys into the process-wide LocMemCache and a long suite run would otherwise trip 429s
+unrelated to the assertion at hand (the webhook-hardening tests grew the same pattern for the
+anonymous throttle).
+
+**Gate (2026-10-06):** SQLite `make check` — **488 passed, 3 skipped**; Postgres `test_pg` —
+**467 passed, 24 skipped**; `ruff check` + `ruff format --check` clean on `query/` and the two
+edited files; mypy "Success: no issues found in 95 source files"; `manage.py check` clean;
+`makemigrations --check --dry-run` clean (the `query` app adds no models, as the brief requires).
+The query suite contributes exactly 47 tests (488 = 441 pre-existing + 47; the pre-existing total
+moved 440 → 441 by a single test landed between the P7 gate and HEAD, outside Phase 8 — the
+P7-era 419 Postgres figure moves the same way).
+
+**Post-gate record (the AC8.4 live check ran against a seeded prod-settings DB through thehive4py
+unmodified; it surfaced three gaps, all closed and committed with Phase 8):**
+
+| # | Live gate finding | Fix | Why |
+|---|---|---|---|
+| P8-5 | `POST /api/v1/alert` (T1 `InputCreateAlert`, plan §7.2) did not exist — the MVP loop only ever created alerts via the webhook, so `client.alert.create` from AC8.4 returned 405 | Added the endpoint: `alert_list` accepts `GET`/`POST`, new `_create_alert` validates `title`/`type`/`source`/`sourceRef` (400 `BadRequest` with `fields`), auto-creates unknown alert statuses (ADR D11 `resolve_alert_status`), converts the ms-epoch wire `date` to a tz-aware `DateTimeField`, and records an `ingestion_warnings` entry for any unmapped fields; returns `alert_json` 201 | AC8.4 drives `alert.create` first; without the T1 create endpoint the gate cannot run its merge/timeline half |
+| P8-6 | `POST /api/v1/alert/{alertId}/merge/{caseId}` returned `alert_json` (the alert), but 5.8.0's `OutputCase`/thehive4py `merge_into_case()` contract says the **case** | The view now returns `case_json(case, detail=True)` | AC8.4's `merged["_id"] == case_id` assertion failed on the alert uuid; the OpenAPI records `$ref: OutputCase` for the 200 of that route |
+| P8-7 | prod settings configure `channels_redis.core.RedisChannelLayer` but `channels-redis` was never a pinned dependency — the merge path publishes a ledger event through the layer, so the first live merge raised `ModuleNotFoundError` | Added `channels-redis==4.3.0` to `requirements/base.txt` and installed it | The AC1.3/AC1.4 live gate never exercised an event publishing path; this one does. The dependency was always required by `settings/prod.py`, Phase 8 merely made it reachable |
+
+**Final gate after the P8-5..P8-7 fixes (this commit):** SQLite `make check` — **491 passed, 3
+skipped**; Postgres `test_pg` — **470 passed, 24 skipped** (the +3 are `test_alert_create_roundtrip
+_through_thehive4py_shape`, `test_alert_create_requires_source_ref_and_titles`, `test_merge_returns
+_the_case_not_the_alert` in the query suite, now 50 tests). AC8.4 live gate
+(`live_ac84_seed.py` + `live_ac84.py`, thehive4py 2.1.0 against the seeded prod DB): **PASS** —
+`case.find` → 1 case; `alert.create` → 201; `alert.merge_into_case` → `OutputCase` with the case
+id; `case.get_timeline` → `{"events": [...]}` with `alert.occurred` events. The gate scripts are
+documented here, not committed (same as AC1.3/AC1.4 — the seed writes a throwaway key and user on
+the local prod-DB container).
+
 ## 14. Open Questions
 
 Resolved 2026-10-06 per TODO §3; each decision is recorded with the rationale that settled it. The

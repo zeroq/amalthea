@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     "realtime",
     "services",
     "ui",
+    "query",
 ]
 
 MIDDLEWARE = [

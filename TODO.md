@@ -317,9 +317,14 @@ task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §9.
   now includes `alerts/`. The other stands: the repo ships no htmx, so the new `hx-*` attributes
   are inert until one is added.
 
-- [ ] **5.5 — Phase 8: Query API** (T2)
+- [x] **5.5 — Phase 8: Query API** — **DONE (2026-10-06)**
   `POST /api/v1/query` DSL, `X-Total`, bare-array responses. Unimplemented operators must 400, never
   silently return a wrong answer. Includes **AC8.4**: TheHive4py unmodified against a live server.
+  Gate: SQLite `make check` 491 passed / 3 skipped; Postgres `test_pg` 470 passed / 24 skipped;
+  query suite 50 tests. AC8.4 live gate PASS (thehive4py 2.1.0: find → create → merge → timeline).
+  Deviations P8-1..P8-7 in plan §13 (timeline envelope P8-1; inline 400s P8-2; `excludeFields: []`
+  P8-3; getCase-miss → `[]` P8-4; live-gate gaps P8-5 POST /api/v1/alert, P8-6 merge → OutputCase,
+  P8-7 channels-redis pin).
 
 - [x] **5.6 — Phase 9: Minimal UI** — **DONE (2026-10-06)**
   Dark, keyboard-first, TheHive-aligned, WCAG-aware severity rendering (text+colour, §a11y tests).
