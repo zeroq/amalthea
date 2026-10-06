@@ -475,6 +475,11 @@ def test_the_standard_accepts_a_sound_guard(description: str, source: str) -> No
 
 
 @pytest.mark.django_db
+@pytest.mark.skipif(
+    connection.vendor != "sqlite",
+    reason="the _mutation.py harness is SQLite-only by construction (reads sqlite_master) — "
+    "guarded alongside test_schema_mutation_guards.py for the Postgres gate (TODO 3.1)",
+)
 def test_the_mutation_helper_still_verifies() -> None:
     """Guard the guard: `schema_mutation` must still *behave* as though a no-op is a failure.
 

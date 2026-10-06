@@ -42,6 +42,24 @@ def migrate(targets: list[tuple[str, str]]) -> None:
     MigrationExecutor(connection).migrate(targets)
 
 
+# An *executed* seed rollback is a SQLite-only proof, and the reason is the engine, not a
+# preference. Round-3's H3-2 fix made the seed migrations' dependency graph plan-safe on
+# every engine, but *executing* a rollback replays historical model state: rolling back
+# `alerts/0003_seed` legitimately drags `automation/0003_automation_hardening` down with it
+# (its chain runs through `alerts/0004_alert_hardening`), and reversing that migration
+# recreates an FK against the pre-rename `case` table — `relation "case" does not exist` on
+# Postgres. SQLite's lazy FK handling is the only reason the executed tests below are
+# possible at all; on Postgres the plan-level H3-2 tests (which pass) carry the invariant.
+# (REVIEW-2026-10-05 gate: executed rollbacks stay SQLite-only; plans are engine-neutral.)
+EXECUTED_ROLLBACK_SQLITE_ONLY = pytest.mark.skipif(
+    connection.vendor != "sqlite",
+    reason="an executed seed rollback replays the pre-rename `case` table via "
+    "automation/0003's reverse, which Postgres rejects; SQLite's lazy FK handling is the "
+    "only engine that tolerates it. The plan-level H3-2 tests below prove the invariant "
+    "on Postgres (REVIEW-2026-10-05).",
+)
+
+
 SEED_MIGRATIONS = (
     ("cases", "0003_seed"),
     ("alerts", "0003_seed"),
@@ -84,6 +102,7 @@ def test_the_seed_rows_are_present_after_a_normal_migrate() -> None:
 # transaction; `serialized_rollback` because transactional tests flush every table, and the
 # flush would remove the rows the seed migrations inserted — the very rows under test.
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
+@EXECUTED_ROLLBACK_SQLITE_ONLY
 @pytest.mark.parametrize(("app_label", "name"), SEED_MIGRATIONS)
 def test_m10_rolling_back_a_seed_migration_deletes_no_rows(app_label: str, name: str) -> None:
     """A schema rollback must never delete domain data.
@@ -224,6 +243,7 @@ def _seed_names(app_label: str) -> set[str]:
 
 
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
+@EXECUTED_ROLLBACK_SQLITE_ONLY
 def test_m10_a_seed_neither_overwrites_nor_deletes_a_pre_existing_row() -> None:
     """The exact scenario the old reverse destroyed.
 
@@ -250,6 +270,7 @@ def test_m10_a_seed_neither_overwrites_nor_deletes_a_pre_existing_row() -> None:
 
 
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
+@EXECUTED_ROLLBACK_SQLITE_ONLY
 def test_a_user_defined_vocabulary_entry_survives_a_rollback() -> None:
     from cases.models import CaseStatus
 
@@ -263,6 +284,7 @@ def test_a_user_defined_vocabulary_entry_survives_a_rollback() -> None:
 
 
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
+@EXECUTED_ROLLBACK_SQLITE_ONLY
 def test_m10_a_seed_is_idempotent_when_re_applied() -> None:
     from observables.models import ObservableType
 
@@ -292,7 +314,7 @@ def test_m12_the_imported_stage_is_a_legal_alert_stage() -> None:
     assert set(stages.values()) <= {"New", "InProgress", "Closed", "Imported"}
 
 
-@pytest.mark.django_db(transaction=True)
+@pytest.mark.django_db(transaction=True, serialized_rollback=True)
 @pytest.mark.parametrize(("app_label", "name"), SEED_MIGRATIONS)
 def test_m11_sqlmigrate_prints_no_ddl_for_a_seed_migration(
     app_label: str, name: str, capsys: pytest.CaptureFixture[str]

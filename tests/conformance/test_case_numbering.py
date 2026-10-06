@@ -58,8 +58,14 @@ def test_a_case_is_numbered_on_save(new_status: CaseStatus) -> None:
 @pytest.mark.django_db
 def test_numbers_increase_and_are_unique(new_status: CaseStatus) -> None:
     numbers = [Case.objects.create(title=f"case {i}", status=new_status).number for i in range(5)]
-    assert numbers == [1, 2, 3, 4, 5], "allocation must be monotonic and gapless per insert"
-    assert len(set(numbers)) == 5
+    # Relative, not absolute, and that matters on Postgres: a sequence is non-transactional,
+    # so an earlier test's rolled-back `nextval` is still consumed and the start point is
+    # suite-order dependent. What the allocator promises is monotonicity and uniqueness; the
+    # "the first allocation of a fresh sequence is 1" absolute is asserted by the test above.
+    assert numbers == sorted(numbers), "allocation must be monotonic"
+    assert len(set(numbers)) == 5, "allocation must be unique"
+    # Consecutive within this INSERT batch: 2,3,4,5,6 (or 1,2,3,4,5 on a fresh sequence).
+    assert numbers[-1] - numbers[0] == 4, "allocation must be gapless per insert"
 
 
 @pytest.mark.django_db
@@ -183,6 +189,12 @@ def test_h6_the_sync_statement_advances_the_sequence_monotonically() -> None:
     the fix in place when the suite runs on SQLite. `setval` alone would let a re-import of
     an *older* number walk the sequence backwards; `is_called = false` would hand the
     explicit number itself out again on the very next insert.
+
+    REVIEW-2026-10-05 §6(b): the read of `last_value` and the `setval` write must be
+    serialized. Postgres forbids locking a sequence directly (`FOR UPDATE` and `LOCK TABLE`
+    both raise), so the lock is the transaction-scoped advisory lock inside the statement's
+    own subquery — asserted here so the pin can never be dropped back to the racy
+    GREATEST-with-stale-read form that round 3 flagged.
     """
     assert "setval" in SEQUENCE_SYNC_SQL
     assert "GREATEST" in SEQUENCE_SYNC_SQL, "the sync must be monotonic, not an assignment"
@@ -191,6 +203,13 @@ def test_h6_the_sync_statement_advances_the_sequence_monotonically() -> None:
     assert SEQUENCE_NAME in SEQUENCE_SYNC_SQL
     assert "%(number)s" in SEQUENCE_SYNC_SQL, "the number must be a bound parameter"
     assert "CREATE SEQUENCE" not in SEQUENCE_SYNC_SQL, "C1: no DDL from the write path"
+    assert "pg_advisory_xact_lock" in SEQUENCE_SYNC_SQL, (
+        "§6(b): the read-modify-write must take the advisory lock before reading last_value"
+    )
+    assert "pg_advisory_xact_lock" in SEQUENCE_SYNC_SQL.split("GREATEST")[1], (
+        "§6(b): the advisory lock must live inside the GREATEST argument subquery, which "
+        "evaluates to completion before setval can run"
+    )
 
 
 def test_h6_the_sequence_sync_is_vendor_guarded() -> None:
@@ -269,7 +288,7 @@ def test_h6_bulk_create_with_explicit_numbers_syncs_too(
     assert calls == [], "an auto-allocated batch must not re-sync"
 
 
-@pytest.mark.django_db(transaction=True)
+@pytest.mark.django_db(transaction=True, serialized_rollback=True)
 @pytest.mark.skipif(
     connection.vendor != "postgresql",
     reason="H-6 is Postgres-only by construction: SQLite allocates MAX(number)+1, which reads "
@@ -291,7 +310,73 @@ def test_h6_on_postgres_the_next_auto_number_clears_an_imported_number(
 
     following = Case.objects.create(title="auto after import", status=new_status)
     assert following.number > 500, f"nextval re-issued an imported number: {following.number}"
-    assert not Case.objects.filter(number=500).exclude(pk=following.pk).exists()
+    assert Case.objects.filter(number=500).count() == 1, (
+        "the imported number must belong to exactly one case: the imported row"
+    )
+
+
+@pytest.mark.django_db(transaction=True, serialized_rollback=True)
+@pytest.mark.skipif(
+    connection.vendor != "postgresql",
+    reason="the read-modify-write race (§6b) exists only where a sequence is a real object; "
+    "SQLite has no sequence to race on",
+)
+def test_h6_concurrent_imports_cannot_walk_the_sequence_backwards(
+    new_status: CaseStatus,
+) -> None:
+    """REVIEW-2026-10-05 §6(b): two concurrent imports must serialize on the sync.
+
+    Without the advisory lock, T1 and T2 both read the stale ``last_value`` (e.g. 100), then
+    T1's ``setval`` to 500 lands and T2's ``setval`` to 300 overwrites it — the sequence
+    moves **backwards** and later ``nextval`` re-issues numbers already in the table. With
+    the lock, T2 blocks until T1 commits, reads the fresh 500, and ``GREATEST(500, 300)``
+    keeps 500. This test needs real concurrency, so it commits and uses two connections.
+    """
+    import threading
+
+    from django.db import connections as dbs
+
+    # Anchor the sequence so earlier (non-transactional) sequence consumers in this file
+    # cannot move the goalposts: explicit imports in prior tests leave last_value at 4242/901,
+    # which would turn this race test into a GREATEST test instead.
+    with connection.cursor() as cursor:
+        cursor.execute(f"SELECT setval('{SEQUENCE_NAME}', 100, true)")
+    Case.objects.create(title="seed at 100", status=new_status, number=100)
+
+    start = threading.Barrier(2)  # both imports must be ready before either begins, to
+    # widen the window in which both can read the stale last_value before either setval.
+
+    def sync(number: int, results: list[tuple[int, int]]) -> None:
+        conn = dbs["default"]
+        with conn.cursor() as cursor:
+            start.wait()  # line up both racers
+            # Each job opens its own transaction so the advisory xact lock is held
+            # until *after* the read; the race window is the gap between read and setval.
+            cursor.execute("BEGIN")
+            cursor.execute(SEQUENCE_SYNC_SQL, {"number": number})
+            cursor.fetchone()  # the setval result — consumed so the cursor stays clean
+            cursor.execute(f"SELECT last_value FROM {SEQUENCE_NAME}")  # noqa: S608
+            last = cursor.fetchone()[0]
+            cursor.execute("COMMIT")
+            results.append((number, last))
+
+    results: list[tuple[int, int]] = []
+    threads = [
+        threading.Thread(target=sync, args=(500, results)),
+        threading.Thread(target=sync, args=(300, results)),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    by_import = dict(results)
+    assert by_import[500] == 500, f"the higher import must land at 500, got {by_import}"
+    # Final position is 500 no matter which thread ran last: the lower import's setval(300)
+    # cannot overwrite 500 after 500 was set.
+    with connection.cursor() as cursor:
+        cursor.execute(f"SELECT last_value FROM {SEQUENCE_NAME}")  # noqa: S608
+        assert cursor.fetchone()[0] == 500, "a lower import walked the sequence backwards"
 
 
 # --------------------------------------------------------------------------------------

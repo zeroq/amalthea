@@ -213,6 +213,11 @@ Postgres (§1.11), and the round-3 H3-2 forward-only migration gap is documented
   the H-6 sequence race get their final verdict.
   **Must complete before:** Phase 10, AC3.7, and any production deployment — most urgently `H3`
   (`data_hash`), whose failure mode is prod-only. Verification SQL is in the review report.
+  **VERIFIED 2026-10-06:** full suite on PostgreSQL 16 → **408 passed, 24 skipped**. Review
+  §6(a)–(e) closed (round-3 report; summary: (b) advisory-lock fix + concurrency guard proven to
+  bite, (e) new planner guard). AC1.3 (`celery inspect ping` → pong) and AC1.4 (live `/readyz` 200)
+  verified against running Redis. Remaining at this gate: 5.7 Phase 10 (contracts, security pass,
+  verifier) and coverage 78% → 80% (`H3-5`, §2.1).
 
 - [x] **3.2 — Multi-tenancy timing** Plan §14 Q4 — **DECIDED 2026-10-06: single-tenant + nullable `Organisation` FK**
   Matches the provisional in the plan and the implemented schema (`User.org` nullable, `SET_NULL`).
@@ -319,6 +324,14 @@ task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §9.
 - [ ] **5.8 — AC1.3 / AC1.4 verification**
   `celery inspect ping` and `/readyz` 503-when-Redis-down were never exercised — no Redis is running.
   Verify as part of §3.1.
+
+- [x] **5.9 — §3.1 Postgres gate executed (2026-10-06)** — see §3.1
+  Full suite on real PostgreSQL 16: **408 passed, 24 skipped, 0 failures**. Review §6 (a)–(e) all
+  CLOSED: (b) sequence race fixed with `pg_advisory_xact_lock` + mutation-bitten concurrency test;
+  (e) new Postgres planner guard for `ar_pending_idx`. **5.8 also closed here**: AC1.3
+  `celery -A amalthea inspect ping` → `pong, 1 node online` against a live worker on the Redis broker;
+  AC1.4 live `/readyz` → HTTP 200 (`{"status": "ok"}`) with Redis up; the 503-when-Redis-down path
+  stays covered by `test_readyz_fails_when_redis_is_unreachable` (`test_core_views.py:8`).
 
 ---
 

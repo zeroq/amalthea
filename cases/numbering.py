@@ -61,9 +61,23 @@ SEQUENCE_NAME = "case_number_seq"
 #: next ``nextval()`` returns ``last_value + 1`` instead of reusing ``last_value`` itself.
 #: The number is a bound parameter; only the sequence name is interpolated, and that is a
 #: module constant — never request data, never a caller-supplied string.
+#:
+#: REVIEW-2026-10-05 round-3 **§6(b)** — the read-modify-write must be serialized. ``setval``
+#: takes the sequence's row lock, but the inner ``SELECT last_value`` takes only
+#: ``ACCESS SHARE`` first, so two concurrent imports could both read the stale value and the
+#: second ``setval`` would walk the sequence **backwards** despite ``GREATEST`` (it only
+#: protects against the value *it* read). Postgres forbids the obvious fixes — ``FOR UPDATE``
+#: and ``LOCK TABLE`` on a sequence raise ``cannot lock rows/relation in sequence`` — so the
+#: lock is a transaction-scoped advisory lock keyed by the sequence's own name:
+#: ``pg_advisory_xact_lock(hashtext('case_number_seq'))``. A second caller blocks inside the
+#: subquery's ``WHERE`` until the first one's transaction ends, then reads the fresh
+#: ``last_value`` and ``GREATEST`` still cannot move the sequence down. The lock lives in the
+#: same statement as the read, so the read cannot happen before the lock is held; both run in
+#: the caller's enclosing transaction (held until the INSERT commits).
 SEQUENCE_SYNC_SQL = (
     f"SELECT setval('{SEQUENCE_NAME}', "  # noqa: S608 — constant name, bound parameter
-    f"GREATEST((SELECT last_value FROM {SEQUENCE_NAME}), %(number)s), true)"
+    f"GREATEST((SELECT last_value FROM {SEQUENCE_NAME} "
+    f"WHERE pg_advisory_xact_lock(hashtext('{SEQUENCE_NAME}')) IS NOT NULL), %(number)s), true)"
 )
 
 

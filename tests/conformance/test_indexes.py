@@ -392,8 +392,9 @@ def test_the_pending_run_index_predicate_is_still_partial() -> None:
 @pytest.mark.skipif(
     connection.vendor != "sqlite",
     reason="plan shape is asserted against SQLite's EXPLAIN QUERY PLAN; on Postgres the "
-    "predicate proof is the catalog read in test_the_pending_run_index_predicate_is_still_partial "
-    "plus the ANALYZE run in the round-2 review's verification SQL (TODO 3.1)",
+    "predicate proof is the catalog read in "
+    "test_the_pending_run_index_predicate_is_still_partial "
+    "plus the planner proof in test_the_postgres_planner_picks_the_pending_run_index (§6e)",
 )
 def test_the_pending_index_serves_only_pending_runs() -> None:
     """The behavioural half: Pending uses the index, any other status does not.
@@ -412,6 +413,51 @@ def test_the_pending_index_serves_only_pending_runs() -> None:
     other = plan("SELECT id FROM automation_run WHERE status = 'Success' ORDER BY created_at")
     assert "ar_pending_idx" in pending, pending
     assert "TEMP B-TREE" not in pending, f"the pending sweep must not sort: {pending}"
+    assert "ar_pending_idx" not in other, (
+        f"a non-Pending status must not be answered from a Pending-only index: {other}"
+    )
+
+
+@pytest.mark.django_db
+@pytest.mark.skipif(
+    connection.vendor != "postgresql",
+    reason="REVIEW-2026-10-05 §6(e): the Postgres planner, not just the catalog DDL, must "
+    "choose ar_pending_idx for the dispatch sweep. SQLite's plan shape is asserted in "
+    "test_the_pending_index_serves_only_pending_runs.",
+)
+def test_the_postgres_planner_picks_the_pending_run_index() -> None:
+    """The behavioural half on Postgres: the planner uses the partial index, no sort.
+
+    Two assertions prove predicate honesty, not just presence. The Pending sweep must be an
+    index scan that needs no Sort node — a plain `(created_at)` index would serve Success
+    too, and a non-partial predicate would let the Success sweep ride the same index. The
+    Success sweep must therefore *not* mention ar_pending_idx, which is what makes this test
+    fail the moment the `WHERE status = 'Pending'` is dropped from the model.
+
+    The table is empty under test, so the planner would Seq Scan everything and the proof
+    would be vacuous; `enable_seqscan = off` forces it to price index paths, which is what
+    the round-2 verification SQL exercised on a populated database (TODO 3.1).
+    """
+
+    def plan(sql: str) -> str:
+        with connection.cursor() as cursor:
+            cursor.execute("SET enable_seqscan = off")
+            try:
+                rows = cursor.execute(
+                    f"EXPLAIN {sql}"  # fixed statement, no user input
+                ).fetchall()
+            finally:
+                cursor.execute("SET enable_seqscan = default")
+        return " | ".join(row[0] for row in rows)
+
+    pending = plan(
+        "SELECT id FROM automation_run WHERE status = 'Pending' ORDER BY created_at LIMIT 100"
+    )
+    other = plan(
+        "SELECT id FROM automation_run WHERE status = 'Success' ORDER BY created_at LIMIT 100"
+    )
+    assert "Index Scan using ar_pending_idx" in pending, pending
+    assert "Sort" not in pending, f"the pending sweep must not sort: {pending}"
     assert "ar_pending_idx" not in other, (
         f"a non-Pending status must not be answered from a Pending-only index: {other}"
     )

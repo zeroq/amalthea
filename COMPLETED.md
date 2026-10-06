@@ -2,7 +2,7 @@
 
 Finished work, with the evidence that it actually happened. Open items live in
 [`TODO.md`](./TODO.md).
-Last updated: 2026-10-03
+Last updated: 2026-10-06
 
 Items are only listed here once independently verified. Where code exists but an acceptance criterion
 is still unproven, the item says so explicitly and the verification gap is cross-linked in `TODO.md`.
@@ -305,3 +305,29 @@ reported.
   these are recordings, not retrofits.
 - [x] **TODO.md rewritten** to reflect reality: Phases 4–6/9 marked done, round-3 highs resolved,
   most 2.5 items closed, remaining open work re-scoped (Phase 7 next, Postgres gate, coverage 78%→80%).
+
+## 2026-10-06 — Postgres gate (TODO 3.1) executed
+
+- [x] **§3.1 Postgres verification — DONE.** Full conformance suite on real PostgreSQL 16
+  (`--ds=amalthea.settings.test_pg`): **408 passed, 24 skipped, 0 failures**. SQLite `make check`
+  stays green: **429 passed, 3 skipped**.
+- [x] **Review round-3 §6(a)–(e) closed** (`docs/reviews/REVIEW-2026-10-05-...round3.md`).
+  - (a) H-6 collision test + (c) L-3 prefix guard + (d) btree tuple cap: settled green on Postgres.
+  - (b) sequence race: **fixed** in `cases/numbering.py` — `setval`'s stale read is now serialized by
+    `pg_advisory_xact_lock(hashtext('case_number_seq'))` (FOR UPDATE and LOCK TABLE are both rejected
+    by Postgres for sequences). New `test_h6_concurrent_imports_cannot_walk_the_sequence_backwards`
+    (Postgres-only, two-session barrier) fails against the pre-fix SQL (2/10 runs with the window
+    widened) and passes 10/10 now; the lock token is also text-pinned in the statement test.
+  - (e) `ar_pending_idx`: new Postgres-only `test_the_postgres_planner_picks_the_pending_run_index`
+    (EXPLAIN with `enable_seqscan=off`: Pending sweep must be an index scan with no Sort; Success
+    sweep must not touch the index). Bite-proven: recreating the index without the `WHERE` clause
+    makes the Success sweep use it, failing the guard.
+- [x] **AC1.3 live** — `celery -A amalthea inspect ping` against a real worker on the Redis broker:
+  `pong, 1 node online`. (Broker URL required `CELERY_BROKER_URL=redis://...`; prod settings rely on
+  env as documented.)
+- [x] **AC1.4 live** — `/readyz` → HTTP 200 `{"status":"ok"}` with Postgres migrated + Redis up;
+  503-when-Redis-down path remains covered by `test_readyz_fails_when_redis_is_unreachable`.
+- [x] **pytest-django gotcha fixed while here:** content-type poisoning from
+  `transaction=True`-without-`serialized_rollback` teardown flushes (m11 + H-6 + the new concurrency
+  test now all use `serialized_rollback=True`); `test_numbers_increase_and_are_unique` asserts
+  relative monotonicity instead of absolute numbers because Postgres sequences are non-transactional.

@@ -49,6 +49,19 @@ from tests.conformance._schema import partial_index_predicate
 
 Skipped = pytest.skip.Exception
 
+# The mutation harness (_mutation.py) snapshots live DDL from `sqlite_master`, and several
+# mutations depend on SQLite-only mechanics (`remove_constraint` → `_remake_table` from `_meta`,
+# `sqlite_autoindex_*` naming). The harness is SQLite-only by construction, so the guards can
+# only be exercised on the dev engine; running them on Postgres would fail for the wrong reason
+# (OperationalError: no such table: sqlite_master). TODO 3.1's Postgres gate covers the
+# Postgres-specific consequences instead (H-6 collision, sequence race, btree tuple cap,
+# partial-index predicate via pg_indexes/ANALYZE).
+pytestmark = pytest.mark.skipif(
+    connection.vendor != "sqlite",
+    reason="the _mutation.py harness reads sqlite_master and SQLite-only DDL mechanics — "
+    "Postgres consequences are covered by the test_pg gate (TODO 3.1)",
+)
+
 
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
 def test_mutation_1_introspection_detects_a_renamed_column():

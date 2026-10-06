@@ -137,6 +137,16 @@ def partial_index_predicate(table: str, name: str) -> str:
 def columns(table: str) -> dict[str, str]:
     """`{column_name: declared SQL type}` as stored by the database."""
     with connection.cursor() as cursor:
+        if connection.vendor == "postgresql":
+            # psycopg reports `type_code` as an int (a pg_type OID), not a name; ask
+            # information_schema for the declared type instead — the catalog is the
+            # source of truth for "what the database stores".
+            cursor.execute(
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_name = %s",
+                [table],
+            )
+            return {name: declared.upper() for name, declared in cursor.fetchall()}
         return {
             info.name: info.type_code.upper()
             for info in connection.introspection.get_table_description(cursor, table)

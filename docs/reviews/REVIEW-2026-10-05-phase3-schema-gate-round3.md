@@ -443,6 +443,12 @@ caught mutation. Both are the right call and are exercised by mutations 11-14.
 PostgreSQL is not available here. Nothing below is claimed as verified. For each item, the test or
 SQL that would settle it is named.
 
+> **Closure (2026-10-06, TODO 3.1 gate):** §6 (a)–(e) were all executed against a live
+> PostgreSQL 16 (`amalthea/amalthea@127.0.0.1:5432`, `--ds=amalthea.settings.test_pg`) and are
+> now **CLOSED** — full suite **408 passed, 24 skipped, 0 failures**; SQLite `make check`
+> **429 passed, 3 skipped**. (a)–(d) settled by the passing suite; (b) additionally got a
+> mutation-proven race fix; (e) got a new Postgres planner guard. Details per item below.
+
 **(a) H-6's end-to-end collision test is skipped, correctly.**
 `tests/conformance/test_case_numbering.py:272` is gated on `connection.vendor != "postgresql"` with a
 precise reason: SQLite allocates `MAX(number) + 1`, which reads the row just written and therefore
@@ -489,20 +495,51 @@ SELECT last_value FROM case_number_seq;  -- expect 300, not >= 500
 ROLLBACK;
 ```
 
+> **CLOSED (2026-10-06).** Empirically on PostgreSQL 16: `FOR UPDATE` inside the subquery raises
+> `ProgrammingError: cannot lock rows in sequence "case_number_seq"`, and `LOCK TABLE
+> case_number_seq IN ACCESS EXCLUSIVE MODE` raises `cannot lock relation "case_number_seq"` /
+> *not supported for sequences* — so the review's first two suggested forms are impossible and the
+> third is the one live. `cases/numbering.py` now wraps the read in
+> `pg_advisory_xact_lock(hashtext('case_number_seq'))` inside the same statement. Proof:
+> - `test_h6_concurrent_imports_cannot_walk_the_sequence_backwards` (Postgres-only, two
+>   transactions racing 500 vs 300; the final position must be 500) fails against the old
+>   non-atomic SQL — the race bit in 2/10 runs once a start barrier widened the window, and
+>   passes 10/10 with the fix.
+> - The lock token is pinned in `test_h6_the_sync_statement_advances_the_sequence_monotonically`
+>   (`pg_advisory_xact_lock` must be inside the GREATEST argument subquery), so removing the fix
+>   is a deterministic text-level failure in addition to the behavioural race test.
+
 **(c) L-3's prefix-coverage guard is engine-dependent.**
 `test_no_index_is_left_prefix_covered_by_a_wider_one` relies on Django's `indexes()`, which omits
 unique constraints on SQLite — the exact engine where H-5's dropped indexes did not bite. Settled by
 running the suite on Postgres. Unchanged from round 2.
+
+> **CLOSED (2026-10-06):** ran green on PostgreSQL in the full suite (408 pass). The redundant-index
+> check is live-engine, so any H-5-style regression is caught on the production engine.
 
 **(d) Unbounded-index-tuple behaviour (H3's original motivation) cannot be exercised.** SQLite has no
 btree tuple cap, so `test_two_long_observables_coexist` proves the *bound* (64 hex chars regardless of
 input length) and not the original Postgres symptom. Settled by inserting a >2704-byte
 `normalized_data` on Postgres.
 
+> **CLOSED (2026-10-06):** `test_two_long_observables_coexist` ran green on PostgreSQL — a 4000+ byte
+> `normalized_data` inserts and indexes fine because `uniq_obs_dtype_hash` indexes `data_hash`
+> (64 hex chars), never `normalized_data`; the btree cap is structurally avoided, not stretched.
+
 **(e) Partial-index predicate selection is confirmed by DDL only.** `ar_pending_idx`'s DDL is
 `CREATE INDEX … ("created_at") WHERE "status" = 'Pending'`, which is correct, but I cannot confirm a
 Postgres planner chooses it for the dispatch query. Round 2 confirmed the SQLite plan
 (`SCAN automation_run USING INDEX ar_pending_idx`); that is carried forward, not re-verified.
+
+> **CLOSED (2026-10-06).** New Postgres-only guard
+> `test_the_postgres_planner_picks_the_pending_run_index` runs
+> `EXPLAIN` with `enable_seqscan=off` (the table is empty under test, so the planner must be forced
+> onto index paths): the Pending sweep must be `Index Scan using ar_pending_idx` with **no Sort**
+> node, and the Success sweep must **not** mention `ar_pending_idx`. The predicate is also catalog-
+> read live on both engines by `test_the_pending_run_index_predicate_is_still_partial`. The guard
+> bites: a probe that recreated the index without `WHERE status='Pending'` produced
+> `Index Scan using ar_pending_idx on automation_run ... Filter: ((status)::text = 'Success'::text)`
+> for the Success sweep — exactly the plan the new test fails on.
 
 ## 7. Required before re-gate
 
