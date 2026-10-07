@@ -1,7 +1,7 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-07
+Last updated: 2026-10-07 (post Phase 10 commit `e3a94d8`)
 
 **Conventions** — every item carries a `Source` (plan AC, review finding ID, or decision ID) so it can
 be traced, and `Blocks` when it gates other work. Review IDs (`C1`, `H2`, `M5`…) refer to
@@ -128,10 +128,11 @@ discipline, no code change is safe on SQLite).
   `db_index=False` on the prefix-covered side, applied as state-only `SeparateDatabaseAndState` +
   `AlterField` (the autodetector cannot emit `through=`).
 
-- [~] **1.20 — Round-3 Highs** `round3 H3-1..H3-5` — **H3-1 · H3-3 · H3-4 FIXED; H3-2 documented; H3-5 open (§2.1)**
+- [x] **1.20 — Round-3 Highs** `round3 H3-1..H3-5` — **H3-1 · H3-2 · H3-3 · H3-4 CLOSED; H3-5 closed via §2.1**
   Report: `docs/reviews/REVIEW-2026-10-05-phase3-schema-gate-round3.md`. All eight in-scope round-2
   items verified **closed**; the C-1 evidence defect did not recur (15/15 mutation guards land real
-  DDL).
+  DDL). **Status:** §1 as a whole closed 2026-10-07 with Phase 10 — H3-5 (coverage) is folded into
+  §2.1 and **DONE at 83.10%**.
   - **`H3-1` (High) — a vocabulary change silently invalidates every stored digest.** **FIXED** (`7bea08a`).
     `ObservableType.save()` now re-hashes affected rows when `is_case_sensitive` flips, plus a
     backfill path for post-rec canonicalisation collisions. Mutation-verified.
@@ -149,7 +150,8 @@ discipline, no code change is safe on SQLite).
   - **`H3-4` / `M-1` — `correlation_key` never derived.** **FIXED** (`ac6c8b0`). Derived in
     `ingest/mapping.py` via jsonpath-ng from `correlation_key`/`correlationKey`/`correlation`
     mapping keys; `AC4.1`-style round-trip tests pass.
-  - **`H3-5` / `M-6` — coverage 76.36% vs `fail_under=80`.** **OPEN** — folded into §2.1 (now 78%).
+  - **`H3-5` / `M-6` — coverage 76.36% vs `fail_under=80`.** **CLOSED via §2.1.** Now 83.10%
+    (Phase 10a).
   - **Postgres-only, quarantined in report §6:** `sync_case_number_sequence` is a non-atomic
     read-modify-write whose `GREATEST` does **not** prevent backwards sequence movement under
     concurrent imports — correct but not concurrency-safe; treat as unproven until AC3.7 runs on
@@ -226,8 +228,9 @@ discipline, no code change is safe on SQLite).
   §6(a)–(e) closed (round-3 report; summary: (b) advisory-lock fix + concurrency guard proven to
   bite, (e) new planner guard). AC1.3 (`celery inspect ping` → pong) and AC1.4 (live `/readyz` 200)
   verified against running Redis. Re-confirmed 2026-10-07 at the Phase 8 gate: **470 passed,
-  24 skipped**. Remaining at this gate: 5.7 Phase 10 (contracts, security pass, verifier) and
-  coverage 77% → 80% (`H3-5`, §2.1).
+  24 skipped** and at the Phase 10 gate: **712 passed, 24 skipped** (SQLite `make check` 733/3).
+  The two items that were still open at the Phase 8 gate — §5.7 (Phase 10) and coverage `H3-5`
+  (§2.1) — are both **closed** as of 2026-10-07.
 
 - [x] **3.2 — Multi-tenancy timing** Plan §14 Q4 — **DECIDED 2026-10-06: single-tenant + nullable `Organisation` FK**
   Matches the provisional in the plan and the implemented schema (`User.org` nullable, `SET_NULL`).
@@ -295,14 +298,14 @@ discipline, no code change is safe on SQLite).
 
 ## 5. Remaining phases
 
-Phases 4–9 have code in place and pass their gates on SQLite and Postgres. Phase 10 is unstarted.
-Full
-task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §9.
+Phases 4–10 are complete and pass their gates on SQLite and Postgres; Phase 10 shipped in
+commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
+Full task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §9.
 
 - [x] **5.1 — Phase 4: Ingestion** (AGENTS.md §4.1) — **DONE**
   jsonpath-ng mapping engine, `POST /api/v1/alerts/webhook/{source_id}`, size cap **before** parse,
   per-source secret (hasher-backed), per-source + per-IP throttle, idempotent replay, correlation_key
-  derivation. `test_webhook_hardening.py` (36) + `test_mvp_loop.py`.
+  derivation. `test_webhook_hardening.py` (37) + `test_mvp_loop.py`.
 
 - [x] **5.2 — Phase 5: Escalation, Observables, Tasks, Timeline** (AGENTS.md §4.2–4.3) — **DONE**
   `merge/{caseId}` + `import/{caseId}`, correlation engine on `correlation_key`, typed observable
@@ -386,6 +389,27 @@ task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §9.
 - [ ] **6.3 — Per-link tags on observable link tables** Plan §13 #11
   Per-link `tags` agreed; per-link `is_ioc` **rejected** as incoherent on a globally-deduped entity.
 
+- [ ] **6.4 — Tenant isolation** Phase 10 SEC-AUDIT F2, plan §13 deferred (a)
+  `User.org` / `Organisation` exist and are nullable (decision §3.2), but **no endpoints scope by
+  organisation yet**; `owner_org` is not populated and there is no tenant predicate in any query.
+  Requires a decision on how isolation is enforced (middleware org-scope vs per-view filters) and on
+  superuser/analyst roles before implementation.
+
+- [ ] **6.5 — Observable PATCH/DELETE cross-case blast radius** Phase 10 SEC-AUDIT F3, plan §13 deferred (b)
+  An observable is globally deduped across cases; free PATCH/DELETE would let one case mutate or
+  delete an artifact other cases depend on. Decide policy (allow with warning vs. require
+  `force=true` vs. per-link shadow copy) before opening those verbs wider.
+
+- [ ] **6.6 — Production cookie/secret hardening** Phase 10 SEC-AUDIT F9, plan §13 deferred (c)
+  Dev settings pin `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, `SECRET_KEY` handling for local use
+  only. Prod-grade: env-driven secrets, `SecurityMiddleware` headers (HSTS, X-Content-Type-Options,
+  Referrer-Policy), `SESSION_COOKIE_HTTPONLY` audit, rate-limited auth/login.
+
+- [ ] **6.7 — Paged case-detail timeline** Phase 10 PERF F2, plan §13 deferred (d)
+  `case_json(detail=True)` embeds the **full** timeline in one payload; a very large ledger (10k+
+  events) makes the case page heavy. Follow the `events_after` keyset pattern: paginate the embedded
+  timeline (e.g. `?includeTimeline=true&timelinePage=1`) or move it to a separate endpoint.
+
 ---
 
 ## 7. Process improvements identified
@@ -445,3 +469,16 @@ failures were in the **evidence layer**, not the code under test.
 - [ ] **8.6 — Guard the CI invocation itself**
   The hooks pin the commands, but nothing pins them on a remote runner. A single workflow file running
   `make check` + `make coverage` is needed when this moves to GitHub (§4.5).
+
+- [ ] **8.7 — Timestamp-unit wording in plan §7.1** Verifier (2026-10-07), POST-closure note
+  The plan's T1 timestamp row still reads "ms" while the implemented (and verifier-confirmed)
+  contract is: entity JSON carries ISO-8601 strings, the timeline envelope carries ms integers
+  (deviation P10-2). Reword the plan row so the two surfaces are stated separately.
+
+---
+
+## 9. Scratch/probe hygiene
+
+- [x] **9.1 — Stale `__pycache__` from deleted scratch tests** Verifier recommendation 7 — **DONE (2026-10-07)**
+  Removed all `tests/**/__pycache__` dirs; none of the pycs were tracked (`.gitignore` covers
+  `__pycache__/`), so no commit contained them.
