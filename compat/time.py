@@ -20,10 +20,18 @@ def parse_timestamp(v: int | str | float | None) -> datetime | None:
         if v < 0:
             return None
         ts = float(v)
-        if ts > 1_000_000_000_000:  # ms
-            dt = datetime.fromtimestamp(ts / 1000.0, tz=UTC)
-        else:
-            dt = datetime.fromtimestamp(ts, tz=UTC)
+        # Hostile magnitudes (`float("inf")`, `float("nan")`, `1e18`) make `fromtimestamp`
+        # raise OverflowError/OSError/ValueError, which used to escape as a 500. Degrading to
+        # None sends them down the same clean 400 "invalid timestamp" path as any other
+        # unparseable value (auditor F5). `nan < 0` is False, so it reaches the seconds
+        # branch and is caught there.
+        try:
+            if ts > 1_000_000_000_000:  # ms
+                dt = datetime.fromtimestamp(ts / 1000.0, tz=UTC)
+            else:
+                dt = datetime.fromtimestamp(ts, tz=UTC)
+        except (OverflowError, OSError, ValueError):
+            return None
         return dt
     if isinstance(v, str):
         s = v.strip()

@@ -1,7 +1,7 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-06
+Last updated: 2026-10-07
 
 **Conventions** — every item carries a `Source` (plan AC, review finding ID, or decision ID) so it can
 be traced, and `Blocks` when it gates other work. Review IDs (`C1`, `H2`, `M5`…) refer to
@@ -14,11 +14,14 @@ be traced, and `Blocks` when it gates other work. Review IDs (`C1`, `H2`, `M5`�
 
 ## 1. Phase 3 gate remediation
 
-Status: **substantially complete.** `429 passed, 1 skipped`, `mypy` clean on 88 files (strict),
-`manage.py check` 0 issues, migrations in sync, `make check` green. Round-3 Highs H3-1 (observable
-re-hash), H3-3 (R11 AST standard), H3-4 (correlation_key derivation) are **FIXED**; H3-5 (coverage)
-is folded into §2.1. **Still required: a `db-postgres` re-gate to confirm the fixes hold on
-Postgres (§1.11), and the round-3 H3-2 forward-only migration gap is documented but not fixed.**
+Status: **complete on SQLite and Postgres.** `491 passed, 3 skipped` on SQLite, `470 passed,
+24 skipped` on Postgres (2026-10-07), `mypy` clean on 95 files (strict), `manage.py check` 0
+issues, migrations in sync, `make check` green. Round-3 Highs H3-1 (observable re-hash), H3-3 (R11
+AST standard), H3-4 (correlation_key derivation) are **FIXED** and hold on Postgres; the
+`db-postgres` re-gate (§1.11) is **DONE**. H3-5 (coverage) is folded into §2.1. **Only H3-2
+remains: the forward-only migration gap is documented but deliberately unfixed on SQLite** — its
+verdict is recorded in §3.1 (Postgres re-verification gave it the same call: forward-only
+discipline, no code change is safe on SQLite).
 
 - [x] **1.1 — `Case.save()` number allocation** `C1` — **DONE, verified**
   New `cases/numbering.py`. Goes further than the brief: `pre_save()` on a custom
@@ -152,27 +155,33 @@ Postgres (§1.11), and the round-3 H3-2 forward-only migration gap is documented
     concurrent imports — correct but not concurrency-safe; treat as unproven until AC3.7 runs on
     Postgres.
 
-- [ ] **1.11 — Re-run the `db-postgres` gate** *(round 2 FAIL 2C/7H/9M/4L; round 3 FAIL 0 Critical/5 High → 3 fixed, 2 open)*
+- [x] **1.11 — Re-run the `db-postgres` gate** — **DONE (2026-10-06)**
   Round 2 confirmed `C3`, `H2`, `H4`, `H6`, `M2`, `M3`, `M4`, `M6`, `M10`, `M14` — **`M10` genuinely
   clean**: with analyst rows deliberately sharing seeded names (`Contained`, `Imported`, `hash`), all 10
-  reversal/re-apply steps changed zero rows. Round 3 required after 1.13–1.18; now needs to confirm
-  the H3 fixes (observable re-hash, migration forward-only discipline on seeded apps) hold on Postgres.
+  reversal/re-apply steps changed zero rows. Round 3 was executed after 1.13–1.18 (§3.1): full suite
+  on PostgreSQL 16 → **408 passed, 24 skipped, 0 failures**; review §6(a)–(e) all CLOSED,
+  including the observable re-hash (H3-1) and the H-6 sequence race on real `nextval()`. Phase 8's
+  Postgres gate (2026-10-07, §5.5) re-confirms: **470 passed, 24 skipped**.
 
 ---
 
 ## 2. Quality gates not yet met
 
-- [ ] **2.1 — Coverage → ≥ 80%** Plan §11, `pyproject` `fail_under = 80` · **Phase 6 MVP gate now reached**
-  Currently **78%** (was 76.36%). The largest remaining gap is `compat/mappers/`, which only became
-  meaningful now that Phases 4–6 supply real logic — write honest tests against that logic, not filler
-  (the R11 failure mode). Old items (operators, webhook hardening, automation executor, UI views) are
-  now covered.
+- [x] **2.1 — Coverage → ≥ 80%** Plan §11, `pyproject` `fail_under = 80` — **DONE (2026-10-07, Phase 10a)**
+  **83.10%** at the Phase 10 gate; `fail_under=80` kept. The two largest gaps noted below are gone:
+  `compat/mappers/` was **deleted** (9 empty stub files, zero importers — deviation P10-1 supersedes
+  §13-13) and `query/engine.py` plus the new T1 serializers (`task_json`, `custom_event_json`,
+  `custom_field_json`, `user_json`) are covered by the new contract surface:
+  `test_t1_surface.py` (53), `test_unknown_fields.py` (33), `test_authz.py` matrix (131 tests),
+  `test_ledger_keyset.py` (2), `test_thehive_fixtures.py` (13), `test_webhook_hardening.py` (37).
+  Old items (operators, webhook hardening, automation executor, UI views) remain covered.
 
-- [x] **2.2 — mypy strict clean** Plan DoD — **DONE** (88 source files, strict, 0 errors)
+- [x] **2.2 — mypy strict clean** Plan DoD — **DONE** (95 source files, strict, 0 errors)
   The four residue items from the previous listing are resolved via targeted, documented overrides:
   celery (`ignore_missing_imports`), channels `URLRouter` arg-type (runtime-identical class),
   custom field generic bounds (`disallow_any_generics = false` on `cases.numbering`,
-  `observables.hashing`). `make check` runs bare `mypy` and it is green.
+  `observables.hashing`). `make check` runs bare `mypy` and it is green (Phase 8 added `query/` to
+  the pinned scope and it is clean there too).
 
 - [ ] **2.3 — Enforce the one-way dependency rule with a lint check** Brief §0.4, `R3`
   Nothing currently prevents TheHive field-name literals (`_id`, `_createdAt`, `dataType`,
@@ -203,7 +212,7 @@ Postgres (§1.11), and the round-3 H3-2 forward-only migration gap is documented
 
 ## 3. Open decisions
 
-- [ ] **3.1 — Postgres verification** `R4`, `R10`, plan §5 · **Blocks AC3.7 and production; does NOT block Phases 7–10**
+- [x] **3.1 — Postgres verification** `R4`, `R10`, plan §5 · **DONE — verified 2026-10-06, re-confirmed 2026-10-07**
   **Decision 2026-10-03 (user):** proceed with the Phase 3 remediation wave now and verify on SQLite;
   do **not** block on Postgres. The `C1` sequence fix is vendor-guarded precisely so this is possible.
   Nine features still cannot be validated until `docker-compose up -d postgres` runs: GIN, covering
@@ -216,8 +225,9 @@ Postgres (§1.11), and the round-3 H3-2 forward-only migration gap is documented
   **VERIFIED 2026-10-06:** full suite on PostgreSQL 16 → **408 passed, 24 skipped**. Review
   §6(a)–(e) closed (round-3 report; summary: (b) advisory-lock fix + concurrency guard proven to
   bite, (e) new planner guard). AC1.3 (`celery inspect ping` → pong) and AC1.4 (live `/readyz` 200)
-  verified against running Redis. Remaining at this gate: 5.7 Phase 10 (contracts, security pass,
-  verifier) and coverage 78% → 80% (`H3-5`, §2.1).
+  verified against running Redis. Re-confirmed 2026-10-07 at the Phase 8 gate: **470 passed,
+  24 skipped**. Remaining at this gate: 5.7 Phase 10 (contracts, security pass, verifier) and
+  coverage 77% → 80% (`H3-5`, §2.1).
 
 - [x] **3.2 — Multi-tenancy timing** Plan §14 Q4 — **DECIDED 2026-10-06: single-tenant + nullable `Organisation` FK**
   Matches the provisional in the plan and the implemented schema (`User.org` nullable, `SET_NULL`).
@@ -285,7 +295,8 @@ Postgres (§1.11), and the round-3 H3-2 forward-only migration gap is documented
 
 ## 5. Remaining phases
 
-Phases 4–7 and 9 have code in place and pass their gates. Phase 8 and 10 are unstarted. Full
+Phases 4–9 have code in place and pass their gates on SQLite and Postgres. Phase 10 is unstarted.
+Full
 task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §9.
 
 - [x] **5.1 — Phase 4: Ingestion** (AGENTS.md §4.1) — **DONE**
@@ -331,13 +342,26 @@ task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §9.
   Dashboard, alert triage (escalate/merge), case ledger (status, notes, tasks, artifacts), automation
   + sources pages. Session auth, POST-only mutations, CSRF. `test_ui_loop.py` (25).
 
-- [ ] **5.7 — Phase 10: Conformance, Security & Performance**
-  Contract tests per T1 endpoint, `security-auditor` pass, `EXPLAIN` review of the five hot paths,
-  `verifier` pass over every AC.
+- [x] **5.7 — Phase 10: Conformance, Security & Performance** — **DONE (2026-10-07)**
+  Executed as **Phase 10a (T1 surface closure, Option 1 — user-approved)** + this phase per
+  `docs/planning/PLAN-2026-10-07-phase10-t1-closure.md` / `BRIEF-2026-10-07-phase10-t1-closure.md`.
+  Twelve missing T1 endpoint groups implemented (`login`, `logout`, alert/case/observable DELETE,
+  `POST /alert/{id}/observable`, `POST /case/{id}/customEvent`, task detail GET/PATCH/DELETE,
+  customEvent PATCH/DELETE, `GET /customField`, case→alert unlink), `ScopePermission` wired into
+  `DEFAULT_PERMISSION_CLASSES` (read-only keys can no longer mutate), `compat/mappers/` deleted.
+  **Gate:** SQLite `make check` **733 passed / 3 skipped**; Postgres `test_pg` **712 passed /
+  24 skipped**; coverage **83.10%** (≥80 gate); ruff + mypy clean; pip-audit 0 CVEs; bandit no new
+  findings. Security-auditor pass (Wave C) + fix burst: findings F1·F3·F5·F6·F7·F8 fixed; F2/F9
+  (tenant isolation) and F3-observable recorded deferred. EXPLAIN review (Wave D) → AC10.5 MET;
+  `events_after` keyset rewritten (F1); transcripts committed under `docs/perf/`. Verifier pass →
+  VERIFY report; its V1 (slashless `POST /case/{id}/observable` 405 — thehive4py's spelling) and
+  V3–V5 (4 test-pin gaps) **closed** — `docs/planning/VERIFY-2026-10-07-phase10.md`.
+  Deviations P10-1..P10-13 recorded in plan §13.
 
-- [ ] **5.8 — AC1.3 / AC1.4 verification**
-  `celery inspect ping` and `/readyz` 503-when-Redis-down were never exercised — no Redis is running.
-  Verify as part of §3.1.
+- [x] **5.8 — AC1.3 / AC1.4 verification** — **DONE (2026-10-06, via §3.1)**
+  `celery -A amalthea inspect ping` → `pong, 1 node online` and live `/readyz` → 200
+  (`{"status": "ok"}`) with Redis up; the 503-when-Redis-down path stays covered by
+  `test_readyz_fails_when_redis_is_unreachable`.
 
 - [x] **5.9 — §3.1 Postgres gate executed (2026-10-06)** — see §3.1
   Full suite on real PostgreSQL 16: **408 passed, 24 skipped, 0 failures**. Review §6 (a)–(e) all
@@ -373,7 +397,9 @@ task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §9.
 - [ ] **7.2 — Keep the domain-expert gate on every phase, not just Phase 3**
   The `db-postgres` review found 4 Criticals and refuted 2 of the planner's own 4 findings. The
   division of labour (planner proposes, expert verifies with evidence, planner amends the plan) is
-  what caught these. Schedule the expert gate for Phase 7 and Phase 8 alongside the code review.
+  what caught these. Phases 7–9 shipped without a full expert gate (Phase 8 had the live AC8.4
+  thehive4py gate, which did catch three real gaps — P8-5/P8-6/P8-7); the process intent stands for
+  Phase 10 and beyond.
 
 - [ ] **7.3 — Require subagents to deliver the report they promise**
   Twice an agent stated a detailed report "follows in the final response" and never produced it, and

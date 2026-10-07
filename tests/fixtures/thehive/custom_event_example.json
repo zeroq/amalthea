@@ -1,0 +1,14 @@
+{
+  "_id": "~24568324",
+  "id": "~24568324",
+  "_type": "CustomEvent",
+  "_createdBy": "lucas@example.com",
+  "_updatedBy": "emma@example.com",
+  "_createdAt": 1737020400000,
+  "_updatedAt": 1737025800000,
+  "date": 1737020400000,
+  "endDate": 1737025800000,
+  "title": "Ransom demand received via email",
+  "description": "Attacker sent a ransom demand to the security team requesting payment in exchange for the decryption key.",
+  "caseId": "~98112"
+}

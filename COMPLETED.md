@@ -367,3 +367,64 @@ reported.
 - [x] Final gate: SQLite `make check` **491 passed / 3 skipped**; Postgres `test_pg`
   **470 passed / 24 skipped** (query suite is 50 tests). mypy/ruff clean; `makemigrations
   --check` clean (query app adds no models).
+
+## 2026-10-07 — Phase 10a: T1 surface closure + Phase 10: Conformance, Security & Performance
+
+Plans: `docs/planning/PLAN-2026-10-07-phase10-t1-closure.md` /
+`BRIEF-2026-10-07-phase10-t1-closure.md`. User-approved **Option 1**: implement the missing T1
+endpoints rather than shrink the contract (AC10.1/AC10.3 required them to exist).
+
+- [x] **The twelve missing T1 groups now exist.** `POST /api/v1/login`; `GET/POST /logout`;
+  `DELETE /alert/{id}`; `POST /alert/{id}/observable` (links `AlertObservable`, no automation
+  dispatch at link time — the case path owns that); `DELETE /case/{id}` (alerts survive via
+  `SET_NULL`, tasks/links/timeline/customFieldValues cascade); `DELETE /case/{id}/alert/{alertId}`
+  (unlink + `alert-removed` ledger entry); `POST /case/{caseId}/customEvent`;
+  `GET/PATCH/DELETE /task/{taskId}` (task statuses are the model's `Waiting/InProgress/Done`);
+  `PATCH/DELETE /customEvent/{eventId}` (system kinds → 400); `GET /customField`;
+  `PATCH/DELETE /observable/{id}`. New serializers `task_json`, `custom_event_json`,
+  `custom_field_json`, `user_json` in `core/serializers.py`. All mutations scoped via
+  `ScopePermission` wired into `DEFAULT_PERMISSION_CLASSES` (P10-z); read-only keys now 403 on every
+  mutable verb including `POST /api/v1/query`.
+- [x] **`compat/mappers/` deleted** (P10-a): nine empty stub files, zero importers — dead weight
+  that blocked the coverage gate (supersedes §13-13). Wire rendering lives only in
+  `core/serializers.py`.
+- [x] **Conformance surface added.** `test_t1_surface.py` (42 contract tests), `test_unknown_fields.py`
+  (33, unknown-field policy), `test_authz.py` rewritten as a 31-route × 4-actor matrix (125 rows),
+  `test_thehive_fixtures.py` rewritten with pinned keys (13), new golden fixtures
+  (task/custom_event/custom_field/user/alert_observable). Two latent bugs found and fixed:
+  `case_task_create` defaulted `"Todo"` (violates the PG CHECK constraint; now `"Waiting"`) and a
+  `@api_view` decorator misuse that 500'd every task creation.
+- [x] **Security-auditor pass (Wave C) + fix burst.** F1 (login type-hostility + exception-text
+  leak), F3 (unbounded customEvent title), F5 (`parse_timestamp` inf/nan 500), F6 (envelope echoes
+  `str(exc)`), F7/F8 test/doc pins — **fixed**. F2 (org-blind case/alert resolution) and F9 (prod
+  cookie/secret hardening) **recorded, deferred to the tenant-isolation follow-up** (nothing sets
+  `owner_org` today), alongside the F3-observable blast-radius belt suggestion. pip-audit 0 CVEs;
+  bandit no new findings.
+- [x] **Postgres EXPLAIN review (Wave D) → AC10.5 MET.** All five hot paths index-driven (<2ms at
+  6k alerts / 29k timeline / 5.8k automation-run seed on scratch DB `amalthea_perf`).
+  `events_after` keyset rewritten (range predicate + negated tie-break) — D-F1 was filtering
+  12,501 rows for a 50-row page on PG, invisible on SQLite. `test_ledger_keyset.py` pins the
+  semantics. Borderline D-F2 (one case owning ~86% of the timeline) recorded; mitigation = paging.
+- [x] **Final gate (2026-10-07):** SQLite `make check` **724 passed / 3 skipped** (baseline 491/3);
+  Postgres `test_pg` **703 passed / 24 skipped** (baseline 470/24); coverage **83.07%** (gate
+  ≥80 — TODO §2.1 DONE); ruff check + format clean (164 files); mypy clean (86 files);
+  `makemigrations --check` clean (no new migrations). Deviations P10-1..P10-11 recorded in plan §13;
+  verifier report: `docs/planning/VERIFY-2026-10-07-phase10.md`.
+- [x] **Verifier closure (2026-10-07).** The read-only verify pass (23 Met / 2 Deviated / 0 Not Met)
+  surfaced one real interop defect and four test gaps, all now closed:
+  - **V1 — slashless `POST /api/v1/case/{id}/observable` answered 405** — the exact spelling
+    thehive4py 2.1.0 posts (`endpoints/observable.py:38`). The pre-wave route split served GET on
+    the slashless path and POST on the slashed one; both spellings now resolve to one GET+POST
+    dispatcher (`case_observable_list` / undecorated `case_observable_add` helper, the
+    `case_task_list` pattern). DRF `MethodNotAllowed` also now maps to a fixed `BadRequest`
+    envelope instead of stringifying `ErrorDetail` into `GenericError` (`compat/errors.py`).
+    Pinned by `test_case_observable_post_slashless_is_the_spelling_thehive4py_uses`.
+  - **V3/V4 — three untested §7.2 rows pinned:** `POST /logout` (parametrised over GET+POST),
+    `POST /alert/{id}/import/{caseId}`, the array-`data` branch of `POST /alert/{id}/observable`.
+  - **V5 — two matrix gaps pinned:** `alert-import-into` added to the authz matrix; the
+    per-IP webhook counter got `test_throttling_is_per_ip_not_global`; the
+    `case-observable-create` authz + unknown-field rows now post **slashless** (the real spelling).
+  - **Durability:** the five `EXPLAIN` transcripts moved from ephemeral `/tmp` to committed
+    `docs/perf/`. Deviations P10-12/P10-13 record all of it.
+  **Post-closure gate:** SQLite `make check` **733 passed / 3 skipped**; Postgres `test_pg`
+  **712 passed / 24 skipped**; coverage **83.10%**; ruff + mypy clean.

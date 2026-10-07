@@ -1,0 +1,21 @@
+{
+  "_id": "~84123",
+  "id": "~84123",
+  "_type": "Task",
+  "_createdBy": "alice@example.com",
+  "_updatedBy": "lucas@example.com",
+  "_createdAt": 1748476800000,
+  "_updatedAt": 1748563200000,
+  "title": "Isolate affected workstation from the network",
+  "group": "Containment",
+  "description": "Disconnect CORP-LAPTOP-056 from the network immediately.",
+  "status": "InProgress",
+  "flag": false,
+  "startDate": 1748476800000,
+  "endDate": 1748563200000,
+  "order": 0,
+  "dueDate": 1748563200000,
+  "assignee": "sami@example.com",
+  "mandatory": false,
+  "extraData": {}
+}

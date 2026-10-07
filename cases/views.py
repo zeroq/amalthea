@@ -13,8 +13,10 @@ timeline a decoration, and the choke point is what keeps it published as well as
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, renderer_classes
@@ -22,13 +24,27 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from alerts.escalation import link_case_from_identifier, resolve_case_status
+from alerts.escalation import (
+    link_alert_from_identifier,
+    link_case_from_identifier,
+    resolve_case_status,
+)
+from alerts.models import Alert
 from cases.ledger import append_timeline_event
-from cases.models import Case, Task, TimelineEvent
-from compat.time import to_epoch_ms
-from core.serializers import case_json, observable_json
+from cases.models import Case, CustomField, Task, TimelineEvent
+from compat.time import parse_timestamp, to_epoch_ms
+from core.enums import TASK_STATUS_CHOICES
+from core.serializers import (
+    case_json,
+    custom_event_json,
+    custom_field_json,
+    observable_json,
+    task_json,
+)
 from observables.extractor import add_observable, extract_into_case
-from observables.models import Observable
+from observables.models import Observable, ObservableType
+
+_TASK_STATUSES = tuple(choice for choice, _label in TASK_STATUS_CHOICES)
 
 
 def _actor(request: Request) -> Any:
@@ -42,11 +58,43 @@ def _not_found(what: str) -> Response:
     )
 
 
+def _bad(message: str, fields: dict[str, list[str]]) -> Response:
+    return Response(
+        {"type": "BadRequest", "message": message, "fields": fields},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
 def _resolve_case(identifier: str) -> Case | None:
     try:
         return link_case_from_identifier(identifier)
     except Case.DoesNotExist:
         return None
+
+
+def _as_uuid(value: Any) -> UUID | None:
+    """Parse a path segment as a UUID without letting a malformed one reach the ORM.
+
+    `filter(pk="not-a-uuid")` raises `ValidationError` out of the query compiler, which the
+    exception handler does not map — a 500 where the contract promises a 404. Parsing here
+    keeps "not found" and "malformed" the same honest answer at the path boundary.
+    """
+    try:
+        return UUID(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _case_org_scope(request: Request) -> Q:
+    """Org guard for rows reached *through* a case (deviation **P10-w**).
+
+    A row whose case belongs to no organisation is visible to every authenticated caller —
+    every API-created case today is org-NULL, so gating on `= user.org` alone would make
+    every task lookup a 404 and turn the guard into a lock-out rather than a control. A row
+    whose case *is* org-owned is visible only inside that organisation.
+    """
+    org_id = getattr(getattr(request, "user", None), "org_id", None)
+    return Q(case__owner_org__isnull=True) | Q(case__owner_org_id=org_id)
 
 
 @api_view(["GET", "POST"])
@@ -69,10 +117,10 @@ def case_collection(request: Request) -> Response:
     return Response([case_json(c) for c in queryset[:200]])
 
 
-@api_view(["GET", "PATCH", "PUT"])
+@api_view(["GET", "PATCH", "PUT", "DELETE"])
 @renderer_classes([JSONRenderer])
 def case_detail(request: Request, case_id: str) -> Response:
-    """`GET|PATCH /api/v1/case/{idOrNumber}` — read the case, or change it.
+    """`GET|PATCH|DELETE /api/v1/case/{idOrNumber}` — read, change, or delete the case.
 
     Read returns observables, timeline and automation runs attached: the MVP proof is "the
     playbook's output is visible on the case timeline", and a client that needs four calls to see
@@ -81,10 +129,19 @@ def case_detail(request: Request, case_id: str) -> Response:
     The write half handles the status transition the triage queue is built on, and writes a
     `TimelineEvent` **in the same transaction** — a status change that is not on the ledger makes
     the ledger a decoration.
+
+    DELETE is 5.8.0's "permanently delete" (plan §13 non-goals, deviation **P10-c**): the case row
+    and its CASCADE children (tasks, ledger, observable links, custom-field values) go, while the
+    alerts point here by `SET_NULL` — they survive, unlinked, with their own evidence intact. No
+    ledger entry is written: the ledger dies with the case, and writing one first would be a
+    tombstone nobody can read.
     """
     case = _resolve_case(case_id)
     if case is None:
         return _not_found("Case")
+    if request.method == "DELETE":
+        case.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
     if request.method in ("PATCH", "PUT"):
         return _update_case(request, case)
     return Response(case_json(case, detail=True))
@@ -180,10 +237,16 @@ def _update_case(request: Request, case: Case) -> Response:
     return Response(case_json(case, detail=True))
 
 
-@api_view(["POST"])
-@renderer_classes([JSONRenderer])
 def case_task_create(request: Request, case_id: str) -> Response:
-    """`POST /api/v1/case/{idOrNumber}/task` — add a task to the case."""
+    """`POST /api/v1/case/{idOrNumber}/task` — add a task to the case.
+
+    Deliberately *not* `@api_view`-decorated: this is an inner helper that `case_task_list`
+    calls with the request it already holds. Wrapping it would make it a fresh
+    `WrappedAPIView.as_view()`, and calling that with a DRF `Request` runs
+    `initialize_request()` on it — `Request.__init__` then asserts `isinstance(request,
+    HttpRequest)` and the endpoint answers 500 for every POST. The route is registered once,
+    against `case_task_list`, which dispatches GET/POST itself.
+    """
     case = _resolve_case(case_id)
     if case is None:
         return _not_found("Case")
@@ -201,7 +264,9 @@ def case_task_create(request: Request, case_id: str) -> Response:
     task = Task.objects.create(
         case=case,
         title=title[:500],
-        status=str(payload.get("status") or "Todo"),
+        # Was `"Todo"`, which is not in `TASK_STATUS_CHOICES` and violates the
+        # `task_status_valid` CHECK on Postgres (plan §13 bug fix, A3).
+        status=str(payload.get("status") or "Waiting"),
     )
     return Response(
         {"_id": str(task.id), "id": str(task.id), "title": task.title, "status": task.status},
@@ -236,10 +301,133 @@ def case_task_list(request: Request, case_id: str) -> Response:
     )
 
 
-@api_view(["POST"])
+@api_view(["GET", "PATCH", "DELETE"])
 @renderer_classes([JSONRenderer])
+def task_detail(request: Request, task_id: str) -> Response:
+    """`GET|PATCH|DELETE /api/v1/task/{taskId}` — one task, T1 detail (plan §7.2).
+
+    Org-scoped through the owning case (`_case_org_scope`, deviation **P10-w**): a task's UUID
+    is guessable-shaped like any other id, and the id must not become a cross-organisation read
+    path the moment `owner_org` starts being set.
+
+    PATCH is "no field, no write" (ADR D11): only keys present in the body are touched, an
+    empty body is a 400 naming that nothing arrived, and `status` is validated against
+    `TASK_STATUS_CHOICES` rather than left for the database CHECK to turn into a 500.
+    """
+    task = _lookup_task(request, task_id)
+    if task is None:
+        return _not_found("Task")
+    if request.method == "DELETE":
+        task.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    if request.method == "PATCH":
+        return _update_task(request, task)
+    return Response(task_json(task))
+
+
+def _lookup_task(request: Request, task_id: str) -> Task | None:
+    pk = _as_uuid(task_id)
+    if pk is None:
+        return None
+    return (
+        Task.objects.select_related("case", "assignee")
+        .filter(pk=pk)
+        .filter(_case_org_scope(request))
+        .first()
+    )
+
+
+@transaction.atomic
+def _update_task(request: Request, task: Task) -> Response:
+    payload = request.data if isinstance(request.data, dict) else {}
+    fields: list[str] = []
+
+    if "title" in payload:
+        title = str(payload["title"] or "").strip()
+        if not title:
+            return _bad("title is required", {"title": ["required"]})
+        task.title = title[:500]
+        fields.append("title")
+    for key in ("description", "group"):
+        if key in payload:
+            setattr(task, key, str(payload[key] or ""))
+            fields.append(key)
+    if "flag" in payload:
+        task.flag = bool(payload["flag"])
+        fields.append("flag")
+    if "mandatory" in payload:
+        task.mandatory = bool(payload["mandatory"])
+        fields.append("mandatory")
+    if "order" in payload:
+        try:
+            task.order = int(payload["order"])
+        except (TypeError, ValueError):
+            return _bad("order must be an integer", {"order": ["must be an integer"]})
+        fields.append("order")
+    if "status" in payload:
+        value = str(payload["status"])
+        if value not in _TASK_STATUSES:
+            return _bad(
+                f"unknown status {payload['status']!r}",
+                {"status": [f"must be one of {', '.join(_TASK_STATUSES)}"]},
+            )
+        task.status = value
+        fields.append("status")
+    for key, attr in (
+        ("dueDate", "due_date"),
+        ("startDate", "started_at"),
+        ("endDate", "ended_at"),
+    ):
+        if key not in payload:
+            continue
+        moment = parse_timestamp(payload[key])
+        if moment is None and payload[key] is not None:
+            return _bad(f"{key} is not a valid timestamp", {key: ["invalid timestamp"]})
+        setattr(task, attr, moment)
+        fields.append(attr)
+    if "assignee" in payload:
+        task.assignee = _resolve_login(payload["assignee"])
+        fields.append("assignee")
+
+    if not fields:
+        return _bad("No updatable field supplied", {})
+    task.save(update_fields=[*fields, "updated_at"])
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _resolve_login(value: Any) -> Any:
+    """Login string → user (parity with `_update_case`); empty/`null` unassigns.
+
+    An unknown login unassigns rather than raising: ADR D11 refuses to auto-create a user
+    per unrecognised wire value, so the only safe readings of "not a user" are "nobody". The
+    UUID fallback is parsed first because `filter(pk="not-a-uuid")` raises `ValidationError`
+    out of the query compiler — an unassigned task must not become a 500.
+    """
+    if not value:
+        return None
+    from identity.models import User
+
+    candidate = User.objects.filter(login=str(value)).first()
+    if candidate is not None:
+        return candidate
+    pk = _as_uuid(value)
+    return User.objects.filter(pk=pk).first() if pk is not None else None
+
+
 def case_observable_add(request: Request, case_id: str) -> Response:
-    """`POST /api/v1/case/{idOrNumber}/observable` — attach one artifact, or re-run extraction."""
+    """`POST /api/v1/case/{idOrNumber}/observable` — attach one artifact, or re-run extraction.
+
+    A plain helper rather than its own route (the `case_task_create` pattern): the collection
+    is served by one view, `case_observable_list`, which dispatches GET/POST itself. That keeps
+    both spellings — the slashless one thehive4py posts, and the slashed one — on the same
+    handler, so POST can never 405 on a spelling that resolves (verifier V1).
+
+    Deliberately *not* `@api_view`-decorated: wrapping it would make it a fresh
+    `WrappedAPIView.as_view()`, and calling that with a DRF `Request` runs
+    `initialize_request()` on it — `Request.__init__` then asserts `isinstance(request,
+    HttpRequest)` and the endpoint answers 500 for every POST. Exactly the trap
+    `case_task_create` documents; the two helpers must stay undecorated together.
+    """
     case = _resolve_case(case_id)
     if case is None:
         return _not_found("Case")
@@ -263,15 +451,115 @@ def case_observable_add(request: Request, case_id: str) -> Response:
     return Response([observable_json(link) for link in links])
 
 
-@api_view(["GET"])
+@api_view(["GET", "POST"])
 @renderer_classes([JSONRenderer])
 def case_observable_list(request: Request, case_id: str) -> Response:
-    """`GET /api/v1/case/{idOrNumber}/observable`."""
+    """`GET` lists a case's observables; `POST` attaches one and lists the result.
+
+    Both verbs share the route *and* the view, mirroring `case_task_list`. Registering GET on
+    the slashless spelling and POST on the slashed one (the pre-verifier split) made
+    `POST /api/v1/case/{id}/observable` — the exact spelling thehive4py 2.1.0 sends — answer
+    405, because Django resolves the slashless path to the GET view before APPEND_SLASH can
+    redirect. One view, both spellings: no spelling can 405.
+    """
+    if request.method == "POST":
+        return case_observable_add(request, case_id)
     case = _resolve_case(case_id)
     if case is None:
         return _not_found("Case")
     links = case.case_observables.select_related("observable__data_type").order_by("-created_at")
     return Response([observable_json(link) for link in links])
+
+
+@api_view(["DELETE"])
+@renderer_classes([JSONRenderer])
+def case_alert_remove(request: Request, case_id: str, alert_id: str) -> Response:
+    """`DELETE /api/v1/case/{idOrNumber}/alert/{alertId}` — unlink, do not destroy (204).
+
+    The distinction is the whole endpoint: the alert keeps its row, its `raw_payload` and its
+    `source_ref`, and only the `case` FK is cleared — deleting it here would take the evidence
+    with it. The removal lands in the *case's* ledger (the case outlives the link, so a reader
+    of the case can still see the alert left), because a silently shrinking alert list is how a
+    team loses track of what it already triaged.
+    """
+    case = _resolve_case(case_id)
+    if case is None:
+        return _not_found("Case")
+    alert = _lookup_alert_for_case(case, alert_id)
+    if isinstance(alert, Response):
+        return alert
+    alert.case = None
+    alert.save(update_fields=["case", "updated_at"])
+    append_timeline_event(
+        case,
+        title=f"Alert removed: {alert.title}",
+        kind="alert-removed",
+        actor=_actor(request),
+        metadata={"alert_id": str(alert.id)},
+    )
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _lookup_alert_for_case(case: Case, alert_id: str) -> Alert | Response:
+    """Resolve `alert_id` inside `case`, or the 404 response to hand straight back.
+
+    Resolved through `link_alert_from_identifier` so a UUID and an unambiguous `source_ref`
+    behave exactly as they do on `/api/v1/alert/{alertId}`; "exists but linked elsewhere" and
+    "does not exist" are the same 404 here, because the endpoint's contract is about *this*
+    case's membership and neither answer should leak the other case's contents.
+    """
+    try:
+        alert = link_alert_from_identifier(alert_id)
+    except Alert.DoesNotExist:
+        return _not_found("Alert")
+    except Alert.MultipleObjectsReturned:
+        return _not_found("Alert")
+    if alert.case_id != case.pk:
+        return _not_found("Alert")
+    return alert
+
+
+@api_view(["POST"])
+@renderer_classes([JSONRenderer])
+def case_custom_event_create(request: Request, case_id: str) -> Response:
+    """`POST /api/v1/case/{idOrNumber}/customEvent` — write one ledger entry (201).
+
+    `InputCustomEvent` requires `date` (epoch-ms) and `title`; the caller's `date` is the row's
+    `date`, not the server clock, because an event back-dated to when the incident actually
+    happened is the point of a timeline. It therefore has to be set **before** the row exists —
+    `append_timeline_event` publishes the row it created, and patching the date afterwards would
+    broadcast a timestamp the ledger no longer holds.
+    """
+    case = _resolve_case(case_id)
+    if case is None:
+        return _not_found("Case")
+    payload = request.data if isinstance(request.data, dict) else {}
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        return _bad("title is required", {"title": ["required"]})
+    if payload.get("date") is None:
+        return _bad("date is required", {"date": ["required"]})
+    event_date = parse_timestamp(payload["date"])
+    if event_date is None:
+        return _bad("date is not a valid timestamp", {"date": ["invalid timestamp"]})
+    end_date = None
+    if payload.get("endDate") is not None:
+        end_date = parse_timestamp(payload["endDate"])
+        if end_date is None:
+            return _bad("endDate is not a valid timestamp", {"endDate": ["invalid timestamp"]})
+    event = append_timeline_event(
+        case,
+        # `TimelineEvent.title` is CharField(max_length=500): SQLite lets a longer value
+        # through, Postgres raises a DataError (auditor F4), so the bound lives at the write
+        # exactly where `case_task_create` puts it.
+        title=title[:500],
+        description=str(payload.get("description") or ""),
+        kind="custom",
+        actor=_actor(request),
+        date=event_date,
+        end_date=end_date,
+    )
+    return Response(custom_event_json(event), status=status.HTTP_201_CREATED)
 
 
 # Ledger kind → TheHive `OutputTimelineEvent.kind`. The 5.8.0 vocabulary has no spelling for
@@ -327,13 +615,168 @@ def case_timeline(request: Request, case_id: str) -> Response:
     return Response({"events": [_timeline_event_wire(event) for event in events]})
 
 
+@api_view(["PATCH", "DELETE"])
+@renderer_classes([JSONRenderer])
+def custom_event_detail(request: Request, event_id: str) -> Response:
+    """`PATCH|DELETE /api/v1/customEvent/{eventId}` — one *analyst-authored* ledger entry.
+
+    Only `kind="custom"` rows are writable. Every other kind is a system row — a status
+    transition, an import, an automation result — and an API client that could delete one would
+    be able to erase the audit trail the ledger exists to be. The refusal is a 400 naming the
+    rule rather than a 403: the operation is invalid *for that row*, not a permission the caller
+    lacks (plan §8).
+    """
+    event = _lookup_custom_event(request, event_id)
+    if event is None:
+        return _not_found("CustomEvent")
+    if event.kind != "custom":
+        return _bad(
+            "Only custom events can be updated or deleted",
+            {"_id": [f"ledger kind {event.kind!r} is system-managed"]},
+        )
+    if request.method == "DELETE":
+        event.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    return _update_custom_event(event, request)
+
+
+def _lookup_custom_event(request: Request, event_id: str) -> TimelineEvent | None:
+    pk = _as_uuid(event_id)
+    if pk is None:
+        return None
+    return (
+        TimelineEvent.objects.select_related("case")
+        .filter(pk=pk)
+        .filter(_case_org_scope(request))
+        .first()
+    )
+
+
+@transaction.atomic
+def _update_custom_event(event: TimelineEvent, request: Request) -> Response:
+    payload = request.data if isinstance(request.data, dict) else {}
+    fields: list[str] = []
+    for key in ("title", "description"):
+        if key in payload:
+            value = str(payload[key] or "")
+            if key == "title":
+                if not value.strip():
+                    return _bad("title is required", {"title": ["required"]})
+                # CharField(max_length=500): bound it here like `case_task_create`, because
+                # Postgres enforces the length and SQLite does not (auditor F4).
+                value = value[:500]
+            setattr(event, key, value)
+            fields.append(key)
+    for key, attr in (("date", "date"), ("endDate", "end_date")):
+        if key not in payload:
+            continue
+        moment = parse_timestamp(payload[key])
+        if moment is None:
+            return _bad(f"{key} is not a valid timestamp", {key: ["invalid timestamp"]})
+        setattr(event, attr, moment)
+        fields.append(attr)
+    if not fields:
+        return _bad("No updatable field supplied", {})
+    event.save(update_fields=[*fields, "updated_at"])
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 @api_view(["GET"])
 @renderer_classes([JSONRenderer])
+def custom_field_list(request: Request) -> Response:
+    """`GET /api/v1/customField` — the field definitions a client renders values against.
+
+    Definitions are organisation-neutral by design (plan §4: one `CustomField` serves both case
+    and alert values), so this is the rare list that is deliberately *not* org-scoped: a field a
+    case already carries must render for whoever opens that case.
+    """
+    return Response(
+        [custom_field_json(field) for field in CustomField.objects.all().order_by("name")]
+    )
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@renderer_classes([JSONRenderer])
 def observable_detail(request: Request, observable_id: str) -> Response:
-    """`GET /api/v1/observable/{id}` — one artifact plus the cases it appears in (Module C)."""
-    observable = Observable.objects.select_related("data_type").filter(pk=observable_id).first()
+    """`GET|PATCH|DELETE /api/v1/observable/{id}` — one artifact plus the cases it appears in.
+
+    PATCH/DELETE are deliberately **not** org-scoped (plan §5, A5): an `Observable` is globally
+    deduplicated (Module C), so the same row is shared by every case that ever saw the value and
+    an org filter would let one organisation edit — or refuse to edit — evidence another owns.
+    The permission check is therefore the auth-level one (authenticated, writable key), exactly
+    as the GET half has always been.
+
+    `dataType` is the interesting PATCH field: re-typing changes the case-fold rule the identity
+    digest is taken under, and `Observable.save()` re-hashes `data_hash` in the same write —
+    without which `(data_type, data_hash)` would still describe the old type and the unique
+    constraint would admit a duplicate of a value already on file.
+    """
+    pk = _as_uuid(observable_id)
+    if pk is None:
+        return _not_found("Observable")
+    observable = Observable.objects.select_related("data_type").filter(pk=pk).first()
     if observable is None:
         return _not_found("Observable")
+    if request.method == "DELETE":
+        observable.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    if request.method == "PATCH":
+        return _update_observable(observable, request)
+    return _observable_detail_payload(observable)
+
+
+@transaction.atomic
+def _update_observable(observable: Observable, request: Request) -> Response:
+    """Apply `InputUpdateObservable`'s fields. Only-present, no field, no write.
+
+    Returns 204 (the recorded OpenAPI, and what thehive4py's `observable.update()` reads as
+    `None`) rather than the echoed body the alert/case PATCHes return — the two surfaces were
+    recorded from different operations and are kept as recorded.
+    """
+    payload = request.data if isinstance(request.data, dict) else {}
+    fields: list[str] = []
+
+    if "dataType" in payload:
+        obs_type = ObservableType.objects.filter(name=str(payload["dataType"])).first()
+        if obs_type is None:
+            return _bad(
+                f"unknown dataType {payload['dataType']!r}",
+                {"dataType": ["not in the observable vocabulary"]},
+            )
+        observable.data_type = obs_type
+        fields.append("data_type")
+    if "message" in payload:
+        observable.message = str(payload["message"] or "")
+        fields.append("message")
+    for key in ("tlp", "pap"):
+        if key in payload:
+            try:
+                value = int(payload[key])
+            except (TypeError, ValueError):
+                value = -1
+            if not 0 <= value <= 3:
+                return _bad(
+                    f"{key} must be an integer between 0 and 3",
+                    {key: ["must be an integer between 0 and 3"]},
+                )
+            setattr(observable, key, value)
+            fields.append(key)
+    for key, attr in (
+        ("ioc", "ioc"),
+        ("sighted", "sighted"),
+        ("ignoreSimilarity", "ignore_similarity"),
+    ):
+        if key in payload:
+            setattr(observable, attr, bool(payload[key]))
+            fields.append(attr)
+
+    if not fields:
+        return _bad("No updatable field supplied", {})
+    observable.save(update_fields=[*fields, "updated_at"])
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _observable_detail_payload(observable: Observable) -> Response:
     payload = {
         "_id": str(observable.id),
         "id": str(observable.id),
@@ -357,12 +800,17 @@ def observable_detail(request: Request, observable_id: str) -> Response:
 
 
 __all__ = [
+    "case_alert_remove",
     "case_collection",
+    "case_custom_event_create",
     "case_detail",
     "case_observable_add",
     "case_observable_list",
     "case_task_create",
     "case_task_list",
     "case_timeline",
+    "custom_event_detail",
+    "custom_field_list",
     "observable_detail",
+    "task_detail",
 ]

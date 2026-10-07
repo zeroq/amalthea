@@ -108,6 +108,14 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
+        # Read-only API keys must fail closed on every mutating verb (plan §11-5, deviation
+        # P10-z). The class was defined in Phase 8 but never listed here, so `scope="read"`
+        # could PATCH/POST/DELETE exactly like a readwrite key. It runs *after*
+        # `IsAuthenticated`, so an anonymous caller is still a 401 and never reaches it.
+        # `ScopePermission` returns True for anything that is not a read-scoped ApiKey, so
+        # session and basic auth are unaffected; `login`/`logout` carry an explicit `AllowAny`,
+        # which replaces this list outright for those two views.
+        "compat.auth.ScopePermission",
     ],
     "DEFAULT_PAGINATION_CLASS": None,
     "PAGE_SIZE": None,

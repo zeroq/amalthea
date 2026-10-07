@@ -1,0 +1,13 @@
+{
+  "_id": "~192024",
+  "_type": "user",
+  "_createdBy": "admin@example.com",
+  "_createdAt": 1748739600000,
+  "login": "lucas@example.com",
+  "name": "Sami Analyst",
+  "org": "TheOrganization",
+  "hasKey": true,
+  "hasPassword": true,
+  "hasMFA": false,
+  "locked": false
+}

@@ -21,6 +21,7 @@ defined once, next to the write, instead of once per consumer.
 
 from __future__ import annotations
 
+from datetime import datetime
 from functools import partial
 from typing import Any
 from uuid import UUID
@@ -43,6 +44,8 @@ def append_timeline_event(
     description: str = "",
     actor: User | None = None,
     metadata: dict[str, Any] | None = None,
+    date: datetime | None = None,
+    end_date: datetime | None = None,
 ) -> TimelineEvent:
     """Write one ledger entry and publish it to the case room once it is durable.
 
@@ -50,13 +53,21 @@ def append_timeline_event(
     create a row that is invisible to every live client, which is the failure this module exists to
     make unrepresentable.
 
+    `date` defaults to *now* for the events the system itself emits (a status change happened
+    now), but a `POST .../customEvent` carries the caller's own timestamp — an entry back-dated to
+    when the incident occurred is the entire reason that endpoint exists. Both are passed to
+    `objects.create` rather than assigned afterwards so the published payload and the stored row
+    are the same instant: mutating `date` after the fact would broadcast one timestamp and
+    persist another.
+
     `kind` doubles as the publish `event_type` — one vocabulary for "what happened" in the
     database, on the wire and in the timeline's CSS class, so a new event type needs no second
     mapping table.
     """
     event = TimelineEvent.objects.create(
         case=case,
-        date=timezone.now(),
+        date=date if date is not None else timezone.now(),
+        end_date=end_date,
         title=title,
         description=description,
         kind=kind,
@@ -100,5 +111,12 @@ def events_after(
     # Keyset, not OFFSET: two events sharing a microsecond (automation writes several at once) make
     # row-number pagination skip or repeat, and "no duplicates" is AC7.4. `id` breaks the tie and
     # UUIDv4 ordering is consistent between SQLite's text storage and PostgreSQL's uuid type.
-    keyset = Q(date__gt=anchor.date) | Q(date=anchor.date, id__gt=anchor.id)
+    #
+    # Written as a range plus a negated tie-break rather than `date > a | (date = a & id > a)`:
+    # the two forms are logically identical, but only this one lets Postgres fold `date__gte`
+    # into an `Index Cond` on `timeline_case_date_idx` instead of filtering every row of the
+    # case (perf review Wave D-F1: 12,501 filtered rows → 1 on a 25k ledger). The anchor row
+    # itself and every same-date sibling with a lower or equal id are excluded — the return
+    # stays *strictly after* the anchor, exactly as before.
+    keyset = Q(date__gte=anchor.date) & ~Q(date=anchor.date, id__lte=anchor.id)
     return events.filter(keyset).order_by("date", "id")

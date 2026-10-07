@@ -17,6 +17,9 @@ urlpatterns = [
     path("alert/", views.alert_list, name="alert-list-slash"),
     path("alert/<str:alert_id>/raw", views.alert_raw, name="alert-raw"),
     path("alert/<str:alert_id>/import", views.alert_import, name="alert-import"),
+    path(
+        "alert/<str:alert_id>/observable", views.alert_observable_add, name="alert-observable-add"
+    ),
     path("alert/<str:alert_id>/merge/<str:case_id>", views.alert_merge, name="alert-merge"),
     path("alert/<str:alert_id>/import/<str:case_id>", views.alert_merge, name="alert-import-into"),
     path("alert/<str:alert_id>", views.alert_detail, name="alert-detail"),

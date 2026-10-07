@@ -1,0 +1,15 @@
+{
+  "_id": "~123456789",
+  "_type": "customField",
+  "_createdBy": "emma@example.com",
+  "_createdAt": 1735732800000,
+  "name": "threat-type",
+  "displayName": "Threat Type",
+  "group": "Classification",
+  "description": "Type of threat detected in the case.",
+  "type": "string",
+  "options": ["Malware", "Intrusion", "Data Leak"],
+  "order": 0,
+  "mandatory": true,
+  "extraData": {}
+}

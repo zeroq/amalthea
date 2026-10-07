@@ -1,0 +1,414 @@
+
+====================================================================================================
+### HOT-1a Alert queue (spec shape): filter(status=<FK>) ORDER BY date DESC
+--- SQL (as sent by the ORM) ---
+SELECT "alert"."id", "alert"."created_at", "alert"."updated_at", "alert"."type", "alert"."source", "alert"."source_ref", "alert"."external_link", "alert"."title", "alert"."description", "alert"."severity", "alert"."status_id", "alert"."date", "alert"."flag", "alert"."tlp", "alert"."pap", "alert"."summary", "alert"."assignee_id", "alert"."raw_payload", "alert"."correlation_key", "alert"."ingestion_source_id", "alert"."case_id", "alert"."follow", "alert"."ingestion_warnings", "alert"."owner_org_id", "alert_status"."id", "alert_status"."created_at", "alert_status"."updated_at", "alert_status"."value", "alert_status"."stage", "alert_status"."order", "alert_status"."description", "alert_status"."hidden", "case_record"."id", "case_record"."created_at", "case_record"."updated_at", "case_record"."number", "case_record"."title", "case_record"."description", "case_record"."severity", "case_record"."status_id", "case_record"."assignee_id", "case_record"."flag", "case_record"."tlp", "case_record"."pap", "case_record"."summary", "case_record"."start_date", "case_record"."end_date", "case_record"."closed_date", "case_record"."owner_org_id", "case_record"."ingestion_warnings" FROM "alert" INNER JOIN "alert_status" ON ("alert"."status_id" = "alert_status"."id") LEFT OUTER JOIN "case_record" ON ("alert"."case_id" = "case_record"."id") WHERE "alert"."status_id" = %s ORDER BY "alert"."date" DESC
+--- params ---
+(UUID('4f850ba2-d418-4d7d-a84f-5026bb6a3b09'),)
+--- plan ---
+Sort  (cost=221.65..222.40 rows=300 width=454) (actual time=0.259..0.268 rows=300 loops=1)
+  Sort Key: alert.date DESC
+  Sort Method: quicksort  Memory: 124kB
+  Buffers: shared hit=22
+  ->  Hash Left Join  (cost=17.98..209.31 rows=300 width=454) (actual time=0.063..0.153 rows=300 loops=1)
+        Hash Cond: (alert.case_id = case_record.id)
+        Buffers: shared hit=19
+        ->  Nested Loop  (cost=10.61..201.14 rows=300 width=292) (actual time=0.018..0.079 rows=300 loops=1)
+              Buffers: shared hit=15
+              ->  Seq Scan on alert_status  (cost=0.00..1.05 rows=1 width=52) (actual time=0.002..0.002 rows=1 loops=1)
+                    Filter: (id = '4f850ba2-d418-4d7d-a84f-5026bb6a3b09'::uuid)
+                    Rows Removed by Filter: 3
+                    Buffers: shared hit=1
+              ->  Bitmap Heap Scan on alert  (cost=10.61..197.09 rows=300 width=240) (actual time=0.015..0.057 rows=300 loops=1)
+                    Recheck Cond: (status_id = '4f850ba2-d418-4d7d-a84f-5026bb6a3b09'::uuid)
+                    Heap Blocks: exact=10
+                    Buffers: shared hit=14
+                    ->  Bitmap Index Scan on alert_status_date_idx  (cost=0.00..10.53 rows=300 width=0) (actual time=0.011..0.011 rows=300 loops=1)
+                          Index Cond: (status_id = '4f850ba2-d418-4d7d-a84f-5026bb6a3b09'::uuid)
+                          Buffers: shared hit=4
+        ->  Hash  (cost=5.50..5.50 rows=150 width=162) (actual time=0.038..0.038 rows=150 loops=1)
+              Buckets: 1024  Batches: 1  Memory Usage: 36kB
+              Buffers: shared hit=4
+              ->  Seq Scan on case_record  (cost=0.00..5.50 rows=150 width=162) (actual time=0.001..0.017 rows=150 loops=1)
+                    Buffers: shared hit=4
+Planning:
+  Buffers: shared hit=45
+Planning Time: 0.266 ms
+Execution Time: 0.327 ms
+
+====================================================================================================
+### HOT-1b Alert queue (as shipped, alerts/views.alert_list): filter(status__value=...) ORDER BY date DESC LIMIT 200
+--- SQL (as sent by the ORM) ---
+SELECT "alert"."id", "alert"."created_at", "alert"."updated_at", "alert"."type", "alert"."source", "alert"."source_ref", "alert"."external_link", "alert"."title", "alert"."description", "alert"."severity", "alert"."status_id", "alert"."date", "alert"."flag", "alert"."tlp", "alert"."pap", "alert"."summary", "alert"."assignee_id", "alert"."raw_payload", "alert"."correlation_key", "alert"."ingestion_source_id", "alert"."case_id", "alert"."follow", "alert"."ingestion_warnings", "alert"."owner_org_id", "alert_status"."id", "alert_status"."created_at", "alert_status"."updated_at", "alert_status"."value", "alert_status"."stage", "alert_status"."order", "alert_status"."description", "alert_status"."hidden", "case_record"."id", "case_record"."created_at", "case_record"."updated_at", "case_record"."number", "case_record"."title", "case_record"."description", "case_record"."severity", "case_record"."status_id", "case_record"."assignee_id", "case_record"."flag", "case_record"."tlp", "case_record"."pap", "case_record"."summary", "case_record"."start_date", "case_record"."end_date", "case_record"."closed_date", "case_record"."owner_org_id", "case_record"."ingestion_warnings" FROM "alert" INNER JOIN "alert_status" ON ("alert"."status_id" = "alert_status"."id") LEFT OUTER JOIN "case_record" ON ("alert"."case_id" = "case_record"."id") WHERE "alert_status"."value" = %s ORDER BY "alert"."date" DESC LIMIT 200
+--- params ---
+('New',)
+--- plan ---
+Limit  (cost=335.87..336.37 rows=200 width=454) (actual time=1.854..1.866 rows=200 loops=1)
+  Buffers: shared hit=111
+  ->  Sort  (cost=335.87..339.62 rows=1500 width=454) (actual time=1.854..1.859 rows=200 loops=1)
+        Sort Key: alert.date DESC
+        Sort Method: top-N heapsort  Memory: 126kB
+        Buffers: shared hit=111
+        ->  Hash Left Join  (cost=55.28..271.04 rows=1500 width=454) (actual time=0.113..1.027 rows=3000 loops=1)
+              Hash Cond: (alert.case_id = case_record.id)
+              Buffers: shared hit=111
+              ->  Nested Loop  (cost=47.91..259.71 rows=1500 width=292) (actual time=0.067..0.692 rows=3000 loops=1)
+                    Buffers: shared hit=107
+                    ->  Seq Scan on alert_status  (cost=0.00..1.05 rows=1 width=52) (actual time=0.002..0.003 rows=1 loops=1)
+                          Filter: ((value)::text = 'New'::text)
+                          Rows Removed by Filter: 3
+                          Buffers: shared hit=1
+                    ->  Bitmap Heap Scan on alert  (cost=47.91..243.66 rows=1500 width=240) (actual time=0.063..0.505 rows=3000 loops=1)
+                          Recheck Cond: (status_id = alert_status.id)
+                          Heap Blocks: exact=89
+                          Buffers: shared hit=106
+                          ->  Bitmap Index Scan on alert_status_date_idx  (cost=0.00..47.53 rows=1500 width=0) (actual time=0.054..0.054 rows=3000 loops=1)
+                                Index Cond: (status_id = alert_status.id)
+                                Buffers: shared hit=17
+              ->  Hash  (cost=5.50..5.50 rows=150 width=162) (actual time=0.040..0.040 rows=150 loops=1)
+                    Buckets: 1024  Batches: 1  Memory Usage: 36kB
+                    Buffers: shared hit=4
+                    ->  Seq Scan on case_record  (cost=0.00..5.50 rows=150 width=162) (actual time=0.001..0.016 rows=150 loops=1)
+                          Buffers: shared hit=4
+Planning:
+  Buffers: shared hit=6
+Planning Time: 0.164 ms
+Execution Time: 1.920 ms
+
+====================================================================================================
+### HOT-1c status→stage join (select_related status) — point lookup on one alert
+--- SQL (as sent by the ORM) ---
+SELECT "alert"."id", "alert"."created_at", "alert"."updated_at", "alert"."type", "alert"."source", "alert"."source_ref", "alert"."external_link", "alert"."title", "alert"."description", "alert"."severity", "alert"."status_id", "alert"."date", "alert"."flag", "alert"."tlp", "alert"."pap", "alert"."summary", "alert"."assignee_id", "alert"."raw_payload", "alert"."correlation_key", "alert"."ingestion_source_id", "alert"."case_id", "alert"."follow", "alert"."ingestion_warnings", "alert"."owner_org_id", "alert_status"."id", "alert_status"."created_at", "alert_status"."updated_at", "alert_status"."value", "alert_status"."stage", "alert_status"."order", "alert_status"."description", "alert_status"."hidden", "case_record"."id", "case_record"."created_at", "case_record"."updated_at", "case_record"."number", "case_record"."title", "case_record"."description", "case_record"."severity", "case_record"."status_id", "case_record"."assignee_id", "case_record"."flag", "case_record"."tlp", "case_record"."pap", "case_record"."summary", "case_record"."start_date", "case_record"."end_date", "case_record"."closed_date", "case_record"."owner_org_id", "case_record"."ingestion_warnings" FROM "alert" INNER JOIN "alert_status" ON ("alert"."status_id" = "alert_status"."id") LEFT OUTER JOIN "case_record" ON ("alert"."case_id" = "case_record"."id") WHERE "alert"."id" = %s
+--- params ---
+(UUID('64e0db68-9b8f-48d3-9eaa-c8cbff692ce2'),)
+--- plan ---
+Nested Loop  (cost=8.31..15.30 rows=1 width=454) (actual time=0.015..0.026 rows=1 loops=1)
+  Join Filter: (alert.status_id = alert_status.id)
+  Buffers: shared hit=8
+  ->  Hash Right Join  (cost=8.31..14.21 rows=1 width=402) (actual time=0.013..0.024 rows=1 loops=1)
+        Hash Cond: (case_record.id = alert.case_id)
+        Buffers: shared hit=7
+        ->  Seq Scan on case_record  (cost=0.00..5.50 rows=150 width=162) (actual time=0.001..0.006 rows=150 loops=1)
+              Buffers: shared hit=4
+        ->  Hash  (cost=8.30..8.30 rows=1 width=240) (actual time=0.009..0.009 rows=1 loops=1)
+              Buckets: 1024  Batches: 1  Memory Usage: 9kB
+              Buffers: shared hit=3
+              ->  Index Scan using alert_pkey on alert  (cost=0.28..8.30 rows=1 width=240) (actual time=0.007..0.007 rows=1 loops=1)
+                    Index Cond: (id = '64e0db68-9b8f-48d3-9eaa-c8cbff692ce2'::uuid)
+                    Buffers: shared hit=3
+  ->  Seq Scan on alert_status  (cost=0.00..1.04 rows=4 width=52) (actual time=0.000..0.000 rows=1 loops=1)
+        Buffers: shared hit=1
+Planning:
+  Buffers: shared hit=6
+Planning Time: 0.101 ms
+Execution Time: 0.047 ms
+
+====================================================================================================
+### HOT-2a case row
+--- SQL (as sent by the ORM) ---
+SELECT "case_record"."id", "case_record"."created_at", "case_record"."updated_at", "case_record"."number", "case_record"."title", "case_record"."description", "case_record"."severity", "case_record"."status_id", "case_record"."assignee_id", "case_record"."flag", "case_record"."tlp", "case_record"."pap", "case_record"."summary", "case_record"."start_date", "case_record"."end_date", "case_record"."closed_date", "case_record"."owner_org_id", "case_record"."ingestion_warnings" FROM "case_record" WHERE "case_record"."id" = %s
+--- params ---
+(UUID('3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'),)
+--- plan ---
+Seq Scan on case_record  (cost=0.00..5.88 rows=1 width=162) (actual time=0.002..0.006 rows=1 loops=1)
+  Filter: (id = '3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'::uuid)
+  Rows Removed by Filter: 149
+  Buffers: shared hit=4
+Planning Time: 0.016 ms
+Execution Time: 0.009 ms
+
+====================================================================================================
+### HOT-2b observables: CaseObservable.select_related(observable__data_type).filter(case=).order_by(-created_at)
+--- SQL (as sent by the ORM) ---
+SELECT "case_observable"."id", "case_observable"."updated_at", "case_observable"."case_id", "case_observable"."observable_id", "case_observable"."added_by_id", "case_observable"."created_at", "observable"."id", "observable"."created_at", "observable"."updated_at", "observable"."data_type_id", "observable"."data", "observable"."normalized_data", "observable"."data_hash", "observable"."ioc", "observable"."sighted", "observable"."sighted_at", "observable"."ignore_similarity", "observable"."message", "observable"."tlp", "observable"."pap", "observable"."enrichment_data", "observable"."external", "observable_type"."id", "observable_type"."created_at", "observable_type"."updated_at", "observable_type"."name", "observable_type"."is_attachment", "observable_type"."is_case_sensitive" FROM "case_observable" INNER JOIN "observable" ON ("case_observable"."observable_id" = "observable"."id") INNER JOIN "observable_type" ON ("observable"."data_type_id" = "observable_type"."id") WHERE "case_observable"."case_id" = %s ORDER BY "case_observable"."created_at" DESC
+--- params ---
+(UUID('3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'),)
+--- plan ---
+Sort  (cost=53.05..53.08 rows=10 width=302) (actual time=0.105..0.106 rows=10 loops=1)
+  Sort Key: case_observable.created_at DESC
+  Sort Method: quicksort  Memory: 28kB
+  Buffers: shared hit=38
+  ->  Nested Loop  (cost=19.78..52.89 rows=10 width=302) (actual time=0.028..0.101 rows=10 loops=1)
+        Buffers: shared hit=38
+        ->  Hash Join  (cost=19.63..51.75 rows=10 width=263) (actual time=0.024..0.093 rows=10 loops=1)
+              Hash Cond: (observable.id = case_observable.observable_id)
+              Buffers: shared hit=28
+              ->  Seq Scan on observable  (cost=0.00..30.00 rows=800 width=183) (actual time=0.002..0.040 rows=800 loops=1)
+                    Buffers: shared hit=22
+              ->  Hash  (cost=19.51..19.51 rows=10 width=80) (actual time=0.019..0.019 rows=10 loops=1)
+                    Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                    Buffers: shared hit=6
+                    ->  Bitmap Heap Scan on case_observable  (cost=4.36..19.51 rows=10 width=80) (actual time=0.011..0.016 rows=10 loops=1)
+                          Recheck Cond: (case_id = '3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'::uuid)
+                          Heap Blocks: exact=4
+                          Buffers: shared hit=6
+                          ->  Bitmap Index Scan on uniq_case_observable  (cost=0.00..4.35 rows=10 width=0) (actual time=0.007..0.007 rows=10 loops=1)
+                                Index Cond: (case_id = '3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'::uuid)
+                                Buffers: shared hit=2
+        ->  Memoize  (cost=0.15..0.18 rows=1 width=39) (actual time=0.001..0.001 rows=1 loops=10)
+              Cache Key: observable.data_type_id
+              Cache Mode: logical
+              Hits: 5  Misses: 5  Evictions: 0  Overflows: 0  Memory Usage: 1kB
+              Buffers: shared hit=10
+              ->  Index Scan using observable_type_pkey on observable_type  (cost=0.14..0.17 rows=1 width=39) (actual time=0.001..0.001 rows=1 loops=5)
+                    Index Cond: (id = observable.data_type_id)
+                    Buffers: shared hit=10
+Planning:
+  Buffers: shared hit=173 dirtied=3
+Planning Time: 0.390 ms
+Execution Time: 0.129 ms
+
+====================================================================================================
+### HOT-2c timeline: TimelineEvent.filter(case=).order_by('date','id')  [index is (case, -date, -id) — check for a backward scan, no Sort]
+--- SQL (as sent by the ORM) ---
+SELECT "timeline_event"."id", "timeline_event"."created_at", "timeline_event"."updated_at", "timeline_event"."case_id", "timeline_event"."date", "timeline_event"."end_date", "timeline_event"."title", "timeline_event"."description", "timeline_event"."kind", "timeline_event"."actor_id", "timeline_event"."metadata" FROM "timeline_event" WHERE "timeline_event"."case_id" = %s ORDER BY "timeline_event"."date" ASC, "timeline_event"."id" ASC
+--- params ---
+(UUID('3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'),)
+--- plan ---
+Sort  (cost=70.41..70.49 rows=34 width=133) (actual time=0.032..0.033 rows=34 loops=1)
+  Sort Key: date, id
+  Sort Method: quicksort  Memory: 30kB
+  Buffers: shared hit=7
+  ->  Bitmap Heap Scan on timeline_event  (cost=4.54..69.54 rows=34 width=133) (actual time=0.009..0.012 rows=34 loops=1)
+        Recheck Cond: (case_id = '3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'::uuid)
+        Heap Blocks: exact=2
+        Buffers: shared hit=4
+        ->  Bitmap Index Scan on timeline_case_date_idx  (cost=0.00..4.54 rows=34 width=0) (actual time=0.006..0.006 rows=34 loops=1)
+              Index Cond: (case_id = '3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'::uuid)
+              Buffers: shared hit=2
+Planning Time: 0.023 ms
+Execution Time: 0.045 ms
+
+====================================================================================================
+### HOT-2d tasks: case.tasks.all()
+--- SQL (as sent by the ORM) ---
+SELECT "task"."id", "task"."created_at", "task"."updated_at", "task"."case_id", "task"."title", "task"."description", "task"."group", "task"."status", "task"."flag", "task"."assignee_id", "task"."order", "task"."due_date", "task"."started_at", "task"."ended_at", "task"."mandatory" FROM "task" WHERE "task"."case_id" = %s
+--- params ---
+(UUID('3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'),)
+--- plan ---
+Bitmap Heap Scan on task  (cost=4.34..20.02 rows=8 width=112) (actual time=0.009..0.010 rows=8 loops=1)
+  Recheck Cond: (case_id = '3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'::uuid)
+  Heap Blocks: exact=1
+  Buffers: shared hit=3
+  ->  Bitmap Index Scan on task_case_id_c691f6ba  (cost=0.00..4.34 rows=8 width=0) (actual time=0.007..0.007 rows=8 loops=1)
+        Index Cond: (case_id = '3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'::uuid)
+        Buffers: shared hit=2
+Planning:
+  Buffers: shared hit=100
+Planning Time: 0.153 ms
+Execution Time: 0.015 ms
+
+====================================================================================================
+### HOT-2e automation runs: AutomationRun.filter(case=).order_by('-created_at')
+--- SQL (as sent by the ORM) ---
+SELECT "automation_run"."id", "automation_run"."created_at", "automation_run"."updated_at", "automation_run"."case_id", "automation_run"."alert_id", "automation_run"."playbook_id", "automation_run"."playbook_name", "automation_run"."trigger_event", "automation_run"."status", "automation_run"."output_log", "automation_run"."error", "automation_run"."triggered_by_observable_id", "automation_run"."celery_task_id", "automation_run"."started_at", "automation_run"."finished_at", "automation_run"."idempotency_key" FROM "automation_run" WHERE "automation_run"."case_id" = %s ORDER BY "automation_run"."created_at" DESC
+--- params ---
+(UUID('3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'),)
+--- plan ---
+Sort  (cost=113.46..113.56 rows=39 width=202) (actual time=0.072..0.073 rows=39 loops=1)
+  Sort Key: created_at DESC
+  Sort Method: quicksort  Memory: 32kB
+  Buffers: shared hit=38
+  ->  Bitmap Heap Scan on automation_run  (cost=4.58..112.43 rows=39 width=202) (actual time=0.021..0.063 rows=39 loops=1)
+        Recheck Cond: (case_id = '3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'::uuid)
+        Heap Blocks: exact=36
+        Buffers: shared hit=38
+        ->  Bitmap Index Scan on ar_case_started_idx  (cost=0.00..4.58 rows=39 width=0) (actual time=0.013..0.013 rows=39 loops=1)
+              Index Cond: (case_id = '3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'::uuid)
+              Buffers: shared hit=2
+Planning:
+  Buffers: shared hit=166 dirtied=1
+Planning Time: 0.414 ms
+Execution Time: 0.087 ms
+
+====================================================================================================
+### HOT-2f alertCount: SELECT COUNT(*) FROM alert WHERE case_id = ?
+--- plan ---
+Aggregate  (cost=4.68..4.69 rows=1 width=8) (actual time=0.041..0.041 rows=1 loops=1)
+  Buffers: shared hit=3
+  ->  Index Only Scan using alert_case_id_be755fe7 on alert  (cost=0.28..4.63 rows=20 width=0) (actual time=0.031..0.032 rows=20 loops=1)
+        Index Cond: (case_id = '3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'::uuid)
+        Heap Fetches: 0
+        Buffers: shared hit=3
+Planning Time: 0.051 ms
+Execution Time: 0.055 ms
+
+====================================================================================================
+### HOT-3a observable graph (cases/views.observable_detail): observable.case_observables.select_related('case').order_by('-created_at')
+--- SQL (as sent by the ORM) ---
+SELECT "case_observable"."id", "case_observable"."updated_at", "case_observable"."case_id", "case_observable"."observable_id", "case_observable"."added_by_id", "case_observable"."created_at", "case_record"."id", "case_record"."created_at", "case_record"."updated_at", "case_record"."number", "case_record"."title", "case_record"."description", "case_record"."severity", "case_record"."status_id", "case_record"."assignee_id", "case_record"."flag", "case_record"."tlp", "case_record"."pap", "case_record"."summary", "case_record"."start_date", "case_record"."end_date", "case_record"."closed_date", "case_record"."owner_org_id", "case_record"."ingestion_warnings" FROM "case_observable" INNER JOIN "case_record" ON ("case_observable"."case_id" = "case_record"."id") WHERE "case_observable"."observable_id" = %s ORDER BY "case_observable"."created_at" DESC
+--- params ---
+(UUID('5697ba0f-8c33-44b2-b044-0da261acdf07'),)
+--- plan ---
+Sort  (cost=29.92..30.07 rows=60 width=242) (actual time=0.078..0.080 rows=60 loops=1)
+  Sort Key: case_observable.created_at DESC
+  Sort Method: quicksort  Memory: 39kB
+  Buffers: shared hit=9
+  ->  Hash Join  (cost=22.24..28.15 rows=60 width=242) (actual time=0.031..0.055 rows=60 loops=1)
+        Hash Cond: (case_record.id = case_observable.case_id)
+        Buffers: shared hit=9
+        ->  Seq Scan on case_record  (cost=0.00..5.50 rows=150 width=162) (actual time=0.001..0.009 rows=150 loops=1)
+              Buffers: shared hit=4
+        ->  Hash  (cost=21.49..21.49 rows=60 width=80) (actual time=0.026..0.027 rows=60 loops=1)
+              Buckets: 1024  Batches: 1  Memory Usage: 14kB
+              Buffers: shared hit=5
+              ->  Bitmap Heap Scan on case_observable  (cost=4.74..21.49 rows=60 width=80) (actual time=0.010..0.019 rows=60 loops=1)
+                    Recheck Cond: (observable_id = '5697ba0f-8c33-44b2-b044-0da261acdf07'::uuid)
+                    Heap Blocks: exact=3
+                    Buffers: shared hit=5
+                    ->  Bitmap Index Scan on caseobs_obs_case_idx  (cost=0.00..4.73 rows=60 width=0) (actual time=0.007..0.007 rows=60 loops=1)
+                          Index Cond: (observable_id = '5697ba0f-8c33-44b2-b044-0da261acdf07'::uuid)
+                          Buffers: shared hit=2
+Planning:
+  Buffers: shared hit=10
+Planning Time: 0.094 ms
+Execution Time: 0.103 ms
+
+====================================================================================================
+### HOT-3b alert-side fan-out (index named in the brief: alertobs_obs_alert_idx): observable.alert_observables.filter(observable=)
+--- SQL (as sent by the ORM) ---
+SELECT "alert_observable"."id", "alert_observable"."updated_at", "alert_observable"."alert_id", "alert_observable"."observable_id", "alert_observable"."added_by_id", "alert_observable"."created_at" FROM "alert_observable" WHERE "alert_observable"."observable_id" = %s ORDER BY "alert_observable"."created_at" DESC
+--- params ---
+(UUID('5697ba0f-8c33-44b2-b044-0da261acdf07'),)
+--- plan ---
+Sort  (cost=76.77..77.52 rows=301 width=80) (actual time=0.073..0.079 rows=301 loops=1)
+  Sort Key: created_at DESC
+  Sort Method: quicksort  Memory: 50kB
+  Buffers: shared hit=10
+  ->  Bitmap Heap Scan on alert_observable  (cost=14.61..64.38 rows=301 width=80) (actual time=0.022..0.041 rows=301 loops=1)
+        Recheck Cond: (observable_id = '5697ba0f-8c33-44b2-b044-0da261acdf07'::uuid)
+        Heap Blocks: exact=6
+        Buffers: shared hit=10
+        ->  Bitmap Index Scan on alertobs_obs_alert_idx  (cost=0.00..14.54 rows=301 width=0) (actual time=0.019..0.019 rows=301 loops=1)
+              Index Cond: (observable_id = '5697ba0f-8c33-44b2-b044-0da261acdf07'::uuid)
+              Buffers: shared hit=4
+Planning:
+  Buffers: shared hit=81 dirtied=3
+Planning Time: 0.187 ms
+Execution Time: 0.096 ms
+
+====================================================================================================
+### HOT-4 pending AutomationRun dispatch sweep (automation/models ar_pending_idx partial): filter(status='Pending').order_by('created_at')
+--- SQL (as sent by the ORM) ---
+SELECT "automation_run"."id", "automation_run"."created_at", "automation_run"."updated_at", "automation_run"."case_id", "automation_run"."alert_id", "automation_run"."playbook_id", "automation_run"."playbook_name", "automation_run"."trigger_event", "automation_run"."status", "automation_run"."output_log", "automation_run"."error", "automation_run"."triggered_by_observable_id", "automation_run"."celery_task_id", "automation_run"."started_at", "automation_run"."finished_at", "automation_run"."idempotency_key" FROM "automation_run" WHERE "automation_run"."status" = %s ORDER BY "automation_run"."created_at" ASC
+--- params ---
+('Pending',)
+--- plan ---
+Index Scan using ar_pending_idx on automation_run  (cost=0.14..15.04 rows=60 width=202) (actual time=0.005..0.049 rows=60 loops=1)
+  Buffers: shared hit=48
+Planning Time: 0.024 ms
+Execution Time: 0.054 ms
+
+====================================================================================================
+### HOT-4b same sweep with a beat LIMIT 100
+--- SQL (as sent by the ORM) ---
+SELECT "automation_run"."id", "automation_run"."created_at", "automation_run"."updated_at", "automation_run"."case_id", "automation_run"."alert_id", "automation_run"."playbook_id", "automation_run"."playbook_name", "automation_run"."trigger_event", "automation_run"."status", "automation_run"."output_log", "automation_run"."error", "automation_run"."triggered_by_observable_id", "automation_run"."celery_task_id", "automation_run"."started_at", "automation_run"."finished_at", "automation_run"."idempotency_key" FROM "automation_run" WHERE "automation_run"."status" = %s ORDER BY "automation_run"."created_at" ASC LIMIT 100
+--- params ---
+('Pending',)
+--- plan ---
+Limit  (cost=0.14..15.04 rows=60 width=202) (actual time=0.010..0.028 rows=60 loops=1)
+  Buffers: shared hit=48
+  ->  Index Scan using ar_pending_idx on automation_run  (cost=0.14..15.04 rows=60 width=202) (actual time=0.010..0.025 rows=60 loops=1)
+        Buffers: shared hit=48
+Planning Time: 0.023 ms
+Execution Time: 0.042 ms
+
+====================================================================================================
+### HOT-4c control: filter(status='Success').order_by('created_at') (must NOT ride the partial index)
+--- SQL (as sent by the ORM) ---
+SELECT "automation_run"."id", "automation_run"."created_at", "automation_run"."updated_at", "automation_run"."case_id", "automation_run"."alert_id", "automation_run"."playbook_id", "automation_run"."playbook_name", "automation_run"."trigger_event", "automation_run"."status", "automation_run"."output_log", "automation_run"."error", "automation_run"."triggered_by_observable_id", "automation_run"."celery_task_id", "automation_run"."started_at", "automation_run"."finished_at", "automation_run"."idempotency_key" FROM "automation_run" WHERE "automation_run"."status" = %s ORDER BY "automation_run"."created_at" ASC LIMIT 100
+--- params ---
+('Success',)
+--- plan ---
+Limit  (cost=497.56..497.81 rows=100 width=202) (actual time=1.224..1.230 rows=100 loops=1)
+  Buffers: shared hit=276
+  ->  Sort  (cost=497.56..507.31 rows=3900 width=202) (actual time=1.224..1.226 rows=100 loops=1)
+        Sort Key: created_at
+        Sort Method: top-N heapsort  Memory: 76kB
+        Buffers: shared hit=276
+        ->  Seq Scan on automation_run  (cost=0.00..348.50 rows=3900 width=202) (actual time=0.136..0.634 rows=3900 loops=1)
+              Filter: ((status)::text = 'Success'::text)
+              Rows Removed by Filter: 1900
+              Buffers: shared hit=276
+Planning Time: 0.019 ms
+Execution Time: 1.240 ms
+
+====================================================================================================
+### HOT-5a events_after anchor lookup: filter(case=, pk=anchor).first()
+--- SQL (as sent by the ORM) ---
+SELECT "timeline_event"."id", "timeline_event"."created_at", "timeline_event"."updated_at", "timeline_event"."case_id", "timeline_event"."date", "timeline_event"."end_date", "timeline_event"."title", "timeline_event"."description", "timeline_event"."kind", "timeline_event"."actor_id", "timeline_event"."metadata" FROM "timeline_event" WHERE ("timeline_event"."case_id" = %s AND "timeline_event"."id" = %s)
+--- params ---
+(UUID('3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'), UUID('98b26a9f-8589-40be-9a9a-7ab7597b15a9'))
+--- plan ---
+Index Scan using timeline_event_pkey on timeline_event  (cost=0.28..8.30 rows=1 width=133) (actual time=0.016..0.017 rows=1 loops=1)
+  Index Cond: (id = '98b26a9f-8589-40be-9a9a-7ab7597b15a9'::uuid)
+  Filter: (case_id = '3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'::uuid)
+  Buffers: shared hit=3
+Planning Time: 0.017 ms
+Execution Time: 0.021 ms
+
+====================================================================================================
+### HOT-5b events_after keyset page: filter(case=, date>anchor | (date=anchor AND id>anchor)).order_by('date','id')
+--- SQL (as sent by the ORM) ---
+SELECT "timeline_event"."id", "timeline_event"."created_at", "timeline_event"."updated_at", "timeline_event"."case_id", "timeline_event"."date", "timeline_event"."end_date", "timeline_event"."title", "timeline_event"."description", "timeline_event"."kind", "timeline_event"."actor_id", "timeline_event"."metadata", "identity_user"."password", "identity_user"."last_login", "identity_user"."is_superuser", "identity_user"."username", "identity_user"."first_name", "identity_user"."last_name", "identity_user"."email", "identity_user"."is_staff", "identity_user"."is_active", "identity_user"."date_joined", "identity_user"."id", "identity_user"."login", "identity_user"."role", "identity_user"."org_id" FROM "timeline_event" LEFT OUTER JOIN "identity_user" ON ("timeline_event"."actor_id" = "identity_user"."id") WHERE ("timeline_event"."case_id" = %s AND ("timeline_event"."date" > %s OR ("timeline_event"."date" = %s AND "timeline_event"."id" > %s))) ORDER BY "timeline_event"."date" ASC, "timeline_event"."id" ASC
+--- params ---
+(UUID('3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'), datetime.datetime(2026, 7, 9, 17, 34, 47, 930920, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 7, 9, 17, 34, 47, 930920, tzinfo=datetime.timezone.utc), UUID('98b26a9f-8589-40be-9a9a-7ab7597b15a9'))
+--- plan ---
+Sort  (cost=71.95..72.04 rows=34 width=226) (actual time=0.028..0.029 rows=16 loops=1)
+  Sort Key: timeline_event.date, timeline_event.id
+  Sort Method: quicksort  Memory: 28kB
+  Buffers: shared hit=5
+  ->  Hash Left Join  (cost=5.68..71.09 rows=34 width=226) (actual time=0.018..0.023 rows=16 loops=1)
+        Hash Cond: (timeline_event.actor_id = identity_user.id)
+        Buffers: shared hit=5
+        ->  Bitmap Heap Scan on timeline_event  (cost=4.54..69.80 rows=34 width=133) (actual time=0.010..0.011 rows=16 loops=1)
+              Recheck Cond: (case_id = '3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'::uuid)
+              Filter: ((date > '2026-07-09 17:34:47.93092+00'::timestamp with time zone) OR ((date = '2026-07-09 17:34:47.93092+00'::timestamp with time zone) AND (id > '98b26a9f-8589-40be-9a9a-7ab7597b15a9'::uuid)))
+              Rows Removed by Filter: 18
+              Heap Blocks: exact=2
+              Buffers: shared hit=4
+              ->  Bitmap Index Scan on timeline_case_date_idx  (cost=0.00..4.54 rows=34 width=0) (actual time=0.006..0.006 rows=34 loops=1)
+                    Index Cond: (case_id = '3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'::uuid)
+                    Buffers: shared hit=2
+        ->  Hash  (cost=1.06..1.06 rows=6 width=93) (actual time=0.005..0.005 rows=6 loops=1)
+              Buckets: 1024  Batches: 1  Memory Usage: 9kB
+              Buffers: shared hit=1
+              ->  Seq Scan on identity_user  (cost=0.00..1.06 rows=6 width=93) (actual time=0.001..0.002 rows=6 loops=1)
+                    Buffers: shared hit=1
+Planning:
+  Buffers: shared hit=136
+Planning Time: 0.313 ms
+Execution Time: 0.052 ms
+
+====================================================================================================
+### HOT-5c events_after() as called by realtime/consumers.py
+--- SQL (as sent by the ORM) ---
+SELECT "timeline_event"."id", "timeline_event"."created_at", "timeline_event"."updated_at", "timeline_event"."case_id", "timeline_event"."date", "timeline_event"."end_date", "timeline_event"."title", "timeline_event"."description", "timeline_event"."kind", "timeline_event"."actor_id", "timeline_event"."metadata", "identity_user"."password", "identity_user"."last_login", "identity_user"."is_superuser", "identity_user"."username", "identity_user"."first_name", "identity_user"."last_name", "identity_user"."email", "identity_user"."is_staff", "identity_user"."is_active", "identity_user"."date_joined", "identity_user"."id", "identity_user"."login", "identity_user"."role", "identity_user"."org_id" FROM "timeline_event" LEFT OUTER JOIN "identity_user" ON ("timeline_event"."actor_id" = "identity_user"."id") WHERE ("timeline_event"."case_id" = %s AND ("timeline_event"."date" > %s OR ("timeline_event"."date" = %s AND "timeline_event"."id" > %s))) ORDER BY "timeline_event"."date" ASC, "timeline_event"."id" ASC
+--- params ---
+(UUID('3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'), datetime.datetime(2026, 7, 9, 17, 34, 47, 930920, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 7, 9, 17, 34, 47, 930920, tzinfo=datetime.timezone.utc), UUID('98b26a9f-8589-40be-9a9a-7ab7597b15a9'))
+--- plan ---
+Sort  (cost=71.95..72.04 rows=34 width=226) (actual time=0.024..0.024 rows=16 loops=1)
+  Sort Key: timeline_event.date, timeline_event.id
+  Sort Method: quicksort  Memory: 28kB
+  Buffers: shared hit=5
+  ->  Hash Left Join  (cost=5.68..71.09 rows=34 width=226) (actual time=0.015..0.019 rows=16 loops=1)
+        Hash Cond: (timeline_event.actor_id = identity_user.id)
+        Buffers: shared hit=5
+        ->  Bitmap Heap Scan on timeline_event  (cost=4.54..69.80 rows=34 width=133) (actual time=0.007..0.009 rows=16 loops=1)
+              Recheck Cond: (case_id = '3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'::uuid)
+              Filter: ((date > '2026-07-09 17:34:47.93092+00'::timestamp with time zone) OR ((date = '2026-07-09 17:34:47.93092+00'::timestamp with time zone) AND (id > '98b26a9f-8589-40be-9a9a-7ab7597b15a9'::uuid)))
+              Rows Removed by Filter: 18
+              Heap Blocks: exact=2
+              Buffers: shared hit=4
+              ->  Bitmap Index Scan on timeline_case_date_idx  (cost=0.00..4.54 rows=34 width=0) (actual time=0.004..0.004 rows=34 loops=1)
+                    Index Cond: (case_id = '3b24c4fe-7d9e-45a2-bbf6-d4bfffd2f899'::uuid)
+                    Buffers: shared hit=2
+        ->  Hash  (cost=1.06..1.06 rows=6 width=93) (actual time=0.004..0.004 rows=6 loops=1)
+              Buckets: 1024  Batches: 1  Memory Usage: 9kB
+              Buffers: shared hit=1
+              ->  Seq Scan on identity_user  (cost=0.00..1.06 rows=6 width=93) (actual time=0.001..0.001 rows=6 loops=1)
+                    Buffers: shared hit=1
+Planning:
+  Buffers: shared hit=4
+Planning Time: 0.065 ms
+Execution Time: 0.045 ms

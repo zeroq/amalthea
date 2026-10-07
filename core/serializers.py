@@ -20,9 +20,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from alerts.models import Alert
+from alerts.models import Alert, AlertObservable
 from automation.models import AutomationRun
-from cases.models import Case, CaseObservable, TimelineEvent
+from cases.models import Case, CaseObservable, CustomField, Task, TimelineEvent
+from identity.models import User
 from observables.models import Observable
 
 
@@ -62,7 +63,13 @@ def alert_json(alert: Alert) -> dict[str, Any]:
     }
 
 
-def observable_json(link: CaseObservable) -> dict[str, Any]:
+def observable_json(link: CaseObservable | AlertObservable) -> dict[str, Any]:
+    """One link row as `OutputObservable`.
+
+    The helper takes either parent because the shape is identical for a case link and an alert
+    link — only `addedAt` (the link's own creation) differs, and both models carry it. Rendering
+    one shape in two places is what this module's docstring exists to prevent.
+    """
     observable: Observable = link.observable
     return {
         "_id": str(observable.id),
@@ -93,6 +100,106 @@ def timeline_event_json(event: TimelineEvent) -> dict[str, Any]:
         "kind": event.kind,
         "actor": _username(event.actor),
         "metadata": event.metadata or {},
+    }
+
+
+def task_json(task: Task) -> dict[str, Any]:
+    """`OutputTask` (recorded 5.8.0 OpenAPI): `_id` + ISO timestamps (deviation **P10-y**)."""
+    return {
+        "_id": str(task.id),
+        "id": str(task.id),
+        "_type": "Task",
+        # No creator columns exist on `Task` (plan §4 "no new fields"), so the audit pair
+        # degrades to `null` rather than being omitted — thehive4py's TypedDict reads both keys.
+        "_createdBy": None,
+        "_createdAt": _iso(task.created_at),
+        "_updatedBy": None,
+        "_updatedAt": _iso(task.updated_at),
+        "title": task.title,
+        "group": task.group,
+        "description": task.description,
+        "status": task.status,
+        "flag": task.flag,
+        "startDate": _iso(task.started_at),
+        "endDate": _iso(task.ended_at),
+        "order": task.order,
+        "dueDate": _iso(task.due_date),
+        "assignee": _username(task.assignee),
+        "mandatory": task.mandatory,
+        "extraData": {},
+    }
+
+
+def custom_event_json(event: TimelineEvent) -> dict[str, Any]:
+    """`OutputCustomEvent` — the **wire** view of a ledger row.
+
+    Deliberately not `timeline_event_json`: that is the internal ledger shape the WS `sync`
+    protocol and the Phase 9 UI consume (P8-1), while this is the 5.8.0 entity rendering the
+    `customEvent` endpoints return. Both read the same row; neither is derived from the other.
+    """
+    return {
+        "_id": str(event.id),
+        "id": str(event.id),
+        "_type": "CustomEvent",
+        "date": _iso(event.date),
+        "endDate": _iso(event.end_date),
+        "title": event.title,
+        "description": event.description,
+        # `actor` is the only creator-shaped column a ledger row has.
+        "_createdBy": _username(event.actor),
+        "_createdAt": _iso(event.created_at),
+        "_updatedBy": None,
+        "_updatedAt": _iso(event.updated_at),
+        "caseId": str(event.case_id),
+    }
+
+
+def custom_field_json(field: CustomField) -> dict[str, Any]:
+    """`OutputCustomField`.
+
+    `displayName`/`description`/`order`/`mandatory` have no column on `cases.CustomField`
+    (plan §4, deviation **P10-d**), so they are emitted as the schema-shaped defaults the
+    stored definition actually implies: `displayName` mirrors `name`, and the presentation
+    knobs default rather than being dropped — a client validating against the recorded
+    `OutputCustomField` requires the keys to exist.
+    """
+    return {
+        "_id": str(field.id),
+        "_type": "customField",
+        "name": field.name,
+        "displayName": field.name,
+        "group": field.group,
+        "description": "",
+        "type": field.type,
+        "options": field.options,
+        "order": 0,
+        "mandatory": False,
+        "_createdBy": None,
+        "_createdAt": _iso(field.created_at),
+        "extraData": {},
+    }
+
+
+def user_json(user: User) -> dict[str, Any]:
+    """`OutputUser` — what `POST /api/v1/login` returns.
+
+    `hasKey`/`hasPassword` are computed rather than hardwired: reporting `hasKey: false` for an
+    account that does hold a key would be a lie on the wire, and the recorded schema describes
+    both as "whether the account has …", i.e. a question, not a constant. `hasMFA`/`locked` are
+    constants only because no model column answers them yet (plan §4: no migrations).
+    """
+    return {
+        "_id": str(user.id),
+        "_type": "user",
+        "login": user.login,
+        "name": user.get_full_name() or user.username,
+        "org": user.org.name if user.org else None,
+        "hasKey": user.api_keys.exists(),
+        "hasPassword": user.has_usable_password(),
+        "hasMFA": False,
+        "locked": False,
+        "_createdBy": None,
+        "_createdAt": _iso(user.date_joined),
     }
 
 

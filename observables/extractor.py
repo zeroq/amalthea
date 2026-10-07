@@ -330,6 +330,42 @@ def extract_into_case(case: Case, *texts: str) -> list[Observable]:
     return linked
 
 
+def resolve_observable(
+    type_name: str,
+    value: str,
+    *,
+    defaults: dict[str, Any] | None = None,
+) -> tuple[Observable, bool] | None:
+    """Get-or-create one typed, normalized artifact row, linked to nothing.
+
+    The shared half of "a caller names a type and a value": both `add_observable` (case
+    context) and the alert-observable endpoint resolve the row the same way, so normalization,
+    global dedupe and the vocabulary refusal cannot drift between them. Returns
+    `(observable, created)` — the `created` flag is the dispatch signal its callers need —
+    or `None` when `type_name` is not in the vocabulary, which is refused rather than coerced:
+    a mislabelled artifact is worse than a missing one.
+
+    `defaults` is merged over the stored `data` for a *new* row only. An existing row is left
+    exactly as it is: `Observable` is globally deduplicated, so letting one alert's payload
+    rewrite the tlp/pap of an artifact four other cases are reading would be one caller
+    mutating shared evidence. "No field, no write" applies across the seam.
+    """
+    obs_type = ObservableType.objects.filter(name=type_name).first()
+    if obs_type is None:
+        return None
+    canonical = canonical_value_under(
+        normalize(type_name, value, is_case_sensitive=obs_type.is_case_sensitive),
+        case_sensitive=obs_type.is_case_sensitive,
+    )
+    create_defaults: dict[str, Any] = {"data": value.strip()}
+    if defaults:
+        create_defaults.update(defaults)
+    observable, created = Observable.objects.get_or_create(
+        data_type=obs_type, normalized_data=canonical, defaults=create_defaults
+    )
+    return observable, created
+
+
 @transaction.atomic
 def add_observable(case: Case, type_name: str, value: str) -> Observable | None:
     """Add one analyst-supplied artifact to a case, typed and normalized.
@@ -339,16 +375,10 @@ def add_observable(case: Case, type_name: str, value: str) -> Observable | None:
     """
     from cases.models import CaseObservable
 
-    obs_type = ObservableType.objects.filter(name=type_name).first()
-    if obs_type is None:
+    resolved = resolve_observable(type_name, value)
+    if resolved is None:
         return None
-    canonical = canonical_value_under(
-        normalize(type_name, value, is_case_sensitive=obs_type.is_case_sensitive),
-        case_sensitive=obs_type.is_case_sensitive,
-    )
-    observable, created = Observable.objects.get_or_create(
-        data_type=obs_type, normalized_data=canonical, defaults={"data": value.strip()}
-    )
+    observable, created = resolved
     _link, link_created = CaseObservable.objects.get_or_create(
         case=case, observable=observable, defaults={}
     )

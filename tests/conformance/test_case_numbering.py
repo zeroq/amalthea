@@ -50,9 +50,36 @@ def new_status() -> CaseStatus:
 
 @pytest.mark.django_db
 def test_a_case_is_numbered_on_save(new_status: CaseStatus) -> None:
+    """The INSERT path fills `number` — and a *fresh* sequence hands out 1.
+
+    Freshness has to be established, not assumed. `case_number_seq` is non-transactional, so
+    every `nextval` an earlier test spent and then rolled back is still spent and the sequence's
+    start point is suite-order dependent — which is precisely the reason the test below is
+    deliberately *relative*. This is where the absolute claim lives, so this is where the
+    sequence is rewound.
+    """
+    _rewind_case_number_sequence()
     case = Case.objects.create(title="Phishing wave", status=new_status)
     assert case.number is not None, "the allocator must fill the number"
     assert case.number == 1, "the first allocated number of a fresh sequence is 1"
+
+
+def _rewind_case_number_sequence() -> None:
+    """Point `case_number_seq` back at its own first value so the next `nextval` returns 1.
+
+    `1` and `is_called = false` rather than `0`: the sequence was created `START 1`, so `0` is
+    outside its bounds (`setval: value 0 is out of bounds`), and `is_called = false` is what
+    makes the next call return `last_value` itself instead of `last_value + 1`.
+
+    A no-op off Postgres: SQLite's allocator is `MAX(number) + 1` over the rows this test's
+    transaction can see, and an empty table is already the fresh state — there is nothing to
+    rewind. `SEQUENCE_NAME` is a module constant, so the interpolation is the same one
+    `allocate_case_number` and `SEQUENCE_SYNC_SQL` already do.
+    """
+    if connection.vendor != "postgresql":
+        return
+    with connection.cursor() as cursor:
+        cursor.execute(f"SELECT setval('{SEQUENCE_NAME}', 1, false)")
 
 
 @pytest.mark.django_db

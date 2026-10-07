@@ -22,11 +22,40 @@ urlpatterns = [
     path("case/<str:case_id>/task", views.case_task_list, name="case-task-list"),
     path("case/<str:case_id>/task/", views.case_task_list, name="case-task-list-slash"),
     path("case/<str:case_id>/observable", views.case_observable_list, name="case-observable-list"),
-    path("case/<str:case_id>/observable/", views.case_observable_add, name="case-observable-add"),
+    path(
+        "case/<str:case_id>/observable/",
+        views.case_observable_list,
+        name="case-observable-list-slash",
+    ),
     path("case/<str:case_id>/timeline", views.case_timeline, name="case-timeline"),
+    # Unlink and customEvent are two segments deep: registered *above* the bare detail route for
+    # the same reason as the collections — `<str:case_id>` would otherwise swallow `alert` and
+    # `customEvent` as a case identifier. Both spellings of customEvent point at the one
+    # POST-only view, so there is no verb collision between the twin entries.
+    path(
+        "case/<str:case_id>/alert/<str:alert_id>",
+        views.case_alert_remove,
+        name="case-alert-remove",
+    ),
+    path(
+        "case/<str:case_id>/customEvent",
+        views.case_custom_event_create,
+        name="case-custom-event-create",
+    ),
+    path(
+        "case/<str:case_id>/customEvent/",
+        views.case_custom_event_create,
+        name="case-custom-event-create-slash",
+    ),
     path("case/<str:case_id>", views.case_detail, name="case-detail"),
     path("case/<str:case_id>/", views.case_detail, name="case-detail-slash"),
     path("observable/<str:observable_id>", views.observable_detail, name="observable-detail"),
+    # Distinct top-level prefixes (`task/`, `customEvent/`, `customField/`) — no collision with
+    # `case/<id>`, and all of them land before `compat.urls`' catch-all by construction.
+    path("task/<str:task_id>", views.task_detail, name="task-detail"),
+    path("customEvent/<str:event_id>", views.custom_event_detail, name="custom-event-detail"),
+    path("customField", views.custom_field_list, name="custom-field-list"),
+    path("customField/", views.custom_field_list, name="custom-field-list-slash"),
     # Collection routes are registered with and without the trailing slash: CommonMiddleware's
     # APPEND_SLASH would redirect a POST and lose its body, so the slashless spellings are explicit.
     path("case", views.case_collection, name="case-collection"),

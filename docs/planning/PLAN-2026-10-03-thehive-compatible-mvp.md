@@ -640,6 +640,52 @@ id; `case.get_timeline` → `{"events": [...]}` with `alert.occurred` events. Th
 documented here, not committed (same as AC1.3/AC1.4 — the seed writes a throwaway key and user on
 the local prod-DB container).
 
+---
+
+### Phase 10 record — Phase 10a T1-closure + conformance/security/perf pass, 2026-10-07
+Wave plan: `PLAN-2026-10-07-phase10-t1-closure.md`; brief: `BRIEF-2026-10-07-phase10-t1-closure.md`.
+
+**Discovery (pre-wave route audit):** the plan §7.2 T1 surface was ~half-implemented. Twelve T1
+endpoint groups were missing at the route level (`POST /api/v1/login`, `GET/POST /logout`,
+`DELETE` on `alert`/`case`/`observable`, `POST /alert/{id}/observable`,
+`POST /case/{id}/customEvent`, `GET/PATCH/DELETE /task/{taskId}`, `PATCH/DELETE
+/customEvent/{eventId}`, `GET /customField`, `DELETE /case/{id}/alert/{alertId}`,
+`PATCH /observable/{id}`). User approved **Option 1: implement them** (G2's "T1 = hard, test-enforced
+contract" could not be met otherwise — AC10.1/AC10.3 require the endpoints to exist).
+
+| # | Plan said | We did | Why |
+|---|---|---|---|
+| P10-1 | `compat/mappers/` stubs to be filled in Phases 4–5 (deviation §13-13) | **Supersedes §13-13: the package was deleted** (9 empty stub files, zero importers). Wire rendering stays in `core/serializers.py` (its module docstring: one module so one entity can't render two ways) | Filling them would duplicate the real renderers; keeping them blocks coverage §2.1 |
+| P10-2 | ISO-8601 vs epoch-ms (§7.1/AC2.4 say ms output) | **Entity serializers keep ISO-8601; timeline wire keeps ms (P8-1).** Recorded boundary: API entity JSON = ISO, timeline envelope = ms | UI templates read ORM objects (verified: `alert.date|date:`), not API JSON, so conforming was safe but a bucket rewrite would churn Phase 8/9 consumers for no client-visible gain; thehive4py typed dicts don't validate |
+| P10-3 | `DELETE /case/{idOrName}` cascade semantics unspecified | Case row hard-deleted; `Alert.case` is `SET_NULL` so case's alerts **survive unlinked**; tasks/links/timeline/customFieldValues die via CASCADE | Verified `alerts/models.py` FK |
+| P10-4 | `POST /alert/{id}/observable` would dispatch automation | **No dispatch at link time.** `dispatch_observable_linked(observable, case_id)` requires a case id (not optional); alert observables are pre-import candidates. Automation fires on import/merge via the existing case path | TheHive semantics: alert observables are candidates |
+| P10-5 | customField output includes `displayName` | Emitted as `displayName = name` fallback (model has no field) | Model carries `name/group/type/options` only |
+| P10-6 | login/logout under default auth chain | Public API auth views are `AllowAny` + `csrf_exempt` + empty `authentication_classes`; bad creds → **400** (never 401, no user-enumeration oracle) | DRF `SessionAuthentication` would CSRF-reject a session-bearing logout POST regardless; 400-vs-401 split would leak account existence |
+| P10-7 | Read-only API keys enforced "at the permission layer" (plan §10) | `ScopePermission` (defined since Phase 2, never wired) now in `DEFAULT_PERMISSION_CLASSES`; read-only key → 403 on every mutating verb incl. `POST /api/v1/query` (no GET-exemption) | AC10.3 finding; without it read-only keys could mutate |
+| P10-8 | Latent bug found + fixed: `case_task_create` defaulted status `"Todo"` | Now `"Waiting"` (model default); also removed a `@api_view` decorator misuse that made every task creation 500 under DRF | `"Todo"` violates the `task_status_valid` CHECK constraint → Postgres INSERT failure |
+| P10-9 | `append_timeline_event` creates events with `date=now()` | Extended with optional `date`/`end_date` kwargs for `customEvent` POST | customEvent carries a caller-supplied date |
+| P10-10 | Security-auditor (Wave C) findings | F1 login type-hostility (+exception leak F6), F3 customEvent title bound, F5 `parse_timestamp` inf/nan, F7 test pins, F8 docstring → **all fixed**. F2 (org-blind case/alert resolution) and F3 (global observable PATCH/DELETE) and F9 (prod cookie/SECRET_KEY fail-closed) → **recorded, deferred to a tenant-isolation follow-up** (no behavior change until `owner_org` is populated — nothing sets it today) | Fix burst green: SQLite 724/3, Postgres 703/24, coverage 83.07% |
+| P10-11 | Perf (Wave D) — AC10.5 | **Met**: five hot paths all index-driven (<2ms at 6k alerts / 29k timeline / 5.8k automation-run seed). `events_after` keyset rewritten from OR-predicate to range+negated tie-break (F1: 12,501 filtered rows → 1, invisible on SQLite). Borderline F2 (case-detail timeline seq-scans only when one case owns ~86% of `timeline_event`) recorded, mitigation = page the timeline | EXPLAIN transcripts now committed under `docs/perf/` (`amalthea_{explain,probe,stress,limit,fixprobe}.txt`); scratch DB `amalthea_perf` left for re-runs |
+| P10-12 | Verifier follow-up **V1** (2026-10-07): `POST /api/v1/case/{caseId}/observable` slashless answered **405** — the exact spelling thehive4py 2.1.0 sends (`endpoints/observable.py:38`). Pre-existing route split: slashless → GET-only list view, slashed → POST-only add view | **Fixed**: merged into one GET+POST dispatcher (`case_observable_list`, the `case_task_list` pattern — `case_observable_add` is now the undecorated helper it calls), both spellings registered. **Also:** `compat/errors.py` now maps DRF `MethodNotAllowed` to a fixed `BadRequest` envelope instead of stringifying `ErrorDetail` into `GenericError` (the 405 leaked the framework's internals through the `else` branch) | thehive4py is the pinned interop client of record (plan §11); a client that can create alerts but not attach artifacts was the one interop gap the conformance suite could not see because no test posted the slashless spelling. Disclosed only in test comments pre-verifier |
+| P10-13 | Verifier follow-up **V3/V4/V5** (2026-10-07): three §7.2 rows had no test (`POST /logout`, `POST /alert/{id}/import/{caseId}`, array-`data` branch of `POST /alert/{id}/observable`); the long-untested per-IP webhook counter and the `alert-import-into` alias had no authz pins either | **All pinned**, verified green: logout parametrised over GET+POST (`test_t1_surface.py`), `test_alert_import_into_a_named_case_is_the_merge_spelling`, `test_alert_observable_accepts_an_array_of_artifacts`, `test_case_observable_post_slashless_is_the_spelling_thehive4py_uses`, `test_throttling_is_per_ip_not_global` (`test_webhook_hardening.py`), plus `alert-import-into` row in the authz matrix, and the `case-observable-create` authz row now posts **slashless** (the real spelling) | AC10.1 needed ≥1 conformance test keyed to every §7.2 row; the verifier's coverage audit listed these as the gaps. Post-gap gate: **SQLite 733/3, Postgres 712/24, coverage ≥83%** |
+
+**Gate (2026-10-07):** SQLite `make check` — **733 passed, 3 skipped** (baseline 491/3);
+Postgres `test_pg` — **712 passed, 24 skipped** (baseline 470/24); coverage **83.10%** (gate ≥80;
+`fail_under=80` kept); ruff check + format clean (164 files), mypy clean (86 files), `pip-audit` 0
+CVEs, bandit no new findings. New conformance surface: `test_t1_surface.py` (**53**),
+`test_unknown_fields.py` (33), `test_authz.py` matrix (**131** tests: 32 rows × 4 parametrisations +
+3 standalone), `test_ledger_keyset.py` (2), `test_thehive_fixtures.py` (13), `test_webhook_hardening.py`
+(37), plus fixed listings. Deviations P10-1..P10-13 above.
+
+**Deferred follow-ups (recorded, not resolved):** (a) tenant-isolation: org-scope case/alert
+resolution + populate `owner_org` at create + case-detail org 404 row in authz matrix (auditor F2);
+(b) observable PATCH/DELETE cross-org evidence blast-radius (auditor F3, belt suggestion); (c) prod
+cookie/secret hardening — `SESSION_COOKIE_SECURE`/`CSRF_COOKIE_SECURE`/HSTS + fail-closed
+`DJANGO_SECRET_KEY` in `settings/prod.py` (auditor F9); (d) page the `case_json(detail=True)` timeline
+for large ledgers (perf F2). The verifier's V1–V5 (slashless observable 405, untested §7.2 rows,
+per-IP throttle pin, `alert-import-into` authz row, durable EXPLAIN transcripts) are **closed** —
+see P10-12/P10-13 and `docs/perf/`.
+
 ## 14. Open Questions
 
 Resolved 2026-10-06 per TODO §3; each decision is recorded with the rationale that settled it. The

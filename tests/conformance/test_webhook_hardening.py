@@ -355,6 +355,37 @@ def test_throttling_is_per_source_not_global(source: IngestionSource, settings: 
     cache.clear()
 
 
+def test_throttling_is_per_ip_not_global(source: IngestionSource, settings: Any) -> None:
+    """The per-IP counter (`WEBHOOK_RATE_IP_PER_MIN`, verifier V3) must hold on its own.
+
+    `test_the_webhook_is_rate_limited` disables the per-IP counter to assert only the
+    per-source budget; here the per-source budget is lifted so the per-IP key is the only
+    thing that can answer 429. Two different `REMOTE_ADDR`s then share neither budget, and a
+    single address exhausts its own.
+    """
+    from django.core.cache import cache
+
+    cache.clear()
+    settings.WEBHOOK_RATE_SOURCE_PER_MIN = 0  # disable the per-source counter for this assertion
+    settings.WEBHOOK_RATE_IP_PER_MIN = 2
+
+    noisy = Client()
+    codes = [
+        _post(noisy, "o365", {"title": f"ip {i}", "sourceRef": f"ip{i}"}).status_code
+        for i in range(4)
+    ]
+    assert codes[:2] == [201, 201]
+    assert codes[2] == 429, f"the per-IP limit did not engage: {codes}"
+    assert Alert.objects.count() == 2, "a throttled request still wrote an alert"
+
+    # A second address has its own budget: the 429s above must not have spent it.
+    other = Client(REMOTE_ADDR="203.0.113.77")
+    assert _post(other, "o365", {"title": "other ip", "sourceRef": "other"}).status_code == 201, (
+        "one address exhausting its limit blocked a different address"
+    )
+    cache.clear()
+
+
 def test_the_secret_is_checked_before_the_rate_budget_is_spent(
     locked_source: IngestionSource, settings: Any
 ) -> None:

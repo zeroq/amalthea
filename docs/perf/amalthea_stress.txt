@@ -1,0 +1,113 @@
+created 25000 events on b9e82e48-32f6-40e4-89b9-daaba92ebd60
+
+====================================================================================================
+### PROBE-4a big case (25k events): ORM timeline ORDER BY date,id (case_json detail shape)
+--- SQL ---
+SELECT "timeline_event"."id", "timeline_event"."created_at", "timeline_event"."updated_at", "timeline_event"."case_id", "timeline_event"."date", "timeline_event"."end_date", "timeline_event"."title", "timeline_event"."description", "timeline_event"."kind", "timeline_event"."actor_id", "timeline_event"."metadata" FROM "timeline_event" WHERE "timeline_event"."case_id" = %s ORDER BY "timeline_event"."date" ASC, "timeline_event"."id" ASC
+--- params ---
+(UUID('b9e82e48-32f6-40e4-89b9-daaba92ebd60'),)
+--- plan ---
+Sort  (cost=2703.51..2766.01 rows=25000 width=109) (actual time=4.450..5.032 rows=25000 loops=1)
+  Sort Key: date, id
+  Sort Method: quicksort  Memory: 3935kB
+  Buffers: shared hit=514
+  ->  Seq Scan on timeline_event  (cost=0.00..877.30 rows=25000 width=109) (actual time=0.159..1.908 rows=25000 loops=1)
+        Filter: (case_id = 'b9e82e48-32f6-40e4-89b9-daaba92ebd60'::uuid)
+        Rows Removed by Filter: 4064
+        Buffers: shared hit=514
+Planning Time: 0.020 ms
+Execution Time: 5.653 ms
+
+====================================================================================================
+### PROBE-4b big case: narrow projection ORDER BY date,id (backward index probe)
+--- SQL ---
+SELECT id, date FROM timeline_event WHERE case_id = %s ORDER BY date ASC, id ASC
+--- params ---
+['b9e82e48-32f6-40e4-89b9-daaba92ebd60']
+--- plan ---
+Sort  (cost=2703.51..2766.01 rows=25000 width=24) (actual time=2.966..3.460 rows=25000 loops=1)
+  Sort Key: date, id
+  Sort Method: quicksort  Memory: 1940kB
+  Buffers: shared hit=514
+  ->  Seq Scan on timeline_event  (cost=0.00..877.30 rows=25000 width=24) (actual time=0.189..1.825 rows=25000 loops=1)
+        Filter: (case_id = 'b9e82e48-32f6-40e4-89b9-daaba92ebd60'::uuid)
+        Rows Removed by Filter: 4064
+        Buffers: shared hit=514
+Planning Time: 0.041 ms
+Execution Time: 3.931 ms
+
+====================================================================================================
+### PROBE-4c big case: events_after OR-form keyset (as shipped)
+--- SQL ---
+SELECT "timeline_event"."id", "timeline_event"."created_at", "timeline_event"."updated_at", "timeline_event"."case_id", "timeline_event"."date", "timeline_event"."end_date", "timeline_event"."title", "timeline_event"."description", "timeline_event"."kind", "timeline_event"."actor_id", "timeline_event"."metadata" FROM "timeline_event" WHERE ("timeline_event"."case_id" = %s AND ("timeline_event"."date" > %s OR ("timeline_event"."date" = %s AND "timeline_event"."id" > %s))) ORDER BY "timeline_event"."date" ASC, "timeline_event"."id" ASC
+--- params ---
+(UUID('b9e82e48-32f6-40e4-89b9-daaba92ebd60'), datetime.datetime(2026, 3, 22, 22, 39, 39, 33966, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 3, 22, 22, 39, 39, 33966, tzinfo=datetime.timezone.utc), UUID('3c349ef1-33eb-4b81-85cd-e724fde1cfb5'))
+--- plan ---
+Sort  (cost=2078.21..2113.82 rows=14247 width=109) (actual time=2.855..3.126 rows=12499 loops=1)
+  Sort Key: date, id
+  Sort Method: quicksort  Memory: 2045kB
+  Buffers: shared hit=514
+  ->  Seq Scan on timeline_event  (cost=0.00..1095.28 rows=14247 width=109) (actual time=0.754..1.659 rows=12499 loops=1)
+        Filter: ((case_id = 'b9e82e48-32f6-40e4-89b9-daaba92ebd60'::uuid) AND ((date > '2026-03-22 22:39:39.033966+00'::timestamp with time zone) OR ((date = '2026-03-22 22:39:39.033966+00'::timestamp with time zone) AND (id > '3c349ef1-33eb-4b81-85cd-e724fde1cfb5'::uuid))))
+        Rows Removed by Filter: 16565
+        Buffers: shared hit=514
+Planning:
+  Buffers: shared hit=6
+Planning Time: 0.058 ms
+Execution Time: 3.395 ms
+
+====================================================================================================
+### PROBE-4d big case: ORM-expressible rewrite — date >= anchor AND NOT (date = anchor AND id <= anchor)
+--- SQL ---
+SELECT id, date FROM timeline_event WHERE case_id = %s AND date >= %s AND NOT (date = %s AND id <= %s) ORDER BY date ASC, id ASC
+--- params ---
+['b9e82e48-32f6-40e4-89b9-daaba92ebd60', datetime.datetime(2026, 3, 22, 22, 39, 39, 33966, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 3, 22, 22, 39, 39, 33966, tzinfo=datetime.timezone.utc), '3c349ef1-33eb-4b81-85cd-e724fde1cfb5']
+--- plan ---
+Sort  (cost=2078.28..2113.90 rows=14248 width=24) (actual time=2.001..2.256 rows=12499 loops=1)
+  Sort Key: date, id
+  Sort Method: quicksort  Memory: 970kB
+  Buffers: shared hit=514
+  ->  Seq Scan on timeline_event  (cost=0.00..1095.28 rows=14248 width=24) (actual time=0.622..1.438 rows=12499 loops=1)
+        Filter: ((date >= '2026-03-22 22:39:39.033966+00'::timestamp with time zone) AND (case_id = 'b9e82e48-32f6-40e4-89b9-daaba92ebd60'::uuid) AND ((date <> '2026-03-22 22:39:39.033966+00'::timestamp with time zone) OR (id > '3c349ef1-33eb-4b81-85cd-e724fde1cfb5'::uuid)))
+        Rows Removed by Filter: 16565
+        Buffers: shared hit=514
+Planning:
+  Buffers: shared hit=11
+Planning Time: 0.050 ms
+Execution Time: 2.498 ms
+
+====================================================================================================
+### PROBE-4e big case: row-comparison (date, id) > (anchor) — planner's ideal form
+--- SQL ---
+SELECT id, date FROM timeline_event WHERE case_id = %s AND (date, id) > (%s, %s) ORDER BY date ASC, id ASC
+--- params ---
+['b9e82e48-32f6-40e4-89b9-daaba92ebd60', datetime.datetime(2026, 3, 22, 22, 39, 39, 33966, tzinfo=datetime.timezone.utc), '3c349ef1-33eb-4b81-85cd-e724fde1cfb5']
+--- plan ---
+Sort  (cost=2005.55..2041.16 rows=14247 width=24) (actual time=2.078..2.325 rows=12499 loops=1)
+  Sort Key: date, id
+  Sort Method: quicksort  Memory: 970kB
+  Buffers: shared hit=514
+  ->  Seq Scan on timeline_event  (cost=0.00..1022.62 rows=14247 width=24) (actual time=0.699..1.517 rows=12499 loops=1)
+        Filter: ((case_id = 'b9e82e48-32f6-40e4-89b9-daaba92ebd60'::uuid) AND (ROW(date, id) > ROW('2026-03-22 22:39:39.033966+00'::timestamp with time zone, '3c349ef1-33eb-4b81-85cd-e724fde1cfb5'::uuid)))
+        Rows Removed by Filter: 16565
+        Buffers: shared hit=514
+Planning Time: 0.013 ms
+Execution Time: 2.566 ms
+
+====================================================================================================
+### PROBE-4f big case: full-row events_after with row comparison
+--- SQL ---
+SELECT * FROM timeline_event WHERE case_id = %s AND (date, id) > (%s, %s) ORDER BY date ASC, id ASC
+--- params ---
+['b9e82e48-32f6-40e4-89b9-daaba92ebd60', datetime.datetime(2026, 3, 22, 22, 39, 39, 33966, tzinfo=datetime.timezone.utc), '3c349ef1-33eb-4b81-85cd-e724fde1cfb5']
+--- plan ---
+Sort  (cost=2005.55..2041.16 rows=14247 width=109) (actual time=2.273..2.575 rows=12499 loops=1)
+  Sort Key: date, id
+  Sort Method: quicksort  Memory: 2045kB
+  Buffers: shared hit=514
+  ->  Seq Scan on timeline_event  (cost=0.00..1022.62 rows=14247 width=109) (actual time=0.674..1.520 rows=12499 loops=1)
+        Filter: ((case_id = 'b9e82e48-32f6-40e4-89b9-daaba92ebd60'::uuid) AND (ROW(date, id) > ROW('2026-03-22 22:39:39.033966+00'::timestamp with time zone, '3c349ef1-33eb-4b81-85cd-e724fde1cfb5'::uuid)))
+        Rows Removed by Filter: 16565
+        Buffers: shared hit=514
+Planning Time: 0.017 ms
+Execution Time: 2.872 ms
