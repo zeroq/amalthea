@@ -74,11 +74,14 @@ the `docker compose` v2 plugin is **not** installed, so scripts and docs must ca
   3.14 wheels cleanly, so `uv` was **not** needed — this keeps the machine untouched.
 - Django pinned to **5.2.17** (5.2 LTS; includes fixes for CVE-2026-25673 / CVE-2026-25674).
 - Dependency split in `requirements/` is a true **dependency-closure computation**, not a name filter:
-  `scripts/lock.sh` builds a throwaway venv with only the runtime top-level packages, freezes it, and
-  treats the remainder as the dev closure. Name-based splitting misclassifies transitives
+  `scripts/lock.sh` (rewritten Phase 11, see §13 Phase 11 record) runs
+  `pip-compile --generate-hashes` over the existing exact pins — self-referential input, no
+  `.in` layer, dev constrained by `-c base.txt`, base-overlapping entries filtered out so the
+  runtime/dev split stays a real disjoint closure. Name-based splitting misclassifies transitives
   (`CacheControl`, `thehive4py`, `mypy_extensions` all leaked into a naive `base.txt`).
-- **Reproducibility verified**: a fresh venv built from `requirements/dev.txt` yields a
-  byte-identical `pip freeze` to the working `.venv` (95 packages).
+- **Reproducibility verified**: `make lock` is byte-identical across consecutive runs (hashing pass
+  over fully-pinned input has no version choice); a fresh venv built from `requirements/dev.txt` with
+  `--require-hashes` yields the committed closure (49 runtime + 54 dev pins, 1588 hash lines).
 - **Dev default DB: SQLite** for zero-friction `manage.py` work. Accepted, recorded deviation —
   see §12 R4 and §13 #9. CI and all JSONB/index work run on Postgres.
 - `docker-compose.yml` provides Postgres 16 + Redis 7; validated with `docker-compose config`
@@ -685,6 +688,33 @@ cookie/secret hardening — `SESSION_COOKIE_SECURE`/`CSRF_COOKIE_SECURE`/HSTS + 
 for large ledgers (perf F2). The verifier's V1–V5 (slashless observable 405, untested §7.2 rows,
 per-IP throttle pin, `alert-import-into` authz row, durable EXPLAIN transcripts) are **closed** —
 see P10-12/P10-13 and `docs/perf/`.
+
+---
+
+### Phase 11 record — CI workflow + hash-pinned requirements, 2026-10-07
+Wave plan: `PLAN-2026-10-07-ci-hashed-requirements.md` (closes TODO §4.3 + §8.6; user-selected as the
+next wave after Phase 10, TODO commit `7a4ffd0`).
+
+**No model/API/UI surface** — devops/tooling wave: `scripts/lock.sh` rewritten, both requirement files
+re-generated with all-platform hashes, `.github/workflows/ci.yml` added, Makefile `lock` comment fixed.
+
+| # | Plan said | We did | Why |
+|---|---|---|---|
+| P11-1 | Lock = `pip freeze` subtraction of a throwaway runtime venv | **Superseded** by `pip-compile --generate-hashes` over the existing exact pins (self-referential input, no `.in` layer — see P11-3); dev compiled with `-c base.txt` + a base-overlap filter that keeps runtime/dev name-sets disjoint | Hash verification needs hashes; freeze gives none. pip-compile over fully-pinned input has no version choice, so it cannot drift — the closure invariant (below) machine-checks that claim |
+| P11-2 | Coverage: non-blocking signal everywhere (plan §13 #13, Makefile `|| true`) | CI treats `fail_under=80` as a **hard gate**; local `make coverage` stays non-blocking per §1.18 | A remote runner that never enforces the number would not guard it |
+| P11-3 | (implied) top-level `.in` declaration layer | **Not introduced** — existing exact pins remain the single source of truth | Tested closure must stay the truth; ranges would reintroduce drift |
+| P11-4 | CI validated on first push | Workflow steps are exact locally-verified commands (AC8); the runner-side byte-identity of the mac-generated lock is asserted by the `lock.sh --check` step on first push | Repo has no remote yet (§4.5 deferred — needs user decisions: org, visibility, LICENSE) |
+| P11-5 | (new, found in-the-field) pip-compile 7.6.2 warns `--strip-extras` becomes default in 8.0 | Added `--no-strip-extras` to both passes; also normalised the temp-dir path out of the output header/`via` comments so `make lock` is byte-identical across runs (determinism AC2) | Warning broke the "quiet then tail" script contract; raw `$TMP` paths made every run differ in header lines only |
+| P11-6 | (new) counts | Real numbers from the commit: base **49** pkgs / 710 hash lines; dev **54** pkgs / 878 hash lines, zero name overlap with base; closure diff vs git HEAD = exactly the 6 bootstrap pins (`build`, `pyproject-hooks`, `pip-tools`, `wheel`, `pip`, `setuptools`) | Plan had stale "53+45" from pre-Phase-10 counting; actual snapshot is the comparator, so the invariant is self-verifying |
+
+**Gate (2026-10-07):** SQLite `make check` — **733 passed, 3 skipped** (unchanged from Phase 10);
+Postgres `test_pg` — **712 passed, 24 skipped** (unchanged); coverage **83.47%** (Phase 10: 83.10%);
+`make lock` **byte-identical on 3 consecutive runs**; `pip install --dry-run --require-hashes -r
+requirements/dev.txt` exits 0; `pip-audit` **0 CVEs**; ruff/mypy/django-check/migration-sync all green
+via `make check`. Hashes are all-platform (PyPI JSON API) so a mac-generated lock installs on Linux CI.
+
+**Verification:** T5.2 verifier pass over AC1–AC8 → 8/8 Met, 0 Deviated, 0 Not Met, no blockers
+(see [`VERIFY-2026-10-07-phase11.md`](./VERIFY-2026-10-07-phase11.md)).
 
 ## 14. Open Questions
 

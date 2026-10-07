@@ -428,3 +428,38 @@ endpoints rather than shrink the contract (AC10.1/AC10.3 required them to exist)
     `docs/perf/`. Deviations P10-12/P10-13 record all of it.
   **Post-closure gate:** SQLite `make check` **733 passed / 3 skipped**; Postgres `test_pg`
   **712 passed / 24 skipped**; coverage **83.10%**; ruff + mypy clean.
+
+## 2026-10-07 — Phase 11: CI workflow + hash-pinned requirements
+
+Plan: `docs/planning/PLAN-2026-10-07-ci-hashed-requirements.md`. Closes TODO **§4.3** (hash-pin the
+requirements) and **§8.6** (guard the CI invocation itself). User-selected next wave after Phase 10
+(TODO commit `7a4ffd0`). Zero Django code, zero migrations — devops/tooling only.
+
+- [x] **`scripts/lock.sh` rewritten** — freeze-subtraction (P11-1, unhashed) replaced by
+  `pip-compile --generate-hashes` over the existing exact pins (self-referential input, no `.in`
+  layer per P11-3). Dev pass: `-c base.txt` constraint + `--allow-unsafe` (pins pip/setuptools) +
+  `--no-strip-extras` (P11-5) + a Python filter that drops base-overlapping entries so runtime/dev
+  name-sets stay disjoint. Output header normalised so `make lock` is **byte-identical across runs**
+  (AC2 — verified on three consecutive runs).
+- [x] **Closure invariant, machine-checked.** `parse_closure` (extras-aware, continuation/hash
+  aware, follows `-r` includes) compares the git-HEAD snapshot against the regenerated multiset; the
+  only allowed diff is the 6-entry bootstrap allowlist (`build` 1.6.1, `pyproject-hooks` 1.3.3,
+  `pip-tools` 7.6.2, `wheel` 0.48.0, `pip` 26.2.1, `setuptools` 84.0.0). Verified with a standalone
+  parser: diff is **exactly** those six. `--check` mode exits non-zero when the committed files
+  differ from what the lock produces — CI gate.
+- [x] **All-platform hashes.** base.txt: **49 pkgs / 710 hash lines**; dev.txt: **54 pkgs / 878 hash
+  lines**; zero hash-less pins (AC3); `pip install --dry-run --require-hashes -r
+  requirements/dev.txt` exits 0 (AC5). Hashes come from the PyPI JSON API (every platform wheel), so
+  a mac-generated lock installs on Linux CI.
+- [x] **`.github/workflows/ci.yml`** — the DoD on a fresh runner: Python 3.14 (local parity),
+  `postgres:16-alpine` service container (amalthea/amalthea, `docker-compose.yml` parity),
+  `permissions: contents: read`, concurrency cancellation. Steps are exact locally-verified
+  commands: install with `--require-hashes` → `make check` → Postgres suite (`test_pg`) → coverage
+  gate (`fail_under=80`, P11-2) → `scripts/lock.sh --check` → `pip-audit`. YAML parse-verified via
+  PyYAML; `.yml` is inside the pre-commit hook's code-scope regex (`pre-commit.sh:22`).
+- [x] **Gates unchanged by hashing (AC6).** SQLite `make check` **733 / 3 skipped**; Postgres
+  `test_pg` **712 / 24 skipped**; coverage **83.47%** (Phase 10: 83.10%); `pip-audit` **0 CVEs**;
+  ruff/mypy/django-check/migration-sync green via `make check`.
+- [x] **Recorded.** Master plan §13 Phase 11 record with P11-1..P11-6; TODO §4.3/§8.6 closed with
+  figures; verifier report: `docs/planning/VERIFY-2026-10-07-phase11.md`; runner-side validation of
+  the workflow is the first-push item (§4.5, deferred by user decision).

@@ -286,10 +286,14 @@ discipline, no code change is safe on SQLite).
   6. Decide whether `TODO.md` / `COMPLETED.md` / `docs/reviews/` stay public. They are honest and
      useful, but they narrate internal process; keeping them is defensible, hiding them is not.
 
-- [ ] **4.3 — Hash-pin the requirements** `R9`, plan §5
-  Versions are pinned and the closure is verified byte-reproducible (95 packages), but
-  `requirements/*.txt` carry no hashes. Run `pip-compile --generate-hashes` with a **larger timeout**
-  than the 120s default — the first attempt timed out resolving hashes for 97 packages.
+- [x] **4.3 — Hash-pin the requirements** `R9`, plan §5 — **CLOSED 2026-10-07 (Phase 11)**
+  `scripts/lock.sh` rewritten to `pip-compile --generate-hashes` over the existing exact pins
+  (all-platform hashes from the PyPI JSON API; `--no-strip-extras`; dev constrained by `-c base.txt`
+  with the base-overlap filter keeping runtime/dev disjoint). base.txt: 49 pkgs / 710 hash lines;
+  dev.txt: 54 pkgs / 878 hash lines; closure invariant machine-checked with a 6-entry bootstrap
+  allowlist (`build`, `pyproject-hooks`, `pip-tools`, `wheel`, `pip`, `setuptools`); `make lock`
+  verified byte-identical on repeat runs; `--check` mode adds the CI lock-currentness gate. Plan:
+  `PLAN-2026-10-07-ci-hashed-requirements.md`; record: master plan §13 Phase 11.
 
 - [ ] **4.4 — `docs/spec/` is empty**
   Intended home for the data-model/API spec once it stabilises past the plan.
@@ -466,9 +470,12 @@ failures were in the **evidence layer**, not the code under test.
   (`test_integrity.py`) but lack a mutation guard; `severity`/`pap` ranges and the `ar_pending_idx`
   partial predicate are asserted against DDL/behaviour. Judge on a per-AC basis as Phases 7–8 land.
 
-- [ ] **8.6 — Guard the CI invocation itself**
-  The hooks pin the commands, but nothing pins them on a remote runner. A single workflow file running
-  `make check` + `make coverage` is needed when this moves to GitHub (§4.5).
+- [x] **8.6 — Guard the CI invocation itself** — **CLOSED 2026-10-07 (Phase 11)**
+  `.github/workflows/ci.yml` runs the full DoD on `ubuntu-latest` (Python 3.14, Postgres 16-alpine
+  service container, `permissions: contents: read`): pip install with `--require-hashes`, `make
+  check`, the Postgres suite, the coverage gate, `scripts/lock.sh --check`, and `pip-audit`. Every
+  step is a locally-verified command; runner-validated on first push (§4.5). Plan:
+  `PLAN-2026-10-07-ci-hashed-requirements.md`; record: master plan §13 Phase 11.
 
 - [ ] **8.7 — Timestamp-unit wording in plan §7.1** Verifier (2026-10-07), POST-closure note
   The plan's T1 timestamp row still reads "ms" while the implemented (and verifier-confirmed)

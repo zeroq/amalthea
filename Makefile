@@ -70,7 +70,7 @@ audit: ## Security and dependency audit
 	@$(PY) -m bandit -r . -x './.venv,./tests' -q || true
 	@$(PIP) list --outdated --format=columns | head -20
 
-lock: ## Regenerate the pinned requirement closure from pyproject.toml
+lock: ## Regenerate the pinned, hash-verified requirement closure (requirements/{base,dev}.txt)
 	@./scripts/lock.sh
 
 hooks: ## Install the pre-commit + pre-push git hooks

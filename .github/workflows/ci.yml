@@ -1,0 +1,73 @@
+# Amalthea CI gate (plan PLAN-2026-10-07-ci-hashed-requirements.md §Architecture).
+#
+# Runs the same Definition of Done on a fresh remote runner instead of naming ad-hoc
+# commands (risk R11 / TODO 8.6): every step below is a locally-verified invocation.
+# Side effects: none beyond the workflow itself — the Postgres service container is the
+# docker-compose.yml equivalent; no Redis service (the suite uses in-memory Channels +
+# eager Celery, and the "Redis unreachable -> 503" path is itself under test).
+#
+# The lock-currentness step (scripts/lock.sh --check) fails when a hand-edited or
+# accidentally-drifted requirement file differs from what the deterministic lock produces,
+# so review is not the only guard on the hashed closure (supply-chain security note).
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: DoD gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: amalthea
+          POSTGRES_PASSWORD: amalthea
+          POSTGRES_DB: amalthea
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amalthea -d amalthea"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install pinned closure (hash-verified)
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --require-hashes -r requirements/dev.txt
+
+      - name: SQLite DoD gate (lint, types, migrations, suite)
+        run: make check
+
+      - name: Postgres conformance suite
+        run: DJANGO_SETTINGS_MODULE=amalthea.settings.test_pg .venv/bin/python -m pytest -q
+
+      - name: Coverage gate (fail_under=80)
+        run: .venv/bin/python -m pytest -q --cov=. --cov-fail-under=80
+
+      - name: Lock-currentness gate
+        run: ./scripts/lock.sh --check
+
+      - name: Supply-chain audit
+        run: .venv/bin/pip-audit
