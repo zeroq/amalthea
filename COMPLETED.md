@@ -463,3 +463,39 @@ requirements) and **§8.6** (guard the CI invocation itself). User-selected next
 - [x] **Recorded.** Master plan §13 Phase 11 record with P11-1..P11-6; TODO §4.3/§8.6 closed with
   figures; verifier report: `docs/planning/VERIFY-2026-10-07-phase11.md`; runner-side validation of
   the workflow is the first-push item (§4.5, deferred by user decision).
+
+## 2026-10-07 — `docs/spec/`: implemented-system specification (TODO §4.4)
+
+Plan: `docs/planning/PLAN-2026-10-07-docs-spec.md`. Documentation-only wave: zero Django code, zero
+migrations. Closes TODO **§4.4** ("`docs/spec/` is empty"). The spec describes the **shipped** system
+through Phase 11, not the plan's intent; the code + `tests/conformance/` are the source of truth and
+the spec is the pointer-rich map.
+
+- [x] **Eight files created** under `docs/spec/`: `README.md` (index, drift policy, evidence map),
+  `data-model.md` (per-app tables/fields/FKs/constraints/indexes with verbatim constraint names),
+  `api.md` (full `/api/v1/` route table, bodies, wire renderers, error envelope),
+  `realtime.md` (WS route, 4401/4000 close codes, `sync`/`timeline` frames, ledger choke point),
+  `automation.md` (trigger set, dispatch/idempotency, sweep index, executor SSRF safety, feedback
+  loop), `query-dsl.md` (start steps, `_LEAF_OPS`, whitelists, deterministic paging),
+  `identity-auth.md` (ApiKey/scope `ScopePermission`, DRF config, per-env settings, deferred F9
+  hardening), `deviations.md` (the register).
+- [x] **AC2 identifier drift check.** Quoted identifiers verified against source: table names
+  (`case_record`, `automation_run`, `timeline_event`), status sets, constraint names
+  (`uniq_alert_source_type_ref`, `uniq_obs_dtype_hash`, `ar_pending_idx`, `task_status_valid`,
+  `apikey_scope_valid`), WS close codes 4401/4000, `_LEAF_OPS`/`_START_STEPS`, `MAX_OUTPUT_BYTES`,
+  and every `core/serializers.py` renderer — all matched, no plan-era names (`case`, `Todo`) survived.
+- [x] **AC3 deviations register** — ≥15 rows covering M3/M6/M9/M12/M14, P8-1, P10-2…P10-13 (incl.
+  the code-only `P10-w`), the login-400 decision, the ISO-8601-vs-epoch-ms boundary, deferred security
+  hardening (F2 global observable mutation, F9 cookie/SECRET_KEY), **plus the newly-found P12-1**:
+  `task.completed` is in `TRIGGER_EVENTS` but no receiver/call site emits it — a playbook bound to it
+  is inert. Recorded, not fixed (changing the frozen trigger set is an approved-surface change).
+  Register uses the master-plan §13 numeric IDs; `A3/A5/A9/B2` are Phase-10 *task* IDs, not deviations.
+- [x] **Verifier pass (corrective).** First pass returned Partial (AC2 phantom identifiers in
+  `automation.md`/`query-dsl.md`, AC3 label drift). Both files were rewritten from source, every broken
+  evidence ref fixed, and the register canonicalised. Final verifier verdict: **PASS 5/5 Met, zero
+  residual findings** (`docs/planning/VERIFY-2026-10-07-docs-spec.md`).
+- [x] **Drift policy** — `docs/spec/README.md` states the spec is pinned by `tests/conformance/`; a
+  code change that breaks a quoted identifier must update the spec in the same wave. No code changed
+  this wave, so gates are unchanged (SQLite 733/3, Postgres 712/24, coverage 83.47%).
+- [x] **Recorded.** TODO §4.4 closed; master plan §13 Phase 12 record; plan status Approved→
+  Implemented.

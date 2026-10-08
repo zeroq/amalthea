@@ -104,6 +104,8 @@ realtime/       WebSocket consumers (Phase 7 — in progress)
 
 - **Plan & phases** — [`docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md`](docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md)
 - **Specification** — [`AGENTS.md`](./AGENTS.md) (project spec: modules, schema, MVP criteria)
+- **Implemented-system spec** — [`docs/spec/`](docs/spec/) (data model, API, realtime, automation,
+  query DSL, auth — derived from the shipped code, with a deviation register)
 - **Architecture decisions** — [`docs/decisions/`](docs/decisions/) (ADR-001 framework, ADR-002
   TheHive compatibility)
 - **Open work / completed work** — [`TODO.md`](./TODO.md), [`COMPLETED.md`](./COMPLETED.md)

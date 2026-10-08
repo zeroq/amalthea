@@ -716,6 +716,26 @@ via `make check`. Hashes are all-platform (PyPI JSON API) so a mac-generated loc
 **Verification:** T5.2 verifier pass over AC1–AC8 → 8/8 Met, 0 Deviated, 0 Not Met, no blockers
 (see [`VERIFY-2026-10-07-phase11.md`](./VERIFY-2026-10-07-phase11.md)).
 
+### Phase 12 — `docs/spec/`: implemented-system specification (2026-10-07)
+
+Plan: `docs/planning/PLAN-2026-10-07-docs-spec.md`. Closes TODO **§4.4**. Documentation-only: zero
+Django code, zero migrations. The spec (`docs/spec/`) describes the **shipped** system through
+Phase 11; the code + `tests/conformance/` are authoritative. Eight files: `README.md`, `data-model.md`,
+`api.md`, `realtime.md`, `automation.md`, `query-dsl.md`, `identity-auth.md`, `deviations.md`.
+
+| # | Plan said | Implemented / recorded | Why |
+|---|---|---|---|
+| **P12-1** | `TRIGGER_EVENTS` is the set of events that drive playbooks | `task.completed` is listed in `TRIGGER_EVENTS` and mapped in `dispatcher._event_name`, but **no `Task` receiver and no call site emits `TaskCompleted`** — a playbook bound to `task.completed` is inert | Found while writing `docs/spec/automation.md`. Not fixed this wave: changing the frozen trigger set is an approved-surface change and needs its own task. Recorded in `docs/spec/deviations.md` |
+| P12-2 | spec = the plan's intent | spec describes the **implemented** system; the deviations register is the only place plan-vs-code is reconciled | Docs must stay truthful (repo G5 norm): a reader of `docs/spec/` must never be shown an endpoint/field that does not exist |
+| **P12-3** | — | First verifier pass found the spec's own goal violated: `automation.md`/`query-dsl.md` contained **phantom identifiers** (an invented pending-run recovery sweep, `_MAKES_TOTAL`, `_can_match_case`, etc.) and broken evidence refs; the deviations register used invented letter IDs. A corrective pass rewrote both files from source, fixed every broken ref, and canonicalised the register to the §13 numeric IDs | The wave's G2 is "no invented surface"; the independent verifier caught what the author missed. The original plan's G3/AC3 also mislabelled Phase-10 **task** IDs `A3/A5` as deviations — corrected in the plan. Final verifier verdict: **5/5 Met, zero residual findings** |
+
+**Gate:** documentation-only; no code changed, so the Phase 11 gate stands (SQLite 733/3, Postgres
+712/24, coverage 83.47%). Identifier-drift spot-checks (AC2) verified against source.
+
+**Verification:** verifier pass over the `docs/spec/` wave — first pass Partial (AC2/AC3), corrective
+pass landed, final **PASS 5/5 Met / 0 Not Met / 0 Deviated, zero residual findings** — see
+[`VERIFY-2026-10-07-docs-spec.md`](./VERIFY-2026-10-07-docs-spec.md).
+
 ## 14. Open Questions
 
 Resolved 2026-10-06 per TODO §3; each decision is recorded with the rationale that settled it. The

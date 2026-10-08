@@ -295,8 +295,13 @@ discipline, no code change is safe on SQLite).
   verified byte-identical on repeat runs; `--check` mode adds the CI lock-currentness gate. Plan:
   `PLAN-2026-10-07-ci-hashed-requirements.md`; record: master plan §13 Phase 11.
 
-- [ ] **4.4 — `docs/spec/` is empty**
-  Intended home for the data-model/API spec once it stabilises past the plan.
+- [x] **4.4 — `docs/spec/` populated with the implemented-system spec** (2026-10-07)
+  Plan: `docs/planning/PLAN-2026-10-07-docs-spec.md`. Seven reference files derived from code (not
+  the plan's intent), each cross-linked to its conformance/contract tests:
+  `README.md` (index + drift policy), `data-model.md`, `api.md`, `realtime.md`, `automation.md`,
+  `query-dsl.md`, `identity-auth.md`, `deviations.md` (register: M3/M6/M9/M12/M14, P7-*, P8-*,
+  P10-*, P11-*, deferred F2/F9, and the new **P12-1**: `task.completed` is a registered trigger that
+  nothing emits). Source: `tests/conformance/` + `core/serializers.py` + `compat/`. See COMPLETED.md.
 
 ---
 
