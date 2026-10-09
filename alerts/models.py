@@ -163,7 +163,15 @@ class AlertCustomFieldValue(UUIDModel, TimeStampedModel):
         return f"AlertCFV({self.alert_id})"
 
 
-class AlertObservable(UUIDModel, TimeStampedModel):
+class AlertObservable(UUIDModel):
+    """Join row linking an alert to a globally-deduped observable.
+
+    Append-only: a link is created or deleted, never edited, so the row carries only
+    ``created_at``. It declares that field directly rather than inheriting
+    ``TimeStampedModel``, whose ``updated_at`` would be a column nothing ever writes — and
+    whose ``created_at`` this model used to shadow (REVIEW-2026-10-03 **M7**).
+    """
+
     # Both FKs are left-prefix-covered, so both implicit single-column indexes are redundant
     # (REVIEW-2026-10-04 **L-2**). Mirrors `cases.CaseObservable`, which is the same shape:
     # `alert` is the left prefix of `UNIQUE (alert, observable)`, and `observable` is the left

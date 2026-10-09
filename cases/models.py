@@ -250,7 +250,15 @@ class CaseCustomFieldValue(UUIDModel, TimeStampedModel):
         return f"CaseCFV({self.case_id})"
 
 
-class CaseObservable(UUIDModel, TimeStampedModel):
+class CaseObservable(UUIDModel):
+    """Join row linking a case to a globally-deduped observable.
+
+    Append-only: a link is created or deleted, never edited, so the row carries only
+    ``created_at``. It declares that field directly rather than inheriting
+    ``TimeStampedModel``, whose ``updated_at`` would be a column nothing ever writes — and
+    whose ``created_at`` this model used to shadow (REVIEW-2026-10-03 **M7**).
+    """
+
     # db_index=False on `case`: left prefix of uniq_case_observable below.
     case = models.ForeignKey(
         Case, on_delete=models.CASCADE, related_name="case_observables", db_index=False

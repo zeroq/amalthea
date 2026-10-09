@@ -15,9 +15,12 @@ What is asserted here, all against the live database:
   beside it.
 * **M12** the `Imported` alert status is seeded, because ADR-002 §D4 lists it as a legal
   stage and the compat mapper must be able to produce it.
+* **M7** the observable link tables are append-only: they carry `created_at` and no
+  `updated_at` (the column they used to inherit from `TimeStampedModel` while also
+  shadowing that base's `created_at`).
 
 Review items: H1 (vacuous test), H5 (CHECK constraints), H6 (UUID PKs), M2 (FK rename),
-M6 (reserved table name), M12 (Imported stage), M14 (playbook FK).
+M6 (reserved table name), M7 (link-table timestamps), M12 (Imported stage), M14 (playbook FK).
 """
 
 from __future__ import annotations
@@ -164,6 +167,24 @@ def test_h6_apikey_prefix_is_unique_and_the_pk_is_a_uuid() -> None:
     assert ApiKey._meta.get_field("prefix").unique
     assert isinstance(ApiKey._meta.pk, models.UUIDField)
     assert columns("identity_apikey")["prefix"].startswith(("CHAR", "VARCHAR"))
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("table", ["case_observable", "alert_observable"])
+def test_m7_observable_link_tables_are_append_only(table: str) -> None:
+    """REVIEW M7: a link row records when it was made and nothing else.
+
+    Linking an observable creates a row and unlinking deletes it, so there is no edit to
+    timestamp. The old models inherited `updated_at` from `TimeStampedModel` while also
+    shadowing that base's `created_at`; they now declare `created_at` directly and the dead
+    `updated_at` column is gone. A live `updated_at` here means the model re-inherited the
+    base and the migrations were regenerated to match.
+    """
+    present = columns(table)
+    assert "created_at" in present, f"{table} must record when the link was made"
+    assert "updated_at" not in present, (
+        f"{table} is append-only; `updated_at` is a column nothing writes (REVIEW M7)"
+    )
 
 
 @pytest.mark.django_db
