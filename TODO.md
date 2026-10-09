@@ -459,11 +459,8 @@ Full task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md`
   `tests/conformance/test_prod_settings.py`. Still **not** done: rate-limited auth/login and the
   `SESSION_COOKIE_HTTPONLY` audit (Django's default is `True`; not separately asserted).
 
-- [ ] **6.7 — Paged case-detail timeline** Phase 10 PERF F2, plan §13 deferred (d)
-  `case_json(detail=True)` embeds the **full** timeline in one payload; a very large ledger (10k+
-  events) makes the case page heavy. Follow the `events_after` keyset pattern: paginate the embedded
-  timeline (e.g. `?includeTimeline=true&timelinePage=1`) or move it to a separate endpoint.
-  **Scheduled in** `PLAN-2026-10-09-usability-orchestration.md` Phase P6.
+- [x] **6.7 — Paged case-detail timeline** Phase 10 PERF F2, plan §13 deferred (d) — **DONE 2026-10-09**
+  `case_json(detail=True)` now accepts `timelineAfter` (cursor) and `timelineLimit` (page size, default 50, max 200) query parameters. Returns `timelinePagination` with `hasMore` and `nextCursor`. Uses the same keyset pagination as WebSocket sync (`events_after` in `cases/ledger.py`). Plan: Phase 12 §P6.
 
 - [x] **6.8 — Orchestration authoring surface** review 2026-10-09 (off-plan gap) · **Blocks Module D** — **SHIPPED 2026-10-09**
   `Playbook` now has full CRUD API + UI: list, create, edit, delete, run, `_meta` endpoint. API in `automation/{views,urls,playbooks}.py`, UI in `ui/templates/ui/playbook_*.html`, `ui/views.py`. Also **closes deviation P12-1**: `Task` receiver emits `TaskCompleted` on transition into `Completed`. Plan: `PLAN-2026-10-09-usability-orchestration.md` Phase P2 (T2.0).

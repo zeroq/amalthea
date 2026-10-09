@@ -263,7 +263,7 @@ def playbook_json(playbook: Playbook) -> dict[str, Any]:
     }
 
 
-def case_json(case: Case, *, detail: bool = False) -> dict[str, Any]:
+def case_json(case: Case, *, detail: bool = False, timeline_after: str | None = None, timeline_limit: int = 50) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "_id": str(case.id),
         "id": str(case.id),
@@ -292,9 +292,40 @@ def case_json(case: Case, *, detail: bool = False) -> dict[str, Any]:
             .filter(case=case)
             .order_by("-created_at")
         ]
-        payload["timeline"] = [
-            timeline_event_json(e)
-            for e in TimelineEvent.objects.filter(case=case).order_by("date", "id")
+        # Use keyset pagination for timeline (same as WebSocket sync)
+        from cases.ledger import events_after
+        from uuid import UUID
+        
+        timeline_after_uuid = None
+        if timeline_after:
+            try:
+                timeline_after_uuid = UUID(timeline_after)
+            except ValueError:
+                pass
+        
+        timeline_events = events_after(str(case.id), timeline_after_uuid)
+        # Apply limit
+        timeline_events = list(timeline_events[:timeline_limit + 1])  # +1 to detect has_more
+        has_more = len(timeline_events) > timeline_limit
+        if has_more:
+            timeline_events = timeline_events[:timeline_limit]
+        
+        next_cursor = None
+        if has_more and timeline_events:
+            last_event = timeline_events[-1]
+            next_cursor = str(last_event.id)
+        
+        payload["timeline"] = [timeline_event_json(e) for e in timeline_events]
+        payload["timelinePagination"] = {
+            "hasMore": has_more,
+            "nextCursor": next_cursor,
+        }
+        
+        payload["observables"] = [
+            observable_json(link)
+            for link in CaseObservable.objects.select_related("observable__data_type")
+            .filter(case=case)
+            .order_by("-created_at")
         ]
         payload["automationRuns"] = [
             automation_run_json(r)

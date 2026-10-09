@@ -237,6 +237,10 @@ def case_detail(request: Request, case_id: str) -> Response:
     alerts point here by `SET_NULL` — they survive, unlinked, with their own evidence intact. No
     ledger entry is written: the ledger dies with the case, and writing one first would be a
     tombstone nobody can read.
+
+    **Query Parameters (GET only):**
+    - `timelineAfter` (UUID, optional): Cursor for timeline pagination (event ID to fetch after)
+    - `timelineLimit` (int, optional): Page size for timeline (default 50, max 200)
     """
     case = _resolve_case(case_id)
     if case is None:
@@ -246,7 +250,17 @@ def case_detail(request: Request, case_id: str) -> Response:
         return Response(status=status.HTTP_204_NO_CONTENT)
     if request.method in ("PATCH", "PUT"):
         return _update_case(request, case)
-    return Response(case_json(case, detail=True))
+    
+    # GET with timeline pagination
+    timeline_after = request.query_params.get("timelineAfter")
+    timeline_limit = request.query_params.get("timelineLimit")
+    limit = 50
+    if timeline_limit:
+        try:
+            limit = max(1, min(int(timeline_limit), 200))  # cap at 200
+        except ValueError:
+            pass
+    return Response(case_json(case, detail=True, timeline_after=timeline_after, timeline_limit=limit))
 
 
 def _create_case(request: Request) -> Response:
