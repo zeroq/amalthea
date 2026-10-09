@@ -49,6 +49,9 @@ CSP_FORM_ACTION = ("'self'",)
 CSP_BASE_URI = ("'self'",)
 CSP_OBJECT_SRC = ("'none'",)
 
+# Session cookie hardening — prevents XSS from accessing session cookie (TODO 6.11)
+SESSION_COOKIE_HTTPONLY = True
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",

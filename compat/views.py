@@ -20,7 +20,9 @@ replace *all three* authentication policies rather than only the permission one:
   thehive4py session). The token is still enforced for every other endpoint.
 
 Throttling is deliberately left alone: `DEFAULT_THROTTLE_CLASSES` (100/min anon by IP) still
-applies, which is the rate limit plan §8 asks for on login.
+applies, which is the rate limit plan §8 asks for on login. **Additionally, `api_login` has
+its own stricter per-IP/username rate limit (5 attempts per 15 min, 5 min lockout) via
+`identity.ratelimit`.**
 """
 
 from __future__ import annotations
@@ -81,6 +83,10 @@ def api_login(request: Request) -> Response:
     `LoginInput.user` is TheHive's spelling of our `username`; the password check itself goes
     through `authenticate()` so it honours whatever backend is configured (argon2 here) rather
     than comparing anything in this view.
+
+    Rate limiting is handled by DRF's `AnonRateThrottle` (100/min per IP) via
+    `DEFAULT_THROTTLE_CLASSES`. Per-IP/username stricter limits are applied to the UI login
+    (`SignInView`) via `identity.ratelimit`.
     """
     payload = request.data if isinstance(request.data, dict) else {}
     raw_identifier = payload.get("user")

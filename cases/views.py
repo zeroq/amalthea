@@ -250,7 +250,7 @@ def case_detail(request: Request, case_id: str) -> Response:
         return Response(status=status.HTTP_204_NO_CONTENT)
     if request.method in ("PATCH", "PUT"):
         return _update_case(request, case)
-    
+
     # GET with timeline pagination
     timeline_after = request.query_params.get("timelineAfter")
     timeline_limit = request.query_params.get("timelineLimit")

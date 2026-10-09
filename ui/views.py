@@ -27,7 +27,8 @@ from typing import Any
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.views import LoginView as DjangoLoginView, LogoutView
+from django.contrib.auth.views import LoginView as DjangoLoginView
+from django.contrib.auth.views import LogoutView
 from django.db import transaction
 from django.db.models import Count
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
@@ -44,10 +45,9 @@ from alerts.escalation import (
 from alerts.models import Alert
 from automation.models import AutomationRun, Playbook
 from cases.ledger import append_timeline_event
-from cases.models import Case, CaseStatus, CaseTemplate, Comment, Task, Tag
-from cases.views import case_merge as merge_cases_fn
+from cases.models import Case, CaseStatus, CaseTemplate, Comment, Tag, Task
 from core.enums import SEVERITY_CHOICES
-from identity.models import Organisation, User
+from identity.models import User
 from identity.ratelimit import check_login_rate_limit, record_failed_login, record_successful_login
 from ingest.models import IngestionSource
 from observables.extractor import extract_into_case
@@ -113,17 +113,17 @@ class SignInView(DjangoLoginView):
                 f"Too many failed login attempts. Please try again in {retry_after} seconds.",
             )
             return self.form_invalid(self.get_form())
-        
+
         # Process the login
         response = super().post(request, *args, **kwargs)
-        
+
         # Record login attempt result
         username = (request.POST.get("username") or "").strip()
         if response.status_code == 302:  # Success redirect
             record_successful_login(request, username)
         else:  # Form invalid (failed login)
             record_failed_login(request, username)
-        
+
         return response
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
@@ -731,7 +731,6 @@ def playbook_run(request: HttpRequest, playbook_id: str) -> HttpResponse:
     """Manually trigger a playbook run."""
     from automation.dispatcher import run_now
     from cases.models import Case
-    from observables.models import Observable
 
     try:
         import uuid
@@ -812,8 +811,6 @@ def case_export(request: HttpRequest, case_id: str) -> HttpResponse:
 @require_GET
 def case_tags(request: HttpRequest, case_id: str) -> HttpResponse:
     """Manage tags on a case."""
-    from core.enums import TAGS
-    from cases.models import Tag
     case = _resolve_case(case_id)
     tags = Tag.objects.all().order_by("name")
     case_tag_ids = set(case.tags.values_list("id", flat=True))
@@ -833,7 +830,6 @@ def case_tags(request: HttpRequest, case_id: str) -> HttpResponse:
 @require_POST
 def case_tag_toggle(request: HttpRequest, case_id: str, tag_id: str) -> HttpResponse:
     """Add or remove a tag from a case."""
-    from cases.models import Tag
     case = _resolve_case(case_id)
     tag = get_object_or_404(Tag, pk=tag_id)
     if tag in case.tags.all():
@@ -848,7 +844,6 @@ def case_tag_toggle(request: HttpRequest, case_id: str, tag_id: str) -> HttpResp
 @login_required
 def case_apply_template(request: HttpRequest, case_id: str) -> HttpResponse:
     """Apply a case template to a case."""
-    from cases.models import CaseTemplate
     case = _resolve_case(case_id)
     if request.method == "GET":
         templates = CaseTemplate.objects.all().order_by("name")
@@ -897,7 +892,6 @@ def case_attachment_list(request: HttpRequest, case_id: str) -> HttpResponse:
 def case_attachment_upload(request: HttpRequest, case_id: str) -> HttpResponse:
     """Upload an attachment to a case."""
     case = _resolve_case(case_id)
-    from cases.views import case_attachment_list as api_attachment_list
     # Reuse the API logic but adapt for UI
     from django.http import QueryDict
     request.POST = QueryDict(mutable=True)
@@ -919,8 +913,8 @@ def case_attachment_upload(request: HttpRequest, case_id: str) -> HttpResponse:
 @require_GET
 def case_attachment_download(request: HttpRequest, case_id: str, attachment_id: str) -> HttpResponse:
     """Download an attachment."""
+
     from cases.views import case_attachment_download as api_view
-    from django.http import HttpResponse
     # Reuse API logic
     return api_view(request, case_id=case_id, attachment_id=attachment_id)
 
@@ -944,7 +938,6 @@ def case_attachment_delete(request: HttpRequest, case_id: str, attachment_id: st
 @require_GET
 def case_template_list(request: HttpRequest) -> HttpResponse:
     """List case templates."""
-    from cases.models import CaseTemplate
     return render(
         request,
         "ui/case_template_list.html",
@@ -961,7 +954,6 @@ def case_template_create(request: HttpRequest) -> HttpResponse:
     if request.method == "GET":
         return render(request, "ui/case_template_form.html", _base_context(request))
     # POST
-    from cases.models import CaseTemplate
     name = (request.POST.get("name") or "").strip()
     if not name:
         messages.error(request, "Name is required.")
@@ -990,7 +982,6 @@ def case_template_create(request: HttpRequest) -> HttpResponse:
 @login_required
 def case_template_detail(request: HttpRequest, template_id: str) -> HttpResponse:
     """View or edit a case template."""
-    from cases.models import CaseTemplate
     try:
         import uuid
         uuid.UUID(template_id)
@@ -1005,7 +996,6 @@ def case_template_detail(request: HttpRequest, template_id: str) -> HttpResponse
             _base_context(request, template=template),
         )
     # PATCH/POST
-    from cases.views import _apply_template_to_case
     # Update logic similar to playbook_detail
     # Simplified for brevity
     template.name = (request.POST.get("name") or template.name)[:200]
@@ -1027,7 +1017,6 @@ def case_template_detail(request: HttpRequest, template_id: str) -> HttpResponse
 @require_POST
 def case_template_delete(request: HttpRequest, template_id: str) -> HttpResponse:
     """Delete a case template."""
-    from cases.models import CaseTemplate
     try:
         import uuid
         uuid.UUID(template_id)
@@ -1046,7 +1035,6 @@ def case_template_delete(request: HttpRequest, template_id: str) -> HttpResponse
 @require_GET
 def tag_list(request: HttpRequest) -> HttpResponse:
     """List all tags."""
-    from cases.models import Tag
     return render(
         request,
         "ui/tag_list.html",
@@ -1060,7 +1048,6 @@ def tag_list(request: HttpRequest) -> HttpResponse:
 @login_required
 def tag_create(request: HttpRequest) -> HttpResponse:
     """Create a tag."""
-    from cases.models import Tag
     if request.method == "GET":
         return render(request, "ui/tag_form.html", _base_context(request))
     name = (request.POST.get("name") or "").strip()
@@ -1078,7 +1065,6 @@ def tag_create(request: HttpRequest) -> HttpResponse:
 @login_required
 def tag_detail(request: HttpRequest, tag_id: str) -> HttpResponse:
     """View or edit a tag."""
-    from cases.models import Tag
     try:
         import uuid
         uuid.UUID(tag_id)
@@ -1098,7 +1084,6 @@ def tag_detail(request: HttpRequest, tag_id: str) -> HttpResponse:
 @require_POST
 def tag_delete(request: HttpRequest, tag_id: str) -> HttpResponse:
     """Delete a tag."""
-    from cases.models import Tag
     try:
         import uuid
         uuid.UUID(tag_id)
@@ -1117,7 +1102,6 @@ def tag_delete(request: HttpRequest, tag_id: str) -> HttpResponse:
 @require_GET
 def observable_list(request: HttpRequest) -> HttpResponse:
     """Global observables list with cross-case links."""
-    from observables.models import Observable
     return render(
         request,
         "ui/observable_list.html",
@@ -1134,7 +1118,6 @@ def observable_list(request: HttpRequest) -> HttpResponse:
 @require_GET
 def observable_detail(request: HttpRequest, observable_id: str) -> HttpResponse:
     """Observable detail with cross-case fan-out."""
-    from observables.models import Observable
     try:
         import uuid
         uuid.UUID(observable_id)
@@ -1158,10 +1141,8 @@ def observable_detail(request: HttpRequest, observable_id: str) -> HttpResponse:
 @require_GET
 def taxonomy(request: HttpRequest) -> HttpResponse:
     """Aggregate taxonomy page for UI pickers."""
-    from cases.models import CaseStatus, CaseTemplate, Tag
     from alerts.models import AlertStatus
-    from observables.models import ObservableType
-    from cases.models import TTP
+    from cases.models import TTP, CaseStatus
     return render(
         request,
         "ui/taxonomy.html",
@@ -1215,7 +1196,6 @@ def case_bulk(request: HttpRequest, case_id: str) -> HttpResponse:
 @require_GET
 def case_attachment_list(request: HttpRequest, case_id: str) -> HttpResponse:
     case = _resolve_case(case_id)
-    from cases.models import Attachment
     return render(request, "ui/case_attachments.html", _base_context(request, case=case, attachments=case.attachments.all()))
 
 
@@ -1224,10 +1204,8 @@ def case_attachment_list(request: HttpRequest, case_id: str) -> HttpResponse:
 def case_attachment_upload(request: HttpRequest, case_id: str) -> HttpResponse:
     from cases.views import case_attachment_list as api_view
     case = _resolve_case(case_id)
-    from django.http import QueryDict
     # The API view expects multipart/form-data with 'attachments' field
     # We just pass through
-    from cases.views import case_attachment_list as api_view
     response = api_view(request, case_id=case.id)
     if response.status_code == 201:
         messages.success(request, "Attachment uploaded.")

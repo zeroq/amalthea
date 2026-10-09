@@ -7,9 +7,7 @@ Uses Django's cache framework (Redis in production, locmem in dev).
 from __future__ import annotations
 
 from django.core.cache import cache
-from django.http import HttpRequest, HttpResponse
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
+from django.http import HttpRequest
 
 # Configuration
 LOGIN_MAX_ATTEMPTS = 5
@@ -57,21 +55,30 @@ def _is_locked_out(request: HttpRequest, username: str | None = None) -> tuple[b
     Returns (is_locked, retry_after_seconds).
     """
     ip_key, user_key = _make_keys(request, username)
-    
+
     # Check IP lockout
     ip_attempts = _get_attempts(ip_key)
     if ip_attempts >= LOGIN_MAX_ATTEMPTS:
-        ttl = cache.ttl(ip_key)
+        ttl = _get_cache_ttl(ip_key)
         return True, max(ttl, 1)
-    
+
     # Check username lockout
     if user_key:
         user_attempts = _get_attempts(user_key)
         if user_attempts >= LOGIN_MAX_ATTEMPTS:
-            ttl = cache.ttl(user_key)
+            ttl = _get_cache_ttl(user_key)
             return True, max(ttl, 1)
-    
+
     return False, 0
+
+
+def _get_cache_ttl(key: str) -> int:
+    """Get TTL for a cache key, with fallback for LocMemCache which doesn't support ttl()."""
+    try:
+        return cache.ttl(key)
+    except AttributeError:
+        # LocMemCache doesn't support ttl(), fall back to window duration
+        return LOGIN_WINDOW
 
 
 def record_failed_login(request: HttpRequest, username: str | None = None) -> None:
