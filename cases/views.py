@@ -875,6 +875,10 @@ def observable_detail(request: Request, observable_id: str) -> Response:
     digest is taken under, and `Observable.save()` re-hashes `data_hash` in the same write —
     without which `(data_type, data_hash)` would still describe the old type and the unique
     constraint would admit a duplicate of a value already on file.
+
+    **Cross-case protection (TODO 6.5):** If an observable is linked to multiple cases, PATCH/DELETE
+    require the `force=true` query parameter. Without it, a 409 is returned listing the affected
+    cases. This prevents accidental mutation of shared evidence.
     """
     pk = _as_uuid(observable_id)
     if pk is None:
@@ -882,10 +886,44 @@ def observable_detail(request: Request, observable_id: str) -> Response:
     observable = Observable.objects.select_related("data_type").filter(pk=pk).first()
     if observable is None:
         return _not_found("Observable")
+
+    # Check if observable is linked to multiple cases
+    linked_cases = list(observable.case_observables.select_related("case").all())
+    case_count = len(linked_cases)
+    force = request.query_params.get("force", "").lower() == "true"
+
     if request.method == "DELETE":
+        if case_count > 1 and not force:
+            case_links = [
+                {"case_id": str(link.case.id), "case_number": link.case.number, "case_title": link.case.title}
+                for link in linked_cases
+            ]
+            return Response(
+                {
+                    "type": "CrossCaseMutationError",
+                    "message": f"Observable is linked to {case_count} cases. Use ?force=true to confirm deletion across all cases.",
+                    "fields": {"force": ["required when observable is linked to multiple cases"]},
+                    "affected_cases": case_links,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         observable.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
     if request.method == "PATCH":
+        if case_count > 1 and not force:
+            case_links = [
+                {"case_id": str(link.case.id), "case_number": link.case.number, "case_title": link.case.title}
+                for link in linked_cases
+            ]
+            return Response(
+                {
+                    "type": "CrossCaseMutationError",
+                    "message": f"Observable is linked to {case_count} cases. Use ?force=true to confirm mutation across all cases.",
+                    "fields": {"force": ["required when observable is linked to multiple cases"]},
+                    "affected_cases": case_links,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         return _update_observable(observable, request)
     return _observable_detail_payload(observable)
 
