@@ -50,7 +50,9 @@
         <dd>{{ playbook.updated_at|date:"Y-m-d H:i" }}</dd>
 </dl>
 
-      {% include "ui/_modal.html" with modal_id="delete-playbook-{{ playbook.id }}" title="Delete playbook?" body="This cannot be undone. The playbook and all its runs will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action="{% url 'ui-playbook-delete' playbook.id %}" size="sm" %}
+      {% with modal_id="delete-playbook-"|add:playbook.id %}
+      {% include "ui/_modal.html" with modal_id=modal_id title="Delete playbook?" body="This cannot be undone. The playbook and all its runs will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action="{% url 'ui-playbook-delete' playbook.id %}" size="sm" %}
+      {% endwith %}
 
       <div class="card">
         <h3>Action configuration</h3>

@@ -45,43 +45,44 @@
         <dd>{{ template.flag|default:"—" }}</dd>
       </dl>
 
-      {% include "ui/_modal.html" with modal_id="delete-template-{{ template.id }}" title="Delete template?" body="This cannot be undone. The template will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action="{% url 'ui-case-template-delete' template.id %}" size="sm" %}
+      {% with modal_id="delete-template-"|add:template.id %}
+      {% include "ui/_modal.html" with modal_id=modal_id title="Delete template?" body="This cannot be undone. The template will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action="{% url 'ui-case-template-delete' template.id %}" size="sm" %}
+      {% endwith %}
 
-    </div>
-
-    <div class="card">
-      <h3>Tags</h3>
-      <div class="chips">
-        {% for tag in template.tags %}
-        <span class="chip">{{ tag }}</span>
-        {% empty %}
-        <span class="empty">No tags</span>
-        {% endfor %}
+      <div class="card">
+        <h3>Tags</h3>
+        <div class="chips">
+          {% for tag in template.tags %}
+          <span class="chip">{{ tag }}</span>
+          {% empty %}
+          <span class="empty">No tags</span>
+          {% endfor %}
+        </div>
       </div>
-    </div>
 
-    <div class="card">
-      <h3>Task Definitions</h3>
-      <pre class="body">{{ template.tasks|json_script:"tasks-json" }}</pre>
-    </div>
+      <div class="card">
+        <h3>Task Definitions</h3>
+        <pre class="body">{{ template.tasks|json_script:"tasks-json" }}</pre>
+      </div>
 
-    <div class="card">
-      <h3>Custom Field Definitions</h3>
-      <pre class="body">{{ template.custom_fields|json_script:"cf-json" }}</pre>
-    </div>
+      <div class="card">
+        <h3>Custom Field Definitions</h3>
+        <pre class="body">{{ template.custom_fields|json_script:"cf-json" }}</pre>
+      </div>
 
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      try {
-        const tasks = JSON.parse(document.getElementById('tasks-json').textContent);
-        document.querySelector('pre:first-of-type').textContent = JSON.stringify(tasks, null, 2);
-      } catch (e) {}
-      try {
-        const cf = JSON.parse(document.getElementById('cf-json').textContent);
-        document.querySelectorAll('pre')[1].textContent = JSON.stringify(cf, null, 2);
-      } catch (e) {}
-    });
-    </script>
+      <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        try {
+          const tasks = JSON.parse(document.getElementById('tasks-json').textContent);
+          document.querySelector('pre:first-of-type').textContent = JSON.stringify(tasks, null, 2);
+        } catch (e) {}
+        try {
+          const cf = JSON.parse(document.getElementById('cf-json').textContent);
+          document.querySelectorAll('pre')[1].textContent = JSON.stringify(cf, null, 2);
+        } catch (e) {}
+      });
+      </script>
+    </div>
   </div>
 </div>
 {% endblock %}
