@@ -20,11 +20,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from alerts.models import Alert, AlertObservable
+from alerts.models import Alert, AlertObservable, AlertStatus
 from automation.models import AutomationRun
-from cases.models import Case, CaseObservable, CustomField, Task, TimelineEvent
-from identity.models import User
-from observables.models import Observable
+from cases.models import (
+    Case,
+    CaseObservable,
+    CaseStatus,
+    CustomField,
+    Tag,
+    Task,
+    TimelineEvent,
+)
+from identity.models import Organisation, User
+from observables.models import Observable, ObservableType
 
 
 def _iso(value: Any) -> str | None:
@@ -269,3 +277,104 @@ def case_json(case: Case, *, detail: bool = False) -> dict[str, Any]:
             for t in case.tasks.all()
         ]
     return payload
+
+
+def organisation_json(org: Organisation) -> dict[str, Any]:
+    """`OutputOrganisation` for the caller's own organisation.
+
+    `Organisation` is `UUIDModel`-only (plan §4: no timestamps minted for it), so the audit
+    pair the recorded schema requires degrades to `null` rather than being invented — the
+    same honest-bucket choice `task_json` makes for its creator columns. `taskRule`/
+    `observableRule`/`locked` have no column yet and are emitted as the schema-shaped
+    constants the stored tenant actually implies.
+    """
+    return {
+        "_id": str(org.id),
+        "id": str(org.id),
+        "_type": "Organisation",
+        "name": org.name,
+        "description": org.description,
+        "taskRule": "",
+        "observableRule": "",
+        "locked": False,
+        "_createdBy": None,
+        "_createdAt": None,
+        "_updatedBy": None,
+        "_updatedAt": None,
+        "extraData": {},
+    }
+
+
+def observable_type_json(otype: ObservableType) -> dict[str, Any]:
+    """`OutputObservableType` (recorded 5.8.0 OpenAPI): `isAttachment`/`isCaseSensitive`."""
+    return {
+        "_id": str(otype.id),
+        "id": str(otype.id),
+        "_type": "ObservableType",
+        "name": otype.name,
+        "isAttachment": otype.is_attachment,
+        "isCaseSensitive": otype.is_case_sensitive,
+        "_createdBy": None,
+        "_createdAt": _iso(otype.created_at),
+        "_updatedBy": None,
+        "_updatedAt": _iso(otype.updated_at),
+        "extraData": {},
+    }
+
+
+def _status_json(status: CaseStatus | AlertStatus, type_name: str) -> dict[str, Any]:
+    """Shared body of `case_status_json`/`alert_status_json`; only `_type` differs.
+
+    `colour` is a documented `InputCreate*` field with no column on either model, so it is
+    accepted-and-ignored rather than echoed back as a value nothing stored (ADR D11).
+    """
+    return {
+        "_id": str(status.id),
+        "id": str(status.id),
+        "_type": type_name,
+        "value": status.value,
+        "stage": status.stage,
+        "order": status.order,
+        "description": status.description,
+        "hidden": status.hidden,
+        "_createdBy": None,
+        "_createdAt": _iso(status.created_at),
+        "_updatedBy": None,
+        "_updatedAt": _iso(status.updated_at),
+        "extraData": {},
+    }
+
+
+def case_status_json(status: CaseStatus) -> dict[str, Any]:
+    """`OutputCaseStatus` (recorded 5.8.0 OpenAPI)."""
+    return _status_json(status, "CaseStatus")
+
+
+def alert_status_json(status: AlertStatus) -> dict[str, Any]:
+    """`OutputAlertStatus` (recorded 5.8.0 OpenAPI)."""
+    return _status_json(status, "AlertStatus")
+
+
+def tag_json(tag: Tag) -> dict[str, Any]:
+    """`OutputTag`.
+
+    The recorded 5.8.0 schema splits a tag into `namespace` + `predicate`; our `Tag` carries
+    one `name`, so a custom tag renders as `namespace="_freetags_"`, `predicate=name`, with
+    the taxonomy-only `value` left empty. `hidden` has no column and defaults to `False`.
+    """
+    return {
+        "_id": str(tag.id),
+        "id": str(tag.id),
+        "_type": "Tag",
+        "_createdBy": None,
+        "_createdAt": _iso(tag.created_at),
+        "_updatedBy": None,
+        "_updatedAt": _iso(tag.updated_at),
+        "namespace": "_freetags_",
+        "predicate": tag.name,
+        "value": "",
+        "description": tag.description,
+        "colour": tag.colour,
+        "hidden": False,
+        "extraData": {},
+    }

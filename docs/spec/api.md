@@ -3,7 +3,10 @@
 Base path: `/api/v1/`. Every `/api/v1/` include is registered twice-spelled (slash + no-slash) where
 a body is sent, because `CommonMiddleware`'s `APPEND_SLASH` would 301 a POST and drop its body
 (V1/V2). Root URLconf order is load-bearing: `admin/`, `"" → ui.urls`, `"" → core.urls`,
-`api/v1/ → ingest, alerts, cases, query, compat`.
+`api/v1/ → ingest, identity, observables, alerts, cases, query, compat`. `identity` and
+`observables` are mounted **before** `cases` because `cases/urls.py` registers
+`observable/<str:observable_id>`, a single-segment match that would otherwise swallow
+`observable/type` and resolve it to an observable whose id is the word "type".
 
 ## Error envelope (`compat/errors.py::thehive_exception_handler`)
 
@@ -120,6 +123,78 @@ inline themselves.
   alert/case PATCH echo, observable does not — recorded). `dataType` re-type allowed (re-hash on
   save). **Not org-scoped** (global mutation deferred — see F2 in [`deviations.md`](./deviations.md)).
 
+## Identity — `user`, `organisation` (T2/Phase P1)
+
+| Path | Methods | View |
+|---|---|---|
+| `user/current`, `user/current/` | GET | `user_current` |
+| `user/<idOrLogin>`, `user/<idOrLogin>/` | GET | `user_detail` |
+| `organisation`, `organisation/` | GET | `organisation_collection` |
+| `organisation/<idOrName>`, `organisation/<idOrName>/` | GET, PATCH | `organisation_detail` |
+
+- `user_current` ⇒ `user_json` of the authenticated caller (the cheapest way for a client to learn
+  the `login` it must send as an `assignee`). `user_detail` resolves `{idOrLogin}` as a UUID first,
+  then as `login`; unknown ⇒ 404.
+- `organisation_collection` is an **extension**: the recorded 5.8.0 bare path carries only
+  `POST /organisation` (create). It returns a list holding *at most* the caller's own organisation.
+- `organisation_detail` is scoped to the caller's own tenant: a foreign id/name is the **same 404**
+  as "does not exist" (no tenant-enumeration oracle). PATCH writes `name`/`description` only and is
+  **204, no body**; an empty body ⇒ 400; a rename onto an existing tenant ⇒ 400 (not a 500).
+
+## Observable types — `observable/type` (T2/Phase P1)
+
+| Path | Methods | View |
+|---|---|---|
+| `observable/type`, `observable/type/` | GET, POST | `observable_type_collection` |
+| `observable/type/<idOrName>`, `…/` | GET, PATCH, DELETE | `observable_type_detail` |
+
+- `{typeId}` resolves as a UUID first, then as the unique `name`. The collection GET/POST is an
+  **extension** (TheHive lists types only through `POST /query`; its single detail path is
+  `GET|PATCH|DELETE /observable/type/{typeId}`).
+- PATCH writes `isAttachment`/`isCaseSensitive` (the recorded `InputUpdateObservableType`) and goes
+  through `ObservableType.save()` so a case-rule flip re-hashes that type's observables. Empty body
+  ⇒ 400. DELETE ⇒ **204**, but an in-use type ⇒ **400** (not the FK `PROTECT`'s 500).
+
+## Statuses and tags (T2/Phase P1)
+
+| Path | Methods | View |
+|---|---|---|
+| `caseStatus`, `caseStatus/` | GET, POST | `case_status_collection` |
+| `caseStatus/<idOrValue>`, `…/` | GET, PATCH, DELETE | `case_status_detail` |
+| `alertStatus`, `alertStatus/` | GET, POST | `alert_status_collection` |
+| `alertStatus/<idOrValue>`, `…/` | GET, PATCH, DELETE | `alert_status_detail` |
+| `tag`, `tag/` | GET, POST | `tag_collection` |
+| `tag/<idOrName>`, `…/` | GET, PATCH, DELETE | `tag_detail` |
+| `case/<idOrNumber>/tag`, `…/` | POST, DELETE | `case_tag_link` |
+| `alert/<alertId>/tag`, `…/` | POST, DELETE | `alert_tag_link` |
+| `observable/<id>/tag`, `…/` | POST, DELETE | `observable_tag_link` |
+
+- `{idOrValue}` resolves as a UUID first, then the unique `value` (caseStatus/alertStatus) or `name`
+  (tag). `value`/`stage` are **immutable**: a PATCH carrying only those has nothing to write and is a
+  400. Unknown `stage` ⇒ 400 naming the vocabulary (`CASE_STAGES`/`ALERT_STAGES`). DELETE refuses an
+  in-use row with a **400** (`Case.status`/`Alert.status` are `PROTECT`).
+- Statuses `InputCreate*` `colour` is accepted-and-ignored (no model column; ADR D11).
+- `tag` collection GET/POST and the three link routes are an **extension** (TheHive has only
+  `GET|PATCH|DELETE /tag/{tagId}` and attaches tags through the create/update body). PATCH accepts
+  the recorded `InputUpdateTag` fields (`predicate`, `description`, `colour`) plus `name`. Tag DELETE
+  refuses a tag still attached to a case/alert/observable with a **400** (TheHive cascades).
+- The link routes take `{"tags": <string | string[]>}` and return the owner's current tag set
+  (**200**); both directions are idempotent. `observable/<id>/tag` is **not org-scoped**, matching
+  `observable_detail`.
+
+## Describe — `GET /api/v1/describe/{model}` (T2/Phase P1)
+
+| Path | Methods | View |
+|---|---|---|
+| `describe/_all`, `describe/_all/` | GET | `describe_all` |
+| `describe/<model>`, `describe/<model>/` | GET | `describe_model` |
+
+Read-only catalogue keyed by model name (`case`, `alert`, `task`, `observable`, `customEvent`,
+`customField`, `user`, `organisation`, `tag`, `caseStatus`, `alertStatus`, `observableType`). An
+unknown model ⇒ 404. `attributes[]` uses TheHive's `PropertyDescription` vocabulary
+(`type`, `cardinality`, `aggregable`, `indexType`, with `values`/`labels` for enumerations). This is
+a curated subset, not a mechanical dump of every column.
+
 ## Query — `POST /api/v1/query` (+ no-slash twin)
 
 `{"query": [step, ...], "includeFields": [...], "excludeFields": [...]}` → **bare JSON array** (or
@@ -151,14 +226,18 @@ Full DSL in [`query-dsl.md`](./query-dsl.md).
 ## Wire renderers (`core/serializers.py`)
 
 `alert_json`, `observable_json`, `timeline_event_json`, `task_json`, `custom_event_json`,
-`custom_field_json`, `user_json`, `automation_run_json`, `case_json(case, *, detail=False)`.
+`custom_field_json`, `user_json`, `automation_run_json`, `case_json(case, *, detail=False)`,
+`organisation_json`, `observable_type_json`, `case_status_json`, `alert_status_json`, `tag_json`.
 Conventions: `_id` and `id` both present; ISO-8601 `_iso` timestamps; `raw_payload` never inlined;
 `task_json` sets `_createdBy`/`_updatedBy` to `null`; `user_json` computes `hasKey`/`hasPassword`,
-`hasMFA:false`, `locked:false`.
+`hasMFA:false`, `locked:false`. The new entity renderers emit the audit pair as `null` where the
+model has no creator column (`organisation_json`, the status renderers), and `tag_json` renders
+`namespace="_freetags_"` / `predicate=name` / `value=""` around our single `Tag.name`.
 
 ## Evidence
 
 Contract tests: `tests/conformance/test_t1_surface.py` (53), `test_unknown_fields.py` (33),
 `test_authz.py` (131), `test_thehive_fixtures.py` (13, pinned golden fixtures from thehive4py 2.1.0),
-`test_webhook_hardening.py` (37). TheHive shape decisions: `docs/decisions/ADR-002`.
+`test_webhook_hardening.py` (37), `test_t2_p1_surface.py` (19, the T2 P1 surface: identity,
+observable types, statuses, tags, describe). TheHive shape decisions: `docs/decisions/ADR-002`.
 Deviations: [`deviations.md`](./deviations.md).

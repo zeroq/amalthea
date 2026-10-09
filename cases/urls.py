@@ -28,6 +28,10 @@ urlpatterns = [
         name="case-observable-list-slash",
     ),
     path("case/<str:case_id>/timeline", views.case_timeline, name="case-timeline"),
+    # T2 tag link. Registered with the other sub-resources, i.e. above the bare detail route:
+    # `<str:case_id>` would otherwise swallow `tag` as a case identifier.
+    path("case/<str:case_id>/tag", views.case_tag_link, name="case-tag-link"),
+    path("case/<str:case_id>/tag/", views.case_tag_link, name="case-tag-link-slash"),
     # Unlink and customEvent are two segments deep: registered *above* the bare detail route for
     # the same reason as the collections — `<str:case_id>` would otherwise swallow `alert` and
     # `customEvent` as a case identifier. Both spellings of customEvent point at the one
@@ -49,7 +53,33 @@ urlpatterns = [
     ),
     path("case/<str:case_id>", views.case_detail, name="case-detail"),
     path("case/<str:case_id>/", views.case_detail, name="case-detail-slash"),
+    # T2 tag link, above `observable/<id>` so `<str:observable_id>` cannot swallow `tag`.
+    path(
+        "observable/<str:observable_id>/tag",
+        views.observable_tag_link,
+        name="observable-tag-link",
+    ),
+    path(
+        "observable/<str:observable_id>/tag/",
+        views.observable_tag_link,
+        name="observable-tag-link-slash",
+    ),
     path("observable/<str:observable_id>", views.observable_detail, name="observable-detail"),
+    # T2 vocabularies. `caseStatus` is a single segment, disjoint from `case/<id>` (two segments)
+    # and from `task/`; `tag`/`tag/<id>` are disjoint from every other prefix here except
+    # `task/`, which differs at the third character. All registered before `compat.urls`.
+    path("caseStatus", views.case_status_collection, name="case-status-collection"),
+    path("caseStatus/", views.case_status_collection, name="case-status-collection-slash"),
+    path("caseStatus/<str:status_id>", views.case_status_detail, name="case-status-detail"),
+    path(
+        "caseStatus/<str:status_id>/",
+        views.case_status_detail,
+        name="case-status-detail-slash",
+    ),
+    path("tag", views.tag_collection, name="tag-collection"),
+    path("tag/", views.tag_collection, name="tag-collection-slash"),
+    path("tag/<str:tag_id>", views.tag_detail, name="tag-detail"),
+    path("tag/<str:tag_id>/", views.tag_detail, name="tag-detail-slash"),
     # Distinct top-level prefixes (`task/`, `customEvent/`, `customField/`) — no collision with
     # `case/<id>`, and all of them land before `compat.urls`' catch-all by construction.
     path("task/<str:task_id>", views.task_detail, name="task-detail"),

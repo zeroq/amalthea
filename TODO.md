@@ -1,7 +1,7 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-09 (post REVIEW M7 cleanup + `docs/perf/` untrack)
+Last updated: 2026-10-09 (wave 6.1 P1 shipped + TODO 2.3 wire-boundary guard)
 
 **Conventions** — every item carries a `Source` (plan AC, review finding ID, or decision ID) so it can
 be traced, and `Blocks` when it gates other work. Review IDs (`C1`, `H2`, `M5`…) refer to
@@ -187,10 +187,16 @@ discipline, no code change is safe on SQLite).
   `observables.hashing`). `make check` runs bare `mypy` and it is green (Phase 8 added `query/` to
   the pinned scope and it is clean there too).
 
-- [ ] **2.3 — Enforce the one-way dependency rule with a lint check** Brief §0.4, `R3`
-  Nothing currently prevents TheHive field-name literals (`_id`, `_createdAt`, `dataType`,
-  `severityLabel`…) leaking outside `compat/`. This is the control that keeps "compatible on the wire,
-  clean inside" honest.
+- [x] **2.3 — Enforce the one-way dependency rule with a lint check** Brief §0.4, `R3` — **DONE (2026-10-09)**
+  `tests/conformance/test_wire_boundary.py` walks the source tree and fails if a TheHive field-name
+  literal (`_id`, `_type`, `_createdAt`, `_updatedAt`, `dataType`, `customFields`, `severityLabel`,
+  `startDate`, `endDate`, `caseId`, `alertId`, `taskId`) appears outside the wire boundary. The
+  boundary is the **implemented** API surface — `compat/`, `core/serializers.py`, `query/`, and the
+  per-app `views.py`/`urls.py` (the brief drew it under `compat/`; the implementation co-located the
+  renderers with the apps, so a `compat/`-only rule would false-alarm on the very modules that own the
+  wire shape). `tlp`/`pap` are excluded — real internal columns, not leaks. Non-vacuous:
+  `test_the_detector_flags_a_literal` plus a demonstrated tree-level probe (a `"dataType"` literal in
+  `automation/registry.py` is caught at `:126`, clean after revert).
 
 - [x] **2.4 — Reverse-direction link-table indexes** `M5`, plan §6.3 — **DONE**
   `caseobs_obs_case_idx (observable, case)` and `alertobs_obs_alert_idx (observable, alert)` are
@@ -400,7 +406,14 @@ Full task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md`
 
 ## 6. Deferred scope (committed, not yet scheduled)
 
-- [ ] **6.1 — T2 endpoints** Plan §7.3
+- [ ] **6.1 — T2 endpoints** Plan §7.3 — **P1 SHIPPED 2026-10-09**; wave planned →
+  [`PLAN-2026-10-09-t2-endpoints.md`](./docs/planning/PLAN-2026-10-09-t2-endpoints.md) (five phases
+  P1–P5: identity/vocabularies/tags → collaboration (page/comment/share/flow) → attachments →
+  bulk/merge/templates/taxonomy → export/TTP). **P1 done:** `user`/`user/current`, `organisation`
+  (tenant-scoped GET/PATCH), `observable/type` CRUD, `caseStatus`/`alertStatus` CRUD, `tag` CRUD +
+  case/alert/observable link/unlink, `describe/_all` + `describe/{model}`. Remaining: `page`,
+  `comment`, `shares`, `flow`, attachments, bulk/merge, case templates, taxonomy, export,
+  procedures/TTP.
   Attachments, `page`, `comment`, `tag`, `shares`, `observable/type` CRUD, case/alert status CRUD,
   `user`, bulk endpoints, `describe`, `export`, `flow`, case templates, taxonomy, procedures/TTP.
 

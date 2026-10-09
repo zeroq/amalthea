@@ -8,6 +8,11 @@ urlpatterns = [
     path("", include("ui.urls")),
     path("", include("core.urls")),
     path("api/v1/", include("ingest.urls")),
+    # `identity.urls` and `observables.urls` are mounted **before** `cases.urls`: the latter
+    # registers `observable/<str:observable_id>`, which is a single-segment match that would
+    # otherwise resolve `observable/type` to an observable whose id is the word "type".
+    path("api/v1/", include("identity.urls")),
+    path("api/v1/", include("observables.urls")),
     path("api/v1/", include("alerts.urls")),
     path("api/v1/", include("cases.urls")),
     path("api/v1/", include("query.urls")),

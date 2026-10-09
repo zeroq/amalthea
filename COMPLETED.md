@@ -554,3 +554,61 @@ from a promise into an enforced property. Code + config wave.
   adequate headroom. TODO §2.5 closed.
 - [x] Gate: SQLite `make check` **765 passed / 3 skipped** (was 763/3; +2 for the parametrised M7
   test); ruff + mypy clean; `makemigrations --check` clean.
+
+## 2026-10-09 — TODO 2.3: the one-way dependency rule is now enforced (`R3`)
+
+- [x] **`tests/conformance/test_wire_boundary.py`** — walks the source tree (`os.walk`, pruning
+  `.venv`/caches; skips `tests/`, which asserts the wire shape on purpose) and fails when a TheHive
+  field-name string literal is used as an `ast.Constant` outside the wire boundary. Forbidden set:
+  `_id`, `_type`, `_createdAt`, `_updatedAt`, `dataType`, `customFields`, `severityLabel`,
+  `startDate`, `endDate`, `caseId`, `alertId`, `taskId`. `tlp`/`pap` are deliberately excluded — they
+  are real internal columns, not wire artefacts. Exact match, so `"data_type"` and `"dataTypeCache"`
+  are not false positives.
+- [x] **Boundary = the implemented API surface.** `WIRE_BOUNDARY` allows `compat/`, `core/serializers.py`,
+  `query/`, and any `views.py`/`urls.py`. ADR-002 §D11 / BRIEF §0.4 drew that surface under `compat/`
+  (`compat/serializers`, `compat/views`, `compat/query`); the implementation co-located the renderers
+  with the apps, so a literal `compat/`-only rule would fail on the modules that own the wire shape.
+  A future leak into a model/service/task is caught; widening the allowlist is the explicit review
+  trigger. Recorded in the test docstring.
+- [x] **Non-vacuity (R11).** `test_the_detector_flags_a_literal` and `test_the_boundary_matcher`
+  pin the mechanism, and the tree-level failure mode was demonstrated live: a probe `LEAK = "dataType"`
+  appended to `automation/registry.py` fails with `automation/registry.py:126: 'dataType'`, and the
+  file is clean again after revert.
+- [x] Gate: SQLite `make check` **769 passed / 3 skipped**; ruff + mypy clean; `makemigrations --check`
+  clean. No schema or wire-contract change.
+
+## 2026-10-09 — Wave 6.1 Phase P1: identity, vocabularies, tags, `describe` (T2)
+
+First phase of the T2 wave (`PLAN-2026-10-09-t2-endpoints.md`). **No schema change, no migrations.**
+
+- [x] **Identity** — new `identity/{urls,views}.py`: `GET user/current`, `GET user/{idOrLogin}` (UUID
+  then `login`; unknown ⇒ 404), `GET organisation` (extension, tenant-scoped list) and
+  `GET|PATCH organisation/{idOrName}` (writes `name`/`description`; **204 no body**; foreign org is the
+  same 404 as "does not exist" — no tenant-enumeration oracle).
+- [x] **Observable vocabulary** — filled the empty `observables/{urls,views}.py`:
+  `observable/type` CRUD (collection GET is an extension; `POST` + detail match TheHive). PATCH routes
+  through `ObservableType.save()` so a case-rule flip re-hashes that type's observables; DELETE of an
+  in-use type ⇒ 400, not the FK `PROTECT`'s 500.
+- [x] **Status vocabularies** — `caseStatus` / `alertStatus` CRUD in `cases/`+`alerts/` (extensions —
+  TheHive 5 has no REST status route); `value`/`stage` immutable; unknown stage ⇒ 400; in-use DELETE
+  ⇒ 400.
+- [x] **Tags** — `tag` CRUD + link/unlink on `case/<id>/tag`, `alert/<id>/tag`,
+  `observable/<id>/tag`; `cases/tagging.py::tag_names_from_payload` normalises a string-or-array
+  `tags` body; un-link never deletes the tag; in-use tag DELETE ⇒ 400.
+- [x] **`describe`** — `GET describe/_all` (catalogue by model name) + `GET describe/{model}` (404 for
+  an unknown model), on the static catalogue in `compat/views.py`.
+- [x] **Routing** — `identity.urls` and `observables.urls` mounted **before** `cases.urls` so
+  `observable/type` is not swallowed by `observable/<str:observable_id>`; all new routes twin-spelled
+  (slash + no-slash); mounted above the `compat` catch-all.
+- [x] **Tests** — `tests/conformance/test_t2_p1_surface.py` (22 tests over 7 ACs: routes, scoping,
+  CRUD, in-use guards, mount-order hazard, auth-required, twin spelling).
+- [x] **Deviations recorded** — `P1-1`…`P1-5` in `docs/spec/deviations.md` (status + organisation +
+  `observable/type`-collection + `describe/_all` extensions; tenant-scoped org).
+- [x] **Docs** — `docs/spec/api.md` gains the Identity / Observable-types / Statuses-and-tags tables.
+- [x] Gate: SQLite `make check` **789 passed / 3 skipped**; ruff + mypy clean; no new migration.
+- **Process note (TODO 7.3 recurrence):** the implementing subagent's final-response delivery failed
+  (`Bad Request: {"model":"big-pickle"}`) after it had already written the code; the work was verified
+  independently against the filesystem (ruff, the P1 tests, the wire-boundary guard, `make check`) and
+  its two "recorded in deviations.md" claims were found **untrue** and corrected by hand.
+
+

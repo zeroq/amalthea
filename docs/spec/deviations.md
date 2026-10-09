@@ -50,6 +50,20 @@ a brief's letter alias is given where one exists (`P10-2 / y`, `P10-7 / z`, the 
 | **P10-4** | alert-observable link dispatches automation | **No dispatch at link time** — alert observables are import candidates; fire on import/merge via the case path | `alerts/views.py::alert_observable_add`; `automation/registry.dispatch_observable_linked` requires a case · `test_mvp_loop_automation.py` |
 | **P12-1** | `TRIGGER_EVENTS` are the events that drive playbooks | `task.completed` is **listed but nothing emits it** — no `Task` receiver, no call site | `automation/dispatcher.py:36,47`; `core/events.py:31`; `ui/views.py:367` does a bare task save. A playbook bound to it is inert. Fix (receiver **or** remove trigger) is an approved-surface change — see VERIFY-docs-spec |
 
+## Wave 6.1 — T2 Phase P1 (2026-10-09)
+
+The identity/vocabulary/tag/`describe` surface. Verified against `thehive4py` 2.1.0
+(`.venv/.../thehive4py/endpoints/`): `observable/type` detail CRUD and `POST /organisation` /
+`GET|PATCH /organisation/{id}` are **parity**; the rows below are the divergences.
+
+| ID | Plan / TheHive | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **P1-1** | "case/alert status CRUD" | **`caseStatus` / `alertStatus`** REST vocabularies | TheHive 5 exposes **no** case/alert status route (`thehive4py` 2.1.0 has no status endpoint module); these are an Amalthea extension so the vocabularies are editable without a query document. `cases/views.py::case_status_*`, `alerts/views.py::alert_status_*` · `test_t2_p1_surface.py` |
+| **P1-2** | `POST /organisation` (bare) | bare **`GET /organisation`** added | TheHive's bare path is create-only; the read is an extension. Returns a list holding *at most* the caller's own org. `identity/views.py::organisation_collection` · `test_t2_p1_surface.py` |
+| **P1-3** | types listed via `POST /query` `listObservableType` | **`GET /observable/type`** collection added | TheHive's only collection read is the query DSL; the REST list (and the symmetric `POST /observable/type`, which *is* parity) makes the vocabulary editable without one. `observables/views.py::observable_type_collection` · `test_t2_p1_surface.py` |
+| **P1-4** | `describe/{model}` | `describe/{model}` **+ `describe/_all`** | `_all` (the whole catalogue keyed by model name) is an Amalthea convenience; `{model}` follows the recorded per-entity shape. `compat/views.py::describe_*` · `test_t2_p1_surface.py` |
+| **P1-5** | global org directory | **tenant-scoped** | A foreign org id/name is the *same 404* as "does not exist" (no tenant-enumeration oracle); PATCH only writes the caller's own org. `identity/views.py::_own_org` · `test_t2_p1_surface.py` |
+
 ## Security hardening findings
 
 Source: security-auditor Wave C, carried as **P10-10** (F1/F6/F3/F5/F7 fixed in the burst). **F9 is

@@ -22,5 +22,18 @@ urlpatterns = [
     ),
     path("alert/<str:alert_id>/merge/<str:case_id>", views.alert_merge, name="alert-merge"),
     path("alert/<str:alert_id>/import/<str:case_id>", views.alert_merge, name="alert-import-into"),
+    # T2 tag link, above the bare detail route so `<str:alert_id>` cannot swallow `tag`.
+    path("alert/<str:alert_id>/tag", views.alert_tag_link, name="alert-tag-link"),
+    path("alert/<str:alert_id>/tag/", views.alert_tag_link, name="alert-tag-link-slash"),
     path("alert/<str:alert_id>", views.alert_detail, name="alert-detail"),
+    # T2 alert-status vocabulary. `alertStatus` is disjoint from `alert/<id>` (single segment vs
+    # two), so ordering here is convention rather than load-bearing; all land before `compat.urls`.
+    path("alertStatus", views.alert_status_collection, name="alert-status-collection"),
+    path("alertStatus/", views.alert_status_collection, name="alert-status-collection-slash"),
+    path("alertStatus/<str:status_id>", views.alert_status_detail, name="alert-status-detail"),
+    path(
+        "alertStatus/<str:status_id>/",
+        views.alert_status_detail,
+        name="alert-status-detail-slash",
+    ),
 ]

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from django.db import transaction
 from rest_framework import status
@@ -26,9 +27,11 @@ from alerts.escalation import (
     merge_alert_into_case,
     resolve_alert_status,
 )
-from alerts.models import Alert, AlertObservable
-from cases.models import Case
-from core.serializers import alert_json, case_json, observable_json
+from alerts.models import Alert, AlertObservable, AlertStatus, AlertTagLink
+from cases.models import Case, Tag
+from cases.tagging import tag_names_from_payload
+from core.enums import ALERT_STAGES
+from core.serializers import alert_json, alert_status_json, case_json, observable_json, tag_json
 from observables.extractor import resolve_observable
 from observables.models import ObservableType
 
@@ -360,6 +363,153 @@ def _update_alert(request: Request, alert: Alert) -> Response:
     return Response(alert_json(alert))
 
 
+# --- T2: alert statuses and tag links ---------------------------------------
+
+
+def _as_uuid(value: object) -> UUID | None:
+    """Parse a path segment as a UUID; a malformed one must be a 404, never a 500."""
+    try:
+        return UUID(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _resolve_alert_status(identifier: str) -> AlertStatus | None:
+    """Resolve `{idOrValue}` as a UUID first, then as the unique `value`."""
+    pk = _as_uuid(identifier)
+    if pk is not None:
+        found = AlertStatus.objects.filter(pk=pk).first()
+        if found is not None:
+            return found
+    return AlertStatus.objects.filter(value=identifier).first()
+
+
+@api_view(["GET", "POST"])
+@renderer_classes([JSONRenderer])
+def alert_status_collection(request: Request) -> Response:
+    """`GET /api/v1/alertStatus` lists; `POST /api/v1/alertStatus` creates (201)."""
+    if request.method == "POST":
+        return _create_alert_status(request)
+    return Response(
+        [
+            alert_status_json(status_obj)
+            for status_obj in AlertStatus.objects.order_by("order", "value")
+        ]
+    )
+
+
+def _create_alert_status(request: Request) -> Response:
+    payload = request.data if isinstance(request.data, dict) else {}
+    value = str(payload.get("value") or "").strip()
+    stage = str(payload.get("stage") or "").strip()
+    missing = {key: ["required"] for key, val in (("value", value), ("stage", stage)) if not val}
+    if missing:
+        return _bad("value and stage are required", missing)
+    if stage not in ALERT_STAGES:
+        return _bad(
+            f"unknown stage {stage!r}",
+            {"stage": [f"must be one of {', '.join(ALERT_STAGES)}"]},
+        )
+    if AlertStatus.objects.filter(value=value[:64]).exists():
+        return _bad("value already exists", {"value": ["already exists"]})
+    try:
+        order = int(payload.get("order", 0))
+    except (TypeError, ValueError):
+        return _bad("order must be an integer", {"order": ["must be an integer"]})
+    status_obj = AlertStatus.objects.create(
+        value=value[:64],
+        stage=stage,
+        order=order,
+        description=str(payload.get("description") or ""),
+        hidden=bool(payload.get("hidden") or False),
+    )
+    return Response(alert_status_json(status_obj), status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@renderer_classes([JSONRenderer])
+def alert_status_detail(request: Request, status_id: str) -> Response:
+    """`GET|PATCH|DELETE /api/v1/alertStatus/{idOrValue}`.
+
+    Same rules as `cases.views.case_status_detail`: `value`/`stage` are immutable, and DELETE
+    refuses a status still used by an alert with a **400** rather than the `PROTECT` 500.
+    """
+    status_obj = _resolve_alert_status(status_id)
+    if status_obj is None:
+        return _not_found_alert("AlertStatus")
+    if request.method == "DELETE":
+        if status_obj.alerts.exists():
+            return _bad(
+                "Alert status is in use",
+                {"_id": ["at least one alert uses this status"]},
+            )
+        status_obj.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    if request.method == "PATCH":
+        return _update_alert_status(status_obj, request)
+    return Response(alert_status_json(status_obj))
+
+
+def _not_found_alert(what: str) -> Response:
+    return Response(
+        {"type": "NotFoundError", "message": f"{what} not found"},
+        status=status.HTTP_404_NOT_FOUND,
+    )
+
+
+def _update_alert_status(status_obj: AlertStatus, request: Request) -> Response:
+    payload = request.data if isinstance(request.data, dict) else {}
+    fields: list[str] = []
+    if "order" in payload:
+        try:
+            status_obj.order = int(payload["order"])
+        except (TypeError, ValueError):
+            return _bad("order must be an integer", {"order": ["must be an integer"]})
+        fields.append("order")
+    if "description" in payload:
+        status_obj.description = str(payload["description"] or "")
+        fields.append("description")
+    if "hidden" in payload:
+        status_obj.hidden = bool(payload["hidden"])
+        fields.append("hidden")
+    if not fields:
+        return _bad("No updatable field supplied", {})
+    status_obj.save(update_fields=[*fields, "updated_at"])
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _requested_tags(request: Request) -> list[str] | Response:
+    """The tag names in the body, or a 400 response when none were supplied."""
+    payload = request.data if isinstance(request.data, dict) else {}
+    names = tag_names_from_payload(payload)
+    if names is None:
+        return _bad("tags is required", {"tags": ["required"]})
+    return names
+
+
+@api_view(["POST", "DELETE"])
+@renderer_classes([JSONRenderer])
+def alert_tag_link(request: Request, alert_id: str) -> Response:
+    """`POST|DELETE /api/v1/alert/{alertId}/tag` — attach or detach tags (200 with the set).
+
+    TheHive 5.8 has no such route (tags arrive in the create/update body); recorded in
+    `docs/spec/deviations.md` with its case/observable siblings. Idempotent in both directions.
+    """
+    alert = _lookup_alert(alert_id)
+    if isinstance(alert, Response):
+        return alert
+    names = _requested_tags(request)
+    if isinstance(names, Response):
+        return names
+    if request.method == "DELETE":
+        AlertTagLink.objects.filter(alert=alert, tag__name__in=names).delete()
+    else:
+        for name in names:
+            tag, _created = Tag.objects.get_or_create(name=name)
+            AlertTagLink.objects.get_or_create(alert=alert, tag=tag)
+    return Response([tag_json(tag) for tag in alert.tags.order_by("name")])
+
+
 __all__ = [
     "alert_detail",
     "alert_import",
@@ -367,4 +517,7 @@ __all__ = [
     "alert_merge",
     "alert_observable_add",
     "alert_raw",
+    "alert_status_collection",
+    "alert_status_detail",
+    "alert_tag_link",
 ]

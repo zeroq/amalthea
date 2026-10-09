@@ -25,6 +25,8 @@ applies, which is the rate limit plan §8 asks for on login.
 
 from __future__ import annotations
 
+from typing import Any
+
 from django.contrib.auth import authenticate
 from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
@@ -143,3 +145,234 @@ def api_logout(request: Request) -> Response:
     """
     django_logout(request._request)
     return Response(status=status.HTTP_200_OK)
+
+
+# --- Describe: a read-only catalogue of the entities this API models --------
+#
+# TheHive's `GET /describe/_all` and `GET /describe/{model}` let a generated client learn the
+# entity/attribute surface without shipping a hand-maintained copy of the schema. This is a
+# *description*, not a serializer: the attribute type strings are TheHive's `PropertyDescription`
+# `type` enum (`boolean`, `date`, `enumeration`, `float`, `integer`, `string`, `url`, `user`),
+# and `initialQuery` names the query operation a client would call to list the entity. The set
+# below covers every entity this surface models; a model that is not listed answers 404 rather
+# than an empty description, so a typo is loud.
+
+
+def _attr(
+    name: str,
+    prop_type: str,
+    *,
+    cardinality: str = "single",
+    aggregable: bool = False,
+    index_type: str = "none",
+    values: list[str] | None = None,
+    labels: list[str] | None = None,
+) -> dict[str, Any]:
+    attribute: dict[str, Any] = {
+        "name": name,
+        "type": prop_type,
+        "cardinality": cardinality,
+        "aggregable": aggregable,
+        "indexType": index_type,
+    }
+    if values is not None:
+        attribute["values"] = values
+        attribute["labels"] = labels if labels is not None else values
+    return attribute
+
+
+def _entity(label: str, initial_query: str, attributes: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "label": label,
+        "path": "",
+        "initialQuery": initial_query,
+        "attributes": attributes,
+    }
+
+
+_SEVERITY_VALUES = ["1", "2", "3", "4"]
+_SEVERITY_LABELS = ["low", "medium", "high", "critical"]
+_TLP_VALUES = ["0", "1", "2", "3", "4"]
+_TLP_LABELS = ["white", "green", "amber", "red", "unknown"]
+_PAP_VALUES = ["0", "1", "2", "3"]
+_PAP_LABELS = ["white", "green", "amber", "red"]
+
+_DESCRIBE: dict[str, dict[str, Any]] = {
+    "case": _entity(
+        "case",
+        "listCase",
+        [
+            _attr("title", "string", index_type="fulltext"),
+            _attr("description", "string", index_type="fulltext"),
+            _attr(
+                "severity",
+                "integer",
+                aggregable=True,
+                values=_SEVERITY_VALUES,
+                labels=_SEVERITY_LABELS,
+            ),
+            _attr("status", "string"),
+            _attr("tlp", "integer", values=_TLP_VALUES, labels=_TLP_LABELS),
+            _attr("pap", "integer", values=_PAP_VALUES, labels=_PAP_LABELS),
+            _attr("flag", "boolean"),
+            _attr("assignee", "user"),
+            _attr("tags", "string", cardinality="list"),
+            _attr("createdAt", "date"),
+        ],
+    ),
+    "alert": _entity(
+        "alert",
+        "listAlert",
+        [
+            _attr("title", "string", index_type="fulltext"),
+            _attr("type", "string", index_type="fulltext"),
+            _attr("source", "string", index_type="fulltext"),
+            _attr("sourceRef", "string", index_type="fulltext"),
+            _attr(
+                "severity",
+                "integer",
+                aggregable=True,
+                values=_SEVERITY_VALUES,
+                labels=_SEVERITY_LABELS,
+            ),
+            _attr("status", "string"),
+            _attr("date", "date"),
+            _attr("tlp", "integer", values=_TLP_VALUES, labels=_TLP_LABELS),
+            _attr("pap", "integer", values=_PAP_VALUES, labels=_PAP_LABELS),
+            _attr("flag", "boolean"),
+        ],
+    ),
+    "task": _entity(
+        "task",
+        "listTask",
+        [
+            _attr("title", "string", index_type="fulltext"),
+            _attr("group", "string"),
+            _attr(
+                "status",
+                "enumeration",
+                values=["Waiting", "InProgress", "Completed", "Cancel"],
+            ),
+            _attr("flag", "boolean"),
+            _attr("order", "integer"),
+            _attr("assignee", "user"),
+        ],
+    ),
+    "observable": _entity(
+        "observable",
+        "listObservable",
+        [
+            _attr("dataType", "string"),
+            _attr("data", "string", index_type="fulltext"),
+            _attr("tlp", "integer", values=_TLP_VALUES, labels=_TLP_LABELS),
+            _attr("pap", "integer", values=_PAP_VALUES, labels=_PAP_LABELS),
+            _attr("ioc", "boolean"),
+            _attr("sighted", "boolean"),
+            _attr("tags", "string", cardinality="list"),
+        ],
+    ),
+    "customEvent": _entity(
+        "customEvent",
+        "listCustomEvent",
+        [
+            _attr("title", "string", index_type="fulltext"),
+            _attr("description", "string", index_type="fulltext"),
+            _attr("date", "date"),
+            _attr("endDate", "date"),
+        ],
+    ),
+    "customField": _entity(
+        "customField",
+        "listCustomField",
+        [
+            _attr("name", "string"),
+            _attr("group", "string"),
+            _attr(
+                "type",
+                "enumeration",
+                values=["string", "integer", "float", "boolean", "date", "url"],
+            ),
+            _attr("options", "string"),
+        ],
+    ),
+    "user": _entity(
+        "user",
+        "listUser",
+        [
+            _attr("login", "string", index_type="fulltext"),
+            _attr("name", "string", index_type="fulltext"),
+            _attr("role", "string"),
+            _attr("organisation", "string"),
+        ],
+    ),
+    "organisation": _entity(
+        "organisation",
+        "listOrganisation",
+        [
+            _attr("name", "string", index_type="fulltext"),
+            _attr("description", "string", index_type="fulltext"),
+        ],
+    ),
+    "tag": _entity(
+        "tag",
+        "listTag",
+        [
+            _attr("namespace", "string"),
+            _attr("predicate", "string", index_type="fulltext"),
+            _attr("description", "string", index_type="fulltext"),
+            _attr("colour", "string"),
+            _attr("hidden", "boolean"),
+        ],
+    ),
+    "caseStatus": _entity(
+        "caseStatus",
+        "listCaseStatus",
+        [
+            _attr("value", "string", index_type="fulltext"),
+            _attr("stage", "enumeration", values=["New", "InProgress", "Closed"]),
+            _attr("order", "integer"),
+            _attr("description", "string", index_type="fulltext"),
+            _attr("hidden", "boolean"),
+        ],
+    ),
+    "alertStatus": _entity(
+        "alertStatus",
+        "listAlertStatus",
+        [
+            _attr("value", "string", index_type="fulltext"),
+            _attr("stage", "enumeration", values=["New", "InProgress", "Closed", "Imported"]),
+            _attr("order", "integer"),
+            _attr("description", "string", index_type="fulltext"),
+            _attr("hidden", "boolean"),
+        ],
+    ),
+    "observableType": _entity(
+        "observableType",
+        "listObservableType",
+        [
+            _attr("name", "string", index_type="fulltext"),
+            _attr("isAttachment", "boolean"),
+            _attr("isCaseSensitive", "boolean"),
+        ],
+    ),
+}
+
+
+@api_view(["GET"])
+@renderer_classes([JSONRenderer])
+def describe_all(request: Request) -> Response:
+    """`GET /api/v1/describe/_all` — the catalogue keyed by model name."""
+    return Response(_DESCRIBE)
+
+
+@api_view(["GET"])
+@renderer_classes([JSONRenderer])
+def describe_model(request: Request, model: str) -> Response:
+    """`GET /api/v1/describe/{model}` — one entity description, or 404 for an unknown model."""
+    description = _DESCRIBE.get(model)
+    if description is None:
+        return Response(
+            {"type": "NotFoundError", "message": f"{model} is not a described model"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    return Response(description)
