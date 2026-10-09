@@ -67,6 +67,7 @@ def backfill_data_hash(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
+        ('observables', '0001_initial'),
         ('observables', '0002_seed'),
     ]
 

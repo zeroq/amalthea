@@ -27,11 +27,11 @@
   </dl>
 
   <div class="card-actions">
-    <button type="button" class="btn btn-err" data-modal-open="delete-tag-{{ tag.id }}">Delete tag</button>
+    <button type="button" class="btn btn-err" data-modal-open="delete-tag-{{ tag.id|stringformat:"s" }}">Delete tag</button>
   </div>
 
   {% url 'ui-tag-delete' tag.id as delete_url %}
-  {% with modal_id="delete-tag-"|add:tag.id %}
+  {% with modal_id="delete-tag-"|add:tag.id|stringformat:"s" %}
   {% include "ui/_modal.html" with modal_id=modal_id title="Delete tag?" body="This will remove the tag from all linked cases, alerts, and observables. This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
   {% endwith %}
 

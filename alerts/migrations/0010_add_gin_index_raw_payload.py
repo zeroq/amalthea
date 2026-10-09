@@ -8,7 +8,6 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('alerts', '0009_remove_alertobservable_updated_at'),
-        ('cases', '0012_ttp_procedure'),
         ('identity', '0003_identity_hardening'),
         ('ingest', '0002_ingestion_source_hardening'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),

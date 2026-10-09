@@ -876,72 +876,6 @@ def case_bulk(request: HttpRequest, case_id: str) -> HttpResponse:
     return redirect("ui-case-list")
 
 
-@login_required
-@require_GET
-def case_attachment_list(request: HttpRequest, case_id: str) -> HttpResponse:
-    """List and upload attachments for a case."""
-    case = _resolve_case(case_id)
-    return render(
-        request,
-        "ui/case_attachments.html",
-        _base_context(
-            request,
-            case=case,
-        ),
-    )
-
-
-@login_required
-@require_POST
-def case_attachment_upload(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Upload an attachment to a case."""
-    case = _resolve_case(case_id)
-    # Reuse the API logic but adapt for UI
-    from django.http import QueryDict
-
-    request.POST = QueryDict(mutable=True)
-    for key, value in request.POST.items():
-        request.POST[key] = value
-    for key, value in request.FILES.items():
-        request.FILES[key] = value
-    # Call the API view logic directly
-    from cases.views import case_attachment_list as api_view
-
-    response = api_view(request, case_id=case.id)
-    if response.status_code == 201:
-        messages.success(request, "Attachment uploaded.")
-    else:
-        messages.error(request, f"Upload failed: {response.content.decode()[:200]}")
-    return redirect("ui-case-attachment-list", case_id=case.number)
-
-
-@login_required
-@require_GET
-def case_attachment_download(
-    request: HttpRequest, case_id: str, attachment_id: str
-) -> HttpResponse:
-    """Download an attachment."""
-
-    from cases.views import case_attachment_download as api_view
-
-    # Reuse API logic
-    return api_view(request, case_id=case_id, attachment_id=attachment_id)
-
-
-@login_required
-@require_POST
-def case_attachment_delete(request: HttpRequest, case_id: str, attachment_id: str) -> HttpResponse:
-    """Delete an attachment."""
-    from cases.views import case_attachment_detail as api_view
-
-    response = api_view(request, case_id=case_id, attachment_id=attachment_id)
-    if response.status_code == 204:
-        messages.success(request, "Attachment deleted.")
-    else:
-        messages.error(request, "Delete failed.")
-    return redirect("ui-case-attachment-list", case_id=case_id)
-
-
 # --- Case Templates ---
 
 
@@ -1209,14 +1143,6 @@ def case_merge(request: HttpRequest, case_id: str) -> HttpResponse:
     except ValueError as exc:
         messages.error(request, str(exc))
         return redirect("ui-case-merge", case_id=case.number)
-
-
-@login_required
-@require_POST
-def case_bulk(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Bulk update cases (stub)."""
-    messages.info(request, "Bulk operations available via API.")
-    return redirect("ui-case-list")
 
 
 @login_required

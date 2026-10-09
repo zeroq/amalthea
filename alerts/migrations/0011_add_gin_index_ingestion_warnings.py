@@ -8,7 +8,6 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('alerts', '0010_add_gin_index_raw_payload'),
-        ('cases', '0013_add_gin_indexes_json_fields'),
         ('identity', '0003_identity_hardening'),
         ('ingest', '0002_ingestion_source_hardening'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),

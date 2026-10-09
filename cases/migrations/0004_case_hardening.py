@@ -35,6 +35,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
+        ('cases', '0002_initial'),
         ('cases', '0003_seed'),
         ('identity', '0003_identity_hardening'),
         ('observables', '0001_initial'),

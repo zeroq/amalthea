@@ -8,8 +8,7 @@ class Migration(migrations.Migration):
     dependencies = [
         ('alerts', '0009_remove_alertobservable_updated_at'),
         ('automation', '0003_automation_hardening'),
-        ('cases', '0012_ttp_procedure'),
-        ('observables', '0005_rehash_observable_data_hash'),
+        ('observables', '0001_initial'),
     ]
 
     operations = [

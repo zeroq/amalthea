@@ -6,7 +6,6 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('cases', '0013_add_gin_indexes_json_fields'),
         ('observables', '0005_rehash_observable_data_hash'),
     ]
 

@@ -598,6 +598,134 @@ def test_alert_observable_accepts_an_array_of_artifacts(
     assert all(isinstance(entry, dict) and "_id" in entry for entry in body)
 
 
+# --- AC-A5 — observable blast radius (TODO 6.5) ---------------------------
+
+
+def test_observable_blast_radius_delete_requires_force(api: APIClient, db: None) -> None:
+    """DELETE without ?force=true on a multi-case observable returns 409 with affected_cases.
+
+    An observable linked to multiple cases is shared evidence. Mutating it without explicit
+    confirmation would corrupt the other cases' forensic record. The API refuses with a
+    CrossCaseMutationError that lists the affected cases, allowing the caller to decide.
+    """
+    from cases.models import Case, CaseObservable, CaseStatus
+    from observables.models import Observable, ObservableType
+
+    org = Organisation.objects.create(name="Blast Org")
+    user = User.objects.create_user(
+        login="analyst@blast.org", username="blast_analyst_1", email="analyst@blast.org", org=org
+    )
+    api.force_authenticate(user=user)
+
+    ip_type = ObservableType.objects.get(name="ip")
+    observable = Observable.objects.create(
+        data_type=ip_type, data="10.0.0.1", normalized_data="10.0.0.1"
+    )
+
+    open_status = CaseStatus.objects.get(value="New")
+    case1 = Case.objects.create(title="Case One", severity=2, status=open_status, owner_org=org)
+    case2 = Case.objects.create(title="Case Two", severity=2, status=open_status, owner_org=org)
+
+    CaseObservable.objects.create(case=case1, observable=observable)
+    CaseObservable.objects.create(case=case2, observable=observable)
+
+    # DELETE without force -> 409 with affected_cases
+    response = api.delete(f"/api/v1/observable/{observable.id}")
+    assert response.status_code == 409, response.content
+    body = response.json()
+    assert body["type"] == "CrossCaseMutationError"
+    assert "affected_cases" in body
+    assert len(body["affected_cases"]) == 2
+    case_numbers = {c["case_number"] for c in body["affected_cases"]}
+    assert case_numbers == {case1.number, case2.number}
+
+    # DELETE with force=true -> 204
+    response = api.delete(f"/api/v1/observable/{observable.id}?force=true")
+    assert response.status_code == 204, response.content
+    assert not Observable.objects.filter(pk=observable.id).exists()
+
+
+def test_observable_blast_radius_patch_requires_force(api: APIClient, db: None) -> None:
+    """PATCH without ?force=true on a multi-case observable returns 409 with affected_cases."""
+    from cases.models import Case, CaseObservable, CaseStatus
+    from observables.models import Observable, ObservableType
+
+    org = Organisation.objects.create(name="Blast Org 2")
+    user = User.objects.create_user(
+        login="analyst@blast2.org", username="blast_analyst_2", email="analyst@blast2.org", org=org
+    )
+    api.force_authenticate(user=user)
+
+    ip_type = ObservableType.objects.get(name="ip")
+    observable = Observable.objects.create(
+        data_type=ip_type, data="10.0.0.2", normalized_data="10.0.0.2"
+    )
+
+    open_status = CaseStatus.objects.get(value="New")
+    case1 = Case.objects.create(title="Case Alpha", severity=2, status=open_status, owner_org=org)
+    case2 = Case.objects.create(title="Case Beta", severity=2, status=open_status, owner_org=org)
+
+    CaseObservable.objects.create(case=case1, observable=observable)
+    CaseObservable.objects.create(case=case2, observable=observable)
+
+    # PATCH without force -> 409 with affected_cases
+    response = api.patch(
+        f"/api/v1/observable/{observable.id}", {"message": "updated"}, format="json"
+    )
+    assert response.status_code == 409, response.content
+    body = response.json()
+    assert body["type"] == "CrossCaseMutationError"
+    assert "affected_cases" in body
+    assert len(body["affected_cases"]) == 2
+
+    # PATCH with force=true -> 204
+    response = api.patch(
+        f"/api/v1/observable/{observable.id}?force=true", {"message": "updated"}, format="json"
+    )
+    assert response.status_code == 204, response.content
+    observable.refresh_from_db()
+    assert observable.message == "updated"
+
+
+def test_observable_single_case_mutation_works_without_force(api: APIClient, db: None) -> None:
+    """PATCH/DELETE on an observable linked to exactly one case works without ?force=true.
+
+    The blast radius protection only applies when an observable is shared across cases.
+    A single-case observable can be mutated freely — the analyst owns that evidence context.
+    """
+    from cases.models import Case, CaseObservable, CaseStatus
+    from observables.models import Observable, ObservableType
+
+    org = Organisation.objects.create(name="Blast Org 3")
+    user = User.objects.create_user(
+        login="analyst@blast3.org", username="blast_analyst_3", email="analyst@blast3.org", org=org
+    )
+    api.force_authenticate(user=user)
+
+    ip_type = ObservableType.objects.get(name="ip")
+    observable = Observable.objects.create(
+        data_type=ip_type, data="10.0.0.3", normalized_data="10.0.0.3"
+    )
+
+    open_status = CaseStatus.objects.get(value="New")
+    case1 = Case.objects.create(title="Solo Case", severity=2, status=open_status, owner_org=org)
+
+    CaseObservable.objects.create(case=case1, observable=observable)
+
+    # PATCH without force -> 204 (single case, no blast radius)
+    response = api.patch(
+        f"/api/v1/observable/{observable.id}", {"message": "solo update"}, format="json"
+    )
+    assert response.status_code == 204, response.content
+    observable.refresh_from_db()
+    assert observable.message == "solo update"
+
+    # DELETE without force -> 204 (single case, no blast radius)
+    response = api.delete(f"/api/v1/observable/{observable.id}")
+    assert response.status_code == 204, response.content
+    assert not Observable.objects.filter(pk=observable.id).exists()
+
+
 # --- AC-A4/B1 — custom fields ---------------------------------------------
 
 
