@@ -31,5 +31,8 @@ htmlcov/
 .bandit/
 node_modules/
 
+# Local analysis artifacts (may embed absolute dev paths)
+docs/perf/
+
 # OS
 .DS_Store
