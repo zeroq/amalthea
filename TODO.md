@@ -18,9 +18,9 @@ be traced, and `Blocks` when it gates other work. Review IDs (`C1`, `H2`, `M5`�
 |----------|------|-------------|--------|
 | **1** | **6.11 — Login rate-limiting / brute-force hardening** | Webhooks throttled; session/API login wide open. Add throttling + `SESSION_COOKIE_HTTPONLY` assert. | **Critical** for any internet-facing deployment. |
 | **2** | **6.5 — Observable PATCH/DELETE blast radius** | Globally-deduped observables; free PATCH/DELETE corrupts other cases. Need policy (`?force=true` + impact warning). | **High** — data integrity. |
-| **4** | **6.2 — Postgres-only indexes** | GIN on `raw_payload`/`Observable.tags`, `INCLUDE` covering indexes. | **Medium** — perf at scale; defer until data volume. |
-| **5** | **6.3 — Per-link tags on observable link tables** | Per-link `tags` agreed; per-link `is_ioc` rejected. | **Low** — nice-to-have. |
-| **5** | **6.4 — Tenant isolation** | Deferred per 2026-10-09 decision. Requires design decision (middleware vs per-view filters, roles). | **Deferred** — blocked on decision. |
+| **3** | **6.2 — Postgres-only indexes** | GIN on `raw_payload`/`Observable.tags`, `INCLUDE` covering indexes. | **Medium** — perf at scale; defer until data volume. |
+| **4** | **6.3 — Per-link tags on observable link tables** | **SHIPPED 2026-10-09** — `tags` JSONField on `CaseObservable` + `AlertObservable`. | **Done** — per-link tags distinct from global Observable tags. |
+| **5** | **6.4 — Tenant isolation** | Deferred per 2026-10-09 decision. Requires design decision (middleware org-scope vs per-view filters, roles). | **Deferred** — blocked on decision. |
 
 ---
 
@@ -433,8 +433,9 @@ Full task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md`
   GIN on `raw_payload` and `Observable.tags`; `INCLUDE` covering indexes. `GinIndex` needs
   `django.contrib.postgres` in `INSTALLED_APPS` (a prod-only dependency).
 
-- [ ] **6.3 — Per-link tags on observable link tables** Plan §13 #11
-  Per-link `tags` agreed; per-link `is_ioc` **rejected** as incoherent on a globally-deduped entity.
+- [x] **6.3 — Per-link tags on observable link tables** Plan §13 #11 — **SHIPPED 2026-10-09**
+  Per-link `tags` JSONField added to `CaseObservable` (cases/models.py) and `AlertObservable` (alerts/models.py).
+  Distinct from global Observable tags. Migrations created for both apps. Per-link `is_ioc` rejected as incoherent.
 
 - [ ] **6.4 — Tenant isolation** Phase 10 SEC-AUDIT F2, plan §13 deferred (a)
   `User.org` / `Organisation` exist and are nullable (decision §3.2), but **no endpoints scope by
