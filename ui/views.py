@@ -27,8 +27,7 @@ from typing import Any
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.views import LoginView as DjangoLoginView
-from django.contrib.auth.views import LogoutView
+from django.contrib.auth.views import LoginView as DjangoLoginView, LogoutView
 from django.db import transaction
 from django.db.models import Count
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
@@ -45,11 +44,14 @@ from alerts.escalation import (
 from alerts.models import Alert
 from automation.models import AutomationRun, Playbook
 from cases.ledger import append_timeline_event
-from cases.models import Case, CaseStatus, Comment, Task
+from cases.models import Case, CaseStatus, CaseTemplate, Comment, Task, Tag
+from cases.views import case_merge as merge_cases_fn
 from core.enums import SEVERITY_CHOICES
-from identity.models import User
+from identity.models import Organisation, User
+from identity.ratelimit import check_login_rate_limit, record_failed_login, record_successful_login
 from ingest.models import IngestionSource
 from observables.extractor import extract_into_case
+from observables.models import Observable, ObservableType
 
 SEVERITY_LABELS = dict(SEVERITY_CHOICES)
 #: Severity as a CSS class suffix, so a template says `sev-{{ case.severity }}` and the palette lives
@@ -100,6 +102,29 @@ class SignInView(DjangoLoginView):
 
     def get_success_url(self) -> str:
         return reverse("ui-dashboard")
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        # Rate limiting check
+        username = (request.POST.get("username") or "").strip()
+        allowed, retry_after = check_login_rate_limit(request, username)
+        if not allowed:
+            messages.error(
+                request,
+                f"Too many failed login attempts. Please try again in {retry_after} seconds.",
+            )
+            return self.form_invalid(self.get_form())
+        
+        # Process the login
+        response = super().post(request, *args, **kwargs)
+        
+        # Record login attempt result
+        username = (request.POST.get("username") or "").strip()
+        if response.status_code == 302:  # Success redirect
+            record_successful_login(request, username)
+        else:  # Form invalid (failed login)
+            record_failed_login(request, username)
+        
+        return response
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
