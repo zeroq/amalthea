@@ -20,6 +20,10 @@
  * Entries are built with DOM nodes and `textContent`, never HTML concatenation: the payload is
  * attacker-adjacent (it carries alert titles and note bodies), and an innerHTML here would be an
  * XSS sink in the one place that renders untrusted text as rich content.
+ *
+ * Since T2 P2 a frame's `event_type` decides its destination: `page` appends to the case's Pages
+ * card, every other value is a ledger `kind` and appends to the timeline. Without that split a page
+ * (which carries `content`, not `description`) would land in the timeline as a bare title.
  */
 (function () {
   "use strict";
@@ -28,6 +32,10 @@
   if (!list) return;
   var url = list.getAttribute("data-ws-url");
   if (!url || typeof WebSocket === "undefined") return;
+
+  // Optional: the case page's Pages card. Pages are not ledger entries, so a `page` event must not
+  // be fed to the timeline renderer — it targets this list instead, and is dropped when absent.
+  var pages = document.getElementById("case-pages");
 
   var socket = null;
   var backoff = 1000;
@@ -116,6 +124,34 @@
     list.appendChild(entry(event));
   }
 
+  /* Mirrors `ui/templates/ui/_page_entry.html`. The wire shape is `page_json`, so the audit fields
+   * are the `_createdAt`/`_createdBy` spelling, not the ledger event's `date`/`actor`. */
+  function pageEntry(page) {
+    var item = node("li", "page");
+    item.setAttribute("data-page-id", page.id || page._id);
+    item.appendChild(node("p", "page-title", page.title || ""));
+    if (page.content) item.appendChild(node("pre", "tl-body", page.content));
+
+    var meta = node("p", "tl-meta");
+    if (page.category) {
+      meta.appendChild(node("span", "dim", page.category));
+      meta.appendChild(document.createTextNode(" · "));
+    }
+    meta.appendChild(node("span", "mono", stamp(page._createdAt)));
+    if (page._createdBy) meta.appendChild(document.createTextNode(" · " + page._createdBy));
+    item.appendChild(meta);
+    return item;
+  }
+
+  function appendPage(page) {
+    if (!pages || !page) return;
+    var id = page.id || page._id;
+    if (!id || pages.querySelector('[data-page-id="' + id + '"]')) return;
+    var placeholder = pages.querySelector("li.empty");
+    if (placeholder) placeholder.parentNode.removeChild(placeholder);
+    pages.appendChild(pageEntry(page));
+  }
+
   function handle(message) {
     if (!message || typeof message !== "object") return;
     if (message.type === "timeline" && Array.isArray(message.events)) {
@@ -123,7 +159,13 @@
       return;
     }
     if (message.type === "event" && message.payload) {
-      append(message.payload.event);
+      // `event_type` carries the ledger `kind` for timeline entries, or `page` for a page. Routing
+      // on it keeps a page out of the timeline, where it would render as a title with no body.
+      if (message.event_type === "page") {
+        appendPage(message.payload.event);
+      } else {
+        append(message.payload.event);
+      }
     }
   }
 

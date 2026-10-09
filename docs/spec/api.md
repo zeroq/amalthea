@@ -94,6 +94,53 @@ inline themselves.
 | `customEvent/<id>` | PATCH, DELETE | `custom_event_detail` |
 | `customField`, `customField/` | GET | `custom_field_list` |
 
+### Collaboration (T2/Phase P2)
+
+| Path | Methods | View |
+|---|---|---|
+| `case/<id>/comment`, `…/comment/` | GET, POST | `case_comment_list` |
+| `comment/<id>`, `comment/<id>/` | PATCH, DELETE | `comment_detail` |
+| `case/<id>/page`, `…/page/` | GET, POST | `case_page_list` |
+| `case/<id>/page/<page_id>` (+ `/`) | GET, PATCH, DELETE | `case_page_detail` |
+| `case/<id>/flow`, `…/flow/` | GET | `case_flow` |
+| `case/<id>/shares`, `…/shares/` | GET, POST, PUT | `case_share_list` |
+| `case/<id>/share/<share_id>` (+ `/`) | DELETE | `share_detail` |
+| `alert/<id>/comment`, `…/comment/` | GET, POST | `alert_comment_list` |
+
+- Every route runs through `_case_access(request, id, write=…)`: a case with **no** `owner_org` is
+  visible to any authenticated caller; an org-owned case is visible to its org, or to an org holding
+  a `Share` (`read` for reads, `write` additionally for mutating verbs). Unauthorised ⇒ the same
+  **404** as "does not exist". Alerts have no share route (**P2-5**).
+- `comment` create: body `{"message": str}` required; 201 `comment_json`; **also** appends a
+  `comment` ledger event in the same transaction, so the case's WebSocket room receives it
+  (deviation **P2-1**). `comment_detail` edits/deletes the entity only.
+- `page` create: `title` required; optional `content` (Markdown), `order` (int), `category`; 201
+  `page_json`; publishes a `page` event (deviation **P2-6**). PATCH accepts any of those fields.
+- `case_share_list`: POST adds (`share`), PUT replaces the whole set (`set_share`); body
+  `{"shares":[{"organisation": id|name, "permissions": {"write": bool}}]}`. `share_json` carries
+  `organisationName` + `permissions`/`canWrite` (deviation **P2-3**).
+- `case_flow`: `{"_type":"flow","case":…,"alerts":[…],"observables":[…],"tasks":[…]}` — an extension
+  with no TheHive REST route; never inlines `raw_payload` (deviation **P2-4**).
+
+### Attachments (T2/Phase P3)
+
+| Path | Methods | View |
+|---|---|---|
+| `case/<id>/attachments`, `…/attachments/` | POST | `case_attachment_list` |
+| `case/<id>/attachment/<attachment_id>/download` | GET | `case_attachment_download` |
+| `case/<id>/attachment/<attachment_id>` (+ `/`) | DELETE | `case_attachment_detail` |
+
+- Upload is `multipart/form-data` with one or more files under the repeated `attachments` field;
+  the response is TheHive's wrapper `{"attachments":[attachment_json, …]}` (201), not a bare list.
+- **Size is checked before storage**: a file over `ATTACHMENT_MAX_BYTES` ⇒ **413**, with no blob and
+  no row. A declared type outside the allowlist, or bytes whose magic signature contradicts the
+  declared type, ⇒ **415**. The client's filename is reduced to a single safe segment and the blob is
+  stored under a server-generated opaque key (deviation **P3-1**).
+- Download requires only read access and returns the original `name` (via `Content-Disposition`) and
+  `content_type`; the recorded `sha256` is comparable against the body (`hashes[0]`).
+- All three verbs run through `_case_access` — a foreign organisation gets the same **404** as an
+  unknown id.
+
 - Case identifier: UUID **first**, then numeric `number`, resolved in
   `cases/views.py::_resolve_case` → `alerts/escalation.py::link_case_from_identifier`. A
   UUID-shaped string that is not a real UUID is caught by `_as_uuid` (`cases/views.py:75`), never a
@@ -227,7 +274,8 @@ Full DSL in [`query-dsl.md`](./query-dsl.md).
 
 `alert_json`, `observable_json`, `timeline_event_json`, `task_json`, `custom_event_json`,
 `custom_field_json`, `user_json`, `automation_run_json`, `case_json(case, *, detail=False)`,
-`organisation_json`, `observable_type_json`, `case_status_json`, `alert_status_json`, `tag_json`.
+`organisation_json`, `observable_type_json`, `case_status_json`, `alert_status_json`, `tag_json`,
+`comment_json`, `page_json`, `share_json`, `attachment_json`.
 Conventions: `_id` and `id` both present; ISO-8601 `_iso` timestamps; `raw_payload` never inlined;
 `task_json` sets `_createdBy`/`_updatedBy` to `null`; `user_json` computes `hasKey`/`hasPassword`,
 `hasMFA:false`, `locked:false`. The new entity renderers emit the audit pair as `null` where the
@@ -239,5 +287,6 @@ model has no creator column (`organisation_json`, the status renderers), and `ta
 Contract tests: `tests/conformance/test_t1_surface.py` (53), `test_unknown_fields.py` (33),
 `test_authz.py` (131), `test_thehive_fixtures.py` (13, pinned golden fixtures from thehive4py 2.1.0),
 `test_webhook_hardening.py` (37), `test_t2_p1_surface.py` (19, the T2 P1 surface: identity,
-observable types, statuses, tags, describe). TheHive shape decisions: `docs/decisions/ADR-002`.
+observable types, statuses, tags, describe), `test_t2_p2_surface.py` (12, collaboration),
+`test_t2_p3_attachments.py` (9, attachments). TheHive shape decisions: `docs/decisions/ADR-002`.
 Deviations: [`deviations.md`](./deviations.md).

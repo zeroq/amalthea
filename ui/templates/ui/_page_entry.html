@@ -1,0 +1,12 @@
+{# One case page. Mirrored by `pageEntry()` in ui/static/ui/live.js, which renders the same tree
+   from the `page` WebSocket payload — keep the two in step or a page created while the case is open
+   will look different from the same page after a reload. #}
+<li class="page" data-page-id="{{ page.id }}">
+  <p class="page-title">{{ page.title }}</p>
+  {% if page.content %}<pre class="tl-body">{{ page.content }}</pre>{% endif %}
+  <p class="tl-meta">
+    {% if page.category %}<span class="dim">{{ page.category }}</span> · {% endif %}
+    <span class="mono">{{ page.created_at|date:"Y-m-d H:i:s" }}</span>
+    {% if page.created_by %} · {{ page.created_by.login }}{% endif %}
+  </p>
+</li>

@@ -10,6 +10,7 @@ grows.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any
 from uuid import UUID
 
@@ -28,12 +29,20 @@ from alerts.escalation import (
     resolve_alert_status,
 )
 from alerts.models import Alert, AlertObservable, AlertStatus, AlertTagLink
-from cases.models import Case, Tag
+from cases.models import Case, Comment, Tag
 from cases.tagging import tag_names_from_payload
 from core.enums import ALERT_STAGES
-from core.serializers import alert_json, alert_status_json, case_json, observable_json, tag_json
+from core.serializers import (
+    alert_json,
+    alert_status_json,
+    case_json,
+    comment_json,
+    observable_json,
+    tag_json,
+)
 from observables.extractor import resolve_observable
 from observables.models import ObservableType
+from realtime.publisher import publish_case_event
 
 
 def _actor(request: Request) -> Any:
@@ -510,7 +519,43 @@ def alert_tag_link(request: Request, alert_id: str) -> Response:
     return Response([tag_json(tag) for tag in alert.tags.order_by("name")])
 
 
+@api_view(["GET", "POST"])
+@renderer_classes([JSONRenderer])
+@transaction.atomic
+def alert_comment_list(request: Request, alert_id: str) -> Response:
+    """`GET|POST /api/v1/alert/{alertId}/comment` — list or add alert comments (TheHive 5.8).
+
+    An alert already promoted to a case mirrors a new comment onto that case's WebSocket so an
+    open case view updates without a reload; an un-promoted alert has no socket and is fetched on
+    navigation. The comment itself always hangs off the alert's stable `_id`.
+    """
+    alert = _lookup_alert(alert_id)
+    if isinstance(alert, Response):
+        return alert
+    if request.method == "GET":
+        comments = alert.comments.select_related("created_by", "updated_by").order_by(
+            "-created_at", "-id"
+        )
+        return Response([comment_json(c) for c in comments])
+    payload = request.data if isinstance(request.data, dict) else {}
+    message = str(payload.get("message") or "").strip()
+    if not message:
+        return _bad("message is required", {"message": ["required"]})
+    comment = Comment.objects.create(alert=alert, message=message, created_by=_actor(request))
+    if alert.case_id:
+        transaction.on_commit(
+            partial(
+                publish_case_event,
+                str(alert.case_id),
+                "comment",
+                {"event": comment_json(comment)},
+            )
+        )
+    return Response(comment_json(comment), status=status.HTTP_201_CREATED)
+
+
 __all__ = [
+    "alert_comment_list",
     "alert_detail",
     "alert_import",
     "alert_list",

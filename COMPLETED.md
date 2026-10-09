@@ -611,4 +611,82 @@ First phase of the T2 wave (`PLAN-2026-10-09-t2-endpoints.md`). **No schema chan
   independently against the filesystem (ruff, the P1 tests, the wire-boundary guard, `make check`) and
   its two "recorded in deviations.md" claims were found **untrue** and corrected by hand.
 
+## 2026-10-09 — Wave 6.1 Phase P2: collaboration — comments, pages, shares, `flow` (T2)
+
+Second phase of the T2 wave (`PLAN-2026-10-09-t2-endpoints.md` §6-P2). **Schema change:** migration
+`cases/migrations/0009_comment_page_share.py`.
+
+- [x] **`Comment` model** — own entity (plan §6-Q1), not a `TimelineEvent` projection: nullable
+  `case`/`alert` FKs with CHECK `comment_one_parent` (exactly one parent), `message`, audit pair
+  (`SET_NULL`), indexes `comment_{case,alert}_created_idx`.
+- [x] **`Comment` endpoints** — `GET|POST /case/{id}/comment`, `GET|POST /alert/{id}/comment`,
+  `PATCH|DELETE /comment/{id}` (TheHive 5.8). A create also appends a `comment` ledger event in the
+  same transaction, so the live case view renders it and the WebSocket event is emitted on commit.
+  `message` required ⇒ 400; PATCH/DELETE obey the case share guard.
+- [x] **`Page` model + CRUD** — `title`, `content` (Markdown), `order`, `category`, audit pair,
+  `page_case_order_idx`. `GET|POST /case/{id}/page`, `GET|PATCH|DELETE /case/{id}/page/{pageId}`; a
+  page reached through a different case id is a 404. A create publishes a `page` WebSocket event.
+- [x] **`Share` model + CRUD** — case-only (`P2-5`); `permissions` JSON (`{"read": true, "write":
+  bool}`), `uniq_share_case_org`. `GET|POST|PUT /case/{id}/shares` (POST adds, PUT replaces) and
+  `DELETE /case/{id}/share/{shareId}`. **Default-deny**: a read-only share reads but every mutating
+  verb 404s, and the refused write is proven absent from the database. `_case_access()` is the single
+  guard for every P2 sub-resource.
+- [x] **`flow` endpoint** — `GET /case/{id}/flow`, a read-only extension (no TheHive REST route):
+  the case plus its alerts, observables and tasks; never inlines `raw_payload`.
+- [x] **Realtime** — a case comment creates its ledger event **inside one transaction** so the
+  WebSocket publish fires on commit; a page publishes a `page` event. Proven by two
+  `WebsocketCommunicator` tests plus the anonymous-handshake refusal (AC-a).
+- [x] **Tests** — `tests/conformance/test_t2_p2_surface.py` (12 tests over AC-a/AC-b/AC-c: publish
+  chain, anonymous refusal, read-only share denial, write-share upgrade + revoke, comment/page CRUD
+  shapes, `flow` shape, mount-order, 401-without-credentials).
+- [x] **Schema-audit upkeep** — `test_fk_audit.py` `EXPECTED_ON_DELETE` + CASCADE set extended
+  (Comment×4, Page×3, Share×3; inventory tripwire 35 → 45).
+- [x] **Deviations recorded** — `P2-1`…`P2-6` in `docs/spec/deviations.md`; `Comment`/`Page`/`Share`
+  added to `docs/spec/data-model.md`.
+- [x] Gate: SQLite `make check` **802 passed / 3 skipped**; ruff + mypy clean; migration in sync.
+
+### P2 UI follow-up (same day)
+
+- [x] **Note form creates a real `Comment`** (`P2-7`) — `ui/views.py::case_comment` writes the
+  `Comment` row and the `comment` ledger event in one transaction, so the UI note box and
+  `GET /case/{id}/comment` cannot drift. The HTMX/redirect response shapes are unchanged.
+- [x] **Pages card on the case page** — `case_detail.html` renders `case.pages` via
+  `_page_entry.html` and `live.js` routes `page` WebSocket events to `#case-pages` instead of the
+  timeline renderer (a page carries `content`, not `description`, so it previously fell through as a
+  bare title).
+- [x] **Tests** — `test_ui_loop.py`: note→`Comment`, empty note creates neither, and pages render
+  (27 tests in the file).
+- [x] Gate: SQLite `make check` **804 passed / 3 skipped**.
+
+## 2026-10-09 — Wave 6.1 Phase P3: attachments (T2)
+
+Third phase of the T2 wave (`PLAN-2026-10-09-t2-endpoints.md` §6-P3). **Schema change:** migration
+`cases/migrations/0010_attachment.py`. This is the wave's highest-risk surface — client-controlled
+bytes and a client-controlled filename — so the safety controls are the point of the phase.
+
+- [x] **`Attachment` model** — case-owned (`CASCADE`), `name` (original filename, display only),
+  `content_type`, `size`, `sha256`, opaque `path`, `external`, audit pair (`SET_NULL`); indexes
+  `attach_case_created_idx`, `attach_sha256_idx`.
+- [x] **Upload** — `POST /case/{id}/attachments`, multipart, repeated `attachments` field; response is
+  TheHive's `{"attachments":[...]}` wrapper (201). Size checked **before** storage (413 over
+  `ATTACHMENT_MAX_BYTES`), declared type allowlist + magic-byte sniff (415 on a mismatch), client
+  filename reduced to one safe segment, blob stored under a server-generated uuid key.
+- [x] **Download** — `GET /case/{id}/attachment/{id}/download` returns the original filename
+  (`Content-Disposition`) and content type; the recorded `sha256` equals the body's hash.
+- [x] **Delete** — `DELETE /case/{id}/attachment/{id}` removes the row and then the blob; a missing
+  blob cannot 500 the delete.
+- [x] **Authorization** — all three verbs go through `_case_access`; a foreign org gets the same 404
+  as an unknown id, anonymous callers get 401.
+- [x] **Tests** — `tests/conformance/test_t2_p3_attachments.py` (9 tests over AC6.1-P3-a/b/c:
+  413-writes-nothing, 415 disallowed type, 415 sniff mismatch, traversal stored sanitised, download
+  fidelity + sha256, multi-file wrapper + blob delete, cross-org 404, 401, wrong-case 404).
+- [x] **Schema-audit upkeep** — `test_fk_audit.py` `EXPECTED_ON_DELETE` + CASCADE set + column table
+  extended (Attachment×3; inventory tripwire 45 → 48).
+- [x] **Settings** — `ATTACHMENT_MAX_BYTES` / `ATTACHMENT_STORAGE_PREFIX` (env
+  `AMALTHEA_MAX_ATTACHMENT_BYTES`, `AMALTHEA_ATTACHMENT_PREFIX`), documented in `.env.example`.
+- [x] **Deviations recorded** — `P3-1`…`P3-4`; `Attachment` added to `docs/spec/data-model.md`;
+  routes/renderer added to `docs/spec/api.md`.
+- [x] Gate: SQLite `make check` **815 passed / 3 skipped**; ruff + mypy clean; migration in sync.
+
+
 

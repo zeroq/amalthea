@@ -23,10 +23,14 @@ from typing import Any
 from alerts.models import Alert, AlertObservable, AlertStatus
 from automation.models import AutomationRun
 from cases.models import (
+    Attachment,
     Case,
     CaseObservable,
     CaseStatus,
+    Comment,
     CustomField,
+    Page,
+    Share,
     Tag,
     Task,
     TimelineEvent,
@@ -277,6 +281,104 @@ def case_json(case: Case, *, detail: bool = False) -> dict[str, Any]:
             for t in case.tasks.all()
         ]
     return payload
+
+
+def comment_json(comment: Comment) -> dict[str, Any]:
+    """`OutputComment` (recorded 5.8.0). Case- and alert-scoped comments render identically.
+
+    TheHive's `OutputComment` carries no parent id: a comment is reached through its case or alert,
+    so the parent is implicit in the request and is deliberately not echoed. `isEdited` is derived,
+    not stored — `updated_by` is only ever set by an edit, which is the question the field answers.
+    """
+    return {
+        "_id": str(comment.id),
+        "id": str(comment.id),
+        "_type": "comment",
+        "_createdBy": _username(comment.created_by),
+        "_createdAt": _iso(comment.created_at),
+        "_updatedBy": _username(comment.updated_by),
+        "_updatedAt": _iso(comment.updated_at),
+        "message": comment.message,
+        "isEdited": comment.updated_by_id is not None,
+        "extraData": {},
+        "external": False,
+    }
+
+
+def page_json(page: Page) -> dict[str, Any]:
+    """`OutputPage` (recorded 5.8.0): a mutable Markdown page attached to a case.
+
+    `caseId` is emitted even though the hand-written `thehive4py` TypedDict omits it: the recorded
+    OpenAPI page carries the parent, and a flow that lists pages from several cases is otherwise
+    ambiguous. The audit pair uses the `_createdBy`/`_createdAt` spelling the T2 entities share.
+    """
+    return {
+        "_id": str(page.id),
+        "id": str(page.id),
+        "_type": "page",
+        "_createdBy": _username(page.created_by),
+        "_createdAt": _iso(page.created_at),
+        "_updatedBy": _username(page.updated_by),
+        "_updatedAt": _iso(page.updated_at),
+        "caseId": str(page.case_id),
+        "title": page.title,
+        "content": page.content,
+        "order": page.order,
+        "category": page.category,
+        "extraData": {},
+    }
+
+
+def share_json(share: Share) -> dict[str, Any]:
+    """`OutputShare` — the grant of one case to one organisation.
+
+    TheHive's `OutputShare` carries `profileName`/`taskRule`/`observableRule`/`owner`; this
+    deployment models a single `permissions` bag, so the profile-shaped keys degrade to the value
+    the stored row implies and the actual grant is exposed on the wire as `permissions` + `canWrite`
+    (deviation **P2-3**). `organisation` (the id) is echoed alongside `organisationName` so a client
+    can render either without a follow-up lookup.
+    """
+    return {
+        "_id": str(share.id),
+        "id": str(share.id),
+        "_type": "share",
+        "_createdBy": _username(share.created_by),
+        "_createdAt": _iso(share.created_at),
+        "_updatedBy": None,
+        "_updatedAt": _iso(share.updated_at),
+        "caseId": str(share.case_id),
+        "organisation": str(share.organisation_id),
+        "organisationName": share.organisation.name,
+        "owner": False,
+        "profileName": "write" if share.can_write else "read-only",
+        "permissions": share.permissions or {},
+        "canWrite": share.can_write,
+    }
+
+
+def attachment_json(attachment: Attachment) -> dict[str, Any]:
+    """`OutputAttachment` (recorded 5.8.0) — a file attached to a case.
+
+    `hashes` is a list on the wire (TheHive records one or more); this deployment stores a single
+    SHA-256, so the list carries that one value. `path` is the opaque server-side storage key, never
+    the client's filename — `name` is that, and is display data only.
+    """
+    return {
+        "_id": str(attachment.id),
+        "id": str(attachment.id),
+        "_type": "attachment",
+        "_createdBy": _username(attachment.created_by),
+        "_createdAt": _iso(attachment.created_at),
+        "_updatedBy": _username(attachment.updated_by),
+        "_updatedAt": _iso(attachment.updated_at),
+        "name": attachment.name,
+        "hashes": [attachment.sha256],
+        "size": attachment.size,
+        "contentType": attachment.content_type,
+        "path": attachment.path,
+        "extraData": {},
+        "external": attachment.external,
+    }
 
 
 def organisation_json(org: Organisation) -> dict[str, Any]:

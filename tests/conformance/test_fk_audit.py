@@ -78,6 +78,7 @@ EXPECTED_FK_COLUMNS: dict[str, tuple[tuple[str, ...], ...]] = {
     "case_observable": (("case_id",), ("observable_id",), ("added_by_id",)),
     "alert_observable": (("alert_id",), ("observable_id",), ("added_by_id",)),
     "timeline_event": (("case_id",), ("actor_id",)),
+    "attachment": (("case_id",), ("created_by_id",), ("updated_by_id",)),
     "case_custom_field_value": (("case_id",), ("custom_field_id",)),
     "alert_custom_field_value": (("alert_id",), ("custom_field_id",)),
     "identity_apikey": (("user_id",),),
@@ -113,6 +114,28 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     ("cases", "CaseObservable", "case"): models.CASCADE,
     ("cases", "CaseObservable", "observable"): models.CASCADE,
     ("cases", "CaseObservable", "added_by"): models.SET_NULL,
+    # ---- T2 P2 collaboration: comments, pages, shares ----------------------------------
+    # A comment/page is a case- or alert-owned child: deleting the parent must delete it, or it
+    # becomes an orphan no view can reach. The author columns are audit, not ownership: they
+    # outlive a departing analyst, so SET_NULL.
+    ("cases", "Comment", "case"): models.CASCADE,
+    ("cases", "Comment", "alert"): models.CASCADE,
+    ("cases", "Comment", "created_by"): models.SET_NULL,
+    ("cases", "Comment", "updated_by"): models.SET_NULL,
+    ("cases", "Page", "case"): models.CASCADE,
+    ("cases", "Page", "created_by"): models.SET_NULL,
+    ("cases", "Page", "updated_by"): models.SET_NULL,
+    # A share *is* the grant of one case to one organisation, so it has no meaning once either
+    # endpoint is gone; CASCADE in both directions. Deleting an org revokes its grants.
+    ("cases", "Share", "case"): models.CASCADE,
+    ("cases", "Share", "organisation"): models.CASCADE,
+    ("cases", "Share", "created_by"): models.SET_NULL,
+    # ---- T2 P3 attachments -------------------------------------------------------------
+    # A blob is case-owned: deleting the case must delete the row (the view deletes the blob). The
+    # author columns are audit, so they outlive a departing analyst.
+    ("cases", "Attachment", "case"): models.CASCADE,
+    ("cases", "Attachment", "created_by"): models.SET_NULL,
+    ("cases", "Attachment", "updated_by"): models.SET_NULL,
     # ---- Alert ------------------------------------------------------------------------
     ("alerts", "Alert", "status"): models.PROTECT,
     # **TheHive's unlink-on-delete** (ADR-002): deleting a case must not destroy the alerts
@@ -193,10 +216,12 @@ def test_fk_audit_covers_the_whole_model_inventory() -> None:
         f"undeclared={sorted(set(actual) - set(EXPECTED_ON_DELETE))}, "
         f"stale={sorted(set(EXPECTED_ON_DELETE) - set(actual))}"
     )
-    # 35 = 29 pre-L-2 plus the six `*TagLink` join FKs declared explicitly for **L-2**. Kept as a
-    # literal on purpose: it is a tripwire for a model silently dropping out of `OWN_APPS`, and
-    # `EXPECTED_ON_DELETE` already pins the exact set, so a bump here is always a real change.
-    assert len(actual) == 35, f"expected the full FK set, found only {len(actual)}"
+    # 45 = 29 pre-L-2, plus the six `*TagLink` join FKs declared explicitly for **L-2**, plus the
+    # ten T2 P2 collaboration FKs (Comment x4, Page x3, Share x3), plus the three T2 P3 attachment
+    # FKs (Attachment x3). Kept as a literal on purpose: it is a tripwire for a model silently
+    # dropping out of `OWN_APPS`, and `EXPECTED_ON_DELETE` already pins the exact set, so a bump
+    # here is always a real change.
+    assert len(actual) == 48, f"expected the full FK set, found only {len(actual)}"
 
 
 @pytest.mark.django_db
@@ -266,6 +291,17 @@ def test_no_cascade_is_reachable_from_a_longer_lived_row() -> None:
         ("alerts", "AlertTagLink", "tag"),
         ("observables", "ObservableTagLink", "observable"),
         ("observables", "ObservableTagLink", "tag"),
+        # T2 P2 collaboration. A comment, page or share cannot outlive its case (or its alert,
+        # for a comment); a share also dies with the organisation it points at, because the grant
+        # names that organisation and has no meaning once it is gone.
+        ("cases", "Comment", "case"),
+        ("cases", "Comment", "alert"),
+        ("cases", "Page", "case"),
+        ("cases", "Share", "case"),
+        ("cases", "Share", "organisation"),
+        # T2 P3 attachments. A blob row is case-owned — the upload view deletes the file when the
+        # row goes — so it cannot outlive the case it was filed against.
+        ("cases", "Attachment", "case"),
     }, f"the CASCADE surface changed and needs a re-review: {sorted(cascades)}"
 
 

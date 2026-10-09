@@ -12,11 +12,19 @@ timeline a decoration, and the choke point is what keeps it published as well as
 
 from __future__ import annotations
 
+import hashlib
+import re
+from functools import partial
+from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
+from django.conf import settings
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import Q
+from django.http import FileResponse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, renderer_classes
@@ -32,10 +40,15 @@ from alerts.escalation import (
 from alerts.models import Alert
 from cases.ledger import append_timeline_event
 from cases.models import (
+    Attachment,
     Case,
+    CaseObservable,
     CaseStatus,
     CaseTagLink,
+    Comment,
     CustomField,
+    Page,
+    Share,
     Tag,
     Task,
     TimelineEvent,
@@ -44,16 +57,23 @@ from cases.tagging import tag_names_from_payload
 from compat.time import parse_timestamp, to_epoch_ms
 from core.enums import CASE_STAGES, TASK_STATUS_CHOICES
 from core.serializers import (
+    alert_json,
+    attachment_json,
     case_json,
     case_status_json,
+    comment_json,
     custom_event_json,
     custom_field_json,
     observable_json,
+    page_json,
+    share_json,
     tag_json,
     task_json,
 )
+from identity.models import Organisation
 from observables.extractor import add_observable, extract_into_case
 from observables.models import Observable, ObservableTagLink, ObservableType
+from realtime.publisher import publish_case_event
 
 _TASK_STATUSES = tuple(choice for choice, _label in TASK_STATUS_CHOICES)
 
@@ -91,8 +111,24 @@ def _as_uuid(value: Any) -> UUID | None:
     keeps "not found" and "malformed" the same honest answer at the path boundary.
     """
     try:
-        return UUID(str(value))
-    except (ValueError, TypeError, AttributeError):
+        return UUID(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_int(value: Any) -> int | None:
+    """Coerce a JSON scalar to an integer, or `None` when it is not integer-shaped.
+
+    `None` (absent) becomes `0`, matching the `order` default; booleans are rejected so that JSON
+    `true` cannot silently become `1`.
+    """
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
         return None
 
 
@@ -106,6 +142,47 @@ def _case_org_scope(request: Request) -> Q:
     """
     org_id = getattr(getattr(request, "user", None), "org_id", None)
     return Q(case__owner_org__isnull=True) | Q(case__owner_org_id=org_id)
+
+
+def _case_access(request: Request, identifier: str, *, write: bool) -> Case | None:
+    """Resolve a case the caller may reach, or `None` (which callers turn into a 404).
+
+    This is the **share** guard (plan §6-P2, deviation **P10-w**). A case that belongs to no
+    organisation stays visible to every authenticated caller — the same choice `_case_org_scope`
+    makes, and the reason this cannot be `= user.org` alone. A case that *is* org-owned is visible
+    only inside that organisation, or to an organisation holding a `Share`:
+    `read` is enough to look, `write=True` also demands `permissions.write`. A share therefore only
+    ever *adds* access for one tenant; it cannot narrow the owner's or leak across cases.
+    """
+    case = _resolve_case(identifier)
+    if case is None:
+        return None
+    if case.owner_org_id is None:
+        # A case that belongs to no organisation stays visible to every authenticated caller.
+        return case
+    org_id = getattr(getattr(request, "user", None), "org_id", None)
+    if org_id is None:
+        # An org-owned case with no org on the caller: deny rather than fall through to a
+        # self-share lookup that could never match.
+        return None
+    if case.owner_org_id == org_id:
+        return case
+    shares = case.shares.filter(organisation_id=org_id)
+    if write:
+        shares = shares.filter(permissions__write=True)
+    return case if shares.exists() else None
+
+
+def _resolve_org(identifier: Any) -> Organisation | None:
+    """A share names an organisation by UUID or by name; both are accepted, first by id."""
+    if not identifier:
+        return None
+    pk = _as_uuid(identifier)
+    if pk is not None:
+        org = Organisation.objects.filter(pk=pk).first()
+        if org is not None:
+            return org
+    return Organisation.objects.filter(name=str(identifier)).first()
 
 
 @api_view(["GET", "POST"])
@@ -1067,23 +1144,506 @@ def observable_tag_link(request: Request, observable_id: str) -> Response:
     return Response([tag_json(tag) for tag in observable.tags.order_by("name")])
 
 
+# --- T2 P2 — collaboration: comments, pages, shares, flow ------------------
+
+
+def _comment_message(request: Request) -> str | Response:
+    """The `message` in the body, or a 400 response when it is missing or blank."""
+    payload = request.data if isinstance(request.data, dict) else {}
+    message = str(payload.get("message") or "").strip()
+    if not message:
+        return _bad("message is required", {"message": ["required"]})
+    return message
+
+
+@api_view(["GET", "POST"])
+@renderer_classes([JSONRenderer])
+@transaction.atomic
+def case_comment_list(request: Request, case_id: str) -> Response:
+    """`GET|POST /api/v1/case/{idOrNumber}/comment` — list or add case comments.
+
+    A created comment is also appended to the ledger as a `comment` event in the same transaction:
+    the `Comment` row is TheHive's `OutputComment`, while the ledger is what the live case view
+    renders, and an entry present in only one of the two would be invisible to half the product.
+    The ledger append is what publishes the WebSocket event (AC6.1-P2-a).
+    """
+    case = _case_access(request, case_id, write=request.method == "POST")
+    if case is None:
+        return _not_found("Case")
+    if request.method == "GET":
+        comments = case.comments.select_related("created_by", "updated_by").order_by(
+            "-created_at", "-id"
+        )
+        return Response([comment_json(c) for c in comments])
+    message = _comment_message(request)
+    if isinstance(message, Response):
+        return message
+    comment = Comment.objects.create(case=case, message=message, created_by=_actor(request))
+    append_timeline_event(
+        case,
+        title="Comment",
+        description=message,
+        kind="comment",
+        actor=_actor(request),
+        metadata={"comment": str(comment.id)},
+    )
+    return Response(comment_json(comment), status=status.HTTP_201_CREATED)
+
+
+@api_view(["PATCH", "DELETE"])
+@renderer_classes([JSONRenderer])
+def comment_detail(request: Request, comment_id: str) -> Response:
+    """`PATCH|DELETE /api/v1/comment/{id}` — edit or remove a comment (TheHive 5.8).
+
+    A comment reached through a case obeys the case's share guard: a read-only share can list the
+    comment but cannot edit or delete it (AC6.1-P2-b).
+    """
+    pk = _as_uuid(comment_id)
+    comment = (
+        Comment.objects.select_related("case").filter(pk=pk).first() if pk is not None else None
+    )
+    if comment is None:
+        return _not_found("Comment")
+    if comment.case_id and _case_access(request, str(comment.case_id), write=True) is None:
+        return _not_found("Comment")
+    if request.method == "DELETE":
+        comment.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    message = _comment_message(request)
+    if isinstance(message, Response):
+        return message
+    comment.message = message
+    comment.updated_by = _actor(request)
+    comment.save(update_fields=["message", "updated_by", "updated_at"])
+    return Response(comment_json(comment))
+
+
+@api_view(["GET", "POST"])
+@renderer_classes([JSONRenderer])
+@transaction.atomic
+def case_page_list(request: Request, case_id: str) -> Response:
+    """`GET|POST /api/v1/case/{idOrNumber}/page` — list or create case pages (Markdown).
+
+    A created page publishes a `page` WebSocket event on commit, so a second tab sees it without a
+    reload (AC6.1-P2-a). It is deliberately **not** a `TimelineEvent`: a page is mutable state, and
+    an immutable ledger row per edit would misrepresent it as an event.
+    """
+    case = _case_access(request, case_id, write=request.method == "POST")
+    if case is None:
+        return _not_found("Case")
+    if request.method == "GET":
+        pages = case.pages.select_related("created_by", "updated_by").order_by(
+            "order", "created_at"
+        )
+        return Response([page_json(page) for page in pages])
+    payload = request.data if isinstance(request.data, dict) else {}
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        return _bad("title is required", {"title": ["required"]})
+    order = _as_int(payload.get("order"))
+    if order is None:
+        return _bad("order must be an integer", {"order": ["invalid"]})
+    page = Page.objects.create(
+        case=case,
+        title=title[:500],
+        content=str(payload.get("content") or ""),
+        order=order,
+        category=str(payload.get("category") or "")[:100],
+        created_by=_actor(request),
+    )
+    transaction.on_commit(
+        partial(publish_case_event, str(case.id), "page", {"event": page_json(page)})
+    )
+    return Response(page_json(page), status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@renderer_classes([JSONRenderer])
+def case_page_detail(request: Request, case_id: str, page_id: str) -> Response:
+    """`GET|PATCH|DELETE /api/v1/case/{idOrNumber}/page/{pageId}` (TheHive 5.8)."""
+    case = _case_access(request, case_id, write=request.method in ("PATCH", "DELETE"))
+    if case is None:
+        return _not_found("Case")
+    page_pk = _as_uuid(page_id)
+    page = Page.objects.filter(pk=page_pk, case=case).first() if page_pk is not None else None
+    if page is None:
+        return _not_found("Page")
+    if request.method == "DELETE":
+        page.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    if request.method == "GET":
+        return Response(page_json(page))
+    payload = request.data if isinstance(request.data, dict) else {}
+    fields: list[str] = []
+    if "title" in payload:
+        title = str(payload["title"] or "").strip()
+        if not title:
+            return _bad("title must not be empty", {"title": ["blank"]})
+        page.title = title[:500]
+        fields.append("title")
+    if "content" in payload:
+        page.content = str(payload["content"] or "")
+        fields.append("content")
+    if "category" in payload:
+        page.category = str(payload["category"] or "")[:100]
+        fields.append("category")
+    if "order" in payload:
+        order = _as_int(payload["order"])
+        if order is None:
+            return _bad("order must be an integer", {"order": ["invalid"]})
+        page.order = order
+        fields.append("order")
+    if not fields:
+        return _bad("No updatable field supplied", {})
+    page.updated_by = _actor(request)
+    page.save(update_fields=[*fields, "updated_by", "updated_at"])
+    return Response(page_json(page))
+
+
+@api_view(["GET"])
+@renderer_classes([JSONRenderer])
+def case_flow(request: Request, case_id: str) -> Response:
+    """`GET /api/v1/case/{idOrNumber}/flow` — the case and everything linked to it.
+
+    TheHive 5.8 has no REST `flow` route and thehive4py 2.1.0 has no `flow` module, so this is an
+    **extension** shaped after the entities it links: the case, its alerts, its observables and its
+    tasks in one read (recorded as deviation **P2-4**). `raw_payload` is never inlined.
+    """
+    case = _case_access(request, case_id, write=False)
+    if case is None:
+        return _not_found("Case")
+    alerts = case.alerts.select_related("status", "assignee").order_by("-date")
+    observables = (
+        CaseObservable.objects.select_related("observable__data_type")
+        .filter(case=case)
+        .order_by("-created_at")
+    )
+    return Response(
+        {
+            "_type": "flow",
+            "case": case_json(case),
+            "alerts": [alert_json(alert) for alert in alerts],
+            "observables": [observable_json(link) for link in observables],
+            "tasks": [task_json(task) for task in case.tasks.select_related("assignee")],
+        }
+    )
+
+
+@api_view(["GET", "POST", "PUT"])
+@renderer_classes([JSONRenderer])
+@transaction.atomic
+def case_share_list(request: Request, case_id: str) -> Response:
+    """`GET|POST|PUT /api/v1/case/{idOrNumber}/shares` — read, add or replace shares.
+
+    **Default deny** (plan §6-P2): reading the share list needs read access, mutating it needs
+    write access, so an organisation the case was merely shared *read-only* with cannot widen its
+    own grant. `POST` adds (TheHive's `share`); `PUT` replaces the whole set (TheHive's `set_share`).
+    A share only ever adds access for one tenant and cannot touch the owner's.
+    """
+    case = _case_access(request, case_id, write=request.method in ("POST", "PUT"))
+    if case is None:
+        return _not_found("Case")
+    if request.method == "GET":
+        shares = case.shares.select_related("organisation").order_by("created_at")
+        return Response([share_json(share) for share in shares])
+    payload = request.data if isinstance(request.data, dict) else {}
+    entries = payload.get("shares")
+    if not isinstance(entries, list) or not entries:
+        return _bad("shares is required", {"shares": ["required"]})
+    resolved: list[tuple[Organisation, dict[str, Any]]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return _bad("each share must be an object", {"shares": ["invalid"]})
+        organisation = _resolve_org(entry.get("organisation"))
+        if organisation is None:
+            return _bad("unknown organisation", {"organisation": ["unknown"]})
+        permissions = entry.get("permissions")
+        if not isinstance(permissions, dict):
+            permissions = {"write": bool(entry.get("write"))}
+        permissions = {"read": True, "write": bool(permissions.get("write"))}
+        resolved.append((organisation, permissions))
+    if request.method == "PUT":
+        case.shares.all().delete()
+    for organisation, permissions in resolved:
+        if request.method == "PUT":
+            Share.objects.create(
+                case=case,
+                organisation=organisation,
+                permissions=permissions,
+                created_by=_actor(request),
+            )
+        else:
+            Share.objects.get_or_create(
+                case=case,
+                organisation=organisation,
+                defaults={"permissions": permissions, "created_by": _actor(request)},
+            )
+    shares = case.shares.select_related("organisation").order_by("created_at")
+    return Response([share_json(share) for share in shares])
+
+
+@api_view(["DELETE"])
+@renderer_classes([JSONRenderer])
+def share_detail(request: Request, case_id: str, share_id: str) -> Response:
+    """`DELETE /api/v1/case/{idOrNumber}/share/{shareId}` — revoke one share (TheHive 5.8)."""
+    case = _case_access(request, case_id, write=True)
+    if case is None:
+        return _not_found("Case")
+    share_pk = _as_uuid(share_id)
+    share = Share.objects.filter(pk=share_pk, case=case).first() if share_pk is not None else None
+    if share is None:
+        return _not_found("Share")
+    share.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# --- Attachments (T2 P3) ---------------------------------------------------
+#
+# The highest-risk surface of the T2 wave: client-controlled bytes and a client-controlled
+# filename. Two rules hold throughout — the client's name is *display data only* and never a path
+# component, and the size is checked before a byte reaches permanent storage.
+
+# Concrete types only. A wildcard like `application/octet-stream` is deliberately absent: it would
+# declare nothing and defeat the content sniff below.
+_ATTACHMENT_ALLOWED_TYPES = frozenset(
+    {
+        "text/plain",
+        "text/csv",
+        "text/markdown",
+        "text/x-python",
+        "application/json",
+        "application/x-ndjson",
+        "application/pdf",
+        "application/zip",
+        "application/xml",
+        "text/xml",
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+    }
+)
+
+# Magic-byte signatures for the binary types above. A declared type that has a signature here must
+# match the bytes; a text/JSON/XML type must instead decode as UTF-8 (the fallback in `_sniff`).
+_ATTACHMENT_SIGNATURES = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"%PDF-", "application/pdf"),
+    (b"PK\x03\x04", "application/zip"),
+)
+
+
+def _unsupported(message: str) -> Response:
+    return Response(
+        {"type": "UnsupportedMediaType", "message": message},
+        status=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+    )
+
+
+def _too_large(message: str) -> Response:
+    return Response(
+        {"type": "TooLarge", "message": message},
+        status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+    )
+
+
+def _safe_attachment_name(raw: str) -> str:
+    """A display filename reduced to one harmless segment.
+
+    The stored blob never uses this (see `_attachment_storage_path`), but it is stored and echoed in
+    `Content-Disposition`, so `../../etc/passwd` or an embedded NUL must not survive into a header
+    or a log line.
+    """
+    name = Path((raw or "").replace("\x00", "")).name.strip()
+    if not name or name in {".", ".."}:
+        return "attachment"
+    return name[:255]
+
+
+def _attachment_storage_path(name: str) -> str:
+    """An opaque, collision-free storage key under the configured prefix.
+
+    The extension comes from the client's name but is re-validated to `[a-z0-9]` and length-capped,
+    so a crafted suffix cannot reintroduce a path separator. The stem is a server-side uuid4, so two
+    uploads of the same name never share a blob and there is nothing for a traversal to climb.
+    """
+    prefix = getattr(settings, "ATTACHMENT_STORAGE_PREFIX", "attachments")
+    suffix = Path(name).suffix.lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,10}", suffix):
+        suffix = ""
+    return f"{prefix}/{uuid4().hex}{suffix}"
+
+
+def _sniff_attachment(content_type: str, data: bytes) -> bool:
+    """True when `data` is consistent with the declared `content_type`.
+
+    A file whose bytes start with a known signature must declare that signature's type (so PNG
+    bytes sent as `text/plain`, or a PDF sent as `image/png`, is a 415). Anything the signature
+    table does not know must at least decode as UTF-8 when it claims to be text-ish, which rejects
+    a binary smuggled in under a text type. This is a sanity check, not a full MIME detector.
+    """
+    for signature, declared in _ATTACHMENT_SIGNATURES:
+        if data.startswith(signature):
+            return declared == content_type
+    if content_type.startswith("text/") or content_type in {
+        "application/json",
+        "application/x-ndjson",
+        "application/xml",
+    }:
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+    return True
+
+
+def _find_attachment(case: Case, attachment_id: str) -> Attachment | None:
+    """An attachment reached *through* its case, so a foreign case id cannot address it."""
+    pk = _as_uuid(attachment_id)
+    if pk is None:
+        return None
+    return Attachment.objects.filter(pk=pk, case=case).first()
+
+
+@api_view(["POST"])
+@renderer_classes([JSONRenderer])
+def case_attachment_list(request: Request, case_id: str) -> Response:
+    """`POST /api/v1/case/{idOrNumber}/attachments` — multipart upload (TheHive 5.8).
+
+    Accepts one or more files under the repeated `attachments` field and answers with TheHive's
+    wrapper `{"attachments": [...]}`, not a bare list. Every file is size-checked and
+    content-checked **before** anything is written to storage, so a rejected upload leaves neither a
+    blob nor a row (AC6.1-P3-a). The client's filename is stored as `name` only; the blob name is
+    generated server-side.
+    """
+    case = _case_access(request, case_id, write=True)
+    if case is None:
+        return _not_found("Case")
+    uploads = request.FILES.getlist("attachments")
+    if not uploads:
+        return _bad("attachments is required", {"attachments": ["required"]})
+    max_bytes = int(getattr(settings, "ATTACHMENT_MAX_BYTES", 25 * 1024 * 1024))
+
+    # Phase 1 — validate all of them before a single byte hits permanent storage.
+    prepared: list[tuple[str, str, bytes]] = []
+    for upload in uploads:
+        content_type = (upload.content_type or "").split(";")[0].strip().lower()
+        if content_type not in _ATTACHMENT_ALLOWED_TYPES:
+            return _unsupported(f"content type {content_type or 'unknown'} is not allowed")
+        if upload.size is None or upload.size > max_bytes:
+            return _too_large(f"attachment exceeds {max_bytes} bytes")
+        data = upload.read()
+        if len(data) > max_bytes:
+            return _too_large(f"attachment exceeds {max_bytes} bytes")
+        if not data:
+            return _bad("an empty file is not an attachment", {"attachments": ["empty"]})
+        if not _sniff_attachment(content_type, data):
+            return _unsupported(f"content does not match declared type {content_type}")
+        prepared.append((_safe_attachment_name(upload.name or ""), content_type, data))
+
+    # Phase 2 — write the blobs, then the rows. A failure mid-way deletes every blob written, so a
+    # rejected request cannot strand an unreferenced file in the attachment volume.
+    stored: list[str] = []
+    attachments: list[Attachment] = []
+    try:
+        with transaction.atomic():
+            for name, content_type, data in prepared:
+                stored.append(
+                    default_storage.save(_attachment_storage_path(name), ContentFile(data))
+                )
+                attachments.append(
+                    Attachment.objects.create(
+                        case=case,
+                        name=name,
+                        content_type=content_type,
+                        size=len(data),
+                        sha256=hashlib.sha256(data).hexdigest(),
+                        path=stored[-1],
+                        created_by=_actor(request),
+                    )
+                )
+    except Exception:
+        for path in stored:
+            default_storage.delete(path)
+        raise
+    return Response(
+        {"attachments": [attachment_json(item) for item in attachments]},
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["GET"])
+@renderer_classes([JSONRenderer])
+def case_attachment_download(request: Request, case_id: str, attachment_id: str) -> Response:
+    """`GET .../attachment/{id}/download` — stream the blob under its original name (TheHive 5.8).
+
+    Read access is enough. The response carries the stored `name` and `content_type`; the recorded
+    `sha256` is what a caller (or a test) compares the body against to prove the same bytes came
+    back (AC6.1-P3-b).
+    """
+    case = _case_access(request, case_id, write=False)
+    if case is None:
+        return _not_found("Case")
+    attachment = _find_attachment(case, attachment_id)
+    if attachment is None or not default_storage.exists(attachment.path):
+        return _not_found("Attachment")
+    return FileResponse(
+        default_storage.open(attachment.path, "rb"),
+        as_attachment=True,
+        filename=attachment.name,
+        content_type=attachment.content_type,
+    )
+
+
+@api_view(["DELETE"])
+@renderer_classes([JSONRenderer])
+def case_attachment_detail(request: Request, case_id: str, attachment_id: str) -> Response:
+    """`DELETE /api/v1/case/{idOrNumber}/attachment/{id}` — remove a case attachment (TheHive 5.8).
+
+    The row goes first: a missing blob must not turn a delete into a 500, and a row without a blob
+    is a broken download while a blob without a row is only wasted bytes.
+    """
+    case = _case_access(request, case_id, write=True)
+    if case is None:
+        return _not_found("Case")
+    attachment = _find_attachment(case, attachment_id)
+    if attachment is None:
+        return _not_found("Attachment")
+    path = attachment.path
+    attachment.delete()
+    default_storage.delete(path)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 __all__ = [
     "case_alert_remove",
+    "case_attachment_detail",
+    "case_attachment_download",
+    "case_attachment_list",
     "case_collection",
+    "case_comment_list",
     "case_custom_event_create",
     "case_detail",
+    "case_flow",
     "case_observable_add",
     "case_observable_list",
+    "case_page_detail",
+    "case_page_list",
+    "case_share_list",
     "case_status_collection",
     "case_status_detail",
     "case_tag_link",
     "case_task_create",
     "case_task_list",
     "case_timeline",
+    "comment_detail",
     "custom_event_detail",
     "custom_field_list",
     "observable_detail",
     "observable_tag_link",
+    "share_detail",
     "tag_collection",
     "tag_detail",
     "task_detail",

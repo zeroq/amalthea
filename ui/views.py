@@ -45,7 +45,7 @@ from alerts.escalation import (
 from alerts.models import Alert
 from automation.models import AutomationRun
 from cases.ledger import append_timeline_event
-from cases.models import Case, CaseStatus, Task
+from cases.models import Case, CaseStatus, Comment, Task
 from core.enums import SEVERITY_CHOICES
 from identity.models import User
 from ingest.models import IngestionSource
@@ -270,6 +270,7 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
                 "-created_at"
             ),
             tasks=case.tasks.select_related("assignee").order_by("order", "created_at"),
+            pages=case.pages.select_related("created_by").order_by("order", "-created_at"),
             runs=AutomationRun.objects.filter(case=case)
             .select_related("playbook", "triggered_by_observable")
             .order_by("-created_at"),
@@ -313,13 +314,18 @@ def case_set_status(request: HttpRequest, case_id: str) -> HttpResponse:
 @login_required
 @require_POST
 def case_comment(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Append a note to the case ledger.
+    """Append a note to the case ledger and record it as a first-class `Comment`.
 
     Two response shapes, one write. With `HX-Request` the browser already has the timeline on
     screen, so the rendered `<li>` comes back for HTMX to append — no reload, and the WebSocket
     clients see the same entry through the publish the write performs. Without HTMX the POST
     redirects exactly as it did before: a non-JS client has no swap to feed, and a bare 200 would
     strand it on a blank page (brief 6).
+
+    Since T2 P2 the note is *also* a `Comment` row: the ledger `TimelineEvent` is what the timeline
+    and the WebSocket render, while the `Comment` is the TheHive-parity entity the API's
+    `GET /case/{id}/comment` returns. Both land in one transaction so a note can never be visible in
+    one view of the case but not the other.
     """
     case = _resolve_case(case_id)
     body = (request.POST.get("body") or "").strip()
@@ -330,9 +336,11 @@ def case_comment(request: HttpRequest, case_id: str) -> HttpResponse:
             return HttpResponse("A note needs a body.", status=400)
         messages.error(request, "A note needs a body.")
         return redirect("ui-case-detail", case_id=case.number)
-    event = append_timeline_event(
-        case, title="Note added", description=body[:10000], kind="comment", actor=request.user
-    )
+    with transaction.atomic():
+        Comment.objects.create(case=case, message=body, created_by=request.user)
+        event = append_timeline_event(
+            case, title="Note added", description=body[:10000], kind="comment", actor=request.user
+        )
     if request.headers.get("HX-Request"):
         # No flash on this path: it would render on the *next* full page load, announcing a note
         # that is already on screen.

@@ -154,6 +154,19 @@
         <button type="submit" class="btn">Add task</button>
       </form>
     </section>
+
+    <section class="card" aria-labelledby="h-pages">
+      <h2 id="h-pages">Pages <span class="count">{{ pages|length }}</span></h2>
+      {# Pages are created through the API (POST /case/{id}/page); the UI renders them and appends
+         new ones live from the `page` WebSocket event, which is why this list carries an id. #}
+      <ul class="pages" id="case-pages">
+        {% for page in pages %}
+          {% include "ui/_page_entry.html" %}
+        {% empty %}
+          <li class="empty">No pages yet.</li>
+        {% endfor %}
+      </ul>
+    </section>
   </div>
 </div>
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from django.db import models, router
+from django.db.models import Q
 from django.utils import timezone
 
 from core.enums import (
@@ -313,3 +314,171 @@ class CaseTagLink(models.Model):
 
     def __str__(self) -> str:
         return f"{self.case_id}:{self.tag_id}"
+
+
+class Comment(UUIDModel, TimeStampedModel):
+    """A first-class comment on a case or an alert (T2 P2, plan §6-Q1).
+
+    TheHive 5 exposes comments as their own entity (`POST /case/{id}/comment`,
+    `GET/POST /alert/{id}/comment`, `PATCH|DELETE /comment/{id}`) rather than as a view over the
+    case ledger, so this is its own row rather than a `TimelineEvent` projection: a comment's
+    `_id` is stable across a note being edited, while a ledger entry is append-only.
+
+    Exactly one of `case`/`alert` is set — a comment belongs to one parent and the CHECK below
+    makes "no parent" and "two parents" unrepresentable rather than a convention.
+    """
+
+    # db_index=False on both parents: each is the left prefix of its own composite index below.
+    case = models.ForeignKey(
+        Case,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="comments",
+        db_index=False,
+    )
+    alert = models.ForeignKey(
+        "alerts.Alert",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="comments",
+        db_index=False,
+    )
+    message = models.TextField()
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="comments"
+    )
+    updated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="edited_comments"
+    )
+
+    class Meta:
+        db_table = "comment"
+        indexes = [
+            models.Index(fields=["case", "-created_at", "-id"], name="comment_case_created_idx"),
+            models.Index(fields=["alert", "-created_at", "-id"], name="comment_alert_created_idx"),
+        ]
+        constraints = [
+            # Exactly one parent. TheHive's comment is case- or alert-scoped; a row with both would
+            # be reachable from either and render twice in a case flow.
+            models.CheckConstraint(
+                condition=(
+                    Q(case__isnull=False, alert__isnull=True)
+                    | Q(case__isnull=True, alert__isnull=False)
+                ),
+                name="comment_one_parent",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        parent = f"case={self.case_id}" if self.case_id else f"alert={self.alert_id}"
+        return f"Comment({parent})"
+
+
+class Page(UUIDModel, TimeStampedModel):
+    """A TheHive case page: Markdown content attached to a case (plan §6-P2, spike §5).
+
+    TheHive 5 exposes `POST /case/{caseId}/page`, `GET|PATCH|DELETE /case/{caseId}/page/{pageId}`.
+    The stored shape follows the recorded `OutputPage`: `title`, `content` (Markdown), `order`
+    and `category`. It is deliberately not a `TimelineEvent` projection — a page is mutable state,
+    not an append-only ledger entry.
+    """
+
+    # db_index=False: `case` is the left prefix of `page_case_order_idx`.
+    case = models.ForeignKey(Case, on_delete=models.CASCADE, related_name="pages", db_index=False)
+    title = models.CharField(max_length=500)
+    content = models.TextField(blank=True)
+    order = models.IntegerField(default=0)
+    category = models.CharField(max_length=100, blank=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="pages"
+    )
+    updated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="edited_pages"
+    )
+
+    class Meta:
+        db_table = "page"
+        indexes = [
+            models.Index(fields=["case", "order", "created_at"], name="page_case_order_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Page({self.case_id}): {self.title}"
+
+
+class Share(UUIDModel, TimeStampedModel):
+    """A case shared with another organisation (plan §6-P2).
+
+    TheHive shares are **case-only** (`/api/v1/case/{caseId}/shares`); alerts have no share route,
+    so the plan's speculative "alert" half is dropped (recorded in `deviations.md`). Access is
+    **default-deny** and this model can only ever *add* access for one organisation — it never
+    widens the owner organisation's scope.
+
+    `permissions` is a JSON bag holding `{"read": true, "write": <bool>}`. A missing/absent
+    `write` key means read-only, so a share created without an explicit write grant can read but
+    never mutate; that is the failure mode AC6.1-P2-b exists to prove.
+    """
+
+    # db_index=False: `case` is the left prefix of uniq_share_case_org.
+    case = models.ForeignKey(Case, on_delete=models.CASCADE, related_name="shares", db_index=False)
+    organisation = models.ForeignKey(
+        Organisation, on_delete=models.CASCADE, related_name="case_shares"
+    )
+    permissions = models.JSONField(default=dict)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_shares"
+    )
+
+    class Meta:
+        db_table = "share"
+        constraints = [
+            models.UniqueConstraint(fields=["case", "organisation"], name="uniq_share_case_org"),
+        ]
+
+    @property
+    def can_write(self) -> bool:
+        return bool(self.permissions.get("write"))
+
+    def __str__(self) -> str:
+        return f"Share({self.case_id} -> {self.organisation_id})"
+
+
+class Attachment(UUIDModel, TimeStampedModel):
+    """A file attached to a case (T2 P3; TheHive `OutputAttachment`).
+
+    The blob on disk is named **opaquely** (`<prefix>/<uuid4hex><ext>`) and never after the
+    client's filename: `name` is untrusted display data, and a path built from it is the traversal
+    sink AC6.1-P3-a exists to catch. `sha256` is recorded at write time so a download can be proven
+    to return the same bytes (AC6.1-P3-b) and a future dedupe can key on content, not name.
+    """
+
+    # db_index=False: `case` is the left prefix of attach_case_created_idx.
+    case = models.ForeignKey(
+        Case, on_delete=models.CASCADE, related_name="attachments", db_index=False
+    )
+    # The *original* filename, for display and Content-Disposition only — never used as a path.
+    name = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=128)
+    size = models.PositiveBigIntegerField()
+    sha256 = models.CharField(max_length=64)
+    # The storage-relative path returned by `default_storage.save`; opaque, generated server-side.
+    path = models.CharField(max_length=255)
+    external = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="uploaded_attachments"
+    )
+    updated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="edited_attachments"
+    )
+
+    class Meta:
+        db_table = "attachment"
+        indexes = [
+            models.Index(fields=["case", "-created_at", "-id"], name="attach_case_created_idx"),
+            models.Index(fields=["sha256"], name="attach_sha256_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Attachment({self.case_id}): {self.name}"

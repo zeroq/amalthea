@@ -19,7 +19,7 @@ from django.urls import reverse
 
 from alerts.models import Alert
 from automation.models import AutomationRun, Playbook
-from cases.models import Case
+from cases.models import Case, Page
 from identity.models import Organisation, User
 from ingest.models import IngestionSource
 
@@ -346,6 +346,42 @@ def test_an_empty_note_is_refused_rather_than_stored(browser: Client) -> None:
     case = _case("No blank notes")
     browser.post(reverse("ui-case-comment", kwargs={"case_id": str(case.number)}), {"body": "   "})
     assert case.timeline_events.filter(kind="comment").count() == 0
+    assert case.comments.count() == 0
+
+
+def test_a_note_is_also_a_first_class_comment(browser: Client) -> None:
+    """T2 P2: the UI note box and the API's `GET /case/{id}/comment` are the same object.
+
+    Without this the two views of "a note" drift: the timeline would show a note the comment API
+    never returns, which is exactly the inconsistency the P2 follow-up exists to close.
+    """
+    case = _case("Notes as comments")
+
+    browser.post(
+        reverse("ui-case-comment", kwargs={"case_id": str(case.number)}),
+        {"body": "Checked the mail flow."},
+    )
+
+    comment = case.comments.get()
+    assert comment.message == "Checked the mail flow."
+    assert comment.created_by.login == "analyst"
+    # And the ledger entry is still written, so the timeline and the WebSocket keep working.
+    assert case.timeline_events.filter(kind="comment").count() == 1
+
+
+def test_case_pages_are_rendered_on_the_case_page(browser: Client) -> None:
+    """Pages are API-created, but they must be visible on the case page and live-appendable."""
+    case = _case("With a page")
+    page = Page.objects.create(case=case, title="Network map", content="10.0.0.0/8 is in scope")
+
+    html = browser.get(
+        reverse("ui-case-detail", kwargs={"case_id": str(case.number)})
+    ).content.decode()
+
+    assert 'id="case-pages"' in html
+    assert f'data-page-id="{page.id}"' in html
+    assert "Network map" in html
+    assert "10.0.0.0/8 is in scope" in html
 
 
 def test_a_task_can_be_added_and_completed_from_the_page(browser: Client) -> None:

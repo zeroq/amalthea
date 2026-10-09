@@ -158,6 +158,11 @@ with read/write perms), `flow` (read-only case-flow view).
 
 ### P3 — Attachments
 
+> **Status: SHIPPED 2026-10-09.** Deviations `P3-1`…`P3-4` in `docs/spec/deviations.md`; record in
+> `COMPLETED.md`. Three rows worth knowing: the stored blob key is server-generated (never the
+> client filename), the content type is allowlist + magic-byte checked (no libmagic), and the size
+> cap is enforced before storage.
+
 **Scope:** `Attachment` model + `POST /case/{caseId}/attachments` (multipart) + download + delete.
 
 **Tasks**

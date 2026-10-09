@@ -25,6 +25,11 @@ urlpatterns = [
     # T2 tag link, above the bare detail route so `<str:alert_id>` cannot swallow `tag`.
     path("alert/<str:alert_id>/tag", views.alert_tag_link, name="alert-tag-link"),
     path("alert/<str:alert_id>/tag/", views.alert_tag_link, name="alert-tag-link-slash"),
+    # T2 P2 — alert comments (`GET|POST`), above the bare detail route.
+    path("alert/<str:alert_id>/comment", views.alert_comment_list, name="alert-comment-list"),
+    path(
+        "alert/<str:alert_id>/comment/", views.alert_comment_list, name="alert-comment-list-slash"
+    ),
     path("alert/<str:alert_id>", views.alert_detail, name="alert-detail"),
     # T2 alert-status vocabulary. `alertStatus` is disjoint from `alert/<id>` (single segment vs
     # two), so ordering here is convention rather than load-bearing; all land before `compat.urls`.

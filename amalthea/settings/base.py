@@ -93,6 +93,15 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# --- Attachments (T2 P3) --------------------------------------------------
+# Hard ceiling for one uploaded attachment, checked *before* the bytes are written to permanent
+# storage. 25 MiB holds a PCAP slice or a mailbox export while keeping a single compromised
+# credential from filling the volume in one request.
+ATTACHMENT_MAX_BYTES = int(os.getenv("AMALTHEA_MAX_ATTACHMENT_BYTES", str(25 * 1024 * 1024)))
+# Prefix under MEDIA_ROOT that attachment blobs live in: the stored name is opaque and the prefix
+# only groups them so an operator can find (and quota) the attachment volume.
+ATTACHMENT_STORAGE_PREFIX = os.getenv("AMALTHEA_ATTACHMENT_PREFIX", "attachments")
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "identity.User"
 

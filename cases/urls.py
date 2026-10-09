@@ -51,6 +51,67 @@ urlpatterns = [
         views.case_custom_event_create,
         name="case-custom-event-create-slash",
     ),
+    # T2 P2 — collaboration. All are sub-resources of an individual case, so they must be
+    # registered ahead of the bare `case/<case_id>` route on line 54 to avoid being swallowed.
+    path("case/<str:case_id>/comment", views.case_comment_list, name="case-comment-list"),
+    path("case/<str:case_id>/comment/", views.case_comment_list, name="case-comment-list-slash"),
+    path("case/<str:case_id>/page", views.case_page_list, name="case-page-list"),
+    path("case/<str:case_id>/page/", views.case_page_list, name="case-page-list-slash"),
+    path(
+        "case/<str:case_id>/page/<str:page_id>",
+        views.case_page_detail,
+        name="case-page-detail",
+    ),
+    path(
+        "case/<str:case_id>/page/<str:page_id>/",
+        views.case_page_detail,
+        name="case-page-detail-slash",
+    ),
+    path("case/<str:case_id>/flow", views.case_flow, name="case-flow"),
+    path("case/<str:case_id>/flow/", views.case_flow, name="case-flow-slash"),
+    path("case/<str:case_id>/shares", views.case_share_list, name="case-share-list"),
+    path("case/<str:case_id>/shares/", views.case_share_list, name="case-share-list-slash"),
+    path(
+        "case/<str:case_id>/share/<str:share_id>",
+        views.share_detail,
+        name="case-share-detail",
+    ),
+    path(
+        "case/<str:case_id>/share/<str:share_id>/",
+        views.share_detail,
+        name="case-share-detail-slash",
+    ),
+    # T2 P3 — attachments. `attachments` (collection) and `attachment/<id>[ /download]` are
+    # case sub-resources, so they stay above the bare `case/<case_id>` route for the same reason as
+    # the P2 block. `<str:attachment_id>` matches one segment, so the `/download` route cannot be
+    # swallowed by the detail route even though it is listed first.
+    path(
+        "case/<str:case_id>/attachments",
+        views.case_attachment_list,
+        name="case-attachment-list",
+    ),
+    path(
+        "case/<str:case_id>/attachments/",
+        views.case_attachment_list,
+        name="case-attachment-list-slash",
+    ),
+    path(
+        "case/<str:case_id>/attachment/<str:attachment_id>/download",
+        views.case_attachment_download,
+        name="case-attachment-download",
+    ),
+    path(
+        "case/<str:case_id>/attachment/<str:attachment_id>",
+        views.case_attachment_detail,
+        name="case-attachment-detail",
+    ),
+    path(
+        "case/<str:case_id>/attachment/<str:attachment_id>/",
+        views.case_attachment_detail,
+        name="case-attachment-detail-slash",
+    ),
+    path("comment/<str:comment_id>", views.comment_detail, name="comment-detail"),
+    path("comment/<str:comment_id>/", views.comment_detail, name="comment-detail-slash"),
     path("case/<str:case_id>", views.case_detail, name="case-detail"),
     path("case/<str:case_id>/", views.case_detail, name="case-detail-slash"),
     # T2 tag link, above `observable/<id>` so `<str:observable_id>` cannot swallow `tag`.

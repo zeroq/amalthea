@@ -132,6 +132,34 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 ### CaseTagLink (`case_record_tags`)
 - `case` (`db_index=False`), `tag`; `unique_together (("case","tag"))`.
 
+### Comment (`comment`, extends `UUIDModel` + `TimeStampedModel`) — T2 P2
+- `case` — FK → `Case`, `CASCADE`, nullable, `db_index=False` · `alert` — FK → `Alert`, `CASCADE`,
+  nullable, `db_index=False` · `message` (Text) · `created_by`/`updated_by` — FK → `User`,
+  `SET_NULL` (audit, not ownership).
+- **Exactly one parent**: CHECK `comment_one_parent` makes "no parent" and "two parents"
+  unrepresentable. Indexes `comment_case_created_idx ("case","-created_at","-id")` and
+  `comment_alert_created_idx ("alert","-created_at","-id")`.
+
+### Page (`page`, extends `UUIDModel` + `TimeStampedModel`) — T2 P2
+- `case` — FK → `Case`, `CASCADE`, `db_index=False` · `title`(500) · `content` (Text, Markdown) ·
+  `order` (default 0) · `category`(100) · `created_by`/`updated_by` — FK → `User`, `SET_NULL`.
+- Index `page_case_order_idx ("case","order","created_at")`.
+
+### Share (`share`, extends `UUIDModel` + `TimeStampedModel`) — T2 P2
+- `case` — FK → `Case`, `CASCADE`, `db_index=False` · `organisation` — FK → `Organisation`,
+  `CASCADE` · `permissions` — JSONB `{"read": true, "write": bool}` · `created_by` — FK → `User`,
+  `SET_NULL`.
+- Constraint `uniq_share_case_org (case, organisation)`. Shares are **case-only** and only ever
+  *add* access for one organisation; `Share.can_write` is the guard's read (`P2-5`, P2-3).
+
+### Attachment (`attachment`, extends `UUIDModel` + `TimeStampedModel`) — T2 P3
+- `case` — FK → `Case`, `CASCADE`, `db_index=False` · `name`(255, the original filename, display
+  only) · `content_type`(128) · `size` (BigInteger) · `sha256`(64) · `path`(255, opaque storage key)
+  · `external` (default False) · `created_by`/`updated_by` — FK → `User`, `SET_NULL`.
+- Indexes `attach_case_created_idx ("case","-created_at","-id")` and `attach_sha256_idx ("sha256")`.
+- `path` is generated server-side (`<ATTACHMENT_STORAGE_PREFIX>/<uuid4hex><ext>`); the client's
+  filename is **never** a path component. `hashes=[sha256]` is emitted on the wire.
+
 ## observables
 
 ### ObservableType (`observable_type`)

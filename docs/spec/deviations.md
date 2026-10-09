@@ -64,6 +64,34 @@ The identity/vocabulary/tag/`describe` surface. Verified against `thehive4py` 2.
 | **P1-4** | `describe/{model}` | `describe/{model}` **+ `describe/_all`** | `_all` (the whole catalogue keyed by model name) is an Amalthea convenience; `{model}` follows the recorded per-entity shape. `compat/views.py::describe_*` · `test_t2_p1_surface.py` |
 | **P1-5** | global org directory | **tenant-scoped** | A foreign org id/name is the *same 404* as "does not exist" (no tenant-enumeration oracle); PATCH only writes the caller's own org. `identity/views.py::_own_org` · `test_t2_p1_surface.py` |
 
+## Wave 6.1 — T2 Phase P2 (2026-10-09)
+
+The collaboration surface: `comment`, `page`, `shares`, `flow`. Routes and bodies are pinned to
+`thehive4py` 2.1.0 (`endpoints/comment.py`, `endpoints/case.py`); the rows below are the divergences.
+
+| ID | Plan / TheHive | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **P2-1** | `comment` as a `TimelineEvent` projection | **own `Comment` model** (plan §6-Q1) | A comment's `_id` must be stable across an edit, while a ledger entry is append-only. A create *also* appends a `comment` ledger event so the live case view renders it — one comment, two rows, both written in one transaction. `cases/models.py::Comment`, `cases/views.py::case_comment_list` · `test_t2_p2_surface.py` |
+| **P2-2** | plan scope listed `comment` for **task** too | **case + alert only** | TheHive 5 exposes no task-comment route (`thehive4py` has none); inventing one would be a new surface, not parity. The plan's "(case/alert/task)" was speculative. `cases/views.py`, `alerts/views.py` · `test_t2_p2_surface.py` |
+| **P2-3** | `OutputShare` with `profileName`/`taskRule`/`observableRule`/`owner` | single **`permissions` bag** + `canWrite` | This deployment has no per-task/observable rule engine; the profile-shaped keys degrade to the value the stored row implies and the real grant is exposed as `permissions` + `canWrite` (TheHive has neither key). `core/serializers.py::share_json`, `cases/models.py::Share.can_write` · `test_t2_p2_surface.py` |
+| **P2-4** | `flow` as a TheHive shape | **extension** | TheHive 5.8 has no REST `flow` route and `thehive4py` 2.1.0 has no `flow` module; shaped after the entities it links (case/alerts/observables/tasks) and explicitly never inlines `raw_payload`. `cases/views.py::case_flow` · `test_t2_p2_surface.py` |
+| **P2-5** | plan said `shares` for **case/alert** × org | **case only** | TheHive's share routes are case-only (`/api/v1/case/{id}/shares`); the plan's alert half was speculative and is dropped. `cases/models.py::Share` · `test_t2_p2_surface.py` |
+| **P2-6** | — | page create emits a **`page` WebSocket event** | TheHive has no realtime contract, but Module B requires the collaborative surface to stay synced, so a page create publishes on commit via the `realtime.publisher` choke point. `cases/views.py::case_page_list` · `test_t2_p2_surface.py` (AC-a) |
+| **P2-7** | plan P2 was endpoints only; UI unchanged | **UI wired to the new entities** (follow-up) | The note form now creates a real `Comment` in the same transaction as its ledger event, so `GET /case/{id}/comment` and the timeline agree; and `case_detail.html` renders a Pages card that live-appends `page` events instead of letting them fall into the timeline renderer. `ui/views.py::case_comment`/`case_detail`, `ui/templates/ui/_page_entry.html`, `ui/static/ui/live.js` · `test_ui_loop.py` |
+
+## Wave 6.1 — T2 Phase P3 (2026-10-09)
+
+Attachments. The upload contract is TheHive 5.8 (`POST /case/{id}/attachments` multipart under the
+`attachments` field, `…/attachment/{id}/download`, `DELETE …/attachment/{id}`); the rows below are
+the divergences, all on the safety side.
+
+| ID | Plan / TheHive | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **P3-1** | TheHive stores under the client filename | **opaque server-generated key** | The blob name is `attachments/<uuid4hex><sanitized-ext>` — the client's filename is display data only, so a traversal filename has nothing to climb and two uploads of the same name never collide. `cases/views.py::_attachment_storage_path`/`_safe_attachment_name` · `test_t2_p3_attachments.py` (AC-a) |
+| **P3-2** | TheHive accepts any content type | **allowlist + magic-byte sniff** | A declared type outside the allowlist is 415, and bytes whose signature contradicts the declared type (PNG as `text/plain`) is 415; text-ish types must decode as UTF-8. No `libmagic` dependency. `cases/views.py::_sniff_attachment` · `test_t2_p3_attachments.py` (AC-a) |
+| **P3-3** | `OutputAttachment.hashes` is a list | single **SHA-256** in the list | One hash is computed at write time; the wire keeps TheHive's list shape (`hashes=[sha256]`). `core/serializers.py::attachment_json` · `test_t2_p3_attachments.py` (AC-b) |
+| **P3-4** | — | **413 before write** | The size cap (`ATTACHMENT_MAX_BYTES`, env `AMALTHEA_MAX_ATTACHMENT_BYTES`) is checked before the blob reaches storage; a rejected request leaves no blob and no row. `amalthea/settings/base.py`, `cases/views.py::case_attachment_list` · `test_t2_p3_attachments.py` (AC-a) |
+
 ## Security hardening findings
 
 Source: security-auditor Wave C, carried as **P10-10** (F1/F6/F3/F5/F7 fixed in the burst). **F9 is
