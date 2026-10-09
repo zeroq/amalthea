@@ -429,6 +429,8 @@ Full task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md`
   organisation yet**; `owner_org` is not populated and there is no tenant predicate in any query.
   Requires a decision on how isolation is enforced (middleware org-scope vs per-view filters) and on
   superuser/analyst roles before implementation.
+  **Decision 2026-10-09: remains deferred.** Phase 12 (Q4) records a further deferral plus the
+  enforcement options in `docs/spec/deviations.md`; this item stays open until a later wave.
 
 - [ ] **6.5 — Observable PATCH/DELETE cross-case blast radius** Phase 10 SEC-AUDIT F3, plan §13 deferred (b)
   An observable is globally deduped across cases; free PATCH/DELETE would let one case mutate or
@@ -447,8 +449,31 @@ Full task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md`
   `case_json(detail=True)` embeds the **full** timeline in one payload; a very large ledger (10k+
   events) makes the case page heavy. Follow the `events_after` keyset pattern: paginate the embedded
   timeline (e.g. `?includeTimeline=true&timelinePage=1`) or move it to a separate endpoint.
+  **Scheduled in** `PLAN-2026-10-09-usability-orchestration.md` Phase P6.
 
----
+- [ ] **6.8 — Orchestration authoring surface** review 2026-10-09 (off-plan gap) · **Blocks Module D**
+  `Playbook` has **no** create/read/update path anywhere: no API view, no route, no UI, no seed
+  fixture, and `automation/admin.py` is empty while only `identity` registers admin models. Module D —
+  the platform's stated differentiator — can only run through hand-written database rows. Add
+  `playbook` CRUD + `_meta` (trigger vocabulary + registered actions), a validating serializer, a
+  manual-run endpoint, a seed playbook, and an authoring UI page. Also **closes deviation P12-1**:
+  the `task.completed` trigger is registered but never emitted, so Phase 12 adds the `Task` receiver
+  that makes it real. Plan: `PLAN-2026-10-09-usability-orchestration.md` Phase P2 (T2.0).
+
+- [ ] **6.9 — Analyst UI catch-up to the T2 surface** review 2026-10-09
+  Every T2 P1–P5 endpoint is API-only. There is no global observables page (Module C's headline —
+  "this artifact appeared in N cases" — is served by the `observable_detail` fan-out but has no
+  view), and no UI for tags, comments/pages/shares, attachments, case templates, procedures/TTP, or
+  bulk edits. Plan: `PLAN-2026-10-09-usability-orchestration.md` Phases P3–P4.
+
+- [ ] **6.10 — Frontend stack actually in place (HTMX + Tailwind + Font Awesome)** review 2026-10-09
+  AGENTS.md §1/§6 spec HTMX + Tailwind; the repo ships neither. `case_detail.html` carries `hx-*`
+  attributes with no htmx on the page (so the live-note path degrades to full-page POSTs) and
+  `ui/static/ui/app.css` is hand-written. Plan: `PLAN-2026-10-09-usability-orchestration.md` Phase P1.
+
+- [ ] **6.11 — Login rate-limiting / brute-force hardening** §6.6 leftover, review 2026-10-09
+  The webhook receiver is throttled per-source and per-IP, but session/API login is not. Add login
+  throttling and assert `SESSION_COOKIE_HTTPONLY`. Plan: `PLAN-2026-10-09-usability-orchestration.md` Phase P5.
 
 ## 7. Process improvements identified
 

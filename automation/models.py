@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from django.db import models
 
-from core.enums import AUTOMATION_RUN_STATUS_CHOICES, in_values
+from core.enums import (
+    AUTOMATION_RUN_STATUS_CHOICES,
+    AUTOMATION_RUN_TRIGGERED_BY_CHOICES,
+    in_values,
+)
 from core.models import TimeStampedModel, UUIDModel
 
 
@@ -52,6 +56,11 @@ class AutomationRun(UUIDModel, TimeStampedModel):
     playbook = models.ForeignKey(Playbook, on_delete=models.PROTECT, related_name="runs")
     playbook_name = models.CharField(max_length=200)
     trigger_event = models.CharField(max_length=100, blank=True)
+    #: Who started this run: a domain event (`trigger`, the default) or an analyst (`manual`).
+    #: Without it the ledger cannot tell a human-run playbook from a triggered one (plan §5.1).
+    triggered_by = models.CharField(
+        max_length=20, default="trigger", choices=list(AUTOMATION_RUN_TRIGGERED_BY_CHOICES)
+    )
     status = models.CharField(
         max_length=20, default="Pending", choices=list(AUTOMATION_RUN_STATUS_CHOICES)
     )
@@ -88,6 +97,11 @@ class AutomationRun(UUIDModel, TimeStampedModel):
                 "automation_run_status_valid",
                 "status",
                 tuple(s for s, _ in AUTOMATION_RUN_STATUS_CHOICES),
+            ),
+            in_values(
+                "automation_run_triggered_by_valid",
+                "triggered_by",
+                tuple(v for v, _ in AUTOMATION_RUN_TRIGGERED_BY_CHOICES),
             ),
         ]
 

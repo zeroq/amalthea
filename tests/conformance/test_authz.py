@@ -36,6 +36,7 @@ from dataclasses import dataclass
 import pytest
 from rest_framework.test import APIClient
 
+from automation.models import Playbook
 from cases.models import TTP, CaseTemplate, Procedure
 from identity.models import Organisation, User
 from ingest.models import IngestionSource
@@ -74,6 +75,10 @@ READ: list[Endpoint] = [
     Endpoint("procedure-detail", "GET", "/api/v1/procedure/{procedure}", False),
     Endpoint("ttp-list", "GET", "/api/v1/ttp", False),
     Endpoint("ttp-detail", "GET", "/api/v1/ttp/{ttp}", False),
+    # T2 P2 — playbook authoring surface.
+    Endpoint("playbook-list", "GET", "/api/v1/playbook", False),
+    Endpoint("playbook-meta", "GET", "/api/v1/playbook/_meta", False),
+    Endpoint("playbook-detail", "GET", "/api/v1/playbook/{playbook}", False),
 ]
 
 MUTATING: list[Endpoint] = [
@@ -125,6 +130,11 @@ MUTATING: list[Endpoint] = [
     Endpoint("ttp-create", "POST", "/api/v1/ttp", True),
     Endpoint("ttp-patch", "PATCH", "/api/v1/ttp/{ttp}", True),
     Endpoint("ttp-delete", "DELETE", "/api/v1/ttp/{ttp}", True),
+    # T2 P2 — playbook authoring surface.
+    Endpoint("playbook-create", "POST", "/api/v1/playbook", True),
+    Endpoint("playbook-patch", "PATCH", "/api/v1/playbook/{playbook}", True),
+    Endpoint("playbook-delete", "DELETE", "/api/v1/playbook/{playbook}", True),
+    Endpoint("playbook-run", "POST", "/api/v1/playbook/{playbook}/run", True),
 ]
 
 MATRIX = READ + MUTATING
@@ -137,6 +147,7 @@ def ids(db: None) -> dict[str, str]:
     procedure = Procedure.objects.create(
         case=case, pattern_id="T1059", pattern_name="Command Shell"
     )
+    playbook = Playbook.objects.filter(name="enrich-observable").first()
     return {
         "case": str(case.id),
         "alert": str(_alert("Authz alert", ref="authz-ref").id),
@@ -146,6 +157,7 @@ def ids(db: None) -> dict[str, str]:
         "template": str(CaseTemplate.objects.create(name="authz-template").id),
         "procedure": str(procedure.id),
         "ttp": str(TTP.objects.create(name="authz-ttp", ttp_code="T1059").id),
+        "playbook": str(playbook.id) if playbook else "",
     }
 
 

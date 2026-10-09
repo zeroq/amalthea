@@ -19,14 +19,16 @@ from __future__ import annotations
 import hashlib
 from functools import partial
 from typing import Any
+from uuid import uuid4
 
 from django.db import transaction
 from django.utils import timezone
 
 from automation.models import AutomationRun, Playbook
 from cases.ledger import append_timeline_event
-from cases.models import TimelineEvent
+from cases.models import Case, TimelineEvent
 from core.events import AlertIngested, CaseStatusChanged, ObservableCreated, TaskCompleted
+from observables.models import Observable
 
 #: Event name → the `Playbook.trigger_event` a playbook binds to.
 TRIGGER_EVENTS: tuple[str, ...] = (
@@ -139,6 +141,56 @@ def dispatch(event: object) -> list[AutomationRun]:
             transaction.on_commit(partial(execute_run.delay, str(run.id)))
 
     return created
+
+
+def run_now(
+    playbook: Playbook,
+    *,
+    case: Case | None = None,
+    observable: Observable | None = None,
+) -> AutomationRun:
+    """Queue one **manual** execution of `playbook` (plan §6.1, T2.4).
+
+    Two differences from :func:`dispatch`, and both are the point:
+
+    * **the key does not deduplicate.** `dispatch` derives its key from the event and its subject
+      so a replay collapses; a manual run binds to a fresh `uuid4`, so an analyst who presses
+      *Run* twice gets two runs. Collapsing two deliberate actions would be a silent dropped
+      request, not idempotency.
+    * **`triggered_by="manual"`.** The ledger question "did a person run this, or did a trigger"
+      is answered by a column, not by inference from `trigger_event`.
+
+    The `AutomationRun` row and the enqueue are written in one transaction and the worker is
+    queued on commit, exactly as event dispatch is: a request that rolls back must not leave a
+    worker reading a run row that was never stored (AC6.6).
+
+    `case` and `observable` are both optional but **at least one is required** — the feedback
+    loop writes back to a case (`record_result` refuses a case-less run), so a run with neither
+    has nowhere to report and is refused up front rather than failing in the worker.
+    """
+    if case is None and observable is None:
+        raise ValueError("run_now needs a case or an observable to run against")
+    if case is None and observable is not None:
+        link = observable.case_observables.select_related("case").first()
+        if link is None:
+            raise ValueError("the observable is not linked to a case, so there is nowhere to write")
+        case = link.case
+
+    run = AutomationRun.objects.create(
+        case=case,
+        playbook=playbook,
+        playbook_name=playbook.name,
+        trigger_event=playbook.trigger_event or "manual",
+        triggered_by="manual",
+        status="Pending",
+        triggered_by_observable=observable,
+        idempotency_key=f"manual:{uuid4()}",
+    )
+
+    from automation.tasks import execute_run
+
+    transaction.on_commit(partial(execute_run.delay, str(run.id)))
+    return run
 
 
 def record_result(run: AutomationRun, result: Any, *, subject_label: str = "") -> TimelineEvent:

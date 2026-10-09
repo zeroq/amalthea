@@ -14,12 +14,46 @@ expected to hold:
 | `observable.created` | `ObservableCreated(observable_id, case_id)` | `registry.observable_saved` (post_save, `created` only, once per already-linked case) and `registry.dispatch_observable_linked` (explicit call from the link writer, since the `CaseObservable` row post-dates `save()`) |
 | `alert.ingested` | `AlertIngested(alert_id, source_id)` | `registry.alert_saved` (post_save, `created` only) |
 | `case.status_changed` | `CaseStatusChanged(case_id, old_status, new_status)` | `registry.case_saved` — fires only on a real **stage** transition: `pre_save` snapshots the old `status__stage`, `post_save` fires when it differs and the row was not created |
-| `task.completed` | `TaskCompleted(task_id, case_id)` | **registered, never emitted** — no `Task` receiver and no call site exists (deviation P12-1) |
+| `task.completed` | `TaskCompleted(task_id, case_id)` | `registry.task_saved` — fires only on a real transition **into** `Completed`: `pre_save` snapshots the old status, `post_save` emits when `status` transitions *into* `"Completed"` (not on create, not on re-save of an already-completed task) |
 
 `Playbook.trigger_event` is a plain `CharField(100)` — it has **no `choices` and no CHECK
 constraint** (`automation/models.py`); the four names above are the convention, not a DB-enforced
 set. Unknown event names are inert by construction (`_event_name` maps only the four known event
 classes).
+
+## Authoring surface (T2/Phase P2)
+
+`Playbook` is a first-class model (`automation/models.py`). The authoring API is an **Amalthea
+extension** (deviation **P12-2** — TheHive 5 / `thehive4py` 2.1.0 expose no playbook route).
+
+| Path | Methods | View |
+|---|---|---|
+| `playbook`, `playbook/` | GET, POST | `playbook_collection` |
+| `playbook/_meta` | GET | `playbook_meta` |
+| `playbook/<idOrName>` | GET, PATCH, DELETE | `playbook_detail` |
+| `playbook/<idOrName>/run` | POST | `playbook_run` |
+
+**Write-time validation** (`automation.playbooks.validate_config`, mirrors `executor.execute`):
+- `action` ∈ `{"http","python"}`.
+- `http`: `url` required; `method` ∈ standard verbs; `headers` string→string; `timeoutSeconds` >0 ≤ 30s.
+- `python`: `action_path` must be a key in `automation.executor.registered_actions()`.
+- Unknown action ⇒ 400. Validation happens at write time so a bad playbook never becomes a `Failed` run.
+
+`GET /playbook/_meta` returns the live vocabulary (AC6.12-P2-c):
+```json
+{
+  "triggerEvents": ["observable.created","alert.ingested","case.status_changed","task.completed"],
+  "actions": [
+    {"action":"http","methods":[...],"required":["url"],"maxTimeoutSeconds":30},
+    {"action":"python","registeredPaths":["amalthea.automation.executor.enrichment_probe",...]}
+  ],
+  "actionNames":["http","python"]
+}
+```
+
+`POST /playbook/<idOrName>/run` body `{"case"?:idOrNumber,"observable"?:id}` with at least one required.
+Returns 202 + run JSON (`triggeredBy: "manual"`); the run uses a non-deduping key `manual:<uuid4>`,
+runs the same worker, and its result lands in `output_log` **and** the case timeline (AC6.12-P2-a).
 
 ## Dispatch (`automation/dispatcher.py::dispatch`)
 

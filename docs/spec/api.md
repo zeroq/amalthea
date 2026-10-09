@@ -219,6 +219,27 @@ inline themselves.
   exception to "`raw_payload` never inlined" (AC6.1-P5-a). The optional `?password=` query param is
   accepted for TheHive-client compatibility but the body is **not** encrypted (deviation **P5-3**).
 
+### Playbook authoring (T2/Phase P2)
+
+| Path | Methods | View |
+|---|---|---|
+| `playbook`, `playbook/` | GET, POST | `playbook_collection` |
+| `playbook/_meta` | GET | `playbook_meta` |
+| `playbook/<idOrName>` | GET, PATCH, DELETE | `playbook_detail` |
+| `playbook/<idOrName>/run` | POST | `playbook_run` |
+
+- **An Amalthea extension** — TheHive 5 / `thehive4py` 2.1.0 expose no playbook route (deviation
+  **P12-2**).
+- Create: required `name`, `triggerEvent` ∈ `TRIGGER_EVENTS`, `config` (validated by
+  `automation.playbooks.validate_config` — mirrors `executor.execute` exactly). 201 `playbook_json`.
+- `config` validation at write time (AC6.12-P2-b):
+  - `http`: `url` required; `method` ∈ standard HTTP verbs; `headers` string→string map; `timeoutSeconds` positive number ≤ 30.
+  - `python`: `action_path` must be a key in `automation.executor.registered_actions()`.
+  - Unknown `action` ⇒ 400.
+- `_meta` (AC6.12-P2-c): `{"triggerEvents":[…], "actions":[{"action":"http",…},{"action":"python","registeredPaths":[…]}], "actionNames":["http","python"]}` — rendered from the live code so the UI pickers cannot drift.
+- `playbook/<idOrName>`: lookup by UUID or `name`; PATCH ⇒ **204 no body** (deviation); DELETE ⇒ **204** or **400** if the playbook has any `AutomationRun` (FK is `PROTECT`).
+- `playbook/<idOrName>/run`: body `{"case"?: idOrNumber, "observable"?: id}` with at least one required; returns **202** + run JSON (`triggeredBy: "manual"`); enqueues a non-deduping run (key `manual:<uuid4>`); result lands in `output_log` **and** case timeline (AC6.12-P2-a).
+
 ## Identity — `user`, `organisation` (T2/Phase P1)
 
 | Path | Methods | View |

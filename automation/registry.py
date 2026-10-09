@@ -10,10 +10,10 @@ a binding is testable without a queue.
 * **`created` only, on `Observable` and `Alert`.** Re-saving an existing row is an analyst edit, and
   firing automation on every edit would re-run enrichment on every keystroke that touched a message
   field.
-* **`pre_save` + `post_save` on `Case`.** A status *transition* is the event AGENTS.md names, and
-  `post_save` alone cannot see one: by the time it runs, the database already holds the new stage, so
-  comparing against the database would compare the new value with itself. The old stage is captured
-  in `pre_save` and compared in `post_save`.
+* **`pre_save` + `post_save` on `Case` and on `Task`.** A status *transition* is the event AGENTS.md
+  names, and `post_save` alone cannot see one: by the time it runs, the database already holds the
+  new stage, so comparing against the database would compare the new value with itself. The old
+  stage is captured in `pre_save` and compared in `post_save`.
 * **Dispatch after the link exists.** `Observable.save()` fires before `extract_into_case` writes the
   `CaseObservable` row, so the observable has no case at `post_save` time. Escalation therefore
   dispatches explicitly once the link is written, and this receiver covers observables an analyst adds
@@ -30,11 +30,14 @@ from django.dispatch import receiver
 
 from alerts.models import Alert
 from automation.models import Playbook
-from cases.models import Case
+from cases.models import Case, Task
 from observables.models import Observable
 
 #: Attribute the previous stage is stashed on between `pre_save` and `post_save`.
 _PREVIOUS_STAGE_ATTR = "_previous_stage"
+
+#: The same, for a `Task`'s status.
+_PREVIOUS_TASK_STATUS_ATTR = "_previous_task_status"
 
 
 def playbooks_for(event_name: str, *, only_active: bool = True) -> list[Playbook]:
@@ -75,6 +78,45 @@ def case_saved(sender: type[Case], instance: Case, created: bool, **kwargs: Any)
     from core.events import CaseStatusChanged
 
     dispatch(CaseStatusChanged(case_id=str(instance.pk), old_status=previous, new_status=current))
+
+
+@receiver(pre_save, sender=Task)
+def _capture_previous_task_status(sender: type[Task], instance: Task, **kwargs: Any) -> None:
+    """Record the persisted status before it is overwritten."""
+    if instance._state.adding or not instance.pk:
+        setattr(instance, _PREVIOUS_TASK_STATUS_ATTR, None)
+        return
+    setattr(
+        instance,
+        _PREVIOUS_TASK_STATUS_ATTR,
+        Task.objects.filter(pk=instance.pk).values_list("status", flat=True).first(),
+    )
+
+
+@receiver(post_save, sender=Task)
+def task_saved(sender: type[Task], instance: Task, created: bool, **kwargs: Any) -> None:
+    """Fire `task.completed` on a real transition **into** `Completed` only (deviation P12-1).
+
+    Three non-events, each deliberate: a task created already-`Completed` (nothing was *completed*),
+    a re-save of a task that is still `Completed` (an edit is not a completion), and a transition to
+    any other status. Without the middle one, every save of a completed task — a title typo fixed, an
+    assignee changed — would enqueue a second run, because the idempotency key binds to the task, not
+    to the moment it was completed.
+    """
+    if created:
+        return
+    previous = getattr(instance, _PREVIOUS_TASK_STATUS_ATTR, None)
+    if previous is None or previous == instance.status or instance.status != "Completed":
+        return
+    from automation.dispatcher import dispatch
+    from core.events import TaskCompleted
+
+    dispatch(
+        TaskCompleted(
+            task_id=str(instance.pk),
+            case_id=str(instance.case_id) if instance.case_id else None,
+        )
+    )
 
 
 @receiver(post_save, sender=Observable)

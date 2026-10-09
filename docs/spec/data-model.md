@@ -217,12 +217,15 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
   snapshot (deviation M14).
 - `trigger_event` · `status` — default `"Pending"`, `AUTOMATION_RUN_STATUS_CHOICES
   ("Pending","Running","Success","Failed")`.
+- **`triggered_by` — CharField(20), default `"trigger"`, choices `AUTOMATION_RUN_TRIGGERED_BY_CHOICES`
+  (`"trigger"`/`"manual"`). Distinguishes event-driven runs from analyst-initiated ones (plan §5.1).
+  Constraint: `automation_run_triggered_by_valid`.**
 - `output_log` · `error` · `triggered_by_observable` — FK, `SET_NULL` · `celery_task_id` ·
   `started_at` · `finished_at` · `idempotency_key` — CharField(255), **unique**.
 - Indexes: `ar_case_started_idx ("case","-started_at")`, `ar_celery_task_idx ("celery_task_id")`,
   **partial `ar_pending_idx ("created_at") WHERE status='Pending'`** — the dispatch-sweep index
   (planner, not just catalog, is asserted in `tests/conformance/test_indexes.py`).
-- Constraint: `automation_run_status_valid`.
+- Constraints: `automation_run_status_valid`, `automation_run_triggered_by_valid`.
 
 ## Core value sets (`core/enums.py`)
 

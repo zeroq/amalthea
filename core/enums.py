@@ -75,6 +75,15 @@ AUTOMATION_RUN_STATUS_CHOICES: Final[tuple[tuple[str, str], ...]] = (
     ("Failed", "Failed"),
 )
 
+#: Plan §5.1 AutomationRun: who started the run — a domain event or an analyst.
+#: The plan's own spelling for the first value is ``event``; the implemented value is
+#: ``trigger`` so it cannot be confused with ``trigger_event`` (the event *name*), and the
+#: deviation is recorded in ``docs/spec/deviations.md`` (P12-3).
+AUTOMATION_RUN_TRIGGERED_BY_CHOICES: Final[tuple[tuple[str, str], ...]] = (
+    ("trigger", "Trigger"),
+    ("manual", "Manual"),
+)
+
 #: Plan §6.2: the stable 3-bucket grouping for metrics and automation triggers.
 #: Case statuses map onto these; `IngestionSource`-driven custom statuses must too.
 CASE_STAGES: Final[tuple[str, ...]] = ("New", "InProgress", "Closed")

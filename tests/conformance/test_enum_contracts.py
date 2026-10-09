@@ -56,6 +56,7 @@ CHOICE_FIELDS: dict[tuple[str, str], str] = {
     ("alert", "pap"): "alert_pap_range",
     ("alert_status", "stage"): "alert_status_stage_valid",
     ("automation_run", "status"): "automation_run_status_valid",
+    ("automation_run", "triggered_by"): "automation_run_triggered_by_valid",
     ("case_record", "severity"): "case_severity_range",
     ("case_record", "tlp"): "case_tlp_range",
     ("case_record", "pap"): "case_pap_range",
@@ -290,6 +291,11 @@ GRADED_DOMAIN: dict[str, tuple[str, str, tuple[Any, ...]]] = {
     "observable_pap_range": ("observable", "pap", (-1, 4, 99)),
     "task_status_valid": ("task", "status", ("AlmostDone", "")),
     "automation_run_status_valid": ("automation_run", "status", ("AlmostDone", "")),
+    "automation_run_triggered_by_valid": (
+        "automation_run",
+        "triggered_by",
+        ("invalid", "event", ""),
+    ),
 }
 
 

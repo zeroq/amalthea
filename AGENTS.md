@@ -73,3 +73,11 @@ The repository is **public**: anything committed to git history is world-readabl
 *   A **secret scan is enforced** on every commit (`scripts/secret-scan.sh --staged` via the pre-commit hook), every push (`--tracked`), and in CI (`--history`, full history). Install hooks with `make hooks`; do not use `--no-verify` to bypass them.
 *   If a secret ever reaches history, **rotate it immediately**, then purge history — deleting the file does not delete the blob. See [`SECURITY.md`](./SECURITY.md).
 *   Production settings **fail closed**: `amalthea/settings/prod.py` refuses to start without a strong `DJANGO_SECRET_KEY` and a non-empty `DJANGO_ALLOWED_HOSTS`.
+
+---
+
+## 6. Design & Style
+*   **Theme:** dark only. Slate/gray base with semantic severity colours (Low → Critical); WCAG-AA contrast; severity is never signalled by colour alone — always pair the colour with a text label.
+*   **Interaction:** keyboard-driven, Linear/Obsidian-inspired, TheHive-aligned. Every primary action is reachable without a mouse and shortcuts are discoverable (e.g. a `?` cheat-sheet).
+*   **Icons:** use **Font Awesome Free** icons where they aid comprehension (entity types, statuses, actions). Decorative icons are hidden from assistive tech (`aria-hidden="true"`); an icon-only control carries an accessible name; on primary actions an icon supplements a visible label, never replaces it.
+*   **Layout & markup:** server-rendered Django templates + HTMX for partial interactivity, Tailwind CSS for styling, Channels WebSockets for live updates (see §1). Prefer semantic HTML and progressive enhancement — the UI degrades to plain forms/POSTs when HTMX is unavailable.

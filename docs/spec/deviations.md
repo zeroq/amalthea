@@ -48,7 +48,8 @@ a brief's letter alias is given where one exists (`P10-2 / y`, `P10-7 / z`, the 
 | ID | Plan said | Implemented | Why · Code pointer · Evidence |
 |---|---|---|---|
 | **P10-4** | alert-observable link dispatches automation | **No dispatch at link time** — alert observables are import candidates; fire on import/merge via the case path | `alerts/views.py::alert_observable_add`; `automation/registry.dispatch_observable_linked` requires a case · `test_mvp_loop_automation.py` |
-| **P12-1** | `TRIGGER_EVENTS` are the events that drive playbooks | `task.completed` is **listed but nothing emits it** — no `Task` receiver, no call site | `automation/dispatcher.py:36,47`; `core/events.py:31`; `ui/views.py:367` does a bare task save. A playbook bound to it is inert. Fix (receiver **or** remove trigger) is an approved-surface change — see VERIFY-docs-spec |
+| **P12-1** | `TRIGGER_EVENTS` are the events that drive playbooks | `task.completed` **was** registered but never emitted (no `Task` receiver) — **FIXED 2026-10-09** by adding `registry.task_saved` receiver that emits `TaskCompleted(task_id, case_id)` only on transition **into** `Completed` (mirrors `case_saved` pattern). A playbook bound to `task.completed` now fires. `automation/registry.py:83-119`; `tests/conformance/test_playbook_authoring.py` (AC6.12-P2-d) |
+| **P12-2** | TheHive 5 has no playbook route | **playbook authoring API + UI** (`GET|POST /playbook`, `GET /playbook/_meta`, `GET|PATCH|DELETE /playbook/{idOrName}`, `POST /playbook/{idOrName}/run`) are an Amalthea extension. Write-time config validation mirrors `executor.execute`; `_meta` serves `TRIGGER_EVENTS` + `registered_actions()`; manual run enqueues with `triggered_by="manual"`. `automation/{views,urls,playbooks}.py`, `core/serializers.py::playbook_json` · `test_playbook_authoring.py` (AC6.12-P2-a–c) |
 
 ## Wave 6.1 — T2 Phase P1 (2026-10-09)
 
@@ -122,7 +123,7 @@ now fixed** (2026-10-08 hardening wave); **F2 remains deferred**.
 
 | ID | Finding | Status / follow-up |
 |---|---|---|
-| **F2** | case/alert resolution is org-blind (`owner_org` never populated, so scoping is a no-op); **`Observable` PATCH/DELETE is global** (any authenticated user can mutate any observable) | **Deferred** — follow-up "tenant isolation" wave; until `owner_org` is set the filter changes nothing, and the observable mutation path is the real gap (code: `cases/views.py::observable_detail`) |
+| **F2** | case/alert resolution is org-blind (`owner_org` never populated, so scoping is a no-op); **`Observable` PATCH/DELETE is global** (any authenticated user can mutate any observable) | **Deferred** — **decision 2026-10-09 (Q4): tenant isolation remains deferred**. A further deferral is recorded with the enforcement options (middleware org-scope vs per-view filters; superuser/analyst roles) in this register so the next wave starts from a decision, not a blank page. Until `owner_org` is set the filter changes nothing; the observable mutation path (AC6.12-P6-b) is the nearer gap. Plan: Phase 12 §12 Q4. |
 | **F9** | prod did not fail closed on `SECRET_KEY` and did not force secure cookies | **Fixed 2026-10-08** — `amalthea/settings/prod.py` now raises `ImproperlyConfigured` unless `DJANGO_SECRET_KEY` is ≥50 chars and `DJANGO_ALLOWED_HOSTS` is non-empty, and forces `SESSION_COOKIE_SECURE`/`CSRF_COOKIE_SECURE`/`SECURE_SSL_REDIRECT`/HSTS/`SECURE_CONTENT_TYPE_NOSNIFF`/`X_FRAME_OPTIONS=DENY`; proven by `tests/conformance/test_prod_settings.py` (9 tests). Plan: [`PLAN-2026-10-08-secret-hygiene.md`](../planning/PLAN-2026-10-08-secret-hygiene.md) |
 
 ## Evidence index
