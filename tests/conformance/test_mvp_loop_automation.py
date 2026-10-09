@@ -90,17 +90,21 @@ def mail_playbook(db: None) -> Playbook:
 
     `trigger_event="observable.created"` with no type filter is the coarse binding the MVP needs;
     type-scoped bindings are a configuration feature, not a code one.
+
+    Uses get_or_create to avoid conflicts with the seed migration that creates "enrich-mail".
     """
-    return Playbook.objects.create(
+    return Playbook.objects.get_or_create(
         name="enrich-mail",
-        description="Look up a newly extracted artifact",
-        trigger_event="observable.created",
-        is_active=True,
-        config={
-            "action": "python",
-            "action_path": "amalthea.automation.executor.enrichment_probe",
+        defaults={
+            "description": "Look up a newly extracted artifact",
+            "trigger_event": "observable.created",
+            "is_active": True,
+            "config": {
+                "action": "python",
+                "action_path": "amalthea.automation.executor.enrichment_probe",
+            },
         },
-    )
+    )[0]
 
 
 def _escalate(anonymous_api: object, api: object, source: IngestionSource) -> Case:
@@ -291,7 +295,7 @@ def test_a_failing_action_records_failure_without_raising(
     # The originating call is unaffected: the failure is a ledger row, not a raised exception.
     assert api.get(f"/api/v1/case/{case.number}").status_code == 200
 
-    event = TimelineEvent.objects.filter(case=case, kind="automation-run").get()
+    event = TimelineEvent.objects.filter(case=case, kind="automation-run", metadata__playbook="broken").get()
     assert event.metadata["status"] == "Failed"
 
 

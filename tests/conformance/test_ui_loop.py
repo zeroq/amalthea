@@ -67,12 +67,14 @@ def source(db: None) -> IngestionSource:
 
 @pytest.fixture
 def mail_playbook(db: None) -> Playbook:
-    return Playbook.objects.create(
+    return Playbook.objects.get_or_create(
         name="enrich-mail",
-        trigger_event="observable.created",
-        is_active=True,
-        config={"action": "python", "action_path": "amalthea.automation.executor.enrichment_probe"},
-    )
+        defaults={
+            "trigger_event": "observable.created",
+            "is_active": True,
+            "config": {"action": "python", "action_path": "amalthea.automation.executor.enrichment_probe"},
+        },
+    )[0]
 
 
 def _case(title: str, **kwargs) -> Case:

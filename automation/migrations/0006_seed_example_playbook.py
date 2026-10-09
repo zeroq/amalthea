@@ -4,10 +4,13 @@ from django.db import migrations
 
 
 def create_example_playbook(apps, schema_editor):
-    """Create an example playbook for observable enrichment (plan §8, T2.5)."""
+    """Create an example playbook for observable enrichment (plan §8, T2.5).
+
+    Named "enrich-mail" to match the `mail_playbook` fixture and MVP loop tests.
+    """
     Playbook = apps.get_model("automation", "Playbook")
     Playbook.objects.get_or_create(
-        name="Enrich Observable",
+        name="enrich-mail",
         defaults={
             "description": "Example enrichment playbook that runs the local probe action on new observables.",
             "trigger_event": "observable.created",
@@ -23,7 +26,7 @@ def create_example_playbook(apps, schema_editor):
 def remove_example_playbook(apps, schema_editor):
     """Remove the example playbook."""
     Playbook = apps.get_model("automation", "Playbook")
-    Playbook.objects.filter(name="Enrich Observable").delete()
+    Playbook.objects.filter(name="enrich-mail").delete()
 
 
 class Migration(migrations.Migration):
