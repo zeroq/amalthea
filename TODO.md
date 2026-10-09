@@ -1,7 +1,7 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-09 (wave 6.1 **P1–P5 shipped** — T2 endpoints complete + TODO 2.3 wire-boundary guard)
+Last updated: 2026-10-09 (wave 6.1 **P1–P5 shipped** — T2 endpoints complete + TODO 2.3 wire-boundary guard + **§6.8 playbook authoring UI shipped** + **§6.10 frontend stack shipped** + **§6.11 keyboard shortcut p + cheatsheet**)
 
 **Conventions** — every item carries a `Source` (plan AC, review finding ID, or decision ID) so it can
 be traced, and `Blocks` when it gates other work. Review IDs (`C1`, `H2`, `M5`…) refer to
@@ -9,6 +9,20 @@ be traced, and `Blocks` when it gates other work. Review IDs (`C1`, `H2`, `M5`�
 `REVIEW-2026-10-05-phase3-schema-gate-round3.md` (round 3).
 
 **Status legend** — `[ ]` open · `[~]` in progress · `[!]` blocked
+
+---
+
+## 🎯 NEXT HIGHEST-IMPACT ITEMS (Priority Order)
+
+| Priority | Item | Description | Impact |
+|----------|------|-------------|--------|
+| **1** | **6.9 — Analyst UI catch-up to T2 surface** | Every T2 P1–P5 endpoint is API-only; no UI for tags, comments/pages/shares, attachments, case templates, procedures/TTP, bulk edits, or global observables graph (Module C headline). | **Critical** — API complete but analyst can't use 80% of it. |
+| **2** | **6.11 — Login rate-limiting** | Webhooks throttled; session/API login wide open. | **Critical** for any internet-facing deployment. |
+| **3** | **6.5 — Observable PATCH/DELETE blast radius** | Globally-deduped observables; free PATCH/DELETE corrupts other cases. Need policy (force flag + warning). | **High** — data integrity. |
+| **4** | **6.7 — Paged case-detail timeline** | 10k+ event cases OOM full payload. Keyset pagination needed. | **High** — performance at scale. |
+| **5** | **6.2 — Postgres-only indexes** | GIN on `raw_payload`/`Observable.tags`, `INCLUDE` covering indexes. | **Medium** — perf at scale; defer until data volume. |
+| **6** | **6.3 — Per-link tags on observable link tables** | Agreed; `is_ioc` rejected. | **Low** — nice-to-have. |
+| **7** | **6.4 — Tenant isolation** | Deferred per 2026-10-09 decision. Requires design decision. | **Deferred** — blocked on decision. |
 
 ---
 
@@ -451,14 +465,8 @@ Full task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md`
   timeline (e.g. `?includeTimeline=true&timelinePage=1`) or move it to a separate endpoint.
   **Scheduled in** `PLAN-2026-10-09-usability-orchestration.md` Phase P6.
 
-- [ ] **6.8 — Orchestration authoring surface** review 2026-10-09 (off-plan gap) · **Blocks Module D**
-  `Playbook` has **no** create/read/update path anywhere: no API view, no route, no UI, no seed
-  fixture, and `automation/admin.py` is empty while only `identity` registers admin models. Module D —
-  the platform's stated differentiator — can only run through hand-written database rows. Add
-  `playbook` CRUD + `_meta` (trigger vocabulary + registered actions), a validating serializer, a
-  manual-run endpoint, a seed playbook, and an authoring UI page. Also **closes deviation P12-1**:
-  the `task.completed` trigger is registered but never emitted, so Phase 12 adds the `Task` receiver
-  that makes it real. Plan: `PLAN-2026-10-09-usability-orchestration.md` Phase P2 (T2.0).
+- [x] **6.8 — Orchestration authoring surface** review 2026-10-09 (off-plan gap) · **Blocks Module D** — **SHIPPED 2026-10-09**
+  `Playbook` now has full CRUD API + UI: list, create, edit, delete, run, `_meta` endpoint. API in `automation/{views,urls,playbooks}.py`, UI in `ui/templates/ui/playbook_*.html`, `ui/views.py`. Also **closes deviation P12-1**: `Task` receiver emits `TaskCompleted` on transition into `Completed`. Plan: `PLAN-2026-10-09-usability-orchestration.md` Phase P2 (T2.0).
 
 - [ ] **6.9 — Analyst UI catch-up to the T2 surface** review 2026-10-09
   Every T2 P1–P5 endpoint is API-only. There is no global observables page (Module C's headline —
@@ -466,12 +474,10 @@ Full task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md`
   view), and no UI for tags, comments/pages/shares, attachments, case templates, procedures/TTP, or
   bulk edits. Plan: `PLAN-2026-10-09-usability-orchestration.md` Phases P3–P4.
 
-- [ ] **6.10 — Frontend stack actually in place (HTMX + Tailwind + Font Awesome)** review 2026-10-09
-  AGENTS.md §1/§6 spec HTMX + Tailwind; the repo ships neither. `case_detail.html` carries `hx-*`
-  attributes with no htmx on the page (so the live-note path degrades to full-page POSTs) and
-  `ui/static/ui/app.css` is hand-written. Plan: `PLAN-2026-10-09-usability-orchestration.md` Phase P1.
+- [x] **6.10 — Frontend stack actually in place (HTMX + Tailwind + Font Awesome)** review 2026-10-09 — **SHIPPED 2026-10-09**
+  HTMX 2.0.4 self-hosted, Tailwind v4 compile pipeline (`make css`), Font Awesome Free subset vendored, CSP strict `self`, `ADR-003` recorded. `case_detail.html` `hx-*` now active. Plan: `PLAN-2026-10-09-usability-orchestration.md` Phase P1.
 
-- [ ] **6.11 — Login rate-limiting / brute-force hardening** §6.6 leftover, review 2026-10-09
+- [ ] **6.11 — Login rate-limiting / brute-force hardening** §6.6 leftover, review 2026-10-09 — **PARTIAL: keyboard shortcut `p` + cheatsheet `?` done (2026-10-09); rate-limiting still open**
   The webhook receiver is throttled per-source and per-IP, but session/API login is not. Add login
   throttling and assert `SESSION_COOKIE_HTTPONLY`. Plan: `PLAN-2026-10-09-usability-orchestration.md` Phase P5.
 
