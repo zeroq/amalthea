@@ -26,7 +26,14 @@
     <dd>{{ tag.observable_set.count }}</dd>
   </dl>
 
-  {% include "ui/_modal.html" with modal_id="delete-tag-{{ tag.id }}" title="Delete tag?" body="This will remove the tag from all linked cases, alerts, and observables. This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action="{% url 'ui-tag-delete' tag.id %}" size="sm" %}
+  <div class="card-actions">
+    <button type="button" class="btn btn-err" data-modal-open="delete-tag-{{ tag.id }}">Delete tag</button>
+  </div>
+
+  {% url 'ui-tag-delete' tag.id as delete_url %}
+  {% with modal_id="delete-tag-"|add:tag.id %}
+  {% include "ui/_modal.html" with modal_id=modal_id title="Delete tag?" body="This will remove the tag from all linked cases, alerts, and observables. This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
+  {% endwith %}
 
   <div class="card">
     <h3>Linked Cases</h3>

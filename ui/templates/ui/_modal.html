@@ -120,6 +120,16 @@ Parameters:
   window['open_{{ modal_id }}'] = openModal;
   window['close_{{ modal_id }}'] = closeModal;
 })();
+
+// Global listener to open modals via data-modal-open attribute
+document.addEventListener('click', function(e) {
+  const trigger = e.target.closest('[data-modal-open]');
+  if (trigger) {
+    const modalId = trigger.getAttribute('data-modal-open');
+    const modal = document.getElementById(modalId);
+    if (modal) modal.showModal();
+  }
+});
 </script>
 
 <style>

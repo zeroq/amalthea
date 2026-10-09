@@ -45,6 +45,10 @@
         <dd>{{ template.flag|default:"—" }}</dd>
       </dl>
 
+      <div class="card-actions">
+        <button type="button" class="btn btn-err" data-modal-open="delete-template-{{ template.id }}">Delete template</button>
+      </div>
+
       {% url 'ui-case-template-delete' template.id as delete_url %}
       {% with modal_id="delete-template-"|add:template.id %}
       {% include "ui/_modal.html" with modal_id=modal_id title="Delete template?" body="This cannot be undone. The template will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
