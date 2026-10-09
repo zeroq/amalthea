@@ -20,6 +20,8 @@
     s: "/sources",
   };
 
+  
+
   // Cheat sheet data (key -> label)
   var CHEATSHEET = [
     { key: "g", label: "Go to Dashboard" },
@@ -78,7 +80,6 @@
 
     var route = ROUTES[event.key];
     if (route) {
-      console.log("[keys.js] Navigating via shortcut:", event.key, "->", route);
       event.preventDefault();
       window.location.assign(route);
       return;
@@ -86,7 +87,6 @@
 
     // `?` (Shift+/) opens the cheat sheet.
     if (event.key === "?" || (event.key === "/" && event.shiftKey)) {
-      console.log("[keys.js] Opening cheatsheet via:", event.key);
       event.preventDefault();
       renderCheatsheet();
       return;
