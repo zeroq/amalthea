@@ -114,6 +114,13 @@ class Observable(UUIDModel, TimeStampedModel):
         ]
         indexes = [
             models.Index(fields=["-created_at"], name="obs_created_at_idx"),
+            # GIN index on enrichment_data for efficient JSON querying (Postgres only)
+            models.Index(
+                fields=["enrichment_data"],
+                name="obs_enrichment_data_gin",
+                condition=None,
+                opclasses=["gin_jsonb_ops"],
+            ),
         ]
 
     def __str__(self) -> str:

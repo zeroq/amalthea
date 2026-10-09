@@ -124,6 +124,20 @@ class Alert(UUIDModel, TimeStampedModel):
             models.Index(fields=["status", "-date"], name="alert_status_date_idx"),
             models.Index(fields=["correlation_key", "date"], name="alert_corrkey_date_idx"),
             models.Index(fields=["-created_at"], name="alert_created_at_idx"),
+            # GIN index on raw_payload for efficient JSON querying (Postgres only)
+            models.Index(
+                fields=["raw_payload"],
+                name="alert_raw_payload_gin",
+                condition=None,
+                opclasses=["gin_jsonb_ops"],
+            ),
+            # GIN index on ingestion_warnings for efficient JSON querying (Postgres only)
+            models.Index(
+                fields=["ingestion_warnings"],
+                name="alert_ingestion_warnings_gin",
+                condition=None,
+                opclasses=["gin_jsonb_ops"],
+            ),
         ]
         constraints = [
             models.UniqueConstraint(

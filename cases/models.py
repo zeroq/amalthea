@@ -125,6 +125,13 @@ class Case(UUIDModel, TimeStampedModel):
             models.Index(fields=["status", "-start_date"], name="case_status_start_idx"),
             models.Index(fields=["-severity"], name="case_severity_idx"),
             models.Index(fields=["-created_at"], name="case_created_at_idx"),
+            # GIN index on ingestion_warnings for efficient JSON querying (Postgres only)
+            models.Index(
+                fields=["ingestion_warnings"],
+                name="case_ingestion_warnings_gin",
+                condition=None,
+                opclasses=["gin_jsonb_ops"],
+            ),
         ]
         constraints = [
             in_range("case_severity_range", "severity", SEVERITY_MIN, SEVERITY_MAX),
