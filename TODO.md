@@ -1,7 +1,7 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-07 (post Phase 10 commit `e3a94d8`)
+Last updated: 2026-10-09 (post REVIEW M7 cleanup + `docs/perf/` untrack)
 
 **Conventions** — every item carries a `Source` (plan AC, review finding ID, or decision ID) so it can
 be traced, and `Blocks` when it gates other work. Review IDs (`C1`, `H2`, `M5`…) refer to
@@ -99,9 +99,11 @@ discipline, no code change is safe on SQLite).
   auto-numbered Case cannot collide. Also wired through `allocate_case_numbers` for `bulk_create`
   (`test_h6_bulk_create_with_explicit_numbers_syncs_too`).
   **Verified by mutation** — removing the `pre_save` sync fails that test.
-  **Honest limitation:** still **unverified on Postgres** (§3.1). SQLite allocates `MAX(number)+1`,
-  which reads the row just written and self-heals, so the collision cannot be reproduced here; the
-  test skips with that reason rather than passing vacuously. AC3.7 must run it on Postgres.
+  **Postgres caveat — CLOSED (§3.1, round-3 §6(b)).** On SQLite the collision cannot be reproduced
+  (`MAX(number)+1` reads the row just written and self-heals), so the test skips rather than passing
+  vacuously. On Postgres the sequence is real: `sync_case_number_sequence`'s read-modify-write is now
+  serialized by `pg_advisory_xact_lock`, and `test_h6_concurrent_imports_cannot_walk_the_sequence_backwards`
+  passes 10/10 (fails against the pre-fix SQL). The H-6 collision test is green on PostgreSQL 16.
 
 - [x] **1.17 — `data_hash` backfill uses a different hash function than the runtime** `round2 H-7` — **FIXED**
   `observables/migrations/0003_observable_data_hash.py` backfills with the same `canonical_value()`
@@ -195,7 +197,7 @@ discipline, no code change is safe on SQLite).
   declared in the models and asserted against live DDL in `test_indexes.py`. Module C's
   observable→cases fan-out no longer depends on an implicit FK index surviving a refactor.
 
-- [~] **2.5 — Remaining Medium/Low cleanups** `M4`–`M14`, `L4`–`L6` — **most done; two remain**
+- [x] **2.5 — Remaining Medium/Low cleanups** `M4`–`M14`, `L4`–`L6` — **DONE (2026-10-09)**
   **DONE:** `M4` custom-field uniqueness (`uniq_case_custom_field`) · `M6` `db_table="case"` reserved
   word → `case_record` · `M8` `Organisation`/`ApiKey` `db_table` set (`identity_organisation`,
   `identity_apikey`) · `M9` timeline keyset (`timeline_case_date_idx (case, date, id)`) ·
@@ -204,11 +206,15 @@ discipline, no code change is safe on SQLite).
   (seeded status includes `Imported`, test present) · `M14` `AutomationRun.playbook` FK exists ·
   `L4` `Case.closed_date` set on transition (`stamp_closed_date`) · `L5` `start_date`/`date` have
   `default=timezone.now` (Postgres `DESC` no longer surfaces NULLs first).
-  **REMAIN:** `M7` link-table `created_at` still shadows the abstract base field
-  (`CaseObservable`/`AlertObservable` declare their own; harmless but redundant — either drop the
-  base field from those models or remove the redeclaration) · `L6` alert unique-constraint headroom
-  (`source(100)+type(100)+source_ref(255)` ≈ 1820 bytes worst case vs 2704-cap; acceptable, revisit
-  only if a source needs longer refs).
+  **`M7` — FIXED (2026-10-09):** `CaseObservable`/`AlertObservable` no longer inherit
+  `TimeStampedModel`; they declare `created_at` directly, so the append-only link rows carry **no**
+  `updated_at` (a column nothing ever wrote) and the base field is no longer shadowed. Migrations
+  `cases/0008_remove_caseobservable_updated_at` + `alerts/0009_remove_alertobservable_updated_at`
+  drop the dead columns (`makemigrations --check` clean); `test_m7_observable_link_tables_are_append_only`
+  pins the invariant. Safe on Postgres — `UPDATE`-less link rows, no reader of the column.
+  **`L6` — ACCEPTED, no change:** the alert unique constraint (`source(100)+type(100)+source_ref(255)`
+  ≈ 1820 bytes worst case vs the 2704-byte btree cap) has adequate headroom; revisit only if a source
+  needs longer refs.
 
 ---
 
@@ -416,10 +422,13 @@ Full task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md`
   delete an artifact other cases depend on. Decide policy (allow with warning vs. require
   `force=true` vs. per-link shadow copy) before opening those verbs wider.
 
-- [ ] **6.6 — Production cookie/secret hardening** Phase 10 SEC-AUDIT F9, plan §13 deferred (c)
-  Dev settings pin `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, `SECRET_KEY` handling for local use
-  only. Prod-grade: env-driven secrets, `SecurityMiddleware` headers (HSTS, X-Content-Type-Options,
-  Referrer-Policy), `SESSION_COOKIE_HTTPONLY` audit, rate-limited auth/login.
+- [x] **6.6 — Production cookie/secret hardening** Phase 10 SEC-AUDIT F9, plan §13 deferred (c) — **CLOSED 2026-10-08 via §4.6**
+  `amalthea/settings/prod.py` now fails closed (env-driven `DJANGO_SECRET_KEY` ≥50 chars, non-empty
+  `DJANGO_ALLOWED_HOSTS`) and forces the `SecurityMiddleware` hardening (`SESSION_COOKIE_SECURE`,
+  `CSRF_COOKIE_SECURE`, `SECURE_SSL_REDIRECT`, HSTS, `SECURE_CONTENT_TYPE_NOSNIFF`,
+  `SECURE_REFERRER_POLICY`, `X_FRAME_OPTIONS=DENY`). Covered by
+  `tests/conformance/test_prod_settings.py`. Still **not** done: rate-limited auth/login and the
+  `SESSION_COOKIE_HTTPONLY` audit (Django's default is `True`; not separately asserted).
 
 - [ ] **6.7 — Paged case-detail timeline** Phase 10 PERF F2, plan §13 deferred (d)
   `case_json(detail=True)` embeds the **full** timeline in one payload; a very large ledger (10k+

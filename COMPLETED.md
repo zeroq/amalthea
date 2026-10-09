@@ -2,7 +2,7 @@
 
 Finished work, with the evidence that it actually happened. Open items live in
 [`TODO.md`](./TODO.md).
-Last updated: 2026-10-06
+Last updated: 2026-10-09
 
 Items are only listed here once independently verified. Where code exists but an acceptance criterion
 is still unproven, the item says so explicitly and the verification gap is cross-linked in `TODO.md`.
@@ -533,3 +533,24 @@ from a promise into an enforced property. Code + config wave.
   3 skipped**.
 - [x] **Recorded.** TODO §4.5 closed (remote) + §4.6 added/closed; master plan §13 Phase 13 record;
   `docs/spec/deviations.md` F9 → fixed; `docs/spec/identity-auth.md` updated; plan status approved.
+
+## 2026-10-09 — Repo hygiene: untrack `docs/perf/` + close REVIEW M7
+
+- [x] **`docs/perf/` untracked** (commit `b89cd60`). The five `EXPLAIN` transcripts embedded
+  absolute dev paths (`/Users/…`), so they are not appropriate for a public repo. Removed from the
+  index, `docs/perf/` added to `.gitignore`; the local copies remain on disk, untracked. This
+  supersedes the *"durability"* note in the Phase 10 entry above (`docs/perf/` is no longer a
+  committed artifact — the perf claims stand on the migration/conformance tests, not the transcripts).
+- [x] **`M7` closed** — `CaseObservable`/`AlertObservable` used to inherit `TimeStampedModel` (which
+  supplies both `created_at` and `updated_at`) **and** redeclare `created_at`, shadowing the base and
+  leaving `updated_at` as a column nothing ever writes. Both are append-only link rows, so they now
+  inherit only `UUIDModel` and declare `created_at` directly; migrations
+  `cases/0008_remove_caseobservable_updated_at` and `alerts/0009_remove_alertobservable_updated_at`
+  drop the dead columns. Pinned by `test_m7_observable_link_tables_are_append_only` (asserts
+  `created_at` present, `updated_at` absent on both tables — a failure mode demonstrated by the prior
+  schema, which carried `updated_at`).
+- [x] **`L6` accepted, no change** — the alert unique constraint
+  (`source(100)+type(100)+source_ref(255)` ≈ 1820 bytes worst case vs the 2704-byte btree cap) has
+  adequate headroom. TODO §2.5 closed.
+- [x] Gate: SQLite `make check` **765 passed / 3 skipped** (was 763/3; +2 for the parametrised M7
+  test); ruff + mypy clean; `makemigrations --check` clean.
