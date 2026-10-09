@@ -48,16 +48,12 @@
 
         <dt>Updated</dt>
         <dd>{{ playbook.updated_at|date:"Y-m-d H:i" }}</dd>
-      </dl>
+</dl>
 
-      <form method="post" action="{% url 'ui-playbook-delete' playbook.id %}" class="inline-form" onsubmit="return confirm('Delete this playbook? This cannot be undone.');">
-        {% csrf_token %}
-        <button class="btn" type="submit" style="background:var(--color-err); border-color:var(--color-err); color:white;">Delete</button>
-      </form>
-    </div>
+      {% include "ui/_modal.html" with modal_id="delete-playbook-{{ playbook.id }}" title="Delete playbook?" body="This cannot be undone. The playbook and all its runs will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action="{% url 'ui-playbook-delete' playbook.id %}" size="sm" %}
 
-    <div class="card">
-      <h3>Action configuration</h3>
+      <div class="card">
+        <h3>Action configuration</h3>
       <pre class="body">{{ playbook.config|json_script:"playbook-config" }}</pre>
       <script type="application/json" id="playbook-config">{{ playbook.config }}</script>
     </div>

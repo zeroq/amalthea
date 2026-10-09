@@ -26,14 +26,10 @@
     <dd>{{ tag.observable_set.count }}</dd>
   </dl>
 
-  <form method="post" action="{% url 'ui-tag-delete' tag.id %}" class="inline-form" onsubmit="return confirm('Delete tag {{ tag.name }}?');">
-    {% csrf_token %}
-    <button class="btn" type="submit" style="background:var(--color-err); border-color:var(--color-err); color:white;">Delete</button>
-  </form>
-</div>
+  {% include "ui/_modal.html" with modal_id="delete-tag-{{ tag.id }}" title="Delete tag?" body="This will remove the tag from all linked cases, alerts, and observables. This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action="{% url 'ui-tag-delete' tag.id %}" size="sm" %}
 
-<div class="card">
-  <h3>Linked Cases</h3>
+  <div class="card">
+    <h3>Linked Cases</h3>
   {% if tag.case_set.all %}
   <ul class="chips">
     {% for case in tag.case_set.all %}

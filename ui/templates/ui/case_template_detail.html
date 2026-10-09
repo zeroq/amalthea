@@ -45,10 +45,8 @@
         <dd>{{ template.flag|default:"—" }}</dd>
       </dl>
 
-      <form method="post" action="{% url 'ui-case-template-delete' template.id %}" class="inline-form" onsubmit="return confirm('Delete this template?');">
-        {% csrf_token %}
-        <button class="btn" type="submit" style="background:var(--color-err); border-color:var(--color-err); color:white;">Delete</button>
-      </form>
+      {% include "ui/_modal.html" with modal_id="delete-template-{{ template.id }}" title="Delete template?" body="This cannot be undone. The template will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action="{% url 'ui-case-template-delete' template.id %}" size="sm" %}
+
     </div>
 
     <div class="card">

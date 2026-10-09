@@ -1,0 +1,187 @@
+{% comment %}
+Reusable modal dialog component.
+
+Usage:
+  {% include "ui/_modal.html" with modal_id="delete-confirm" title="Delete playbook?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action="/automation/playbooks/{{ pb.id }}/delete" %}
+
+Parameters:
+  modal_id (required): Unique ID for the dialog element
+  title (required): Modal title
+  body: Body text/content
+  confirm_text: Text for confirm button (default: "Confirm")
+  confirm_class: CSS class for confirm button (default: "btn-primary")
+  cancel_text: Text for cancel button (default: "Cancel")
+  form_action: Form action URL (if using form submission)
+  form_method: Form method (default: "post")
+  extra_fields: Additional hidden form fields (dict)
+  size: "sm" | "md" | "lg" | "xl" (default: "md")
+  close_on_escape: Allow Esc to close (default: true)
+  show_close_button: Show X button (default: true)
+{% endcomment %}
+
+{% load static %}
+
+<dialog id="{{ modal_id }}" class="modal modal--{{ size|default:'md' }}" role="dialog" aria-modal="true" aria-labelledby="{{ modal_id }}-title">
+  <div class="modal-backdrop" tabindex="-1"></div>
+  <div class="modal-content">
+    <header class="modal-header">
+      <h2 id="{{ modal_id }}-title" class="modal-title">{{ title }}</h2>
+      {% if show_close_button|default:True %}
+      <button type="button" class="modal-close" aria-label="Close" data-modal-close="{{ modal_id }}">&times;</button>
+      {% endif %}
+    </header>
+    <div class="modal-body">
+      {% if body %}
+      <p class="modal-body-text">{{ body }}</p>
+      {% endif %}
+      {% block modal_body %}{% endblock %}
+    </div>
+    <footer class="modal-footer">
+      <button type="button" class="btn modal-cancel" data-modal-close="{{ modal_id }}">{{ cancel_text|default:"Cancel" }}</button>
+      {% if form_action %}
+      <form method="{{ form_method|default:'post' }}" action="{{ form_action }}">
+        {% csrf_token %}
+        {% if extra_fields %}
+          {% for key, value in extra_fields.items %}
+          <input type="hidden" name="{{ key }}" value="{{ value }}">
+          {% endfor %}
+        {% endif %}
+        <button type="submit" class="btn {{ confirm_class|default:'btn-primary' }}">{{ confirm_text|default:"Confirm" }}</button>
+      </form>
+      {% else %}
+      <button type="button" class="btn {{ confirm_class|default:'btn-primary' }}" data-modal-confirm="{{ modal_id }}">{{ confirm_text|default:"Confirm" }}</button>
+      {% endif %}
+    </footer>
+  </div>
+</dialog>
+
+<script>
+(function() {
+  const modal = document.getElementById('{{ modal_id }}');
+  if (!modal) return;
+
+  const closeBtn = modal.querySelector('[data-modal-close="{{ modal_id }}"]');
+  const confirmBtn = modal.querySelector('[data-modal-confirm="{{ modal_id }}"]');
+  const backdrop = modal.querySelector('.modal-backdrop');
+
+  function closeModal() {
+    modal.close();
+  }
+
+  function openModal() {
+    modal.showModal();
+  }
+
+  // Close on backdrop click
+  if (backdrop) {
+    backdrop.addEventListener('click', closeModal);
+  }
+
+  // Close on close button
+  if (closeBtn) {
+    closeBtn.addEventListener('click', closeModal);
+  }
+
+  // Confirm button - if it's a form submit, let it submit naturally
+  // If it's a button with data-modal-confirm, close and optionally dispatch event
+  if (confirmBtn && !confirmBtn.form) {
+    confirmBtn.addEventListener('click', function() {
+      modal.dispatchEvent(new CustomEvent('modal:confirm', { detail: { modalId: '{{ modal_id }}' } }));
+      closeModal();
+    });
+  }
+
+  // ESC key to close
+  {% if close_on_escape|default:True %}
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && modal.open) {
+      closeModal();
+    }
+  });
+  {% endif %}
+
+  // Trap focus within modal
+  modal.addEventListener('keydown', function(e) {
+    if (e.key === 'Tab') {
+      const focusable = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  });
+
+  // Expose open/close globally if needed
+  window['open_{{ modal_id }}'] = openModal;
+  window['close_{{ modal_id }}'] = closeModal;
+})();
+</script>
+
+<style>
+.modal {
+  border: none;
+  border-radius: var(--radius);
+  background: var(--color-bg-raised);
+  color: var(--color-text);
+  padding: 0;
+  max-width: 100%;
+  box-shadow: 0 20px 25px -5px var(--tw-shadow-color, #0000001a), 0 8px 10px -6px var(--tw-shadow-color, #0000001a);
+}
+.modal::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+}
+.modal--sm { max-width: 320px; }
+.modal--md { max-width: 400px; }
+.modal--lg { max-width: 560px; }
+.modal--xl { max-width: 720px; }
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+.modal-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-line);
+}
+.modal-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--color-text-dim);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.modal-close:hover { color: var(--color-text); }
+.modal-body {
+  padding: 16px 20px;
+}
+.modal-body-text { margin: 0; color: var(--color-text-dim); }
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--color-line);
+}
+.modal-footer .btn { margin-top: 0; }
+</style>
