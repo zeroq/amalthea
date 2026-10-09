@@ -712,3 +712,28 @@ as deviation **P4-1**.
   `test_authz.py` + `test_enum_contracts.py` extended.
 - [x] **Deviations recorded** — `P4-1`…`P4-3`; routes added to `docs/spec/api.md`.
 - [x] Gate: SQLite `make check` **877 passed / 3 skipped**; ruff + mypy clean; migration in sync.
+
+## 2026-10-09 — Wave 6.1 Phase P5: procedures, TTP, case export (T2)
+
+Fifth and final phase of the T2 wave (`PLAN-2026-10-09-t2-endpoints.md` §6-P5). **Schema change:**
+migration `cases/migrations/0012_ttp_procedure.py`.
+
+- [x] **`Procedure` model** — exactly one of `case`/`alert` (CHECK), optional `ttp` link (`SET_NULL`),
+  `occur_date`/`pattern_id`/`pattern_name`/`tactic`/`description`; composite indexes per parent.
+- [x] **Attach** — `POST /case/{id}/procedure` and `POST /case/{id}/procedures` (201), plus the alert
+  equivalents; `InputProcedure` parsed by `compat/procedures.py` (accepts TheHive's ms `occurDate`).
+- [x] **Edit/delete** — `GET|PATCH|DELETE /procedure/{id}` (PATCH → 204, deviation **P5-4**) and
+  `POST /procedure/delete/_bulk`.
+- [x] **TTP vocabulary** — `GET|POST /ttp`, `GET|PATCH|DELETE /ttp/{idOrName}`; DELETE refuses a
+  technique referenced by any procedure (AC6.1-P5-b); extension (**P5-2**).
+- [x] **Export** — `GET /case/{id}/export` returns a `CaseExport` JSON document whose
+  `alerts[].rawPayload` is carried **verbatim** (the one deliberate `raw_payload` inline,
+  AC6.1-P5-a); `?password=` accepted but ignored (**P5-3**); org-scoped via `_case_access`.
+- [x] **Tests** — `tests/conformance/test_t2_p5_surface.py` (7 tests); `test_authz.py` + `test_fk_audit.py`
+  (Procedure FKs, inventory 48 → 51) updated.
+- [x] **Deviations recorded** — `P5-1`…`P5-4`; `CaseTemplate`/`TTP`/`Procedure` added to
+  `docs/spec/data-model.md`; routes added to `docs/spec/api.md`.
+- [x] Gate: SQLite `make check` **941 passed / 3 skipped**; ruff + mypy clean; migration in sync.
+
+
+

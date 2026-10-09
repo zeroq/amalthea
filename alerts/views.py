@@ -30,9 +30,11 @@ from alerts.escalation import (
     resolve_alert_status,
 )
 from alerts.models import Alert, AlertObservable, AlertStatus, AlertTagLink
-from cases.models import Case, Comment, Tag
+from cases.models import TTP, Case, Comment, Tag
+from cases.procedures import create_procedure
 from cases.tagging import tag_names_from_payload
 from compat.bulk import bulk_patch
+from compat.procedures import parse_procedure
 from core.enums import ALERT_STAGES
 from core.serializers import (
     alert_json,
@@ -40,6 +42,7 @@ from core.serializers import (
     case_json,
     comment_json,
     observable_json,
+    procedure_json,
     tag_json,
 )
 from observables.extractor import resolve_observable
@@ -400,6 +403,69 @@ def alert_bulk_update(request: Request) -> Response:
     return bulk_patch(
         request, ids_key="ids", resolve=_resolve_alert_for_bulk, apply=_set_alert_fields
     )
+
+
+# --- T2 P5: procedures on an alert ------------------------------------------
+
+
+def _resolve_alert_ttp(value: str) -> TTP | None:
+    try:
+        UUID(value)
+    except (ValueError, TypeError):
+        return TTP.objects.filter(name=value).first()
+    return TTP.objects.filter(pk=value).first() or TTP.objects.filter(name=value).first()
+
+
+def _parse_alert_procedure(payload: Any) -> Response | dict[str, Any]:
+    kwargs, error = parse_procedure(payload, resolve_ttp=_resolve_alert_ttp)
+    if error is not None:
+        field, message = error
+        return _bad(message, {field: [message]})
+    assert kwargs is not None
+    return kwargs
+
+
+def _resolve_alert_or_404(alert_id: str) -> Alert | Response:
+    try:
+        return link_alert_from_identifier(alert_id)
+    except (Alert.DoesNotExist, Alert.MultipleObjectsReturned):
+        return _not_found_alert("Alert")
+
+
+@api_view(["POST"])
+@renderer_classes([JSONRenderer])
+def alert_procedure_create(request: Request, alert_id: str) -> Response:
+    """`POST /api/v1/alert/{id}/procedure` — attach one procedure to an alert (201)."""
+    alert = _resolve_alert_or_404(alert_id)
+    if isinstance(alert, Response):
+        return alert
+    kwargs = _parse_alert_procedure(request.data)
+    if isinstance(kwargs, Response):
+        return kwargs
+    return Response(
+        procedure_json(create_procedure(alert=alert, **kwargs)), status=status.HTTP_201_CREATED
+    )
+
+
+@api_view(["POST"])
+@renderer_classes([JSONRenderer])
+def alert_procedures_create(request: Request, alert_id: str) -> Response:
+    """`POST /api/v1/alert/{id}/procedures` — bulk attach `{"procedures": [...]}` (201)."""
+    alert = _resolve_alert_or_404(alert_id)
+    if isinstance(alert, Response):
+        return alert
+    payload = request.data if isinstance(request.data, dict) else {}
+    specs = payload.get("procedures")
+    if not isinstance(specs, list) or not specs:
+        return _bad("procedures is required", {"procedures": ["required"]})
+    created = []
+    with transaction.atomic():
+        for spec in specs:
+            kwargs = _parse_alert_procedure(spec)
+            if isinstance(kwargs, Response):
+                return kwargs
+            created.append(procedure_json(create_procedure(alert=alert, **kwargs)))
+    return Response(created, status=status.HTTP_201_CREATED)
 
 
 # --- T2: alert statuses and tag links ---------------------------------------

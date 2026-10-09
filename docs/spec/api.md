@@ -194,6 +194,31 @@ inline themselves.
   (`caseStatus`, `alertStatus`, `observableType`, `caseTemplate`, `tag`, TTP) for the UI. Both are
   Amalthea extensions (no thehive4py module) — deviations **P4-1**…**P4-3**.
 
+### Procedures, TTP and export (T2/Phase P5)
+
+| Path | Methods | View |
+|---|---|---|
+| `case/<id>/procedure` | POST | `case_procedure_create` |
+| `case/<id>/procedures` | POST | `case_procedures_create` |
+| `alert/<id>/procedure` | POST | `alert_procedure_create` |
+| `alert/<id>/procedures` | POST | `alert_procedures_create` |
+| `procedure/<id>` | GET, PATCH, DELETE | `procedure_detail` |
+| `procedure/delete/_bulk` | POST | `procedure_bulk_delete` |
+| `ttp`, `ttp/` | GET, POST | `ttp_collection` |
+| `ttp/<idOrName>` | GET, PATCH, DELETE | `ttp_detail` |
+| `case/<id>/export` | GET | `case_export` |
+
+- `InputProcedure` is TheHive's shape: `{"occurDate": ms-int, "patternId", "patternName", "tactic",
+  "description"}`; the bulk form wraps a list in `{"procedures":[…]}` and returns a list (201).
+  Amalthea adds `ttpId` (id or name) linking the procedure to the TTP vocabulary.
+- `procedure_detail` PATCH accepts those fields (204); `POST /procedure/delete/_bulk` deletes
+  `{"ids":[…]}` (204). `ttp` is an Amalthea extension — TheHive exposes no TTP vocabulary route
+  (deviation **P5-2**); DELETE refuses a technique referenced by any procedure (AC6.1-P5-b).
+- `case/<id>/export` returns a self-contained JSON document (`_type: "CaseExport"`, `version: 1`)
+  whose `alerts[].rawPayload` carries the source telemetry **verbatim** — the one deliberate
+  exception to "`raw_payload` never inlined" (AC6.1-P5-a). The optional `?password=` query param is
+  accepted for TheHive-client compatibility but the body is **not** encrypted (deviation **P5-3**).
+
 ## Identity — `user`, `organisation` (T2/Phase P1)
 
 | Path | Methods | View |

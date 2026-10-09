@@ -32,6 +32,17 @@ urlpatterns = [
     ),
     # T2 P4 — bulk patch. `_bulk` is a single segment, so it must precede the bare detail route
     # which would otherwise treat the literal `_bulk` as an alert id.
+    # T2 P5 — procedures attached to an alert, above the bare detail route.
+    path(
+        "alert/<str:alert_id>/procedure",
+        views.alert_procedure_create,
+        name="alert-procedure-create",
+    ),
+    path(
+        "alert/<str:alert_id>/procedures",
+        views.alert_procedures_create,
+        name="alert-procedures-create",
+    ),
     path("alert/_bulk", views.alert_bulk_update, name="alert-bulk-update"),
     path("alert/_bulk/", views.alert_bulk_update, name="alert-bulk-update-slash"),
     path("alert/<str:alert_id>", views.alert_detail, name="alert-detail"),

@@ -36,7 +36,7 @@ from dataclasses import dataclass
 import pytest
 from rest_framework.test import APIClient
 
-from cases.models import CaseTemplate
+from cases.models import TTP, CaseTemplate, Procedure
 from identity.models import Organisation, User
 from ingest.models import IngestionSource
 
@@ -69,6 +69,11 @@ READ: list[Endpoint] = [
     Endpoint("case-template-list", "GET", "/api/v1/case/template", False),
     Endpoint("case-template-detail", "GET", "/api/v1/case/template/{template}", False),
     Endpoint("taxonomy", "GET", "/api/v1/taxonomy", False),
+    # T2 P5 — case export, procedure lookup and the TTP vocabulary.
+    Endpoint("case-export", "GET", "/api/v1/case/{case}/export", False),
+    Endpoint("procedure-detail", "GET", "/api/v1/procedure/{procedure}", False),
+    Endpoint("ttp-list", "GET", "/api/v1/ttp", False),
+    Endpoint("ttp-detail", "GET", "/api/v1/ttp/{ttp}", False),
 ]
 
 MUTATING: list[Endpoint] = [
@@ -109,6 +114,17 @@ MUTATING: list[Endpoint] = [
     Endpoint("case-template-create", "POST", "/api/v1/case/template", True),
     Endpoint("case-template-patch", "PATCH", "/api/v1/case/template/{template}", True),
     Endpoint("case-template-delete", "DELETE", "/api/v1/case/template/{template}", True),
+    # T2 P5 — procedure attach (case and alert), procedure edits, and the TTP vocabulary.
+    Endpoint("case-procedure-create", "POST", "/api/v1/case/{case}/procedure", True),
+    Endpoint("case-procedures-create", "POST", "/api/v1/case/{case}/procedures", True),
+    Endpoint("alert-procedure-create", "POST", "/api/v1/alert/{alert}/procedure", True),
+    Endpoint("alert-procedures-create", "POST", "/api/v1/alert/{alert}/procedures", True),
+    Endpoint("procedure-patch", "PATCH", "/api/v1/procedure/{procedure}", True),
+    Endpoint("procedure-delete", "DELETE", "/api/v1/procedure/{procedure}", True),
+    Endpoint("procedure-bulk-delete", "POST", "/api/v1/procedure/delete/_bulk", True),
+    Endpoint("ttp-create", "POST", "/api/v1/ttp", True),
+    Endpoint("ttp-patch", "PATCH", "/api/v1/ttp/{ttp}", True),
+    Endpoint("ttp-delete", "DELETE", "/api/v1/ttp/{ttp}", True),
 ]
 
 MATRIX = READ + MUTATING
@@ -118,6 +134,9 @@ MATRIX = READ + MUTATING
 def ids(db: None) -> dict[str, str]:
     """One row of every shape the matrix addresses, keyed by the placeholder it fills."""
     case = _case("Authz case")
+    procedure = Procedure.objects.create(
+        case=case, pattern_id="T1059", pattern_name="Command Shell"
+    )
     return {
         "case": str(case.id),
         "alert": str(_alert("Authz alert", ref="authz-ref").id),
@@ -125,6 +144,8 @@ def ids(db: None) -> dict[str, str]:
         "event": str(_event(case).id),
         "observable": str(_observable("10.0.0.7").id),
         "template": str(CaseTemplate.objects.create(name="authz-template").id),
+        "procedure": str(procedure.id),
+        "ttp": str(TTP.objects.create(name="authz-ttp", ttp_code="T1059").id),
     }
 
 

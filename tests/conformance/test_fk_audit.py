@@ -136,6 +136,13 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     ("cases", "Attachment", "case"): models.CASCADE,
     ("cases", "Attachment", "created_by"): models.SET_NULL,
     ("cases", "Attachment", "updated_by"): models.SET_NULL,
+    # ---- T2 P5 procedures / TTP --------------------------------------------------------
+    # A procedure exists only under its case or alert, so CASCADE in both directions (the model
+    # CHECK forbids both being set at once). A procedure survives its TTP: retiring the vocabulary
+    # row must not erase the observed technique from the case history, it just loses the link.
+    ("cases", "Procedure", "case"): models.CASCADE,
+    ("cases", "Procedure", "alert"): models.CASCADE,
+    ("cases", "Procedure", "ttp"): models.SET_NULL,
     # ---- Alert ------------------------------------------------------------------------
     ("alerts", "Alert", "status"): models.PROTECT,
     # **TheHive's unlink-on-delete** (ADR-002): deleting a case must not destroy the alerts
@@ -216,12 +223,11 @@ def test_fk_audit_covers_the_whole_model_inventory() -> None:
         f"undeclared={sorted(set(actual) - set(EXPECTED_ON_DELETE))}, "
         f"stale={sorted(set(EXPECTED_ON_DELETE) - set(actual))}"
     )
-    # 45 = 29 pre-L-2, plus the six `*TagLink` join FKs declared explicitly for **L-2**, plus the
-    # ten T2 P2 collaboration FKs (Comment x4, Page x3, Share x3), plus the three T2 P3 attachment
-    # FKs (Attachment x3). Kept as a literal on purpose: it is a tripwire for a model silently
+    # 51 = the 48 pre-P5 FKs plus the three T2 P5 procedure FKs (case, alert, ttp). `CaseTemplate`
+    # contributes none. Kept as a literal on purpose: it is a tripwire for a model silently
     # dropping out of `OWN_APPS`, and `EXPECTED_ON_DELETE` already pins the exact set, so a bump
     # here is always a real change.
-    assert len(actual) == 48, f"expected the full FK set, found only {len(actual)}"
+    assert len(actual) == 51, f"expected the full FK set, found only {len(actual)}"
 
 
 @pytest.mark.django_db
@@ -302,6 +308,10 @@ def test_no_cascade_is_reachable_from_a_longer_lived_row() -> None:
         # T2 P3 attachments. A blob row is case-owned — the upload view deletes the file when the
         # row goes — so it cannot outlive the case it was filed against.
         ("cases", "Attachment", "case"),
+        # T2 P5 procedures. A procedure exists only under the case or alert it describes, so it
+        # is case-owned like a task; the model CHECK keeps exactly one parent set.
+        ("cases", "Procedure", "case"),
+        ("cases", "Procedure", "alert"),
     }, f"the CASCADE surface changed and needs a re-review: {sorted(cascades)}"
 
 

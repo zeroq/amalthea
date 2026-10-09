@@ -120,6 +120,23 @@ urlpatterns = [
     path("case/_bulk/caseTemplate", views.case_apply_template, name="case-apply-template"),
     path("case/_bulk/caseTemplate/", views.case_apply_template, name="case-apply-template-slash"),
     path("case/_merge/<str:case_ids>", views.case_merge, name="case-merge"),
+    # T2 P5 — procedures attached to a case, and the export. All are case sub-resources, so they
+    # must precede the bare `case/<case_id>` route.
+    path(
+        "case/<str:case_id>/procedure",
+        views.case_procedure_create,
+        name="case-procedure-create",
+    ),
+    path(
+        "case/<str:case_id>/procedures",
+        views.case_procedures_create,
+        name="case-procedures-create",
+    ),
+    path(
+        "case/<str:case_id>/export",
+        views.case_export,
+        name="case-export",
+    ),
     path("case/template", views.case_template_collection, name="case-template-collection"),
     path("case/template/", views.case_template_collection, name="case-template-collection-slash"),
     path(
@@ -165,6 +182,17 @@ urlpatterns = [
     path("tag/<str:tag_id>/", views.tag_detail, name="tag-detail-slash"),
     # Distinct top-level prefixes (`task/`, `customEvent/`, `customField/`) — no collision with
     # `case/<id>`, and all of them land before `compat.urls`' catch-all by construction.
+    # T2 P5 — procedures and the TTP vocabulary. `procedure/delete/_bulk` is listed before the bare
+    # `procedure/<id>` detail for the same "specific first" rule the case block follows.
+    path(
+        "procedure/delete/_bulk",
+        views.procedure_bulk_delete,
+        name="procedure-bulk-delete",
+    ),
+    path("procedure/<str:procedure_id>", views.procedure_detail, name="procedure-detail"),
+    path("ttp", views.ttp_collection, name="ttp-collection"),
+    path("ttp/", views.ttp_collection, name="ttp-collection-slash"),
+    path("ttp/<str:ttp_id>", views.ttp_detail, name="ttp-detail"),
     path("task/_bulk", views.task_bulk_update, name="task-bulk-update"),
     path("task/_bulk/", views.task_bulk_update, name="task-bulk-update-slash"),
     path("task/<str:task_id>", views.task_detail, name="task-detail"),

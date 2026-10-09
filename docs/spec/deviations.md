@@ -104,6 +104,17 @@ endpoints, `POST /case/_merge/{ids}` and `POST /case/_bulk/caseTemplate` are The
 | **P4-2** | — | **`case/_merge` replay is idempotent** | A second POST of the same `<ids>` finds the absorbed cases gone, so it resolves to the surviving target and returns it rather than 500/duplicating provenance. One `case-merged` ledger event per absorbed case is written before `source.delete()`. `cases/merge.py::merge_cases` · `test_t2_p4_surface.py` (AC6.1-P4-b) |
 | **P4-3** | — | **`taxonomy` + case-template CRUD are extensions** | TheHive 5 exposes no aggregate taxonomy route and no case-template module in `thehive4py` 2.1.0; both are Amalthea additions so the UI can drive its pickers. `cases/views.py::taxonomy`/`case_template_*` · `test_t2_p4_surface.py` |
 
+## Wave 6.1 — T2 Phase P5 (2026-10-09)
+
+Procedures (ATT&CK techniques observed on a case/alert) and case export.
+
+| ID | Plan / TheHive | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **P5-1** | `InputProcedure.occurDate` is an epoch-ms integer | **accepted, re-emitted ISO-8601** | House style is ISO-8601 in entity JSON (deviation P10-2); the parser still accepts TheHive's ms integer so clients need no change. `compat/procedures.py`, `core/serializers.py::procedure_json` · `test_t2_p5_surface.py` |
+| **P5-2** | (no TheHive route) | **`ttp` vocabulary + `ttpId` on a procedure** | TheHive stores a free-text `patternId`; Amalthea adds a first-class, editable TTP vocabulary (`GET|POST /ttp`, `GET|PATCH|DELETE /ttp/{idOrName}`) and a nullable `Procedure.ttp` link, with the P1 in-use refusal on DELETE. `cases/models.py::TTP`, `cases/views.py::ttp_*` · `test_t2_p5_surface.py` (AC6.1-P5-b) |
+| **P5-3** | `GET /case/{id}/export` returns an encrypted `.thar`; `password` param | **plain JSON document, `password` ignored** | The export is the one place `raw_payload` is inlined (deliberate — it is the case archive); it is **not** encrypted and the `password` query parameter is accepted only for client compatibility. `cases/views.py::_case_export_document` · `test_t2_p5_surface.py` (AC6.1-P5-a) |
+| **P5-4** | procedure PATCH echoes the row | **204, no body** | Matches the task-PATCH precedent (deviation "task PATCH echoes"); the change is observable via a follow-up GET. `cases/views.py::_update_procedure` · `test_t2_p5_surface.py` |
+
 ## Security hardening findings
 
 Source: security-auditor Wave C, carried as **P10-10** (F1/F6/F3/F5/F7 fixed in the burst). **F9 is

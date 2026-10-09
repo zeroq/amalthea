@@ -167,6 +167,19 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 - Applying a template **copies** these definitions into the case (tasks/tag links/custom-field
   values); nothing is shared with the template row (AC6.1-P4-c).
 
+### TTP (`ttp`, extends `UUIDModel` + `TimeStampedModel`) — T2 P5
+- `name` **unique** · `ttp_code`(64) · `tactic`(100) · `description` (Text).
+- Amalthea extension (no TheHive route); `Procedure.ttp` is `SET_NULL` so retiring a technique
+  keeps the observed procedure. DELETE is refused while any procedure references it (AC6.1-P5-b).
+
+### Procedure (`procedure`, extends `UUIDModel` + `TimeStampedModel`) — T2 P5
+- `case` — FK → `Case`, `CASCADE`, nullable, `db_index=False` · `alert` — FK → `Alert`, `CASCADE`,
+  nullable, `db_index=False` · `ttp` — FK → `TTP`, `SET_NULL`, nullable.
+- `occur_date` · `pattern_id`(255) · `pattern_name`(255) · `tactic`(100) · `description` (Text).
+- **Exactly one parent**: CHECK `procedure_exactly_one_parent` (mirrors `Comment`). Indexes
+  `procedure_case_date_idx ("case","occur_date","id")` and
+  `procedure_alert_date_idx ("alert","occur_date","id")`.
+
 ## observables
 
 ### ObservableType (`observable_type`)

@@ -1,7 +1,7 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-09 (wave 6.1 **P1–P4 shipped** + TODO 2.3 wire-boundary guard)
+Last updated: 2026-10-09 (wave 6.1 **P1–P5 shipped** — T2 endpoints complete + TODO 2.3 wire-boundary guard)
 
 **Conventions** — every item carries a `Source` (plan AC, review finding ID, or decision ID) so it can
 be traced, and `Blocks` when it gates other work. Review IDs (`C1`, `H2`, `M5`…) refer to
@@ -406,15 +406,16 @@ Full task/AC detail in `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md`
 
 ## 6. Deferred scope (committed, not yet scheduled)
 
-- [ ] **6.1 — T2 endpoints** Plan §7.3 — **P1–P4 SHIPPED 2026-10-09** (P5 = procedures/TTP/export pending)
+- [x] **6.1 — T2 endpoints** Plan §7.3 — **P1–P5 SHIPPED 2026-10-09** (the full T2 wave)
   [`PLAN-2026-10-09-t2-endpoints.md`](./docs/planning/PLAN-2026-10-09-t2-endpoints.md):
   P1 = identity/vocabularies/tags (`user/current`, tenant-scoped `organisation`, `observable/type`
   CRUD, `caseStatus`/`alertStatus` CRUD, `tag` CRUD + link/unlink, `describe/_all` +
   `describe/{model}`); P2 = collaboration (`Comment`/`Page`/`Share`/`flow`, migration `0009`, P2-1…P2-7,
   plus the note-form UI follow-up); P3 = attachments (`Attachment`, migration `0010`, P3-1…P3-4);
   P4 = bulk/merge/templates/taxonomy (`CaseTemplate`, migration `0011`, P4-1…P4-3,
-  `test_t2_p4_surface.py`). Gate: `make check` **877 passed / 3 skipped**; ruff + mypy clean;
-  migrations in sync. P5 (procedures/TTP/export) is next.
+  `test_t2_p4_surface.py`); P5 = procedures/TTP/export (`Procedure`/`TTP`, migration `0012`,
+  P5-1…P5-4, `test_t2_p5_surface.py`). Gate at close: `make check` **941 passed / 3 skipped**;
+  ruff + mypy clean; migrations in sync.
 
 - [ ] **6.2 — Postgres-only indexes** `L3`, plan §6.3
   GIN on `raw_payload` and `Observable.tags`; `INCLUDE` covering indexes. `GinIndex` needs

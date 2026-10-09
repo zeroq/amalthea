@@ -23,6 +23,7 @@ from typing import Any
 from alerts.models import Alert, AlertObservable, AlertStatus
 from automation.models import AutomationRun
 from cases.models import (
+    TTP,
     Attachment,
     Case,
     CaseObservable,
@@ -31,6 +32,7 @@ from cases.models import (
     Comment,
     CustomField,
     Page,
+    Procedure,
     Share,
     Tag,
     Task,
@@ -414,6 +416,46 @@ def case_template_json(template: CaseTemplate) -> dict[str, Any]:
         "tasks": list(template.tasks or []),
         "customFields": list(template.custom_fields or []),
         "extraData": {},
+    }
+
+
+def ttp_json(ttp: TTP) -> dict[str, Any]:
+    """Amalthea extension — the editable TTP vocabulary row (no TheHive 5.8 equivalent)."""
+    return {
+        "_id": str(ttp.id),
+        "id": str(ttp.id),
+        "_type": "TTP",
+        "name": ttp.name,
+        "ttpCode": ttp.ttp_code,
+        "tactic": ttp.tactic,
+        "description": ttp.description,
+        "createdAt": _iso(ttp.created_at),
+        "updatedAt": _iso(ttp.updated_at),
+    }
+
+
+def procedure_json(procedure: Procedure) -> dict[str, Any]:
+    """`OutputProcedure` — the fields TheHive's procedure endpoints return, plus our `ttpId`.
+
+    `occurDate` is ISO-8601 like every other timestamp this API emits (the recorded TheHive shape
+    is epoch milliseconds; the house rule here is documented in the module docstring and the
+    deviation is recorded in `docs/spec/deviations.md`).
+    """
+    return {
+        "_id": str(procedure.id),
+        "id": str(procedure.id),
+        "_type": "Procedure",
+        "caseId": str(procedure.case_id) if procedure.case_id else None,
+        "alertId": str(procedure.alert_id) if procedure.alert_id else None,
+        "occurDate": _iso(procedure.occur_date),
+        "patternId": procedure.pattern_id or None,
+        "patternName": procedure.pattern_name or None,
+        "tactic": procedure.tactic or None,
+        "tacticLabel": procedure.tactic or None,
+        "description": procedure.description,
+        "ttpId": str(procedure.ttp_id) if procedure.ttp_id else None,
+        "createdAt": _iso(procedure.created_at),
+        "updatedAt": _iso(procedure.updated_at),
     }
 
 

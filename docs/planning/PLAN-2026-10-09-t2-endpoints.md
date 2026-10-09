@@ -1,7 +1,7 @@
 # PLAN — Wave 6.1: TheHive T2 API surface
 
 - **Date:** 2026-10-09
-- **Status:** SHIPPED — P1–P4 complete 2026-10-09 (P5 pending; see per-phase status blocks in §6)
+- **Status:** SHIPPED — P1–P5 complete 2026-10-09 (see per-phase status blocks in §6)
 - **Owner:** planner (tech lead)
 - **Source:** `TODO.md` §6.1 · master plan `PLAN-2026-10-03-thehive-compatible-mvp.md` §7.3 · `docs/decisions/ADR-002`
 - **Related:** `docs/spec/api.md` (implemented T1 surface), `docs/spec/data-model.md`, `docs/spec/deviations.md`
@@ -208,6 +208,12 @@ with read/write perms), `flow` (read-only case-flow view).
 - **AC6.1-P4-c** Creating a case from a template applies its task/custom-field defaults — demonstrated.
 
 ### P5 — Reporting & TTP
+
+> **Status: SHIPPED 2026-10-09.** Migration `cases/migrations/0012_ttp_procedure.py`; deviations
+> `P5-1`…`P5-4` in `docs/spec/deviations.md`; record in `COMPLETED.md`.
+> **Deviations from this plan:** the export is plain JSON (not an encrypted `.thar`); the `password`
+> param is accepted but ignored. TTP is exposed as an editable vocabulary (`/ttp`) plus a nullable
+> `Procedure.ttp` link. Task 3 (stragglers) closed with none outstanding.
 
 **Scope:** `export` (case/alert export in TheHive's shape), `procedures`/TTP entities.
 

@@ -42,6 +42,7 @@ from alerts.models import Alert, AlertStatus
 from cases.ledger import append_timeline_event
 from cases.merge import merge_cases
 from cases.models import (
+    TTP,
     Attachment,
     Case,
     CaseCustomFieldValue,
@@ -52,13 +53,16 @@ from cases.models import (
     Comment,
     CustomField,
     Page,
+    Procedure,
     Share,
     Tag,
     Task,
     TimelineEvent,
 )
+from cases.procedures import create_procedure
 from cases.tagging import tag_names_from_payload
 from compat.bulk import bulk_patch
+from compat.procedures import parse_procedure
 from compat.time import parse_timestamp, to_epoch_ms
 from core.enums import CASE_STAGES, TASK_STATUS_CHOICES
 from core.serializers import (
@@ -74,9 +78,11 @@ from core.serializers import (
     observable_json,
     observable_type_json,
     page_json,
+    procedure_json,
     share_json,
     tag_json,
     task_json,
+    ttp_json,
 )
 from identity.models import Organisation
 from observables.extractor import add_observable, extract_into_case
@@ -2006,6 +2012,255 @@ def taxonomy(request: Request) -> Response:
     )
 
 
+# --- T2 P5 — procedures, TTP vocabulary and case export ---------------------
+
+
+def _resolve_ttp_value(value: str) -> TTP | None:
+    """Resolve a `ttpId` as a UUID first, then as the unique name."""
+    pk = _as_uuid(value)
+    if pk is not None:
+        found = TTP.objects.filter(pk=pk).first()
+        if found is not None:
+            return found
+    return TTP.objects.filter(name=value).first()
+
+
+def _parse_procedure_payload(
+    payload: Any, *, case: Case | None = None, alert: Alert | None = None
+) -> Response | dict[str, Any]:
+    """Translate TheHive's `InputProcedure` into `create_procedure` kwargs, or a 400."""
+    kwargs, error = parse_procedure(payload, resolve_ttp=_resolve_ttp_value)
+    if error is not None:
+        field, message = error
+        return _bad(message, {field: [message]})
+    assert kwargs is not None  # parse_procedure returns kwargs exactly when error is None
+    return {**kwargs, "case": case, "alert": alert}
+
+
+@transaction.atomic
+@api_view(["POST"])
+@renderer_classes([JSONRenderer])
+def case_procedure_create(request: Request, case_id: str) -> Response:
+    """`POST /api/v1/case/{id}/procedure` — attach one procedure (201)."""
+    case = _case_access(request, case_id, write=True)
+    if case is None:
+        return _not_found("Case")
+    kwargs = _parse_procedure_payload(request.data, case=case)
+    if isinstance(kwargs, Response):
+        return kwargs
+    return Response(procedure_json(create_procedure(**kwargs)), status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@renderer_classes([JSONRenderer])
+def case_procedures_create(request: Request, case_id: str) -> Response:
+    """`POST /api/v1/case/{id}/procedures` — bulk attach `{"procedures": [...]}` (201)."""
+    case = _case_access(request, case_id, write=True)
+    if case is None:
+        return _not_found("Case")
+    return _create_procedures(request, case=case)
+
+
+def _create_procedures(
+    request: Request, *, case: Case | None = None, alert: Alert | None = None
+) -> Response:
+    payload = request.data if isinstance(request.data, dict) else {}
+    specs = payload.get("procedures")
+    if not isinstance(specs, list) or not specs:
+        return _bad("procedures is required", {"procedures": ["required"]})
+    created = []
+    with transaction.atomic():
+        for spec in specs:
+            kwargs = _parse_procedure_payload(spec, case=case, alert=alert)
+            if isinstance(kwargs, Response):
+                return kwargs
+            created.append(procedure_json(create_procedure(**kwargs)))
+    return Response(created, status=status.HTTP_201_CREATED)
+
+
+def _procedure_for_write(procedure_id: str) -> Procedure | None:
+    pk = _as_uuid(procedure_id)
+    return Procedure.objects.filter(pk=pk).first() if pk is not None else None
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@renderer_classes([JSONRenderer])
+def procedure_detail(request: Request, procedure_id: str) -> Response:
+    """`GET|PATCH|DELETE /api/v1/procedure/{id}`."""
+    procedure = _resolve_procedure(procedure_id)
+    if procedure is None:
+        return _not_found("Procedure")
+    if request.method == "DELETE":
+        procedure.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    if request.method == "PATCH":
+        return _update_procedure(procedure, request)
+    return Response(procedure_json(procedure))
+
+
+def _resolve_procedure(procedure_id: str) -> Procedure | None:
+    pk = _as_uuid(procedure_id)
+    if pk is None:
+        return None
+    return Procedure.objects.filter(pk=pk).first()
+
+
+def _update_procedure(procedure: Procedure, request: Request) -> Response:
+    payload = request.data if isinstance(request.data, dict) else {}
+    fields: list[str] = []
+    if "occurDate" in payload:
+        if payload["occurDate"] is None:
+            procedure.occur_date = None
+        else:
+            moment = parse_timestamp(payload["occurDate"])
+            if moment is None:
+                return _bad(
+                    "occurDate is not a valid timestamp", {"occurDate": ["invalid timestamp"]}
+                )
+            procedure.occur_date = moment
+        fields.append("occur_date")
+    for key, attr, limit in (
+        ("patternId", "pattern_id", 255),
+        ("patternName", "pattern_name", 255),
+        ("tactic", "tactic", 100),
+    ):
+        if key in payload:
+            setattr(procedure, attr, str(payload[key] or "")[:limit])
+            fields.append(attr)
+    if "description" in payload:
+        procedure.description = str(payload["description"] or "")
+        fields.append("description")
+    if not fields:
+        return _bad("No updatable field supplied", {})
+    procedure.save(update_fields=[*fields, "updated_at"])
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["POST"])
+@renderer_classes([JSONRenderer])
+def procedure_bulk_delete(request: Request) -> Response:
+    """`POST /api/v1/procedure/delete/_bulk` — delete `{"ids": [...]}` in one call."""
+    payload = request.data if isinstance(request.data, dict) else {}
+    ids = payload.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return _bad("ids is required", {"ids": ["required"]})
+    pks = [pk for raw in ids if (pk := _as_uuid(str(raw))) is not None]
+    Procedure.objects.filter(pk__in=pks).delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET", "POST"])
+@renderer_classes([JSONRenderer])
+def ttp_collection(request: Request) -> Response:
+    """`GET|POST /api/v1/ttp` — the editable TTP vocabulary (Amalthea extension)."""
+    if request.method == "POST":
+        payload = request.data if isinstance(request.data, dict) else {}
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            return _bad("name is required", {"name": ["required"]})
+        if TTP.objects.filter(name=name[:255]).exists():
+            return _bad("name already exists", {"name": ["already exists"]})
+        ttp = TTP.objects.create(
+            name=name[:255],
+            ttp_code=str(payload.get("ttpCode") or "")[:64],
+            tactic=str(payload.get("tactic") or "")[:100],
+            description=str(payload.get("description") or ""),
+        )
+        return Response(ttp_json(ttp), status=status.HTTP_201_CREATED)
+    return Response([ttp_json(ttp) for ttp in TTP.objects.order_by("name")])
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@renderer_classes([JSONRenderer])
+def ttp_detail(request: Request, ttp_id: str) -> Response:
+    """`GET|PATCH|DELETE /api/v1/ttp/{idOrName}`; DELETE refuses an in-use technique (AC6.1-P5-b)."""
+    pk = _as_uuid(ttp_id)
+    ttp = (TTP.objects.filter(pk=pk).first() if pk is not None else None) or TTP.objects.filter(
+        name=ttp_id
+    ).first()
+    if ttp is None:
+        return _not_found("TTP")
+    if request.method == "DELETE":
+        if ttp.procedures.exists():
+            return _bad("TTP is in use", {"_id": ["at least one procedure uses this technique"]})
+        ttp.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    if request.method == "PATCH":
+        return _update_ttp(ttp, request)
+    return Response(ttp_json(ttp))
+
+
+def _update_ttp(ttp: TTP, request: Request) -> Response:
+    payload = request.data if isinstance(request.data, dict) else {}
+    fields: list[str] = []
+    if "name" in payload:
+        name = str(payload["name"] or "").strip()
+        if not name:
+            return _bad("name is required", {"name": ["required"]})
+        if TTP.objects.exclude(pk=ttp.pk).filter(name=name[:255]).exists():
+            return _bad("name already exists", {"name": ["already exists"]})
+        ttp.name = name[:255]
+        fields.append("name")
+    for key, attr, limit in (
+        ("ttpCode", "ttp_code", 64),
+        ("tactic", "tactic", 100),
+    ):
+        if key in payload:
+            setattr(ttp, attr, str(payload[key] or "")[:limit])
+            fields.append(attr)
+    if "description" in payload:
+        ttp.description = str(payload["description"] or "")
+        fields.append("description")
+    if not fields:
+        return _bad("No updatable field supplied", {})
+    ttp.save(update_fields=[*fields, "updated_at"])
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _case_export_document(case: Case) -> dict[str, Any]:
+    """The `.thar`-equivalent export as JSON (plan §6-P5, AC6.1-P5-a).
+
+    `raw_payload` **is** inlined here — the one deliberate exception to the "never inlined" rule,
+    because an investigation export exists precisely to preserve the sender's original telemetry
+    after the alert rows may be gone. Recorded in `docs/spec/deviations.md`.
+    """
+    alerts = Alert.objects.filter(case=case).select_related("status").order_by("date", "id")
+    return {
+        "_type": "CaseExport",
+        "version": 1,
+        "exportedAt": timezone.now().isoformat(),
+        "case": case_json(case, detail=True),
+        "alerts": [
+            {
+                "id": str(alert.id),
+                "_id": str(alert.id),
+                "title": alert.title,
+                "source": alert.source,
+                "sourceRef": alert.source_ref,
+                "severity": alert.severity,
+                "rawPayload": alert.raw_payload,
+            }
+            for alert in alerts
+        ],
+        "procedures": [procedure_json(p) for p in case.procedures.order_by("occur_date", "id")],
+    }
+
+
+@api_view(["GET"])
+@renderer_classes([JSONRenderer])
+def case_export(request: Request, case_id: str) -> Response:
+    """`GET /api/v1/case/{id}/export` — a self-contained JSON export of the case (AC6.1-P5-a).
+
+    Read access is enough (a share with `read` may export), and a foreign organisation gets a 404.
+    The optional `password` query parameter is accepted for TheHive client compatibility but the
+    payload is **not** encrypted — a recorded deviation, not an unstated one.
+    """
+    case = _case_access(request, case_id, write=False)
+    if case is None:
+        return _not_found("Case")
+    return Response(_case_export_document(case))
+
+
 __all__ = [
     "case_alert_remove",
     "case_apply_template",
@@ -2017,12 +2272,15 @@ __all__ = [
     "case_comment_list",
     "case_custom_event_create",
     "case_detail",
+    "case_export",
     "case_flow",
     "case_merge",
     "case_observable_add",
     "case_observable_list",
     "case_page_detail",
     "case_page_list",
+    "case_procedure_create",
+    "case_procedures_create",
     "case_share_list",
     "case_status_collection",
     "case_status_detail",
@@ -2038,10 +2296,14 @@ __all__ = [
     "observable_bulk_update",
     "observable_detail",
     "observable_tag_link",
+    "procedure_bulk_delete",
+    "procedure_detail",
     "share_detail",
     "tag_collection",
     "tag_detail",
     "task_bulk_update",
     "task_detail",
     "taxonomy",
+    "ttp_collection",
+    "ttp_detail",
 ]

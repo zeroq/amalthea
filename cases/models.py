@@ -408,6 +408,87 @@ class Page(UUIDModel, TimeStampedModel):
         return f"Page({self.case_id}): {self.title}"
 
 
+class TTP(UUIDModel, TimeStampedModel):
+    """A reusable ATT&CK technique / tactic (T2 P5, Amalthea extension).
+
+    TheHive 5.8 ships the ATT&CK catalogue as static reference data and exposes no CRUD; a
+    procedure references a `pattern` id as a bare string. Amalthea keeps a small editable
+    vocabulary instead, so an analyst can record an in-house technique without a code change. The
+    delete guard is the same in-use rule the P1 vocabularies use: a technique a procedure points
+    at is refused with a 400 rather than a database 500.
+    """
+
+    name = models.CharField(max_length=255, unique=True)
+    ttp_code = models.CharField(max_length=64, blank=True, default="")
+    tactic = models.CharField(max_length=100, blank=True, default="")
+    description = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "ttp"
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class Procedure(UUIDModel, TimeStampedModel):
+    """A TTP observed on a case or an alert (T2 P5).
+
+    TheHive's `InputProcedure` is `{occurDate, patternId, tactic?, description?}` and the same shape
+    attaches to a case (`POST /case/{id}/procedure(s)`) or an alert
+    (`POST /alert/{id}/procedure(s)`). That is the wire contract (`procedure_json`); the optional
+    `ttp` FK is the Amalthea extension that ties a procedure back to a managed vocabulary row.
+
+    Exactly one parent must be set: a procedure with neither has no subject to render under, and
+    one with both is ambiguous. `pattern_id` stays a plain string even when `ttp` is set, so a
+    client that only knows the TheHive shape never has to learn about the FK.
+    """
+
+    # db_index=False: `case`/`alert` are the left prefixes of the `(parent, occur_date)` indexes.
+    case = models.ForeignKey(
+        Case,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="procedures",
+        db_index=False,
+    )
+    alert = models.ForeignKey(
+        "alerts.Alert",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="procedures",
+        db_index=False,
+    )
+    ttp = models.ForeignKey(
+        TTP, on_delete=models.SET_NULL, null=True, blank=True, related_name="procedures"
+    )
+    occur_date = models.DateTimeField(null=True, blank=True)
+    pattern_id = models.CharField(max_length=255, blank=True, default="")
+    pattern_name = models.CharField(max_length=255, blank=True, default="")
+    tactic = models.CharField(max_length=100, blank=True, default="")
+    description = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "procedure"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(case__isnull=False, alert__isnull=True)
+                    | Q(case__isnull=True, alert__isnull=False)
+                ),
+                name="procedure_exactly_one_parent",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["case", "occur_date"], name="procedure_case_date_idx"),
+            models.Index(fields=["alert", "occur_date"], name="procedure_alert_date_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Procedure({self.pattern_id or self.pk})"
+
+
 class Share(UUIDModel, TimeStampedModel):
     """A case shared with another organisation (plan §6-P2).
 
