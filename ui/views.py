@@ -761,3 +761,494 @@ def playbook_run(request: HttpRequest, playbook_id: str) -> HttpResponse:
 
     messages.success(request, f"Playbook triggered (run {run.id}).")
     return redirect("ui-playbook-detail", playbook_id=playbook_id)
+
+
+# =============================================================================
+# 6.9 — T2 UI catch-up views
+# =============================================================================
+
+@login_required
+@require_GET
+def case_export(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Download case export (JSON)."""
+    case = _resolve_case(case_id)
+    from cases.views import _case_export_document
+    doc = _case_export_document(case)
+    import json
+    response = HttpResponse(
+        json.dumps(doc, indent=2, default=str),
+        content_type="application/json",
+    )
+    response["Content-Disposition"] = f'attachment; filename="case-{case.number}-export.json"'
+    return response
+
+
+@login_required
+@require_GET
+def case_tags(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Manage tags on a case."""
+    from core.enums import TAGS
+    from cases.models import Tag
+    case = _resolve_case(case_id)
+    tags = Tag.objects.all().order_by("name")
+    case_tag_ids = set(case.tags.values_list("id", flat=True))
+    return render(
+        request,
+        "ui/case_tags.html",
+        _base_context(
+            request,
+            case=case,
+            all_tags=tags,
+            case_tag_ids=case_tag_ids,
+        ),
+    )
+
+
+@login_required
+@require_POST
+def case_tag_toggle(request: HttpRequest, case_id: str, tag_id: str) -> HttpResponse:
+    """Add or remove a tag from a case."""
+    from cases.models import Tag
+    case = _resolve_case(case_id)
+    tag = get_object_or_404(Tag, pk=tag_id)
+    if tag in case.tags.all():
+        case.tags.remove(tag)
+        messages.success(request, f"Removed tag '{tag.name}'.")
+    else:
+        case.tags.add(tag)
+        messages.success(request, f"Added tag '{tag.name}'.")
+    return redirect("ui-case-tags", case_id=case.number)
+
+
+@login_required
+def case_apply_template(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Apply a case template to a case."""
+    from cases.models import CaseTemplate
+    case = _resolve_case(case_id)
+    if request.method == "GET":
+        templates = CaseTemplate.objects.all().order_by("name")
+        return render(
+            request,
+            "ui/case_template_apply.html",
+            _base_context(request, case=case, templates=templates),
+        )
+    # POST
+    template_id = request.POST.get("template_id")
+    if not template_id:
+        messages.error(request, "Template is required.")
+        return redirect("ui-case-apply-template", case_id=case.number)
+    template = get_object_or_404(CaseTemplate, pk=template_id)
+    from cases.views import _apply_template_to_case
+    _apply_template_to_case(case, template)
+    messages.success(request, f"Applied template '{template.name}' to case {case.number}.")
+    return redirect("ui-case-detail", case_id=case.number)
+
+
+@login_required
+@require_POST
+def case_bulk(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Bulk update cases (stub for UI integration)."""
+    messages.info(request, "Bulk operations available via API.")
+    return redirect("ui-case-list")
+
+
+@login_required
+@require_GET
+def case_attachment_list(request: HttpRequest, case_id: str) -> HttpResponse:
+    """List and upload attachments for a case."""
+    case = _resolve_case(case_id)
+    return render(
+        request,
+        "ui/case_attachments.html",
+        _base_context(
+            request,
+            case=case,
+        ),
+    )
+
+
+@login_required
+@require_POST
+def case_attachment_upload(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Upload an attachment to a case."""
+    case = _resolve_case(case_id)
+    from cases.views import case_attachment_list as api_attachment_list
+    # Reuse the API logic but adapt for UI
+    from django.http import QueryDict
+    request.POST = QueryDict(mutable=True)
+    for key, value in request.POST.items():
+        request.POST[key] = value
+    for key, value in request.FILES.items():
+        request.FILES[key] = value
+    # Call the API view logic directly
+    from cases.views import case_attachment_list as api_view
+    response = api_view(request, case_id=case.id)
+    if response.status_code == 201:
+        messages.success(request, "Attachment uploaded.")
+    else:
+        messages.error(request, f"Upload failed: {response.content.decode()[:200]}")
+    return redirect("ui-case-attachment-list", case_id=case.number)
+
+
+@login_required
+@require_GET
+def case_attachment_download(request: HttpRequest, case_id: str, attachment_id: str) -> HttpResponse:
+    """Download an attachment."""
+    from cases.views import case_attachment_download as api_view
+    from django.http import HttpResponse
+    # Reuse API logic
+    return api_view(request, case_id=case_id, attachment_id=attachment_id)
+
+
+@login_required
+@require_POST
+def case_attachment_delete(request: HttpRequest, case_id: str, attachment_id: str) -> HttpResponse:
+    """Delete an attachment."""
+    from cases.views import case_attachment_detail as api_view
+    response = api_view(request, case_id=case_id, attachment_id=attachment_id)
+    if response.status_code == 204:
+        messages.success(request, "Attachment deleted.")
+    else:
+        messages.error(request, "Delete failed.")
+    return redirect("ui-case-attachment-list", case_id=case_id)
+
+
+# --- Case Templates ---
+
+@login_required
+@require_GET
+def case_template_list(request: HttpRequest) -> HttpResponse:
+    """List case templates."""
+    from cases.models import CaseTemplate
+    return render(
+        request,
+        "ui/case_template_list.html",
+        _base_context(
+            request,
+            templates=CaseTemplate.objects.all().order_by("name"),
+        ),
+    )
+
+
+@login_required
+def case_template_create(request: HttpRequest) -> HttpResponse:
+    """Create a case template."""
+    if request.method == "GET":
+        return render(request, "ui/case_template_form.html", _base_context(request))
+    # POST
+    from cases.models import CaseTemplate
+    name = (request.POST.get("name") or "").strip()
+    if not name:
+        messages.error(request, "Name is required.")
+        return redirect("ui-case-template-create")
+    if CaseTemplate.objects.filter(name=name[:200]).exists():
+        messages.error(request, "Template with that name already exists.")
+        return redirect("ui-case-template-create")
+    CaseTemplate.objects.create(
+        name=name[:200],
+        display_name=(request.POST.get("display_name") or "").strip(),
+        title_prefix=(request.POST.get("title_prefix") or "").strip(),
+        description=(request.POST.get("description") or "").strip(),
+        summary=(request.POST.get("summary") or "").strip(),
+        flag=(request.POST.get("flag") or "").strip(),
+        severity=int(request.POST.get("severity") or 2),
+        tlp=int(request.POST.get("tlp") or 2),
+        pap=int(request.POST.get("pap") or 2),
+        tags=[t.strip() for t in (request.POST.get("tags") or "").split(",") if t.strip()],
+        tasks=[],
+        custom_fields=[],
+    )
+    messages.success(request, f"Template '{name}' created.")
+    return redirect("ui-case-template-list")
+
+
+@login_required
+def case_template_detail(request: HttpRequest, template_id: str) -> HttpResponse:
+    """View or edit a case template."""
+    from cases.models import CaseTemplate
+    try:
+        import uuid
+        uuid.UUID(template_id)
+        template = get_object_or_404(CaseTemplate, pk=template_id)
+    except ValueError:
+        template = get_object_or_404(CaseTemplate, name=template_id)
+
+    if request.method == "GET":
+        return render(
+            request,
+            "ui/case_template_detail.html",
+            _base_context(request, template=template),
+        )
+    # PATCH/POST
+    from cases.views import _apply_template_to_case
+    # Update logic similar to playbook_detail
+    # Simplified for brevity
+    template.name = (request.POST.get("name") or template.name)[:200]
+    template.display_name = (request.POST.get("display_name") or template.display_name)
+    template.title_prefix = (request.POST.get("title_prefix") or template.title_prefix)
+    template.description = (request.POST.get("description") or template.description)
+    template.summary = (request.POST.get("summary") or template.summary)
+    template.flag = (request.POST.get("flag") or template.flag)
+    template.severity = int(request.POST.get("severity") or template.severity)
+    template.tlp = int(request.POST.get("tlp") or template.tlp)
+    template.pap = int(request.POST.get("pap") or template.pap)
+    template.tags = [t.strip() for t in (request.POST.get("tags") or "").split(",") if t.strip()]
+    template.save()
+    messages.success(request, f"Template '{template.name}' updated.")
+    return redirect("ui-case-template-detail", template_id=template.id)
+
+
+@login_required
+@require_POST
+def case_template_delete(request: HttpRequest, template_id: str) -> HttpResponse:
+    """Delete a case template."""
+    from cases.models import CaseTemplate
+    try:
+        import uuid
+        uuid.UUID(template_id)
+        template = get_object_or_404(CaseTemplate, pk=template_id)
+    except ValueError:
+        template = get_object_or_404(CaseTemplate, name=template_id)
+    name = template.name
+    template.delete()
+    messages.success(request, f"Template '{name}' deleted.")
+    return redirect("ui-case-template-list")
+
+
+# --- Tags ---
+
+@login_required
+@require_GET
+def tag_list(request: HttpRequest) -> HttpResponse:
+    """List all tags."""
+    from cases.models import Tag
+    return render(
+        request,
+        "ui/tag_list.html",
+        _base_context(
+            request,
+            tags=Tag.objects.all().order_by("name"),
+        ),
+    )
+
+
+@login_required
+def tag_create(request: HttpRequest) -> HttpResponse:
+    """Create a tag."""
+    from cases.models import Tag
+    if request.method == "GET":
+        return render(request, "ui/tag_form.html", _base_context(request))
+    name = (request.POST.get("name") or "").strip()
+    if not name:
+        messages.error(request, "Name is required.")
+        return redirect("ui-tag-create")
+    if Tag.objects.filter(name=name[:200]).exists():
+        messages.error(request, "Tag with that name already exists.")
+        return redirect("ui-tag-create")
+    Tag.objects.create(name=name[:200])
+    messages.success(request, f"Tag '{name}' created.")
+    return redirect("ui-tag-list")
+
+
+@login_required
+def tag_detail(request: HttpRequest, tag_id: str) -> HttpResponse:
+    """View or edit a tag."""
+    from cases.models import Tag
+    try:
+        import uuid
+        uuid.UUID(tag_id)
+        tag = get_object_or_404(Tag, pk=tag_id)
+    except ValueError:
+        tag = get_object_or_404(Tag, name=tag_id)
+    if request.method == "GET":
+        return render(request, "ui/tag_detail.html", _base_context(request, tag=tag))
+    # Update
+    tag.name = (request.POST.get("name") or tag.name)[:200]
+    tag.save()
+    messages.success(request, f"Tag '{tag.name}' updated.")
+    return redirect("ui-tag-detail", tag_id=tag.id)
+
+
+@login_required
+@require_POST
+def tag_delete(request: HttpRequest, tag_id: str) -> HttpResponse:
+    """Delete a tag."""
+    from cases.models import Tag
+    try:
+        import uuid
+        uuid.UUID(tag_id)
+        tag = get_object_or_404(Tag, pk=tag_id)
+    except ValueError:
+        tag = get_object_or_404(Tag, name=tag_id)
+    name = tag.name
+    tag.delete()
+    messages.success(request, f"Tag '{name}' deleted.")
+    return redirect("ui-tag-list")
+
+
+# --- Observables ---
+
+@login_required
+@require_GET
+def observable_list(request: HttpRequest) -> HttpResponse:
+    """Global observables list with cross-case links."""
+    from observables.models import Observable
+    return render(
+        request,
+        "ui/observable_list.html",
+        _base_context(
+            request,
+            observables=Observable.objects.select_related("data_type")
+            .prefetch_related("case_observables__case")
+            .order_by("-created_at")[:PAGE_SIZE],
+        ),
+    )
+
+
+@login_required
+@require_GET
+def observable_detail(request: HttpRequest, observable_id: str) -> HttpResponse:
+    """Observable detail with cross-case fan-out."""
+    from observables.models import Observable
+    try:
+        import uuid
+        uuid.UUID(observable_id)
+        observable = get_object_or_404(Observable, pk=observable_id)
+    except ValueError:
+        observable = get_object_or_404(Observable, pk=observable_id)
+    return render(
+        request,
+        "ui/observable_detail.html",
+        _base_context(
+            request,
+            observable=observable,
+            cases=observable.case_observables.select_related("case").order_by("-case__start_date"),
+        ),
+    )
+
+
+# --- Taxonomy ---
+
+@login_required
+@require_GET
+def taxonomy(request: HttpRequest) -> HttpResponse:
+    """Aggregate taxonomy page for UI pickers."""
+    from cases.models import CaseStatus, CaseTemplate, Tag
+    from alerts.models import AlertStatus
+    from observables.models import ObservableType
+    from cases.models import TTP
+    return render(
+        request,
+        "ui/taxonomy.html",
+        _base_context(
+            request,
+            case_statuses=CaseStatus.objects.filter(hidden=False).order_by("order", "value"),
+            alert_statuses=AlertStatus.objects.filter(hidden=False).order_by("order", "value"),
+            observable_types=ObservableType.objects.all().order_by("name"),
+            case_templates=CaseTemplate.objects.all().order_by("name"),
+            tags=Tag.objects.all().order_by("name"),
+            ttps=TTP.objects.all().order_by("name"),
+        ),
+    )
+
+
+@login_required
+@require_GET
+def case_merge(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Merge cases via UI."""
+    from alerts.escalation import merge_cases as merge_cases_fn
+    case = _resolve_case(case_id)
+    if request.method == "GET":
+        # Show merge form with candidate cases
+        candidates = Case.objects.filter(closed_date__isnull=True).exclude(pk=case.pk).order_by("-start_date")
+        return render(request, "ui/case_merge.html", _base_context(request, case=case, candidates=candidates))
+    # POST
+    target_id = request.POST.get("target_case")
+    if not target_id:
+        messages.error(request, "Target case is required.")
+        return redirect("ui-case-merge", case_id=case.number)
+    target = _resolve_case(target_id)
+    try:
+        with transaction.atomic():
+            merged = merge_cases_fn(target, [case])
+        messages.success(request, f"Merged case {case.number} into {merged.number}.")
+        return redirect("ui-case-detail", case_id=merged.number)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect("ui-case-merge", case_id=case.number)
+
+
+@login_required
+@require_POST
+def case_bulk(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Bulk update cases (stub)."""
+    messages.info(request, "Bulk operations available via API.")
+    return redirect("ui-case-list")
+
+
+@login_required
+@require_GET
+def case_attachment_list(request: HttpRequest, case_id: str) -> HttpResponse:
+    case = _resolve_case(case_id)
+    from cases.models import Attachment
+    return render(request, "ui/case_attachments.html", _base_context(request, case=case, attachments=case.attachments.all()))
+
+
+@login_required
+@require_POST
+def case_attachment_upload(request: HttpRequest, case_id: str) -> HttpResponse:
+    from cases.views import case_attachment_list as api_view
+    case = _resolve_case(case_id)
+    from django.http import QueryDict
+    # The API view expects multipart/form-data with 'attachments' field
+    # We just pass through
+    from cases.views import case_attachment_list as api_view
+    response = api_view(request, case_id=case.id)
+    if response.status_code == 201:
+        messages.success(request, "Attachment uploaded.")
+    else:
+        messages.error(request, f"Upload failed: {response.content.decode()[:200]}")
+    return redirect("ui-case-attachment-list", case_id=case.number)
+
+
+@login_required
+@require_GET
+def case_attachment_download(request: HttpRequest, case_id: str, attachment_id: str) -> HttpResponse:
+    from cases.views import case_attachment_download as api_view
+    return api_view(request, case_id=case_id, attachment_id=attachment_id)
+
+
+@login_required
+@require_POST
+def case_attachment_delete(request: HttpRequest, case_id: str, attachment_id: str) -> HttpResponse:
+    from cases.views import case_attachment_detail as api_view
+    response = api_view(request, case_id=case_id, attachment_id=attachment_id)
+    if response.status_code == 204:
+        messages.success(request, "Attachment deleted.")
+    else:
+        messages.error(request, "Delete failed.")
+    return redirect("ui-case-attachment-list", case_id=case_id)
+
+
+@login_required
+@require_GET
+def case_attachment_detail(request: HttpRequest, case_id: str, attachment_id: str) -> HttpResponse:
+    """Attachment detail (download or delete)."""
+    from cases.views import case_attachment_detail as api_view
+    return api_view(request, case_id=case_id, attachment_id=attachment_id)
+
+
+@login_required
+@require_GET
+def case_procedure_create(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Create a procedure on a case."""
+    from cases.views import case_procedure_create as api_view
+    return api_view(request, case_id=case_id)
+
+
+@login_required
+@require_POST
+def case_procedures_create(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Bulk create procedures on a case."""
+    from cases.views import case_procedures_create as api_view
+    return api_view(request, case_id=case_id)

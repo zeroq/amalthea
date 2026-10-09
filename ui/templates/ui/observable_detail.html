@@ -1,0 +1,102 @@
+{% extends "ui/base.html" %}
+{% load static %}
+
+{% block heading %}{{ observable.data_type.name }}: {{ observable.data }}{% endblock %}
+
+{% block actions %}
+<a class="btn" href="{% url 'ui-observable-list' %}">Back</a>
+{% endblock %}
+
+{% block content %}
+<div class="cols">
+  <div class="stack">
+    <div class="card">
+      <h3>Details</h3>
+      <dl class="meta">
+        <dt>Type</dt>
+        <dd><span class="pill">{{ observable.data_type.name }}</span></dd>
+
+        <dt>Value</dt>
+        <dd class="mono break">{{ observable.data }}</dd>
+
+        <dt>Normalized</dt>
+        <dd class="mono break">{{ observable.normalized_data }}</dd>
+
+        <dt>Created</dt>
+        <dd>{{ observable.created_at|date:"Y-m-d H:i" }}</dd>
+
+        <dt>Updated</dt>
+        <dd>{{ observable.updated_at|date:"Y-m-d H:i" }}</dd>
+
+        <dt>TLP</dt>
+        <dd>{{ observable.tlp }}</dd>
+
+        <dt>PAP</dt>
+        <dd>{{ observable.pap }}</dd>
+
+        <dt>IOC</dt>
+        <dd>{{ observable.ioc|yesno:"Yes,No" }}</dd>
+
+        <dt>Tags</dt>
+        <dd>
+          {% if observable.tags.all %}
+          <div class="chips">
+            {% for tag in observable.tags.all %}
+            <span class="chip">{{ tag.name }}</span>
+            {% endfor %}
+          </div>
+          {% else %}—{% endif %}
+        </dd>
+
+        <dt>Enrichment</dt>
+        <dd>
+          {% if observable.enrichment_data %}
+          <pre class="body">{{ observable.enrichment_data|json_script:"enrichment" }}</pre>
+          {% else %}—{% endif %}
+        </dd>
+      </dl>
+    </div>
+
+    <div class="card">
+      <h3>Linked Cases ({{ cases|length }})</h3>
+      {% if cases %}
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>Case</th>
+            <th>Title</th>
+            <th>Status</th>
+            <th>Severity</th>
+            <th>Created</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for link in cases %}
+          <tr>
+            <td><a href="{% url 'ui-case-detail' link.case.number %}">{{ link.case.number }}</a></td>
+            <td>{{ link.case.title|truncatechars:50 }}</td>
+            <td><span class="pill sev-{{ link.case.severity }}">{{ link.case.get_status_display }}</span></td>
+            <td><span class="sev sev-{{ link.case.severity }}">{{ link.case.get_severity_display }}</span></td>
+            <td>{{ link.case.created_at|date:"Y-m-d H:i" }}</td>
+            <td><a class="btn" href="{% url 'ui-case-detail' link.case.number %}">Open</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="empty">This observable is not linked to any case.</p>
+      {% endif %}
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      try {
+        const enrichment = JSON.parse(document.getElementById('enrichment').textContent);
+        document.querySelector('pre.body').textContent = JSON.stringify(enrichment, null, 2);
+      } catch (e) {}
+    });
+    </script>
+  </div>
+</div>
+{% endblock %}

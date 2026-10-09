@@ -1,0 +1,57 @@
+{% extends "ui/base.html" %}
+{% load static %}
+
+{% block heading %}{{ case.number }} — Attachments{% endblock %}
+
+{% block actions %}
+<a class="btn" href="{% url 'ui-case-detail' case.number %}">Back</a>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h3>Upload Attachment</h3>
+  <form method="post" action="{% url 'ui-case-attachment-upload' case.id %}" enctype="multipart/form-data" class="stack">
+    {% csrf_token %}
+    <input type="file" name="attachments" multiple required>
+    <button class="btn btn-primary" type="submit">Upload</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Attachments ({{ attachments|length }})</h3>
+  {% if attachments %}
+  <table class="grid">
+    <thead>
+      <tr>
+        <th>Filename</th>
+        <th>Type</th>
+        <th>Size</th>
+        <th>SHA256</th>
+        <th>Uploaded</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for att in attachments %}
+      <tr>
+        <td>{{ att.name }}</td>
+        <td>{{ att.content_type }}</td>
+        <td>{{ att.size|filesizeformat }}</td>
+        <td class="mono">{{ att.sha256 }}</td>
+        <td>{{ att.created_at|date:"Y-m-d H:i" }}</td>
+        <td>
+          <a class="btn" href="{% url 'ui-case-attachment-download' case.id att.id %}">Download</a>
+          <form method="post" action="{% url 'ui-case-attachment-delete' case.id att.id %}" class="inline-form" onsubmit="return confirm('Delete {{ att.name }}?');">
+            {% csrf_token %}
+            <button class="btn" type="submit" style="background:var(--color-err);border-color:var(--color-err);color:white;">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No attachments.</p>
+  {% endif %}
+</div>
+{% endblock %}

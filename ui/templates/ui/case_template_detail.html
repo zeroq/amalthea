@@ -1,0 +1,89 @@
+{% extends "ui/base.html" %}
+{% load static %}
+
+{% block heading %}{{ template.display_name|default:template.name }}{% endblock %}
+
+{% block actions %}
+<a class="btn" href="{% url 'ui-case-template-list' %}">Back</a>
+<a class="btn" href="{% url 'ui-case-template-create' %}">New template</a>
+{% endblock %}
+
+{% block content %}
+<div class="cols">
+  <div class="stack">
+    <div class="card">
+      <h3>Details</h3>
+      <dl class="meta">
+        <dt>Name</dt>
+        <dd>{{ template.name }}</dd>
+
+        <dt>Display Name</dt>
+        <dd>{{ template.display_name }}</dd>
+
+        <dt>Title Prefix</dt>
+        <dd>{{ template.title_prefix|default:"—" }}</dd>
+
+        <dt>Description</dt>
+        <dd>{{ template.description|default:"—" }}</dd>
+
+        <dt>Summary</dt>
+        <dd>{{ template.summary|default:"—" }}</dd>
+
+        <dt>Flag</dt>
+        <dd>{{ template.flag|default:"—" }}</dd>
+
+        <dt>Severity</dt>
+        <dd><span class="sev sev-{{ template.severity }}">{{ template.get_severity_display }}</span></dd>
+
+        <dt>TLP</dt>
+        <dd>{{ template.tlp }}</dd>
+
+        <dt>PAP</dt>
+        <dd>{{ template.pap }}</dd>
+
+        <dt>Flags</dt>
+        <dd>{{ template.flag|default:"—" }}</dd>
+      </dl>
+
+      <form method="post" action="{% url 'ui-case-template-delete' template.id %}" class="inline-form" onsubmit="return confirm('Delete this template?');">
+        {% csrf_token %}
+        <button class="btn" type="submit" style="background:var(--color-err); border-color:var(--color-err); color:white;">Delete</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Tags</h3>
+      <div class="chips">
+        {% for tag in template.tags %}
+        <span class="chip">{{ tag }}</span>
+        {% empty %}
+        <span class="empty">No tags</span>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Task Definitions</h3>
+      <pre class="body">{{ template.tasks|json_script:"tasks-json" }}</pre>
+    </div>
+
+    <div class="card">
+      <h3>Custom Field Definitions</h3>
+      <pre class="body">{{ template.custom_fields|json_script:"cf-json" }}</pre>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      try {
+        const tasks = JSON.parse(document.getElementById('tasks-json').textContent);
+        document.querySelector('pre:first-of-type').textContent = JSON.stringify(tasks, null, 2);
+      } catch (e) {}
+      try {
+        const cf = JSON.parse(document.getElementById('cf-json').textContent);
+        document.querySelectorAll('pre')[1].textContent = JSON.stringify(cf, null, 2);
+      } catch (e) {}
+    });
+    </script>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,124 @@
+{% extends "ui/base.html" %}
+{% load static %}
+
+{% block heading %}Taxonomy{% endblock %}
+
+{% block content %}
+<div class="cols">
+  <div class="stack">
+    <div class="card">
+      <h3>Case Statuses</h3>
+      <table class="grid">
+        <thead>
+          <tr><th>Value</th><th>Stage</th><th>Order</th><th>Hidden</th></tr>
+        </thead>
+        <tbody>
+          {% for s in case_statuses %}
+          <tr>
+            <td>{{ s.value }}</td>
+            <td>{{ s.stage }}</td>
+            <td>{{ s.order }}</td>
+            <td>{{ s.hidden|yesno:"Yes,No" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Alert Statuses</h3>
+      <table class="grid">
+        <thead>
+          <tr><th>Value</th><th>Stage</th><th>Order</th><th>Hidden</th></tr>
+        </thead>
+        <tbody>
+          {% for s in alert_statuses %}
+          <tr>
+            <td>{{ s.value }}</td>
+            <td>{{ s.stage }}</td>
+            <td>{{ s.order }}</td>
+            <td>{{ s.hidden|yesno:"Yes,No" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="card">
+      <h3>Observable Types</h3>
+      <table class="grid">
+        <thead>
+          <tr><th>Name</th><th>Case Sensitive</th><th>Attachment</th></tr>
+        </thead>
+        <tbody>
+          {% for t in observable_types %}
+          <tr>
+            <td>{{ t.name }}</td>
+            <td>{{ t.is_case_sensitive|yesno:"Yes,No" }}</td>
+            <td>{{ t.is_attachment|yesno:"Yes,No" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Case Templates</h3>
+      <table class="grid">
+        <thead>
+          <tr><th>Name</th><th>Display Name</th><th>Severity</th></tr>
+        </thead>
+        <tbody>
+          {% for t in case_templates %}
+          <tr>
+            <td>{{ t.name }}</td>
+            <td>{{ t.display_name }}</td>
+            <td><span class="sev sev-{{ t.severity }}">{{ t.get_severity_display }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="card">
+      <h3>Tags</h3>
+      <table class="grid">
+        <thead>
+          <tr><th>Name</th><th>Cases</th><th>Alerts</th><th>Observables</th></tr>
+        </thead>
+        <tbody>
+          {% for t in tags %}
+          <tr>
+            <td>{{ t.name }}</td>
+            <td>{{ t.case_set.count }}</td>
+            <td>{{ t.alert_set.count }}</td>
+            <td>{{ t.observable_set.count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>TTPs (ATT&CK)</h3>
+      <table class="grid">
+        <thead>
+          <tr><th>Name</th><th>Code</th><th>Tactic</th></tr>
+        </thead>
+        <tbody>
+          {% for t in ttps %}
+          <tr>
+            <td>{{ t.name }}</td>
+            <td class="mono">{{ t.ttp_code }}</td>
+            <td>{{ t.tactic }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

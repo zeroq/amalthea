@@ -1,0 +1,24 @@
+{% extends "ui/base.html" %}
+{% load static %}
+
+{% block heading %}{{ case.number }} — Apply Template{% endblock %}
+
+{% block actions %}
+<a class="btn" href="{% url 'ui-case-detail' case.number %}">Back</a>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <form method="post" class="stack">
+    {% csrf_token %}
+    <label for="id_template">Select template</label>
+    <select id="id_template" name="template_id" required>
+      <option value="">— select a template —</option>
+      {% for t in templates %}
+      <option value="{{ t.id }}">{{ t.name }} — {{ t.display_name }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-primary" type="submit">Apply Template</button>
+  </form>
+</div>
+{% endblock %}

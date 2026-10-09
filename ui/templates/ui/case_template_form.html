@@ -1,0 +1,116 @@
+{% extends "ui/base.html" %}
+{% load static %}
+
+{% block heading %}
+{% if template %}Edit{% else %}New{% endif %} Case Template
+{% endblock %}
+
+{% block actions %}
+<a class="btn" href="{% url 'ui-case-template-list' %}">Back</a>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <form method="post" class="stack">
+    {% csrf_token %}
+
+    <div class="meta-inline">
+      <label for="id_name">Name (unique)</label>
+      <input type="text" id="id_name" name="name" value="{{ template.name|default:'' }}" maxlength="200" required {% if template %}readonly{% endif %}>
+    </div>
+
+    <div class="meta-inline">
+      <label for="id_display_name">Display Name</label>
+      <input type="text" id="id_display_name" name="display_name" value="{{ template.display_name|default:'' }}" maxlength="200">
+    </div>
+
+    <div class="meta-inline">
+      <label for="id_title_prefix">Title Prefix</label>
+      <input type="text" id="id_title_prefix" name="title_prefix" value="{{ template.title_prefix|default:'' }}" maxlength="100">
+    </div>
+
+    <div class="meta-inline">
+      <label for="id_description">Description</label>
+      <textarea id="id_description" name="description" rows="3">{{ template.description|default:'' }}</textarea>
+    </div>
+
+    <div class="meta-inline">
+      <label for="id_summary">Summary</label>
+      <textarea id="id_summary" name="summary" rows="2">{{ template.summary|default:'' }}</textarea>
+    </div>
+
+    <div class="meta-inline">
+      <label for="id_flag">Flag</label>
+      <input type="text" id="id_flag" name="flag" value="{{ template.flag|default:'' }}" maxlength="50">
+    </div>
+
+    <div class="cols">
+      <div class="meta-inline">
+        <label for="id_severity">Severity</label>
+        <select id="id_severity" name="severity">
+          {% for val, label in severity_labels.items %}
+          <option value="{{ val }}" {% if template.severity|default:2 == val %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="meta-inline">
+        <label for="id_tlp">TLP</label>
+        <select id="id_tlp" name="tlp">
+          <option value="0" {% if template.tlp|default:2 == 0 %}selected{% endif %}>White (0)</option>
+          <option value="1" {% if template.tlp|default:2 == 1 %}selected{% endif %}>Green (1)</option>
+          <option value="2" {% if template.tlp|default:2 == 2 %}selected{% endif %}>Amber (2)</option>
+          <option value="3" {% if template.tlp|default:2 == 3 %}selected{% endif %}>Red (3)</option>
+        </select>
+      </div>
+
+      <div class="meta-inline">
+        <label for="id_pap">PAP</label>
+        <select id="id_pap" name="pap">
+          <option value="0" {% if template.pap|default:2 == 0 %}selected{% endif %}>White (0)</option>
+          <option value="1" {% if template.pap|default:2 == 1 %}selected{% endif %}>Green (1)</option>
+          <option value="2" {% if template.pap|default:2 == 2 %}selected{% endif %}>Amber (2)</option>
+          <option value="3" {% if template.pap|default:2 == 3 %}selected{% endif %}>Red (3)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="meta-inline">
+      <label for="id_tags">Tags (comma-separated)</label>
+      <input type="text" id="id_tags" name="tags" value="{{ template.tags|join:', '|default:'' }}" maxlength="500">
+    </div>
+
+    <div class="meta-inline">
+      <label for="id_tasks">Tasks (JSON array of objects)</label>
+      <textarea id="id_tasks" name="tasks" rows="4" placeholder='[{"title": "Task 1", "status": "Waiting"}]'>{{ template.tasks|json_script:"tasks" }}</textarea>
+    </div>
+
+    <div class="meta-inline">
+      <label for="id_custom_fields">Custom Fields (JSON array)</label>
+      <textarea id="id_custom_fields" name="custom_fields" rows="4" placeholder='[{"name": "Field", "type": "string", "value": ""}]'>{{ template.custom_fields|json_script:"custom_fields" }}</textarea>
+    </div>
+
+    <button class="btn btn-primary" type="submit">{% if template %}Update{% else %}Create{% endif %}</button>
+    <a class="btn" href="{% url 'ui-case-template-list' %}">Cancel</a>
+  </form>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const tasksEl = document.getElementById('tasks');
+  const cfEl = document.getElementById('custom_fields');
+  if (tasksEl) {
+    try {
+      const data = JSON.parse(tasksEl.textContent || '[]');
+      tasksEl.value = JSON.stringify(data, null, 2);
+    } catch (e) {}
+  }
+  if (cfEl) {
+    try {
+      const data = JSON.parse(cfEl.textContent || '[]');
+      cfEl.value = JSON.stringify(data, null, 2);
+    } catch (e) {}
+  }
+});
+</script>
+{% endblock %}

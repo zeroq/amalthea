@@ -1,0 +1,24 @@
+{% extends "ui/base.html" %}
+{% load static %}
+
+{% block heading %}{% if tag %}Edit{% else %}New{% endif %} Tag{% endblock %}
+
+{% block actions %}
+<a class="btn" href="{% url 'ui-tag-list' %}">Back</a>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <form method="post" class="stack">
+    {% csrf_token %}
+
+    <div class="meta-inline">
+      <label for="id_name">Name</label>
+      <input type="text" id="id_name" name="name" value="{{ tag.name|default:'' }}" maxlength="200" required {% if tag %}readonly{% endif %}>
+    </div>
+
+    <button class="btn btn-primary" type="submit">{% if tag %}Update{% else %}Create{% endif %}</button>
+    <a class="btn" href="{% url 'ui-tag-list' %}">Cancel</a>
+  </form>
+</div>
+{% endblock %}
