@@ -33,6 +33,7 @@ urlpatterns = [
         "automation/playbooks/<str:playbook_id>", views.playbook_detail, name="ui-playbook-detail"
     ),
     path("automation/playbooks/<str:playbook_id>/run", views.playbook_run, name="ui-playbook-run"),
+    path("automation/playbooks/<str:playbook_id>/delete", views.playbook_delete, name="ui-playbook-delete"),
     path("sources", views.sources_list, name="ui-sources-list"),
     path("login", views.SignInView.as_view(), name="login"),
     path("logout", views.sign_out, name="logout"),
