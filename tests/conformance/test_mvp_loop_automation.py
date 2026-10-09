@@ -295,7 +295,9 @@ def test_a_failing_action_records_failure_without_raising(
     # The originating call is unaffected: the failure is a ledger row, not a raised exception.
     assert api.get(f"/api/v1/case/{case.number}").status_code == 200
 
-    event = TimelineEvent.objects.filter(case=case, kind="automation-run", metadata__playbook="broken").get()
+    event = TimelineEvent.objects.filter(
+        case=case, kind="automation-run", metadata__playbook="broken"
+    ).get()
     assert event.metadata["status"] == "Failed"
 
 

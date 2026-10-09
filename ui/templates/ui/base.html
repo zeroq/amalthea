@@ -54,6 +54,11 @@ Accessibility notes that are not optional:
         </a>
       </li>
       <li>
+        <a href="{% url 'ui-playbook-list' %}" {% if request.resolver_match.url_name == 'ui-playbook-list' %}aria-current="page"{% endif %}>
+          <span class="k">p</span> Playbooks
+        </a>
+      </li>
+      <li>
         <a href="{% url 'ui-sources-list' %}" {% if request.resolver_match.url_name == 'ui-sources-list' %}aria-current="page"{% endif %}>
           <span class="k">s</span> Sources
         </a>

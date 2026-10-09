@@ -27,6 +27,12 @@ urlpatterns = [
         name="ui-case-task-toggle",
     ),
     path("automation", views.automation_list, name="ui-automation-list"),
+    path("automation/playbooks", views.playbook_list, name="ui-playbook-list"),
+    path("automation/playbooks/new", views.playbook_create, name="ui-playbook-create"),
+    path(
+        "automation/playbooks/<str:playbook_id>", views.playbook_detail, name="ui-playbook-detail"
+    ),
+    path("automation/playbooks/<str:playbook_id>/run", views.playbook_run, name="ui-playbook-run"),
     path("sources", views.sources_list, name="ui-sources-list"),
     path("login", views.SignInView.as_view(), name="login"),
     path("logout", views.sign_out, name="logout"),

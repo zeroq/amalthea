@@ -1,0 +1,71 @@
+{% extends "ui/base.html" %}
+{% load static %}
+
+{% block heading %}Playbooks{% endblock %}
+
+{% block actions %}
+<a class="btn btn-primary" href="{% url 'ui-playbook-create' %}">New playbook</a>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <table class="grid">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Trigger</th>
+        <th>Action</th>
+        <th>Active</th>
+        <th>Last run</th>
+        <th>Runs</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for pb in playbooks %}
+      <tr>
+        <td>
+          <a href="{% url 'ui-playbook-detail' pb.id %}">{{ pb.name }}</a>
+        </td>
+        <td>{{ pb.trigger_event }}</td>
+        <td>
+          <span class="pill">{{ pb.config.action }}</span>
+        </td>
+        <td>
+          {% if pb.is_active %}
+            <span class="pill pill-on">Active</span>
+          {% else %}
+            <span class="pill pill-off">Inactive</span>
+          {% endif %}
+        </td>
+        <td>
+          {% with runs=pb.runs.all %}
+            {% if runs %}
+              <span class="dim">{{ runs.0.created_at|date:"Y-m-d H:i" }}</span>
+            {% else %}
+              <span class="dim">—</span>
+            {% endif %}
+          {% endwith %}
+        </td>
+        <td>
+          <span class="pill">{{ pb.runs.count }}</span>
+        </td>
+        <td>
+          <a class="btn" href="{% url 'ui-playbook-detail' pb.id %}">Open</a>
+          {% if pb.runs.count == 0 %}
+          <form method="post" action="{% url 'ui-playbook-delete' pb.id %}" class="inline-form" style="margin:0">
+            {% csrf_token %}
+            <button class="btn" type="submit" onclick="return confirm('Delete this playbook?')">Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="7" class="empty">No playbooks yet. <a href="{% url 'ui-playbook-create' %}">Create one</a>.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

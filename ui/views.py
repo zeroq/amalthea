@@ -43,7 +43,7 @@ from alerts.escalation import (
     resolve_case_status,
 )
 from alerts.models import Alert
-from automation.models import AutomationRun
+from automation.models import AutomationRun, Playbook
 from cases.ledger import append_timeline_event
 from cases.models import Case, CaseStatus, Comment, Task
 from core.enums import SEVERITY_CHOICES
@@ -431,3 +431,333 @@ def sources_list(request: HttpRequest) -> HttpResponse:
             sources=IngestionSource.objects.annotate(alert_count=Count("alerts")).order_by("slug"),
         ),
     )
+
+
+@login_required
+@require_GET
+def playbook_list(request: HttpRequest) -> HttpResponse:
+    """List all playbooks with their trigger, action, and last run status."""
+    return render(
+        request,
+        "ui/playbook_list.html",
+        _base_context(
+            request,
+            playbooks=Playbook.objects.prefetch_related("runs").order_by("name"),
+        ),
+    )
+
+
+@login_required
+def playbook_create(request: HttpRequest) -> HttpResponse:
+    """Create a new playbook. GET shows the form, POST creates it."""
+    from automation.dispatcher import TRIGGER_EVENTS
+    from automation.executor import registered_actions
+    from automation.playbooks import ACTIONS, HTTP_METHODS
+
+    if request.method == "GET":
+        return render(
+            request,
+            "ui/playbook_form.html",
+            _base_context(
+                request,
+                trigger_events=TRIGGER_EVENTS,
+                actions=ACTIONS,
+                http_methods=HTTP_METHODS,
+                registered_paths=sorted(registered_actions().keys()),
+            ),
+        )
+
+    # POST - create the playbook
+    name = (request.POST.get("name") or "").strip()
+    if not name:
+        messages.error(request, "Name is required.")
+        return redirect("ui-playbook-create")
+
+    if Playbook.objects.filter(name=name[:200]).exists():
+        messages.error(request, "A playbook with that name already exists.")
+        return redirect("ui-playbook-create")
+
+    trigger_event = (request.POST.get("trigger_event") or "").strip()
+    if trigger_event not in TRIGGER_EVENTS:
+        messages.error(
+            request, f"Invalid trigger event. Must be one of: {', '.join(TRIGGER_EVENTS)}"
+        )
+        return redirect("ui-playbook-create")
+
+    action = (request.POST.get("action") or "").lower()
+    if action not in ("http", "python"):
+        messages.error(request, "Action must be 'http' or 'python'.")
+        return redirect("ui-playbook-create")
+
+    config: dict[str, Any] = {"action": action}
+    if action == "http":
+        url = (request.POST.get("url") or "").strip()
+        if not url:
+            messages.error(request, "URL is required for HTTP actions.")
+            return redirect("ui-playbook-create")
+        config["url"] = url
+
+        method = (request.POST.get("http_method") or "GET").upper()
+        if method not in ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"):
+            messages.error(request, "Invalid HTTP method.")
+            return redirect("ui-playbook-create")
+        config["method"] = method
+
+        timeout = request.POST.get("timeout_seconds")
+        if timeout:
+            try:
+                timeout_val = float(timeout)
+                if timeout_val <= 0 or timeout_val > 30:
+                    raise ValueError
+                config["timeoutSeconds"] = timeout_val
+            except ValueError:
+                messages.error(request, "Timeout must be a positive number <= 30.")
+                return redirect("ui-playbook-create")
+
+        headers = {}
+        for key in request.POST:
+            if key.startswith("header_key_") and key[11:]:
+                idx = key[11:]
+                val_key = f"header_val_{idx}"
+                if val_key in request.POST:
+                    headers[request.POST[key]] = request.POST[val_key]
+        if headers:
+            config["headers"] = headers
+
+        body = request.POST.get("http_body")
+        if body:
+            config["body"] = body
+
+    else:  # python
+        action_path = (request.POST.get("action_path") or "").strip()
+        if not action_path:
+            messages.error(request, "Action path is required for Python actions.")
+            return redirect("ui-playbook-create")
+        from automation.executor import registered_actions
+
+        if action_path not in registered_actions():
+            messages.error(
+                request,
+                f"Unknown action path. Registered: {', '.join(sorted(registered_actions().keys()))}",
+            )
+            return redirect("ui-playbook-create")
+        config["action_path"] = action_path
+
+    description = (request.POST.get("description") or "").strip()
+    is_active = request.POST.get("is_active") == "on"
+
+    Playbook.objects.create(
+        name=name[:200],
+        description=description,
+        trigger_event=trigger_event,
+        is_active=is_active,
+        config=config,
+    )
+    messages.success(request, f"Playbook '{name}' created.")
+    return redirect("ui-playbook-list")
+
+
+@login_required
+def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
+    """View or edit a playbook."""
+    from automation.dispatcher import TRIGGER_EVENTS
+    from automation.executor import registered_actions
+    from automation.playbooks import ACTIONS, HTTP_METHODS
+
+    # Resolve by UUID or name
+    playbook = None
+    try:
+        import uuid
+
+        uuid.UUID(playbook_id)
+        playbook = get_object_or_404(Playbook, pk=playbook_id)
+    except ValueError:
+        playbook = get_object_or_404(Playbook, name=playbook_id)
+
+    if request.method == "GET":
+        runs = AutomationRun.objects.filter(playbook=playbook).order_by("-created_at")[:50]
+        return render(
+            request,
+            "ui/playbook_detail.html",
+            _base_context(
+                request,
+                playbook=playbook,
+                runs=runs,
+                trigger_events=sorted(TRIGGER_EVENTS),
+                actions=ACTIONS,
+                http_methods=HTTP_METHODS,
+                registered_paths=sorted(registered_actions().keys()),
+            ),
+        )
+
+    # POST - update the playbook
+    description = (request.POST.get("description") or "").strip()
+    trigger_event = (request.POST.get("trigger_event") or "").strip()
+    if trigger_event and trigger_event not in TRIGGER_EVENTS:
+        messages.error(request, "Invalid trigger event.")
+        return redirect("ui-playbook-detail", playbook_id=playbook_id)
+
+    is_active = request.POST.get("is_active") == "on"
+
+    action = (request.POST.get("action") or "").lower()
+    if action and action not in ("http", "python"):
+        messages.error(request, "Action must be 'http' or 'python'.")
+        return redirect("ui-playbook-detail", playbook_id=playbook_id)
+
+    config = dict(playbook.config) if playbook.config else {}
+    if action:
+        config["action"] = action
+    elif "action" in config:
+        action = config["action"]
+
+    if action == "http":
+        url = request.POST.get("url")
+        if url is not None:
+            url = url.strip()
+            if not url:
+                messages.error(request, "URL is required for HTTP actions.")
+                return redirect("ui-playbook-detail", playbook_id=playbook_id)
+            config["url"] = url
+
+        method = request.POST.get("http_method")
+        if method:
+            method = method.upper()
+            if method not in ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"):
+                messages.error(request, "Invalid HTTP method.")
+                return redirect("ui-playbook-detail", playbook_id=playbook_id)
+            config["method"] = method
+
+        timeout = request.POST.get("timeout_seconds")
+        if timeout is not None:
+            timeout = timeout.strip()
+            if timeout:
+                try:
+                    timeout_val = float(timeout)
+                    if timeout_val <= 0 or timeout_val > 30:
+                        raise ValueError
+                    config["timeoutSeconds"] = timeout_val
+                except ValueError:
+                    messages.error(request, "Timeout must be a positive number <= 30.")
+                    return redirect("ui-playbook-detail", playbook_id=playbook_id)
+            else:
+                config.pop("timeoutSeconds", None)
+
+        # Handle headers - this is a simplified version, full form would be more complex
+        # For now, we just allow clearing
+        if "clear_headers" in request.POST:
+            config.pop("headers", None)
+
+        body = request.POST.get("http_body")
+        if body is not None:
+            config["body"] = body.strip() if body else None
+
+    elif action == "python":
+        action_path = request.POST.get("action_path")
+        if action_path is not None:
+            action_path = action_path.strip()
+            if not action_path:
+                messages.error(request, "Action path is required for Python actions.")
+                return redirect("ui-playbook-detail", playbook_id=playbook_id)
+            from automation.executor import registered_actions
+
+            if action_path not in registered_actions():
+                messages.error(request, "Unknown action path.")
+                return redirect("ui-playbook-detail", playbook_id=playbook_id)
+            config["action_path"] = action_path
+
+    playbook.description = description
+    if trigger_event:
+        playbook.trigger_event = trigger_event
+    playbook.is_active = is_active
+    playbook.config = config
+    playbook.save(
+        update_fields=["description", "trigger_event", "is_active", "config", "updated_at"]
+    )
+
+    messages.success(request, f"Playbook '{playbook.name}' updated.")
+    return redirect("ui-playbook-detail", playbook_id=playbook_id)
+
+
+@login_required
+@require_POST
+def playbook_delete(request: HttpRequest, playbook_id: str) -> HttpResponse:
+    """Delete a playbook if it has no runs."""
+    try:
+        import uuid
+
+        uuid.UUID(playbook_id)
+        playbook = get_object_or_404(Playbook, pk=playbook_id)
+    except ValueError:
+        playbook = get_object_or_404(Playbook, name=playbook_id)
+
+    if playbook.runs.exists():
+        messages.error(request, "Cannot delete playbook: it has associated runs.")
+        return redirect("ui-playbook-detail", playbook_id=playbook_id)
+
+    name = playbook.name
+    playbook.delete()
+    messages.success(request, f"Playbook '{name}' deleted.")
+    return redirect("ui-playbook-list")
+
+
+@login_required
+@require_POST
+def playbook_run(request: HttpRequest, playbook_id: str) -> HttpResponse:
+    """Manually trigger a playbook run."""
+    from automation.dispatcher import run_now
+    from cases.models import Case
+    from observables.models import Observable
+
+    try:
+        import uuid
+
+        uuid.UUID(playbook_id)
+        playbook = get_object_or_404(Playbook, pk=playbook_id)
+    except ValueError:
+        playbook = get_object_or_404(Playbook, name=playbook_id)
+
+    case_id = (request.POST.get("case") or "").strip()
+    observable_id = (request.POST.get("observable") or "").strip()
+
+    if not case_id and not observable_id:
+        messages.error(request, "Either a case or an observable is required.")
+        return redirect("ui-playbook-detail", playbook_id=playbook_id)
+
+    case = None
+    if case_id:
+        try:
+            case = Case.objects.get(number=int(case_id))
+        except (ValueError, Case.DoesNotExist):
+            try:
+                case = Case.objects.get(pk=case_id)
+            except Case.DoesNotExist:
+                messages.error(request, "Case not found.")
+                return redirect("ui-playbook-detail", playbook_id=playbook_id)
+
+    observable = None
+    if observable_id:
+        try:
+            import uuid
+
+            uuid.UUID(observable_id)
+            observable = get_object_or_404(Observable, pk=observable_id)
+        except ValueError:
+            messages.error(request, "Invalid observable ID.")
+            return redirect("ui-playbook-detail", playbook_id=playbook_id)
+
+    # Ensure observable is linked to case if case not provided
+    if case is None and observable is not None:
+        link = observable.case_observables.select_related("case").first()
+        if link is None:
+            messages.error(request, "Observable is not linked to any case.")
+            return redirect("ui-playbook-detail", playbook_id=playbook_id)
+        case = link.case
+
+    try:
+        run = run_now(playbook, case=case, observable=observable)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect("ui-playbook-detail", playbook_id=playbook_id)
+
+    messages.success(request, f"Playbook triggered (run {run.id}).")
+    return redirect("ui-playbook-detail", playbook_id=playbook_id)

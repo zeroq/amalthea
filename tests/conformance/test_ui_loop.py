@@ -72,7 +72,10 @@ def mail_playbook(db: None) -> Playbook:
         defaults={
             "trigger_event": "observable.created",
             "is_active": True,
-            "config": {"action": "python", "action_path": "amalthea.automation.executor.enrichment_probe"},
+            "config": {
+                "action": "python",
+                "action_path": "amalthea.automation.executor.enrichment_probe",
+            },
         },
     )[0]
 
