@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django.urls import include, path
 
+from realtime.routing import http_fallback_urlpatterns
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     # The UI is mounted last-but-one so `compat.urls` stays the final catch-all (BRIEF §0.4 note on
@@ -18,4 +20,6 @@ urlpatterns = [
     path("api/v1/", include("automation.urls")),
     path("api/v1/", include("query.urls")),
     path("api/v1/", include("compat.urls")),
+    # Realtime HTTP fallback (friendly error for WebSocket endpoints accessed via HTTP)
+    path("", include(http_fallback_urlpatterns)),
 ]
