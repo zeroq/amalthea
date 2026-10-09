@@ -16,8 +16,45 @@
     a: "/alerts",
     c: "/cases",
     r: "/automation",
+    p: "/automation/playbooks",
     s: "/sources",
   };
+
+  // Cheat sheet data (key -> label)
+  var CHEATSHEET = [
+    { key: "g", label: "Go to Dashboard" },
+    { key: "a", label: "Alerts list" },
+    { key: "c", label: "Cases list" },
+    { key: "p", label: "Playbooks list" },
+    { key: "r", label: "Automation runs" },
+    { key: "s", label: "Sources" },
+    { key: "/", label: "Focus search / first input" },
+    { key: "?", label: "Show this cheat sheet" },
+  ];
+
+  function renderCheatsheet() {
+    var modal = document.getElementById("cheatsheet-modal");
+    if (modal) return;
+    modal = document.createElement("dialog");
+    modal.id = "cheatsheet-modal";
+    modal.className = "cheatsheet-modal";
+    var html = '<div class="cheatsheet-header"><h2>Keyboard shortcuts</h2><button class="cheatsheet-close" aria-label="Close">&times;</button></div>';
+    html += '<table class="cheatsheet-table"><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody>';
+    CHEATSHEET.forEach(function(item) {
+      html += '<tr><td class="cheatsheet-key"><kbd>' + item.key + '</kbd></td><td>' + item.label + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    modal.innerHTML = html;
+    document.body.appendChild(modal);
+
+    modal.querySelector(".cheatsheet-close").addEventListener("click", function() {
+      modal.close();
+    });
+    modal.addEventListener("click", function(e) {
+      if (e.target === modal) modal.close();
+    });
+    modal.showModal();
+  }
 
   function isTyping(target) {
     if (!target) return false;
@@ -46,8 +83,15 @@
       return;
     }
 
+    // `?` (Shift+/) opens the cheat sheet.
+    if (event.key === "?" || (event.key === "/" && event.shiftKey)) {
+      event.preventDefault();
+      renderCheatsheet();
+      return;
+    }
+
     // `/` focuses the first text field on the page, the way most search-first tools behave.
-    if (event.key === "/") {
+    if (event.key === "/" && !event.shiftKey) {
       var field = document.querySelector("main input:not([type=hidden]), main textarea");
       if (field) {
         event.preventDefault();
