@@ -27,6 +27,7 @@ from cases.models import (
     Case,
     CaseObservable,
     CaseStatus,
+    CaseTemplate,
     Comment,
     CustomField,
     Page,
@@ -35,6 +36,7 @@ from cases.models import (
     Task,
     TimelineEvent,
 )
+from compat.enums import PAP_LABELS, SEVERITY_LABELS, TLP_LABELS
 from identity.models import Organisation, User
 from observables.models import Observable, ObservableType
 
@@ -378,6 +380,40 @@ def attachment_json(attachment: Attachment) -> dict[str, Any]:
         "path": attachment.path,
         "extraData": {},
         "external": attachment.external,
+    }
+
+
+def case_template_json(template: CaseTemplate) -> dict[str, Any]:
+    """`OutputCaseTemplate` (recorded 5.8.0): a reusable case blueprint.
+
+    `tags`/`tasks`/`customFields` are echoed as the JSON definitions the row stores. The audit
+    pair has no creator columns on `CaseTemplate` and degrades to `null`, the same honest-bucket
+    choice `task_json` makes.
+    """
+    return {
+        "_id": str(template.id),
+        "id": str(template.id),
+        "_type": "CaseTemplate",
+        "_createdBy": None,
+        "_createdAt": _iso(template.created_at),
+        "_updatedBy": None,
+        "_updatedAt": _iso(template.updated_at),
+        "name": template.name,
+        "displayName": template.display_name,
+        "titlePrefix": template.title_prefix,
+        "description": template.description,
+        "severity": template.severity,
+        "severityLabel": SEVERITY_LABELS.get(template.severity, ""),
+        "tags": list(template.tags or []),
+        "flag": template.flag,
+        "tlp": template.tlp,
+        "tlpLabel": TLP_LABELS.get(template.tlp, ""),
+        "pap": template.pap,
+        "papLabel": PAP_LABELS.get(template.pap, ""),
+        "summary": template.summary,
+        "tasks": list(template.tasks or []),
+        "customFields": list(template.custom_fields or []),
+        "extraData": {},
     }
 
 

@@ -112,6 +112,24 @@ urlpatterns = [
     ),
     path("comment/<str:comment_id>", views.comment_detail, name="comment-detail"),
     path("comment/<str:comment_id>/", views.comment_detail, name="comment-detail-slash"),
+    # T2 P4 — bulk, merge and case templates, all under `case/`. `_bulk`/`template` are single
+    # segments that the bare `case/<case_id>` route below would otherwise swallow as identifiers,
+    # so they are registered here; `_merge/<ids>` carries a comma-separated list in one segment.
+    path("case/_bulk", views.case_bulk_update, name="case-bulk-update"),
+    path("case/_bulk/", views.case_bulk_update, name="case-bulk-update-slash"),
+    path("case/_bulk/caseTemplate", views.case_apply_template, name="case-apply-template"),
+    path("case/_bulk/caseTemplate/", views.case_apply_template, name="case-apply-template-slash"),
+    path("case/_merge/<str:case_ids>", views.case_merge, name="case-merge"),
+    path("case/template", views.case_template_collection, name="case-template-collection"),
+    path("case/template/", views.case_template_collection, name="case-template-collection-slash"),
+    path(
+        "case/template/<str:template_id>", views.case_template_detail, name="case-template-detail"
+    ),
+    path(
+        "case/template/<str:template_id>/",
+        views.case_template_detail,
+        name="case-template-detail-slash",
+    ),
     path("case/<str:case_id>", views.case_detail, name="case-detail"),
     path("case/<str:case_id>/", views.case_detail, name="case-detail-slash"),
     # T2 tag link, above `observable/<id>` so `<str:observable_id>` cannot swallow `tag`.
@@ -125,6 +143,10 @@ urlpatterns = [
         views.observable_tag_link,
         name="observable-tag-link-slash",
     ),
+    # T2 P4 bulk. `_bulk` is one segment, so it must precede the bare detail routes that would
+    # otherwise treat the literal word `_bulk` as an id.
+    path("observable/_bulk", views.observable_bulk_update, name="observable-bulk-update"),
+    path("observable/_bulk/", views.observable_bulk_update, name="observable-bulk-update-slash"),
     path("observable/<str:observable_id>", views.observable_detail, name="observable-detail"),
     # T2 vocabularies. `caseStatus` is a single segment, disjoint from `case/<id>` (two segments)
     # and from `task/`; `tag`/`tag/<id>` are disjoint from every other prefix here except
@@ -143,7 +165,11 @@ urlpatterns = [
     path("tag/<str:tag_id>/", views.tag_detail, name="tag-detail-slash"),
     # Distinct top-level prefixes (`task/`, `customEvent/`, `customField/`) — no collision with
     # `case/<id>`, and all of them land before `compat.urls`' catch-all by construction.
+    path("task/_bulk", views.task_bulk_update, name="task-bulk-update"),
+    path("task/_bulk/", views.task_bulk_update, name="task-bulk-update-slash"),
     path("task/<str:task_id>", views.task_detail, name="task-detail"),
+    path("taxonomy", views.taxonomy, name="taxonomy"),
+    path("taxonomy/", views.taxonomy, name="taxonomy-slash"),
     path("customEvent/<str:event_id>", views.custom_event_detail, name="custom-event-detail"),
     path("customField", views.custom_field_list, name="custom-field-list"),
     path("customField/", views.custom_field_list, name="custom-field-list-slash"),

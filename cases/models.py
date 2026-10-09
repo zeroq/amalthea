@@ -445,6 +445,45 @@ class Share(UUIDModel, TimeStampedModel):
         return f"Share({self.case_id} -> {self.organisation_id})"
 
 
+class CaseTemplate(UUIDModel, TimeStampedModel):
+    """A reusable case blueprint (T2 P4; TheHive `OutputCaseTemplate`).
+
+    Deliberately holds its defaults as **JSON definitions**, not as linked rows: a template is
+    copied into a case, never shared with it, so a task default or a custom-field default is
+    data the template owns outright. Modelling them as FK collections would make editing a
+    template retroactively rewrite history on every case it ever seeded.
+
+    `tags` is a list of names (not `Tag` rows) for the same reason — applying a template creates
+    the tags it needs on the case.
+    """
+
+    name = models.CharField(max_length=100, unique=True)
+    display_name = models.CharField(max_length=200, blank=True)
+    title_prefix = models.CharField(max_length=100, blank=True)
+    description = models.TextField(blank=True)
+    severity = models.SmallIntegerField(default=2, choices=list(SEVERITY_CHOICES))
+    tlp = models.SmallIntegerField(default=2, choices=list(TLP_CHOICES))
+    pap = models.SmallIntegerField(default=2, choices=list(PAP_CHOICES))
+    flag = models.BooleanField(default=False)
+    summary = models.TextField(blank=True)
+    # `[{"title", "group", "description", "order", "mandatory"}]`.
+    tasks = models.JSONField(default=list, blank=True)
+    # `[{"name", "value"}]` against `CustomField.name`.
+    custom_fields = models.JSONField(default=list, blank=True)
+    tags = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        db_table = "case_template"
+        constraints = [
+            in_range("case_template_severity_range", "severity", SEVERITY_MIN, SEVERITY_MAX),
+            in_range("case_template_tlp_range", "tlp", TLP_MIN, TLP_MAX),
+            in_range("case_template_pap_range", "pap", PAP_MIN, PAP_MAX),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class Attachment(UUIDModel, TimeStampedModel):
     """A file attached to a case (T2 P3; TheHive `OutputAttachment`).
 

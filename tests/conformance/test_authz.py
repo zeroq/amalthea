@@ -36,6 +36,7 @@ from dataclasses import dataclass
 import pytest
 from rest_framework.test import APIClient
 
+from cases.models import CaseTemplate
 from identity.models import Organisation, User
 from ingest.models import IngestionSource
 
@@ -64,6 +65,10 @@ READ: list[Endpoint] = [
     Endpoint("task-detail", "GET", "/api/v1/task/{task}", False),
     Endpoint("custom-field-list", "GET", "/api/v1/customField", False),
     Endpoint("observable-detail", "GET", "/api/v1/observable/{observable}", False),
+    # T2 P4 — case templates list/detail and the aggregate taxonomy read.
+    Endpoint("case-template-list", "GET", "/api/v1/case/template", False),
+    Endpoint("case-template-detail", "GET", "/api/v1/case/template/{template}", False),
+    Endpoint("taxonomy", "GET", "/api/v1/taxonomy", False),
 ]
 
 MUTATING: list[Endpoint] = [
@@ -92,6 +97,18 @@ MUTATING: list[Endpoint] = [
     Endpoint("observable-patch", "PATCH", "/api/v1/observable/{observable}", True),
     Endpoint("observable-delete", "DELETE", "/api/v1/observable/{observable}", True),
     Endpoint("query", "POST", "/api/v1/query", True),
+    # T2 P4 — per-item bulk patches, merge, template apply/CRUD. Bodies are omitted on purpose:
+    # the claim is only that the permission layer does not block the verbs, and the generic
+    # `ids is required` 400 is well under the 500 ceiling this matrix allows.
+    Endpoint("case-bulk", "PATCH", "/api/v1/case/_bulk", True),
+    Endpoint("task-bulk", "PATCH", "/api/v1/task/_bulk", True),
+    Endpoint("observable-bulk", "PATCH", "/api/v1/observable/_bulk", True),
+    Endpoint("alert-bulk", "PATCH", "/api/v1/alert/_bulk", True),
+    Endpoint("case-merge", "POST", "/api/v1/case/_merge/{case}", True),
+    Endpoint("case-apply-template", "POST", "/api/v1/case/_bulk/caseTemplate", True),
+    Endpoint("case-template-create", "POST", "/api/v1/case/template", True),
+    Endpoint("case-template-patch", "PATCH", "/api/v1/case/template/{template}", True),
+    Endpoint("case-template-delete", "DELETE", "/api/v1/case/template/{template}", True),
 ]
 
 MATRIX = READ + MUTATING
@@ -107,6 +124,7 @@ def ids(db: None) -> dict[str, str]:
         "task": str(_task(case).id),
         "event": str(_event(case).id),
         "observable": str(_observable("10.0.0.7").id),
+        "template": str(CaseTemplate.objects.create(name="authz-template").id),
     }
 
 

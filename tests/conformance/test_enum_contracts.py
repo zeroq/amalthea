@@ -34,7 +34,7 @@ from django.db import IntegrityError, transaction
 
 from alerts.models import Alert, AlertStatus
 from automation.models import AutomationRun, Playbook
-from cases.models import Case, CaseStatus, CustomField, Task
+from cases.models import Case, CaseStatus, CaseTemplate, CustomField, Task
 from ingest.models import IngestionSource
 from observables.models import Observable, ObservableType
 
@@ -60,6 +60,9 @@ CHOICE_FIELDS: dict[tuple[str, str], str] = {
     ("case_record", "tlp"): "case_tlp_range",
     ("case_record", "pap"): "case_pap_range",
     ("case_status", "stage"): "case_status_stage_valid",
+    ("case_template", "severity"): "case_template_severity_range",
+    ("case_template", "tlp"): "case_template_tlp_range",
+    ("case_template", "pap"): "case_template_pap_range",
     ("custom_field", "type"): "custom_field_type_valid",
     ("identity_apikey", "scope"): "apikey_scope_valid",
     ("ingestion_source", "default_severity"): "ingestion_source_severity_range",
@@ -254,6 +257,7 @@ _SAMPLE_ROW = {
         slug="enum-probe", name="enum probe"
     ),
     "custom_field": lambda: CustomField.objects.create(name="enum-probe", type="string"),
+    "case_template": lambda: CaseTemplate.objects.create(name="enum-probe"),
     "identity_apikey": lambda: _apikey(),
 }
 
@@ -276,6 +280,9 @@ GRADED_DOMAIN: dict[str, tuple[str, str, tuple[Any, ...]]] = {
     "case_tlp_range": ("case_record", "tlp", (-1, 5, 99)),
     "case_pap_range": ("case_record", "pap", (-1, 4, 99)),
     "case_status_stage_valid": ("case_status", "stage", ("inprogres", "")),
+    "case_template_severity_range": ("case_template", "severity", (-1, 5, 99)),
+    "case_template_tlp_range": ("case_template", "tlp", (-1, 5, 99)),
+    "case_template_pap_range": ("case_template", "pap", (-1, 4, 99)),
     "custom_field_type_valid": ("custom_field", "type", ("enum", "")),
     "apikey_scope_valid": ("identity_apikey", "scope", ("root", "")),
     "ingestion_source_severity_range": ("ingestion_source", "default_severity", (-1, 5, 99)),

@@ -1,7 +1,7 @@
 # PLAN — Wave 6.1: TheHive T2 API surface
 
 - **Date:** 2026-10-09
-- **Status:** Draft for approval
+- **Status:** SHIPPED — P1–P4 complete 2026-10-09 (P5 pending; see per-phase status blocks in §6)
 - **Owner:** planner (tech lead)
 - **Source:** `TODO.md` §6.1 · master plan `PLAN-2026-10-03-thehive-compatible-mvp.md` §7.3 · `docs/decisions/ADR-002`
 - **Related:** `docs/spec/api.md` (implemented T1 surface), `docs/spec/data-model.md`, `docs/spec/deviations.md`
@@ -182,6 +182,13 @@ with read/write perms), `flow` (read-only case-flow view).
 - **AC6.1-P3-c** Cross-org upload/download is rejected (401/403) — demonstrated.
 
 ### P4 — Bulk, merge, templates & taxonomy
+
+> **Status: SHIPPED 2026-10-09.** Migration `cases/migrations/0011_casetemplate.py`; deviations
+> `P4-1`…`P4-3` in `docs/spec/deviations.md`; record in `COMPLETED.md`.
+> **Deviation from this plan:** task 1 framed `_bulk` as `POST /query` operations, but the pinned
+> ground truth (`thehive4py` 2.1.0) is REST `PATCH /{case,alert,task,observable}/_bulk` — implemented
+> that way (`compat/bulk.py`). Task 5's `test_thehive_fixtures.py` coverage was realised as
+> `tests/conformance/test_t2_p4_surface.py`.
 
 **Scope:** `query` `_bulk` patches; `POST /case/_merge/{ids}`; `case/template` CRUD; `taxonomy`.
 

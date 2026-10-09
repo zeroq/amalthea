@@ -30,6 +30,10 @@ urlpatterns = [
     path(
         "alert/<str:alert_id>/comment/", views.alert_comment_list, name="alert-comment-list-slash"
     ),
+    # T2 P4 — bulk patch. `_bulk` is a single segment, so it must precede the bare detail route
+    # which would otherwise treat the literal `_bulk` as an alert id.
+    path("alert/_bulk", views.alert_bulk_update, name="alert-bulk-update"),
+    path("alert/_bulk/", views.alert_bulk_update, name="alert-bulk-update-slash"),
     path("alert/<str:alert_id>", views.alert_detail, name="alert-detail"),
     # T2 alert-status vocabulary. `alertStatus` is disjoint from `alert/<id>` (single segment vs
     # two), so ordering here is convention rather than load-bearing; all land before `compat.urls`.

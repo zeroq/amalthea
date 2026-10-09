@@ -92,6 +92,18 @@ the divergences, all on the safety side.
 | **P3-3** | `OutputAttachment.hashes` is a list | single **SHA-256** in the list | One hash is computed at write time; the wire keeps TheHive's list shape (`hashes=[sha256]`). `core/serializers.py::attachment_json` · `test_t2_p3_attachments.py` (AC-b) |
 | **P3-4** | — | **413 before write** | The size cap (`ATTACHMENT_MAX_BYTES`, env `AMALTHEA_MAX_ATTACHMENT_BYTES`) is checked before the blob reaches storage; a rejected request leaves no blob and no row. `amalthea/settings/base.py`, `cases/views.py::case_attachment_list` · `test_t2_p3_attachments.py` (AC-a) |
 
+## Wave 6.1 — T2 Phase P4 (2026-10-09)
+
+Bulk edits, case merge, case templates and the aggregate taxonomy. The four `PATCH …/_bulk`
+endpoints, `POST /case/_merge/{ids}` and `POST /case/_bulk/caseTemplate` are TheHive 5.8 parity
+(`thehive4py` 2.1.0 `endpoints/{case,alert,task,observable}.py`); the rows below are divergences.
+
+| ID | Plan / TheHive | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **P4-1** | plan §6-P4 framed `_bulk` as `POST /query` operations | **REST `PATCH /{case,alert,task,observable}/_bulk`** | Ground truth is TheHive 5's REST PATCH (verified in `thehive4py` 2.1.0); the plan's query-engine framing was speculative. Per-item isolation + status reporting is the AC. `compat/bulk.py`, `cases/views.py::case_bulk_update` · `test_t2_p4_surface.py` (AC6.1-P4-a) |
+| **P4-2** | — | **`case/_merge` replay is idempotent** | A second POST of the same `<ids>` finds the absorbed cases gone, so it resolves to the surviving target and returns it rather than 500/duplicating provenance. One `case-merged` ledger event per absorbed case is written before `source.delete()`. `cases/merge.py::merge_cases` · `test_t2_p4_surface.py` (AC6.1-P4-b) |
+| **P4-3** | — | **`taxonomy` + case-template CRUD are extensions** | TheHive 5 exposes no aggregate taxonomy route and no case-template module in `thehive4py` 2.1.0; both are Amalthea additions so the UI can drive its pickers. `cases/views.py::taxonomy`/`case_template_*` · `test_t2_p4_surface.py` |
+
 ## Security hardening findings
 
 Source: security-auditor Wave C, carried as **P10-10** (F1/F6/F3/F5/F7 fixed in the burst). **F9 is

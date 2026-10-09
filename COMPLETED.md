@@ -688,5 +688,27 @@ bytes and a client-controlled filename — so the safety controls are the point 
   routes/renderer added to `docs/spec/api.md`.
 - [x] Gate: SQLite `make check` **815 passed / 3 skipped**; ruff + mypy clean; migration in sync.
 
+## 2026-10-09 — Wave 6.1 Phase P4: bulk, merge, case templates, taxonomy (T2)
 
+Fourth phase of the T2 wave (`PLAN-2026-10-09-t2-endpoints.md` §6-P4). **Schema change:** migration
+`cases/migrations/0011_casetemplate.py`. The plan framed `_bulk` as `POST /query` operations; the
+ground truth (`thehive4py` 2.1.0) is REST `PATCH …/_bulk`, so it is implemented that way and recorded
+as deviation **P4-1**.
 
+- [x] **`compat/bulk.py::bulk_patch`** — one per-item contract for all four `_bulk` endpoints: each
+  item runs in its own `transaction.atomic()`, an item error is reported as `{"id","status","message"}`
+  and never rolls back the batch; response is `{"results":[…],"updated":n,"failed":m}`.
+  `_set_task_fields` / `_set_observable_fields` / `_set_alert_fields` were extracted so the single
+  and bulk paths share one field parser.
+- [x] **`POST /case/_merge/{ids}`** — `cases/merge.py::merge_cases`; first id is the target;
+  alerts/tasks/comments/pages/attachments/timeline re-parent by FK, observables/shares/custom fields
+  moved with dedupe; one `case-merged` ledger event per absorbed case; idempotent on replay
+  (deviation **P4-2**).
+- [x] **Case templates** — `CaseTemplate` model (JSON `tags`/`tasks`/`custom_fields`), CRUD at
+  `case/template[/{idOrName}]`, and `POST /case/_bulk/caseTemplate` copies the definitions onto each
+  case (AC6.1-P4-c).
+- [x] **Taxonomy** — `GET /taxonomy` aggregates the editable vocabularies; extension (**P4-3**).
+- [x] **Tests** — `tests/conformance/test_t2_p4_surface.py` (10 tests over AC6.1-P4-a/b/c);
+  `test_authz.py` + `test_enum_contracts.py` extended.
+- [x] **Deviations recorded** — `P4-1`…`P4-3`; routes added to `docs/spec/api.md`.
+- [x] Gate: SQLite `make check` **877 passed / 3 skipped**; ruff + mypy clean; migration in sync.

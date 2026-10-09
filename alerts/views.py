@@ -9,6 +9,7 @@ grows.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from functools import partial
 from typing import Any
@@ -31,6 +32,7 @@ from alerts.escalation import (
 from alerts.models import Alert, AlertObservable, AlertStatus, AlertTagLink
 from cases.models import Case, Comment, Tag
 from cases.tagging import tag_names_from_payload
+from compat.bulk import bulk_patch
 from core.enums import ALERT_STAGES
 from core.serializers import (
     alert_json,
@@ -347,11 +349,14 @@ def alert_import(request: Request, alert_id: str) -> Response:
     return Response(case_json(case), status=status.HTTP_201_CREATED)
 
 
-@transaction.atomic
-def _update_alert(request: Request, alert: Alert) -> Response:
-    """Apply the fields the triage loop actually changes. No field, no write."""
+def _set_alert_fields(alert: Alert, payload: Mapping[str, Any]) -> list[str]:
+    """Apply the triage fields `alert_detail` PATCHes to `alert`; shared with `alert/_bulk`.
+
+    There is no `startedAt`/`endedAt`/`tags` here: `Alert` has no such columns, and its tags move
+    through the dedicated `alert/<id>/tag` link endpoint (`_set_alert_fields` mirrors exactly what
+    `_update_alert` always accepted, so bulk and single PATCH cannot drift apart).
+    """
     fields: list[str] = []
-    payload = request.data if isinstance(request.data, dict) else {}
     for key in ("title", "description", "summary", "severity", "tlp", "pap", "flag", "follow"):
         if key in payload:
             setattr(alert, key, payload[key])
@@ -362,6 +367,14 @@ def _update_alert(request: Request, alert: Alert) -> Response:
         warnings: list[str] = []
         alert.status = resolve_alert_status(str(payload["status"]), warnings=warnings)
         fields.append("status")
+    return fields
+
+
+@transaction.atomic
+def _update_alert(request: Request, alert: Alert) -> Response:
+    """Apply the fields the triage loop actually changes. No field, no write."""
+    payload = request.data if isinstance(request.data, dict) else {}
+    fields = _set_alert_fields(alert, payload)
     if not fields:
         return Response(
             {"type": "BadRequest", "message": "No updatable field supplied", "fields": {}},
@@ -370,6 +383,23 @@ def _update_alert(request: Request, alert: Alert) -> Response:
     alert.save(update_fields=[*fields, "updated_at"])
     alert.refresh_from_db()
     return Response(alert_json(alert))
+
+
+def _resolve_alert_for_bulk(_request: Request, raw: str) -> Alert | None:
+    """Best-effort `{idOrNumber}` resolution for `_bulk`; an unknown id is an item-level 404."""
+    try:
+        return link_alert_from_identifier(raw)
+    except (Alert.DoesNotExist, Alert.MultipleObjectsReturned):
+        return None
+
+
+@api_view(["PATCH"])
+@renderer_classes([JSONRenderer])
+def alert_bulk_update(request: Request) -> Response:
+    """`PATCH /api/v1/alert/_bulk` — apply one field set to many alerts (per-item, AC6.1-P4-a)."""
+    return bulk_patch(
+        request, ids_key="ids", resolve=_resolve_alert_for_bulk, apply=_set_alert_fields
+    )
 
 
 # --- T2: alert statuses and tag links ---------------------------------------

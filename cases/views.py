@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Mapping
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -37,14 +38,17 @@ from alerts.escalation import (
     link_case_from_identifier,
     resolve_case_status,
 )
-from alerts.models import Alert
+from alerts.models import Alert, AlertStatus
 from cases.ledger import append_timeline_event
+from cases.merge import merge_cases
 from cases.models import (
     Attachment,
     Case,
+    CaseCustomFieldValue,
     CaseObservable,
     CaseStatus,
     CaseTagLink,
+    CaseTemplate,
     Comment,
     CustomField,
     Page,
@@ -54,17 +58,21 @@ from cases.models import (
     TimelineEvent,
 )
 from cases.tagging import tag_names_from_payload
+from compat.bulk import bulk_patch
 from compat.time import parse_timestamp, to_epoch_ms
 from core.enums import CASE_STAGES, TASK_STATUS_CHOICES
 from core.serializers import (
     alert_json,
+    alert_status_json,
     attachment_json,
     case_json,
     case_status_json,
+    case_template_json,
     comment_json,
     custom_event_json,
     custom_field_json,
     observable_json,
+    observable_type_json,
     page_json,
     share_json,
     tag_json,
@@ -271,15 +279,20 @@ def _create_case(request: Request) -> Response:
     return Response(case_json(case, detail=True), status=status.HTTP_201_CREATED)
 
 
-@transaction.atomic
-def _update_case(request: Request, case: Case) -> Response:
-    payload = request.data if isinstance(request.data, dict) else {}
+#: `InputUpdateCase`'s scalar/enum fields, in one place so the single PATCH and the `_bulk`
+#: PATCH can never drift into accepting different sets.
+_CASE_SCALAR_FIELDS = ("title", "description", "summary", "severity", "tlp", "pap", "flag")
+
+
+def _set_case_fields(case: Case, payload: Mapping[str, Any]) -> Response | list[str]:
+    """Apply the scalar/enum FK fields of `InputUpdateCase` to `case`.
+
+    Returns the touched column names, or a 400 `Response` on a bad value. Shared by the
+    single-case PATCH (`_update_case`) and the bulk PATCH (`_bulk_update_cases`), so a field the
+    one accepts can never be silently missing from the other.
+    """
     fields: list[str] = []
-    previous_status = case.status.value if case.status_id else None
-    # Captured before the payload loop mutates `case`, so the assignment event below can tell an
-    # assignee that actually changed from a PATCH that merely restated the same one.
-    previous_assignee_id = case.assignee_id
-    for key in ("title", "description", "summary", "severity", "tlp", "pap", "flag"):
+    for key in _CASE_SCALAR_FIELDS:
         if key in payload:
             setattr(case, key, payload[key])
             fields.append(key)
@@ -288,19 +301,57 @@ def _update_case(request: Request, case: Case) -> Response:
         case.status = resolve_case_status(str(payload["status"]), warnings=warnings)
         fields.append("status")
     if "assignee" in payload:
-        from identity.models import User
-
-        login = payload["assignee"]
-        case.assignee = (
-            User.objects.filter(login=login).first() if login else None
-        ) or User.objects.filter(pk=login).first()
+        case.assignee = _resolve_login(payload["assignee"])
         fields.append("assignee")
-    if not fields:
+    return fields
+
+
+def _apply_case_tags(case: Case, payload: Mapping[str, Any]) -> None:
+    """`tags` (replace), `addTags`/`removeTags` (delta) — the recorded `InputUpdateCase` shapes.
+
+    Applied on the case's M2M link table, matching `case_tag_link`. A tag that does not exist is
+    created on attach, exactly as the tag-link endpoint does.
+    """
+    names = tag_names_from_payload(dict(payload))
+    if names is not None:
+        CaseTagLink.objects.filter(case=case).exclude(tag__name__in=names).delete()
+        for name in names:
+            tag, _created = Tag.objects.get_or_create(name=name)
+            CaseTagLink.objects.get_or_create(case=case, tag=tag)
+    for key, attach in (("addTags", True), ("removeTags", False)):
+        raw = payload.get(key)
+        if not isinstance(raw, list):
+            continue
+        for name in raw:
+            if not isinstance(name, str) or not name.strip():
+                continue
+            if attach:
+                tag, _created = Tag.objects.get_or_create(name=name.strip()[:100])
+                CaseTagLink.objects.get_or_create(case=case, tag=tag)
+            else:
+                CaseTagLink.objects.filter(case=case, tag__name=name.strip()).delete()
+
+
+@transaction.atomic
+def _update_case(request: Request, case: Case) -> Response:
+    payload = request.data if isinstance(request.data, dict) else {}
+    previous_status = case.status.value if case.status_id else None
+    # Captured before the field loop mutates `case`, so the assignment event below can tell an
+    # assignee that actually changed from a PATCH that merely restated the same one.
+    previous_assignee_id = case.assignee_id
+    fields = _set_case_fields(case, payload)
+    if isinstance(fields, Response):
+        return fields
+    tags_touched = any(key in payload for key in ("tags", "addTags", "removeTags"))
+    if tags_touched:
+        _apply_case_tags(case, payload)
+    if not fields and not tags_touched:
         return Response(
             {"type": "BadRequest", "message": "No updatable field supplied", "fields": {}},
             status=status.HTTP_400_BAD_REQUEST,
         )
-    case.save(update_fields=[*fields, "updated_at"])
+    if fields:
+        case.save(update_fields=[*fields, "updated_at"])
     case.refresh_from_db()
 
     new_status = case.status.value if case.status_id else None
@@ -425,11 +476,9 @@ def _lookup_task(request: Request, task_id: str) -> Task | None:
     )
 
 
-@transaction.atomic
-def _update_task(request: Request, task: Task) -> Response:
-    payload = request.data if isinstance(request.data, dict) else {}
+def _set_task_fields(task: Task, payload: Mapping[str, Any]) -> Response | list[str]:
+    """Apply `InputUpdateTask`'s fields to `task`; shared by `task_detail` and `task/_bulk`."""
     fields: list[str] = []
-
     if "title" in payload:
         title = str(payload["title"] or "").strip()
         if not title:
@@ -476,7 +525,15 @@ def _update_task(request: Request, task: Task) -> Response:
     if "assignee" in payload:
         task.assignee = _resolve_login(payload["assignee"])
         fields.append("assignee")
+    return fields
 
+
+@transaction.atomic
+def _update_task(request: Request, task: Task) -> Response:
+    payload = request.data if isinstance(request.data, dict) else {}
+    fields = _set_task_fields(task, payload)
+    if isinstance(fields, Response):
+        return fields
     if not fields:
         return _bad("No updatable field supplied", {})
     task.save(update_fields=[*fields, "updated_at"])
@@ -813,15 +870,10 @@ def observable_detail(request: Request, observable_id: str) -> Response:
     return _observable_detail_payload(observable)
 
 
-@transaction.atomic
-def _update_observable(observable: Observable, request: Request) -> Response:
-    """Apply `InputUpdateObservable`'s fields. Only-present, no field, no write.
-
-    Returns 204 (the recorded OpenAPI, and what thehive4py's `observable.update()` reads as
-    `None`) rather than the echoed body the alert/case PATCHes return — the two surfaces were
-    recorded from different operations and are kept as recorded.
-    """
-    payload = request.data if isinstance(request.data, dict) else {}
+def _set_observable_fields(
+    observable: Observable, payload: Mapping[str, Any]
+) -> Response | list[str]:
+    """Apply `InputUpdateObservable`'s fields to `observable`; shared by detail and `_bulk`."""
     fields: list[str] = []
 
     if "dataType" in payload:
@@ -857,7 +909,21 @@ def _update_observable(observable: Observable, request: Request) -> Response:
         if key in payload:
             setattr(observable, attr, bool(payload[key]))
             fields.append(attr)
+    return fields
 
+
+@transaction.atomic
+def _update_observable(observable: Observable, request: Request) -> Response:
+    """Apply `InputUpdateObservable`'s fields. Only-present, no field, no write.
+
+    Returns 204 (the recorded OpenAPI, and what thehive4py's `observable.update()` reads as
+    `None`) rather than the echoed body the alert/case PATCHes return — the two surfaces were
+    recorded from different operations and are kept as recorded.
+    """
+    payload = request.data if isinstance(request.data, dict) else {}
+    fields = _set_observable_fields(observable, payload)
+    if isinstance(fields, Response):
+        return fields
     if not fields:
         return _bad("No updatable field supplied", {})
     observable.save(update_fields=[*fields, "updated_at"])
@@ -1617,16 +1683,342 @@ def case_attachment_detail(request: Request, case_id: str, attachment_id: str) -
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+# --- T2 P4 — bulk, merge, case templates and taxonomy -----------------------
+
+
+@api_view(["PATCH"])
+@renderer_classes([JSONRenderer])
+def case_bulk_update(request: Request) -> Response:
+    """`PATCH /api/v1/case/_bulk` — apply one field set to many cases (per-item, AC6.1-P4-a).
+
+    The body is `InputBulkUpdateCase` (`ids` plus any `InputUpdateCase` field). Each id is its own
+    savepoint and its own ledger entry: a case that fails (unknown, or a bad value) is reported in
+    `results` with its status and does not roll back the others. The 200 envelope is an Amalthea
+    extension — TheHive answers 204 with no body — recorded in `docs/spec/deviations.md`, because
+    AC6.1-P4-a requires the per-item outcome to be observable.
+    """
+
+    def apply_one(case: Case, body: Mapping[str, Any]) -> Response | list[str] | None:
+        fields = _set_case_fields(case, body)
+        if isinstance(fields, Response):
+            return fields
+        tags_touched = any(key in body for key in ("tags", "addTags", "removeTags"))
+        if not fields and not tags_touched:
+            return None
+        if tags_touched:
+            _apply_case_tags(case, body)
+        append_timeline_event(
+            case, title="Case updated (bulk)", kind="case-updated", actor=_actor(request)
+        )
+        return fields
+
+    return bulk_patch(
+        request,
+        ids_key="ids",
+        resolve=lambda req, raw: _case_access(req, raw, write=True),
+        apply=apply_one,
+    )
+
+
+@api_view(["PATCH"])
+@renderer_classes([JSONRenderer])
+def task_bulk_update(request: Request) -> Response:
+    """`PATCH /api/v1/task/_bulk` — apply one field set to many tasks."""
+    return bulk_patch(request, ids_key="ids", resolve=_lookup_task, apply=_set_task_fields)
+
+
+def _resolve_observable_for_bulk(_request: Request, raw: str) -> Observable | None:
+    pk = _as_uuid(raw)
+    if pk is None:
+        return None
+    return Observable.objects.filter(pk=pk).first()
+
+
+@api_view(["PATCH"])
+@renderer_classes([JSONRenderer])
+def observable_bulk_update(request: Request) -> Response:
+    """`PATCH /api/v1/observable/_bulk` — apply one field set to many observables."""
+    return bulk_patch(
+        request,
+        ids_key="ids",
+        resolve=_resolve_observable_for_bulk,
+        apply=_set_observable_fields,
+    )
+
+
+@api_view(["POST"])
+@renderer_classes([JSONRenderer])
+def case_merge(request: Request, case_ids: str) -> Response:
+    """`POST /api/v1/case/_merge/{id1,id2,...}` — fold the later cases into the first (AC6.1-P4-b).
+
+    Ids are resolved best-effort so a replay is idempotent: the merged-away cases are gone, so the
+    second call resolves only the surviving target and `merge_cases` is a no-op that still returns
+    it. A case the caller may not write (foreign org / share without `write`) is treated as
+    unresolvable and skipped; if *nothing* resolves the endpoint answers 404.
+    """
+    tokens = [token.strip() for token in case_ids.split(",") if token.strip()]
+    if not tokens:
+        return _bad("at least one case id is required", {"ids": ["required"]})
+    cases = [case for token in tokens if (case := _case_access(request, token, write=True))]
+    if not cases:
+        return _not_found("Case")
+    target = merge_cases(cases, actor=_actor(request))
+    target.refresh_from_db()
+    return Response(case_json(target, detail=True))
+
+
+def _resolve_case_template(identifier: str) -> CaseTemplate | None:
+    """Resolve `{idOrName}` as a UUID first, then as the unique `name`."""
+    pk = _as_uuid(identifier)
+    if pk is not None:
+        found = CaseTemplate.objects.filter(pk=pk).first()
+        if found is not None:
+            return found
+    return CaseTemplate.objects.filter(name=identifier).first()
+
+
+def _apply_template(
+    case: Case, template: CaseTemplate, *, actor: Any, update_title_prefix: bool = False
+) -> None:
+    """Copy `template`'s defaults onto `case` (AC6.1-P4-c).
+
+    Scalars overwrite; the description is only filled when the case has none, because a template's
+    prose must not clobber what the analyst already wrote. Task and custom-field defaults are
+    copied once, tags are attached. One provenance ledger entry records the template's name.
+    """
+    case.severity = template.severity
+    case.tlp = template.tlp
+    case.pap = template.pap
+    case.flag = template.flag
+    if template.summary:
+        case.summary = template.summary
+    if template.description and not case.description:
+        case.description = template.description
+    if (
+        update_title_prefix
+        and template.title_prefix
+        and not case.title.startswith(template.title_prefix)
+    ):
+        case.title = f"{template.title_prefix}{case.title}"[:500]
+    case.save()
+
+    for name in template.tags or []:
+        if isinstance(name, str) and name.strip():
+            tag, _created = Tag.objects.get_or_create(name=name.strip()[:100])
+            CaseTagLink.objects.get_or_create(case=case, tag=tag)
+
+    for spec in template.tasks or []:
+        if not isinstance(spec, Mapping) or not str(spec.get("title") or "").strip():
+            continue
+        Task.objects.create(
+            case=case,
+            title=str(spec["title"])[:500],
+            group=str(spec.get("group") or "")[:100],
+            description=str(spec.get("description") or ""),
+            order=_as_int(spec.get("order")) or 0,
+            mandatory=bool(spec.get("mandatory") or False),
+        )
+
+    for spec in template.custom_fields or []:
+        if not isinstance(spec, Mapping):
+            continue
+        name = str(spec.get("name") or "").strip()
+        if not name:
+            continue
+        field = CustomField.objects.filter(name=name[:100]).first()
+        if field is None:
+            continue
+        value = spec.get("value")
+        CaseCustomFieldValue.objects.get_or_create(
+            case=case,
+            custom_field=field,
+            defaults={"value": {} if value is None else value},
+        )
+
+    append_timeline_event(
+        case,
+        title=f"Template applied: {template.name}",
+        kind="template-applied",
+        actor=actor,
+        metadata={"template": template.name},
+    )
+
+
+@api_view(["POST"])
+@renderer_classes([JSONRenderer])
+def case_apply_template(request: Request) -> Response:
+    """`POST /api/v1/case/_bulk/caseTemplate` — apply a template to existing cases (AC6.1-P4-c).
+
+    `InputApplyCaseTemplate` is `{"ids": [...], "caseTemplate": "<idOrName>", ...}`; the cases are
+    resolved best-effort like `_merge`, and each application is its own savepoint.
+    """
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    identifier = str(payload.get("caseTemplate") or "").strip()
+    if not identifier:
+        return _bad("caseTemplate is required", {"caseTemplate": ["required"]})
+    template = _resolve_case_template(identifier)
+    if template is None:
+        return _not_found("CaseTemplate")
+    update_prefix = bool(payload.get("updateTitlePrefix") or False)
+    resolved: CaseTemplate = template
+
+    def apply_one(case: Case, _body: Mapping[str, Any]) -> Response | list[str]:
+        _apply_template(case, resolved, actor=_actor(request), update_title_prefix=update_prefix)
+        return []
+
+    return bulk_patch(
+        request,
+        ids_key="ids",
+        resolve=lambda req, raw: _case_access(req, raw, write=True),
+        apply=apply_one,
+    )
+
+
+@api_view(["GET", "POST"])
+@renderer_classes([JSONRenderer])
+def case_template_collection(request: Request) -> Response:
+    """`GET /api/v1/caseTemplate` lists; `POST` creates (201)."""
+    if request.method == "POST":
+        return _create_case_template(request)
+    return Response(
+        [case_template_json(template) for template in CaseTemplate.objects.order_by("name")]
+    )
+
+
+def _create_case_template(request: Request) -> Response:
+    payload = request.data if isinstance(request.data, dict) else {}
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        return _bad("name is required", {"name": ["required"]})
+    if CaseTemplate.objects.filter(name=name[:100]).exists():
+        return _bad("name already exists", {"name": ["already exists"]})
+    template = CaseTemplate.objects.create(
+        name=name[:100],
+        display_name=str(payload.get("displayName") or "")[:200],
+        title_prefix=str(payload.get("titlePrefix") or "")[:100],
+        description=str(payload.get("description") or ""),
+        severity=int(payload.get("severity") or 2),
+        tlp=int(payload.get("tlp") or 2),
+        pap=int(payload.get("pap") or 2),
+        flag=bool(payload.get("flag") or False),
+        summary=str(payload.get("summary") or ""),
+        tasks=payload.get("tasks") if isinstance(payload.get("tasks"), list) else [],
+        custom_fields=(
+            payload.get("customFields") if isinstance(payload.get("customFields"), list) else []
+        ),
+        tags=_template_tags(payload),
+    )
+    return Response(case_template_json(template), status=status.HTTP_201_CREATED)
+
+
+def _template_tags(payload: Mapping[str, Any]) -> list[str]:
+    raw = payload.get("tags")
+    if not isinstance(raw, list):
+        return []
+    return [str(name)[:100] for name in raw if isinstance(name, str) and name.strip()]
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@renderer_classes([JSONRenderer])
+def case_template_detail(request: Request, template_id: str) -> Response:
+    """`GET|PATCH|DELETE /api/v1/caseTemplate/{idOrName}`."""
+    template = _resolve_case_template(template_id)
+    if template is None:
+        return _not_found("CaseTemplate")
+    if request.method == "DELETE":
+        template.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    if request.method == "PATCH":
+        return _update_case_template(template, request)
+    return Response(case_template_json(template))
+
+
+def _update_case_template(template: CaseTemplate, request: Request) -> Response:
+    payload = request.data if isinstance(request.data, dict) else {}
+    fields: list[str] = []
+    if "name" in payload:
+        name = str(payload["name"] or "").strip()
+        if not name:
+            return _bad("name is required", {"name": ["required"]})
+        if CaseTemplate.objects.exclude(pk=template.pk).filter(name=name[:100]).exists():
+            return _bad("name already exists", {"name": ["already exists"]})
+        template.name = name[:100]
+        fields.append("name")
+    for key, attr, limit in (
+        ("displayName", "display_name", 200),
+        ("titlePrefix", "title_prefix", 100),
+    ):
+        if key in payload:
+            setattr(template, attr, str(payload[key] or "")[:limit])
+            fields.append(attr)
+    for key in ("description", "summary"):
+        if key in payload:
+            setattr(template, key, str(payload[key] or ""))
+            fields.append(key)
+    for key in ("severity", "tlp", "pap"):
+        if key in payload:
+            setattr(template, key, int(payload[key]))
+            fields.append(key)
+    if "flag" in payload:
+        template.flag = bool(payload["flag"])
+        fields.append("flag")
+    if "tasks" in payload:
+        template.tasks = payload["tasks"] if isinstance(payload["tasks"], list) else []
+        fields.append("tasks")
+    if "customFields" in payload:
+        template.custom_fields = (
+            payload["customFields"] if isinstance(payload["customFields"], list) else []
+        )
+        fields.append("custom_fields")
+    if "tags" in payload:
+        template.tags = _template_tags(payload)
+        fields.append("tags")
+    if not fields:
+        return _bad("No updatable field supplied", {})
+    template.save(update_fields=[*fields, "updated_at"])
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET"])
+@renderer_classes([JSONRenderer])
+def taxonomy(request: Request) -> Response:
+    """`GET /api/v1/taxonomy` — the vocabularies a client needs in one read (Amalthea extension).
+
+    TheHive 5.8 has no such route; the plan asks for a read model that aggregates the observable
+    types, both status vocabularies and the case templates so a UI can prime its pickers without
+    four round-trips. Recorded in `docs/spec/deviations.md`.
+    """
+    return Response(
+        {
+            "observableTypes": [
+                observable_type_json(o) for o in ObservableType.objects.order_by("name")
+            ],
+            "caseStatuses": [
+                case_status_json(s) for s in CaseStatus.objects.order_by("order", "value")
+            ],
+            "alertStatuses": [
+                alert_status_json(s) for s in AlertStatus.objects.order_by("order", "value")
+            ],
+            "caseTemplates": [case_template_json(t) for t in CaseTemplate.objects.order_by("name")],
+            "tags": [tag_json(t) for t in Tag.objects.order_by("name")],
+        }
+    )
+
+
 __all__ = [
     "case_alert_remove",
+    "case_apply_template",
     "case_attachment_detail",
     "case_attachment_download",
     "case_attachment_list",
+    "case_bulk_update",
     "case_collection",
     "case_comment_list",
     "case_custom_event_create",
     "case_detail",
     "case_flow",
+    "case_merge",
     "case_observable_add",
     "case_observable_list",
     "case_page_detail",
@@ -1637,14 +2029,19 @@ __all__ = [
     "case_tag_link",
     "case_task_create",
     "case_task_list",
+    "case_template_collection",
+    "case_template_detail",
     "case_timeline",
     "comment_detail",
     "custom_event_detail",
     "custom_field_list",
+    "observable_bulk_update",
     "observable_detail",
     "observable_tag_link",
     "share_detail",
     "tag_collection",
     "tag_detail",
+    "task_bulk_update",
     "task_detail",
+    "taxonomy",
 ]

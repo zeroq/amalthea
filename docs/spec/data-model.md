@@ -160,6 +160,13 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 - `path` is generated server-side (`<ATTACHMENT_STORAGE_PREFIX>/<uuid4hex><ext>`); the client's
   filename is **never** a path component. `hashes=[sha256]` is emitted on the wire.
 
+### CaseTemplate (`case_template`, extends `UUIDModel` + `TimeStampedModel`) — T2 P4
+- `name` **unique** · `display_name` · `title_prefix` · `description` · `summary` · `flag`.
+- `severity` / `tlp` / `pap` — SmallInteger with the same range CHECKs as `Case`.
+- `tags` — JSONB list · `tasks` — JSONB list of task definitions · `custom_fields` — JSONB list.
+- Applying a template **copies** these definitions into the case (tasks/tag links/custom-field
+  values); nothing is shared with the template row (AC6.1-P4-c).
+
 ## observables
 
 ### ObservableType (`observable_type`)

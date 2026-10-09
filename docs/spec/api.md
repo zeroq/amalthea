@@ -170,6 +170,30 @@ inline themselves.
   alert/case PATCH echo, observable does not — recorded). `dataType` re-type allowed (re-hash on
   save). **Not org-scoped** (global mutation deferred — see F2 in [`deviations.md`](./deviations.md)).
 
+### Bulk, merge and case templates (T2/Phase P4)
+
+| Path | Methods | View |
+|---|---|---|
+| `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk` | PATCH | `case_bulk_update`, `alert_bulk_update`, `task_bulk_update`, `observable_bulk_update` |
+| `case/_bulk/caseTemplate` | POST | `case_apply_template` |
+| `case/_merge/<id1,id2,…>` | POST | `case_merge` |
+| `case/template`, `case/template/` | GET, POST | `case_template_collection` |
+| `case/template/<idOrName>` | GET, PATCH, DELETE | `case_template_detail` |
+| `taxonomy`, `taxonomy/` | GET | `taxonomy` |
+
+- The four `_bulk` PATCH endpoints take `{"ids":[…], …fields}` and report **per-item** results:
+  `{"results":[{"id","status","message"?}…],"updated":n,"failed":m}`. Each item is transactionally
+  isolated, so one bad id or value never rolls back the batch (AC6.1-P4-a, `compat/bulk.py`).
+- `case/_merge/<ids>` merges every case after the first (the target) into it, re-parents alerts,
+  tasks, comments, pages, attachments, timeline events, observables/shares/custom fields, appends a
+  `case-merged` ledger event per absorbed case, and is idempotent on replay (AC6.1-P4-b). This is
+  TheHive's `POST /case/_merge/{ids}`. An extension `POST /alert/{id}/merge/<case_id>` was already
+  present; `POST /alert/{id}/import/<case_id>` is a synonym.
+- `case/_bulk/caseTemplate` applies a template's tag/task/custom-field defaults to `{"ids":[…]}`.
+- `case/template` is the template CRUD; `taxonomy` aggregates the editable vocabularies
+  (`caseStatus`, `alertStatus`, `observableType`, `caseTemplate`, `tag`, TTP) for the UI. Both are
+  Amalthea extensions (no thehive4py module) — deviations **P4-1**…**P4-3**.
+
 ## Identity — `user`, `organisation` (T2/Phase P1)
 
 | Path | Methods | View |
