@@ -1,0 +1,161 @@
+/* Font Awesome Free 6.5.2 - Subset for Amalthea */
+/* License: CC BY 4.0 (icons) / SIL OFL 1.1 (fonts) */
+/* Source: https://fontawesome.com */
+
+@font-face {
+  font-family: "Font Awesome 6 Free";
+  font-style: normal;
+  font-weight: 900;
+  font-display: block;
+  src: url("../webfonts/fa-solid-900.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Font Awesome 6 Free";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("../webfonts/fa-regular-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Font Awesome 6 Brands";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("../webfonts/fa-brands-400.woff2") format("woff2");
+}
+
+.fa, .fas, .far, .fab {
+  font-family: var(--fa-font, "Font Awesome 6 Free");
+  font-weight: var(--fa-weight, 900);
+  display: inline-block;
+  font-style: normal;
+  font-variant: normal;
+  text-rendering: auto;
+  line-height: 1;
+  font-size: inherit;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+.fa-solid { --fa-font: "Font Awesome 6 Free"; --fa-weight: 900; }
+.fa-regular { --fa-font: "Font Awesome 6 Free"; --fa-weight: 400; }
+.fa-brands { --fa-font: "Font Awesome 6 Brands"; --fa-weight: 400; }
+
+/* Icons used in Amalthea UI */
+.fa-house::before { content: "\f015"; }
+.fa-bell::before { content: "\f0f3"; }
+.fa-folder-open::before { content: "\f07c"; }
+.fa-cogs::before { content: "\f085"; }
+.fa-server::before { content: "\f233"; }
+.fa-right-from-bracket::before { content: "\f2f5"; }
+.fa-magnifying-glass::before { content: "\f002"; }
+.fa-plus::before { content: "\f067"; }
+.fa-pen::before { content: "\f304"; }
+.fa-trash::before { content: "\f1f8"; }
+.fa-eye::before { content: "\f06e"; }
+.fa-chevron-down::before { content: "\f078"; }
+.fa-chevron-right::before { content: "\f054"; }
+.fa-chevron-left::before { content: "\f053"; }
+.fa-circle-exclamation::before { content: "\f06a"; }
+.fa-circle-check::before { content: "\f058"; }
+.fa-circle-xmark::before { content: "\f057"; }
+.fa-triangle-exclamation::before { content: "\f071"; }
+.fa-flag::before { content: "\f024"; }
+.fa-user::before { content: "\f007"; }
+.fa-shield-halved::before { content: "\f3ed"; }
+.fa-bug::before { content: "\f188"; }
+.fa-file-lines::before { content: "\f15c"; }
+.fa-layer-group::before { content: "\f5fd"; }
+.fa-diagram-project::before { content: "\f542"; }
+.fa-arrow-right-from-bracket::before { content: "\f08b"; }
+.fa-circle-question::before { content: "\f059"; }
+.fa-key::before { content: "\f084"; }
+.fa-bars::before { content: "\f0c9"; }
+.fa-xmark::before { content: "\f00d"; }
+.fa-angles-right::before { content: "\f101"; }
+.fa-angles-left::before { content: "\f100"; }
+.fa-square-plus::before { content: "\f144"; }
+.fa-square-minus::before { content: "\f146"; }
+.fa-circle-info::before { content: "\f05a"; }
+.fa-clock::before { content: "\f017"; }
+.fa-calendar::before { content: "\f133"; }
+.fa-tag::before { content: "\f02b"; }
+.fa-shield::before { content: "\f132"; }
+.fa-network-wired::before { content: "\f6ff"; }
+.fa-database::before { content: "\f1c0"; }
+.fa-code::before { content: "\f121"; }
+.fa-terminal::before { content: "\f120"; }
+.fa-bolt::before { content: "\f0e7"; }
+.fa-fire::before { content: "\f06d"; }
+.fa-skull-crossbones::before { content: "\f714"; }
+.fa-robot::before { content: "\f544"; }
+.fa-sitemap::before { content: "\f0e8"; }
+.fa-project-diagram::before { content: "\f542"; }
+.fa-cube::before { content: "\f1b2"; }
+.fa-cubes::before { content: "\f1b3"; }
+.fa-layer-group::before { content: "\f5fd"; }
+.fa-diagram-next::before { content: "\e47a"; }
+.fa-diagram-predecessor::before { content: "\e477"; }
+.fa-diagram-successor::before { content: "\e478"; }
+.fa-arrow-right::before { content: "\f061"; }
+.fa-arrow-left::before { content: "\f060"; }
+.fa-arrow-up::before { content: "\f062"; }
+.fa-arrow-down::before { content: "\f063"; }
+.fa-rotate-right::before { content: "\f01e"; }
+.fa-rotate-left::before { content: "\f0e2"; }
+.fa-sync::before { content: "\f021"; }
+.fa-spinner::before { content: "\f110"; }
+.fa-download::before { content: "\f019"; }
+.fa-upload::before { content: "\f093"; }
+.fa-file::before { content: "\f15b"; }
+.fa-file-text::before { content: "\f15c"; }
+.fa-file-code::before { content: "\f1c9"; }
+.fa-file-lines::before { content: "\f15c"; }
+.fa-folder::before { content: "\f07b"; }
+.fa-folder-plus::before { content: "\f65e"; }
+.fa-folder-minus::before { content: "\f65d"; }
+.fa-archive::before { content: "\f187"; }
+.fa-box::before { content: "\f466"; }
+.fa-boxes-stacked::before { content: "\f468"; }
+.fa-pallet::before { content: "\f482"; }
+.fa-warehouse::before { content: "\f494"; }
+.fa-truck::before { content: "\f0d1"; }
+.fa-shipping-fast::before { content: "\f48b"; }
+.fa-plane::before { content: "\f072"; }
+.fa-globe::before { content: "\f0ac"; }
+.fa-map::before { content: "\f279"; }
+.fa-location-dot::before { content: "\f3c5"; }
+.fa-map-marker-alt::before { content: "\f3c5"; }
+.fa-route::before { content: "\f4d7"; }
+.fa-compass::before { content: "\f14e"; }
+.fa-anchor::before { content: "\f13d"; }
+.fa-life-ring::before { content: "\f1cd"; }
+.fa-shield-alt::before { content: "\f3ed"; }
+.fa-user-shield::before { content: "\f505"; }
+.fa-user-lock::before { content: "\f502"; }
+.fa-user-plus::before { content: "\f234"; }
+.fa-user-minus::before { content: "\f503"; }
+.fa-users::before { content: "\f0c0"; }
+.fa-user-friends::before { content: "\f500"; }
+.fa-user-group::before { content: "\f500"; }
+.fa-address-book::before { content: "\f2b9"; }
+.fa-id-card::before { content: "\f2c2"; }
+.fa-id-badge::before { content: "\f2c1"; }
+.fa-clipboard::before { content: "\f328"; }
+.fa-clipboard-list::before { content: "\f46d"; }
+.fa-clipboard-check::before { content: "\f46c"; }
+.fa-clipboard-question::before { content: "\e4e3"; }
+.fa-calendar-alt::before { content: "\f073"; }
+.fa-calendar-check::before { content: "\f274"; }
+.fa-calendar-times::before { content: "\f273"; }
+.fa-calendar-plus::before { content: "\f271"; }
+.fa-calendar-minus::before { content: "\f272"; }
+.fa-clock::before { content: "\f017"; }
+.fa-hourglass::before { content: "\f254"; }
+.fa-hourglass-half::before { content: "\f252"; }
+.fa-hourglass-end::before { content: "\f253"; }
+.fa-stopwatch::before { content: "\f2f2"; }
+.fa-stopwatch-20::before { content: "\e06f"; }
+.fa-calendar-day::before { content: "\f783"; }
+.fa-calendar-week::before { content: "\f784"; }
+.fa-calendar-month::before { content: "\f678"; }
+.fa-calendar-year::before { content: "\f679"; }

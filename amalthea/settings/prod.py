@@ -36,6 +36,19 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 X_FRAME_OPTIONS = "DENY"
 
+# Content Security Policy — strict 'self' only (ADR-003)
+# All assets (HTMX, Font Awesome, Tailwind-compiled CSS) are self-hosted under /static/
+CSP_DEFAULT_SRC = ("'self'",)
+CSP_SCRIPT_SRC = ("'self'",)
+CSP_STYLE_SRC = ("'self'",)
+CSP_FONT_SRC = ("'self'",)
+CSP_IMG_SRC = ("'self'", "data:")
+CSP_CONNECT_SRC = ("'self'",)
+CSP_FRAME_ANCESTORS = ("'none'",)
+CSP_FORM_ACTION = ("'self'",)
+CSP_BASE_URI = ("'self'",)
+CSP_OBJECT_SRC = ("'none'",)
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",

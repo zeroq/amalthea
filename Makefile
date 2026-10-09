@@ -15,6 +15,7 @@ PIP := .venv/bin/pip
 RUFF := .venv/bin/ruff
 MYPY := .venv/bin/mypy
 PYTEST := .venv/bin/pytest
+TAILWIND := scripts/tailwindcss
 export DJANGO_SETTINGS_MODULE := amalthea.settings.test
 
 .DEFAULT_GOAL := help
@@ -82,6 +83,19 @@ lock: ## Regenerate the pinned, hash-verified requirement closure (requirements/
 
 hooks: ## Install the pre-commit + pre-push git hooks
 	@./scripts/install-hooks.sh
+
+## ---------------------------------------------------------------------------------------------
+## Frontend (Tailwind + vendor assets)
+## ---------------------------------------------------------------------------------------------
+
+css: ## Compile Tailwind CSS to ui/static/ui/app.css
+	@$(TAILWIND) -i ui/static/ui/app.css -o ui/static/ui/app.css --minify
+
+css-check: ## Verify CSS compiles without errors
+	@$(TAILWIND) -i ui/static/ui/app.css -o /dev/null --minify
+	@echo "✓ CSS compiles cleanly"
+
+## ---------------------------------------------------------------------------------------------
 
 clean: ## Remove caches and build artefacts
 	@find . -path ./.venv -prune -o -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true

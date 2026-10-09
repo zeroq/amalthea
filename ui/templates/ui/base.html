@@ -17,6 +17,7 @@ Accessibility notes that are not optional:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Amalthea{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'vendor/fontawesome/css/fontawesome-subset.min.css' %}">
   <link rel="stylesheet" href="{% static 'ui/app.css' %}">
 </head>
 <body>
@@ -86,6 +87,7 @@ Accessibility notes that are not optional:
   </main>
 </div>
 
+<script src="{% static 'vendor/htmx/htmx.min.js' %}" defer></script>
 <script src="{% static 'ui/keys.js' %}" defer></script>
 </body>
 </html>
