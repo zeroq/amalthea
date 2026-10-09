@@ -17,6 +17,9 @@ htmlcov/
 # Secrets — never commit
 .env
 .env.*
+*.env
+*.env.*
+*.envrc
 !.env.example
 *.pem
 *.key

@@ -63,3 +63,13 @@ A coding agent should prioritize getting this single end-to-end loop running bef
 2.  **Escalate:** Trigger an API call that promotes that alert into an active `Case`.
 3.  **Extract:** Parse out an email address observable from that case file.
 4.  **Automate:** Automatically trigger an outbound API request when that observable is created, then cleanly append the result back into the case timeline documentation.
+
+---
+
+## 5. Secret Hygiene (non-negotiable)
+The repository is **public**: anything committed to git history is world-readable and effectively permanent.
+*   **Never commit secrets** — no API keys, tokens, passwords, private keys, or `.env` files in code, tests, fixtures, CI config, docs, or commit messages.
+*   Real configuration lives in **environment variables**; local development uses a gitignored `.env` (`.env.example` holds placeholders only). Generate strong values with `python -c 'import secrets; print(secrets.token_urlsafe(64))'`.
+*   A **secret scan is enforced** on every commit (`scripts/secret-scan.sh --staged` via the pre-commit hook), every push (`--tracked`), and in CI (`--history`, full history). Install hooks with `make hooks`; do not use `--no-verify` to bypass them.
+*   If a secret ever reaches history, **rotate it immediately**, then purge history — deleting the file does not delete the blob. See [`SECURITY.md`](./SECURITY.md).
+*   Production settings **fail closed**: `amalthea/settings/prod.py` refuses to start without a strong `DJANGO_SECRET_KEY` and a non-empty `DJANGO_ALLOWED_HOSTS`.

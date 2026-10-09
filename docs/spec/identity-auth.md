@@ -51,23 +51,44 @@ covered above; `NotAuthenticated` ⇒ 401 `AuthenticationError`.
 | DB | `DATABASES` overridden per env | sqlite `db/dev.sqlite3` | sqlite `:memory:` | Postgres `amalthea/amalthea@127.0.0.1:5432`:image `amalthea` | env-driven (`POSTGRES_*`) |
 | `CHANNEL_LAYERS` | memory (tests/dev relay); prod: `REDIS_URL` | memory | memory | memory | Redis `amalthea_channel` prefix |
 | `CELERY_BROKER_URL` | `REDIS_URL` default `redis://localhost:6379/0` | same | `memory://` | `memory://` | env-driven |
-| secrets | none | `ALLOWED_HOSTS=["*"]` overridden | deterministic test keys | same | env-driven `SECRET_KEY`, `DJANGO_ALLOWED_HOSTS` |
+| secrets | none | `ALLOWED_HOSTS=["*"]` overridden | deterministic test keys | same | **fail-closed** — requires `DJANGO_SECRET_KEY` ≥50 chars + non-empty `DJANGO_ALLOWED_HOSTS` or `ImproperlyConfigured` |
 | webhook caps | `WEBHOOK_MAX_BODY_SIZE` (5 MiB), `WEBHOOK_MAX_DEPTH` (30) | same | same | same | env-able |
 
 `TIME_ZONE = "UTC"`, `USE_TZ = True`, `DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"`,
 `AUTH_USER_MODEL = "identity.User"`, `LOGIN_URL = "login"` (a URL name, so the route survives
 moves).
 
-## Deferred prod-hardening (not implemented — recorded, see F9)
+## Production hardening (implemented 2026-10-08 — closes F9)
 
-- `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE` are **not** forced in production settings today
-  (the repo is HTTPS-deployed by convention, but the flags are not set — a known hardening item).
-- No CORS layer (`CORS_ALLOWED_ORIGINS` absent). API-key auth is the documented cross-origin path.
+`amalthea/settings/prod.py` **fails closed** and forces transport/cookie security:
+
+- `SECRET_KEY` is re-read from `DJANGO_SECRET_KEY`; a missing value, the dev placeholder
+  `dev-only-insecure-change-me`, or a value shorter than 50 chars raises `ImproperlyConfigured`
+  (message tells the operator how to generate one).
+- `DJANGO_ALLOWED_HOSTS` must yield at least one non-blank host, else `ImproperlyConfigured`
+  (whitespace-only is refused).
+- Forced: `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, `SECURE_SSL_REDIRECT`,
+  `SECURE_HSTS_SECONDS=31536000`, `SECURE_HSTS_INCLUDE_SUBDOMAINS`, `SECURE_HSTS_PRELOAD`,
+  `SECURE_CONTENT_TYPE_NOSNIFF`, `SECURE_REFERRER_POLICY="same-origin"`, `X_FRAME_OPTIONS="DENY"`.
+- `SECURE_PROXY_SSL_HEADER` is deliberately **not** auto-set (avoid trusting spoofable headers) —
+  set it in the deployment if TLS terminates at a proxy.
+
+Remaining, not addressed here: no CORS layer (`CORS_ALLOWED_ORIGINS` absent); API-key auth is the
+documented cross-origin path.
+
+## Secret hygiene (repo-wide guard)
+
+The repository is public, so "never commit a secret" is enforced, not merely documented:
+`scripts/secret-scan.sh` (deterministic patterns + filename guard) runs in the pre-commit hook
+(staged, including docs-only commits), the pre-push hook (tracked tree), and the CI `secrets` job
+(full history, with gitleaks pinned by SHA). Install hooks with `make hooks`; run manually with
+`make secrets`. Policy and remediation: [`SECURITY.md`](../SECURITY.md).
 
 ## Evidence
 
 `tests/conformance/test_authz.py` (131 tests: per-verb matrix, scope fail-closed, `read` vs
 `readwrite`, 401-vs-403, prefix collisions), `test_webhook_hardening.py` (webhook auth + throttles),
-`test_identity_contracts.py` (User/ApiKey shapes), `compat/auth.py` docstrings. Settings table
-sourced from `amalthea/settings/{base,dev,test,test_pg,prod}.py` (prod: `DEBUG=False`,
-env-enforced `SECRET_KEY`/`ALLOWED_HOSTS`). Deviations register: [`deviations.md`](./deviations.md).
+`test_identity_contracts.py` (User/ApiKey shapes), `test_prod_settings.py` (fail-closed prod +
+forced hardening flags), `compat/auth.py` docstrings. Settings table sourced from
+`amalthea/settings/{base,dev,test,test_pg,prod}.py`. Deviations register: [`deviations.md`](./deviations.md);
+secret policy: [`SECURITY.md`](../SECURITY.md).

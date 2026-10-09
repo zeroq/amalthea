@@ -272,19 +272,26 @@ discipline, no code change is safe on SQLite).
   only — global config was not touched. To correct the author afterwards:
   `git commit --amend --reset-author --author="Your Name <you@example.com>"`.
 
-- [ ] **4.5 — Move to a real GitHub-hosted remote** · **deferred by decision 2026-10-03**
-  The repo is intentionally local for now; promoting it to GitHub is a later, separate task. When done:
-  1. Confirm the target org/repo name and visibility (**public** is the likely intent — AGENTS.md says
-     "open-source, developer-friendly"; a private repo contradicts that, and the commit history contains
-     `docs/reviews/` and `TODO.md`, which are candid about open risks and unfinished work).
-  2. Add `LICENSE` — **absent today.** AGENTS.md declares the project open-source but no licence file
-     exists, which is a real blocker for outside contributions.
-  3. Add a `.gitattributes` and confirm no CRLF/filemode churn.
-  4. `git remote add origin <url>` then push `main`.
-  5. Consider branch protection on `main` and a PR workflow, since gates are the project's main quality
-     control — a gate is far less meaningful if anyone can push straight to `main`.
-  6. Decide whether `TODO.md` / `COMPLETED.md` / `docs/reviews/` stay public. They are honest and
-     useful, but they narrate internal process; keeping them is defensible, hiding them is not.
+- [x] **4.5 — Move to a real GitHub-hosted remote** — **CLOSED 2026-10-08**
+  `origin` = `https://github.com/zeroq/amalthea` (public), `main` pushed and tracking `origin/main`.
+  Visibility decided **public** (matches "open-source" in AGENTS.md). **Still open from the original
+  plan:** (1) `LICENSE` file absent — AGENTS.md declares AGPL-3.0-or-later but no file exists; (2) no
+  `.gitattributes`; (3) no `main` branch protection / PR workflow yet. Credentials are not persisted
+  locally (per decision); pushes authenticate via Git Credential Manager.
+
+- [x] **4.6 — Production secret hardening + repo-wide secret-hygiene guard** — **CLOSED 2026-10-08**
+  Closes finding **F9**. Two parts: (a) `amalthea/settings/prod.py` now fails closed — refuses to
+  import unless `DJANGO_SECRET_KEY` is ≥50 chars (missing/placeholder rejected) and
+  `DJANGO_ALLOWED_HOSTS` is non-empty, and forces secure cookies/HSTS/SSL-redirect/frame-deny
+  (`tests/conformance/test_prod_settings.py`, 9 tests); (b) `scripts/secret-scan.sh` (dependency-free
+  scanner) wired into the pre-commit hook (staged, runs even on docs-only commits), the pre-push hook
+  (tracked tree), and a new CI `secrets` job (full history + gitleaks pinned by SHA), plus `make
+  secrets` and the `SECURITY.md` policy linked from README + AGENTS.md. **Hardened after an
+  independent adversarial review**: `--staged`/`--tracked` scan git objects (index/HEAD) not the
+  worktree, `--history` scans blobs + commit/tag messages, parsing fails closed, binaries scanned, CI
+  triggers on every branch/tag, filename guard covers `*.env`/`.envrc`
+  (`tests/unit/test_secret_scan.py`, 20 tests). Plan:
+  `docs/planning/PLAN-2026-10-08-secret-hygiene.md`; record: master plan §13 Phase 13.
 
 - [x] **4.3 — Hash-pin the requirements** `R9`, plan §5 — **CLOSED 2026-10-07 (Phase 11)**
   `scripts/lock.sh` rewritten to `pip-compile --generate-hashes` over the existing exact pins

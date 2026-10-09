@@ -7,6 +7,24 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+# Secrets never leave the machine: scan the whole committed tree first, so a push
+# cannot publish a key even if the commit hooks were bypassed with --no-verify.
+echo "hooks: secret scan (tracked tree)…"
+scan_rc=0
+./scripts/secret-scan.sh --tracked || scan_rc=$?
+if [ "$scan_rc" -ge 2 ]; then
+    echo ""
+    echo "hooks: SECRET SCAN ERROR — PUSH BLOCKED (fail closed)."
+    echo "        The scanner could not verify the tracked tree (exit >= 2); fix the"
+    echo "        error above or inspect HEAD by hand before retrying."
+    exit 1
+elif [ "$scan_rc" -eq 1 ]; then
+    echo ""
+    echo "hooks: PUSH BLOCKED — secret detected."
+    echo "        Remove and rotate the secret(s) reported above; see SECURITY.md."
+    exit 1
+fi
+
 echo "hooks: running full check (ruff, mypy, django check, migrations, pytest)…"
 if ! make --no-print-directory check; then
     echo ""

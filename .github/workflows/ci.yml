@@ -9,14 +9,22 @@
 # The lock-currentness step (scripts/lock.sh --check) fails when a hand-edited or
 # accidentally-drifted requirement file differs from what the deterministic lock produces,
 # so review is not the only guard on the hashed closure (supply-chain security note).
+#
+# Two jobs run in parallel, independent of each other:
+#   * gate    — the Definition of Done (lint, types, migrations, suite, coverage, locks);
+#   * secrets — the full-history secret scan (scripts/secret-scan.sh --history is the
+#     authoritative, dependency-free step; gitleaks pinned by commit SHA backs it up).
+# The secrets job is what makes "no secret is ever pushed" an enforced property even
+# when a local git hook was bypassed (fresh clone without hooks, --no-verify).
 
 name: ci
 
+# Bare `push:` / `pull_request:` = every branch and tag, not just main: the secrets
+# backstop must run on the branch a secret was pushed to, otherwise a push to any
+# other branch (or a tag) is never scanned.
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -71,3 +79,31 @@ jobs:
 
       - name: Supply-chain audit
         run: .venv/bin/pip-audit
+
+  # Independent of `gate`: a leaked credential must be caught even while the test
+  # gate is red, and vice versa (no `needs:` — the two jobs run in parallel).
+  secrets:
+    name: Secret scan (full history)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # fetch-depth 0 so every commit/blob in history is available to both scanners.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Authoritative step: the repo's own dependency-free scanner (git + bash + rg),
+      # no virtualenv required — runs straight from the checkout.
+      - name: Full-history scan (local scanner, authoritative)
+        run: bash scripts/secret-scan.sh --history
+
+      # Second opinion: upstream gitleaks over the same full history, pinned by full
+      # commit SHA (supply-chain stance: no floating tags). SHA is the tag target of
+      # v3.0.0, resolved via the GitHub API; v3 is required because the Node 20
+      # runtime was removed from GitHub-hosted runners in Sept 2026 (v2 never starts).
+      - name: gitleaks full-history scan (pinned)
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

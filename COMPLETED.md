@@ -499,3 +499,37 @@ the spec is the pointer-rich map.
   this wave, so gates are unchanged (SQLite 733/3, Postgres 712/24, coverage 83.47%).
 - [x] **Recorded.** TODO §4.4 closed; master plan §13 Phase 12 record; plan status Approved→
   Implemented.
+
+## 2026-10-08 — Production secret hardening + repo-wide secret-hygiene guard (TODO §4.5/§4.6)
+
+Plan: `docs/planning/PLAN-2026-10-08-secret-hygiene.md`. Triggered by publishing the repo to
+`github.com/zeroq/amalthea` (**public**). Closes finding **F9** and turns "never commit secrets"
+from a promise into an enforced property. Code + config wave.
+
+- [x] **Remote configured.** `origin` = `https://github.com/zeroq/amalthea.git`; `main` pushed and
+  tracking `origin/main`. Credentials **not** persisted locally (user decision); pushes authenticate
+  via Git Credential Manager. Pre-push hook ran the full DoD on the first upload (733/3).
+- [x] **F9 fixed — prod fails closed.** `amalthea/settings/prod.py` re-reads `DJANGO_SECRET_KEY` and
+  raises `ImproperlyConfigured` for missing / `dev-only-insecure-change-me` / <50-char values, refuses
+  empty or whitespace-only `DJANGO_ALLOWED_HOSTS`, and forces `SESSION_COOKIE_SECURE`,
+  `CSRF_COOKIE_SECURE`, `SECURE_SSL_REDIRECT`, HSTS (`31536000`, include-subdomains, preload),
+  `SECURE_CONTENT_TYPE_NOSNIFF`, `SECURE_REFERRER_POLICY=same-origin`, `X_FRAME_OPTIONS=DENY`.
+  `SECURE_PROXY_SSL_HEADER` deliberately not auto-set. Proven by `tests/conformance/test_prod_settings.py`
+  (**9 tests**, subprocess-based); full suite **763 passed / 3 skipped**.
+- [x] **Secret-hygiene guard** — `scripts/secret-scan.sh` (dependency-free; 10 patterns +
+  filename guard) wired into the pre-commit hook (staged, runs even on docs-only commits), the
+  pre-push hook (tracked tree), and a new CI `secrets` job (full history + gitleaks pinned by SHA),
+  plus `make secrets`, a widened `.gitignore`, and the `SECURITY.md` policy linked from README +
+  AGENTS.md §5. **Hardened after an independent adversarial review** that reproduced real bypasses:
+  `--staged`/`--tracked` now scan **git objects** (index / `HEAD` tree) rather than the worktree —
+  closing the "stage then edit" and `git add -f .env && rm .env` bypasses; `--history` scans blobs
+  (binaries included) **and** commit/tag messages; parsing fails closed on unparseable records; CI
+  triggers on **every** branch/tag (not just `main`); the filename guard covers `*.env`/`.envrc`.
+  20 regression tests in `tests/unit/test_secret_scan.py`.
+- [x] **Policy documented.** New `SECURITY.md` (reporting + secret-hygiene rules + remediation +
+  enforcement table); linked from `README.md` (new **Security** section) and `AGENTS.md` (new §5).
+- [x] **Verified** — `scripts/secret-scan.sh --tracked` and `--history` exit 0 on the repo; the
+  reviewer's bypass repros are now blocked (and are regression tests); full gate **763 passed /
+  3 skipped**.
+- [x] **Recorded.** TODO §4.5 closed (remote) + §4.6 added/closed; master plan §13 Phase 13 record;
+  `docs/spec/deviations.md` F9 → fixed; `docs/spec/identity-auth.md` updated; plan status approved.

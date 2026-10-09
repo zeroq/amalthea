@@ -111,14 +111,33 @@ realtime/       WebSocket consumers (Phase 7 — in progress)
 - **Open work / completed work** — [`TODO.md`](./TODO.md), [`COMPLETED.md`](./COMPLETED.md)
 - **Review reports** — [`docs/reviews/`](docs/reviews/) (independent expert gates with reproduction
   evidence)
+- **Security policy** — [`SECURITY.md`](./SECURITY.md) (vulnerability reporting + the enforced
+  "never commit secrets" rule)
+
+## Security
+
+This is a **public** repository, so secrets must never reach git history. That rule is enforced by
+[`scripts/secret-scan.sh`](scripts/secret-scan.sh), which runs on every commit (staged files, even
+docs-only), every push (the tracked tree), and in CI (full history, plus gitleaks pinned by SHA):
+
+```
+make hooks      # install the pre-commit + pre-push hooks once per clone
+make secrets    # run the scanner manually over the tracked tree
+```
+
+If a credential ever lands in history, **rotate it** — deleting the file does not remove the blob.
+See [`SECURITY.md`](./SECURITY.md) for the policy and remediation steps.
 
 ## Production notes
 
 - Postgres 15+ is required in production (JSONB, GIN indexes, partial indexes, real sequences). See
   `docs/reviews/` for the Postgres-only verification backlog (TODO §3.1) — SQLite dev cannot validate
   those features.
-- `DJANGO_SETTINGS_MODULE=amalthea.settings.prod` expects a real secret key, Postgres, and Redis; the
-  webhook rate/size limits are configurable via `AMALTHEA_*` environment variables (see
+- `DJANGO_SETTINGS_MODULE=amalthea.settings.prod` **fails closed**: it refuses to start unless
+  `DJANGO_SECRET_KEY` is set to a strong value (≥50 chars — generate one with
+  `python -c 'import secrets; print(secrets.token_urlsafe(64))'`) and `DJANGO_ALLOWED_HOSTS` is
+  non-empty, and it forces secure cookies + HSTS. It expects Postgres and Redis; the webhook
+  rate/size limits are configurable via `AMALTHEA_*` environment variables (see
   `amalthea/settings/base.py`).
 - Celery runs **eager** in dev so no broker is needed; production workers consume from Redis and
   `transaction.on_commit` guarantees a playbook never runs against a rolled-back case.

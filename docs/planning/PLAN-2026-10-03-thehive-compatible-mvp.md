@@ -736,6 +736,27 @@ Phase 11; the code + `tests/conformance/` are authoritative. Eight files: `READM
 pass landed, final **PASS 5/5 Met / 0 Not Met / 0 Deviated, zero residual findings** — see
 [`VERIFY-2026-10-07-docs-spec.md`](./VERIFY-2026-10-07-docs-spec.md).
 
+### Phase 13 — Production secret hardening + repo-wide secret-hygiene guard (2026-10-08)
+
+Plan: `docs/planning/PLAN-2026-10-08-secret-hygiene.md`. Triggered by publishing the repo
+(`github.com/zeroq/amalthea`, public). Closes finding **F9** and makes "never commit secrets" an
+enforced property.
+
+| # | Plan said | Implemented / recorded | Why |
+|---|---|---|---|
+| **P13-1** | F9 deferred: prod does not fail closed on `SECRET_KEY`, does not force secure cookies | `amalthea/settings/prod.py` re-reads `DJANGO_SECRET_KEY` and raises `ImproperlyConfigured` for missing / placeholder / <50-char values, refuses empty (or whitespace-only) `DJANGO_ALLOWED_HOSTS`, and forces `SESSION_COOKIE_SECURE`/`CSRF_COOKIE_SECURE`/`SECURE_SSL_REDIRECT`/HSTS/`SECURE_CONTENT_TYPE_NOSNIFF`/`SECURE_REFERRER_POLICY`/`X_FRAME_OPTIONS`. 9 subprocess tests in `tests/conformance/test_prod_settings.py` | A public placeholder key + insecure cookies are a real exposure, not a style nit. `SECURE_PROXY_SSL_HEADER` deliberately not auto-set (avoid spoofable-header trust) |
+| **P13-2** | "never commit secrets" was policy only | `scripts/secret-scan.sh` (dependency-free; 10 high-specificity patterns + filename guard) wired into pre-commit (`--staged`, runs even on docs-only commits), pre-push (`--tracked`), and a new CI `secrets` job (full history + gitleaks pinned by SHA). `make secrets`; policy in new `SECURITY.md`, linked from README + AGENTS.md §4 | The public repo means a single leaked blob is permanent; local intent is not a control — an independent guard on every surface is |
+| **P13-2a** | — | The scanner's allowlist is a deliberately tiny, commented set of *exact* paths (test fixtures + the plan that documents the URL pattern); no directory/glob entries | A permissive scanner gets disabled; auditing the allowlist must be a glance |
+| **P13-3** | — | HSTS/SSL-redirect in prod can lock out a plaintext-only deployment | Documented in `SECURITY.md`; operators terminate TLS at the proxy and set `SECURE_PROXY_SSL_HEADER` explicitly |
+| **P13-4** | scanner guards the working tree | An **independent adversarial review** (fresh security-auditor session) reproduced real bypasses: hooks scanned the worktree not the git index/blob (a staged-then-edited secret, or `git add -f .env && rm .env`, committed clean); the CI job triggered on `main` only; a `:` in a path failed open; binaries, commit messages and tag messages were unscanned; `*.env`/`.envrc` were missed. All fixed: `--staged`/`--tracked` scan **git objects** (index / `HEAD` tree), `--history` scans blobs **and** messages with `-a` for binaries, parsing fails closed on unparseable records, CI runs on **every** branch/tag, filename guard covers `*.env*`/`.envrc`. 20 tests in `tests/unit/test_secret_scan.py` | A public repo means one leaked blob is permanent; "author is confident" is not a control. The reviewer's bypass repros are now regression tests |
+
+**Gate:** code changed this wave. `make check` green (ruff, ruff-format, mypy, django check,
+migrations-in-sync, pytest); new tests `tests/conformance/test_prod_settings.py` (9). Secret scans
+clean on the tracked tree and on full history.
+
+**Verification:** verifier pass over AC1–AC4 — see
+[`VERIFY-2026-10-08-secret-hygiene.md`](./VERIFY-2026-10-08-secret-hygiene.md).
+
 ## 14. Open Questions
 
 Resolved 2026-10-06 per TODO §3; each decision is recorded with the rationale that settled it. The

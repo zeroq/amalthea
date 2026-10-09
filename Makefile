@@ -18,7 +18,7 @@ PYTEST := .venv/bin/pytest
 export DJANGO_SETTINGS_MODULE := amalthea.settings.test
 
 .DEFAULT_GOAL := help
-.PHONY: help check check-fast quality tests typing migrations coverage audit lock hooks clean
+.PHONY: help check check-fast quality tests typing migrations coverage audit lock hooks secrets clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -55,6 +55,13 @@ typing: ## Type check only (scope is pinned in pyproject.toml, not on the comman
 
 migrations: ## Verify no model change is missing a migration
 	@$(PY) manage.py makemigrations --check --dry-run
+
+## ---------------------------------------------------------------------------------------------
+## Security
+## ---------------------------------------------------------------------------------------------
+
+secrets: ## Scan the tracked tree for committed secrets (hooks and CI enforce this too)
+	@./scripts/secret-scan.sh --tracked
 
 ## ---------------------------------------------------------------------------------------------
 ## Non-blocking signals
