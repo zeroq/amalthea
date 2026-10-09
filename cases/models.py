@@ -265,6 +265,9 @@ class CaseObservable(UUIDModel):
     ``created_at``. It declares that field directly rather than inheriting
     ``TimeStampedModel``, whose ``updated_at`` would be a column nothing ever writes — and
     whose ``created_at`` this model used to shadow (REVIEW-2026-10-03 **M7**).
+
+    Per-link tags (Plan §13 #11): tags specific to this case-observable relationship,
+    distinct from the global tags on the Observable itself.
     """
 
     # db_index=False on `case`: left prefix of uniq_case_observable below.
@@ -277,6 +280,9 @@ class CaseObservable(UUIDModel):
         related_name="case_observables",
         db_index=False,
     )
+    # Per-link tags: tags specific to this case-observable relationship,
+    # distinct from the global tags on the Observable itself.
+    tags = models.JSONField(default=list, blank=True)
     added_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,

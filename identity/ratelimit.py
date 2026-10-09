@@ -51,7 +51,7 @@ def _clear_attempts(key: str) -> None:
 
 def _is_locked_out(request: HttpRequest, username: str | None = None) -> tuple[bool, int]:
     """Check if IP or username is locked out.
-    
+
     Returns (is_locked, retry_after_seconds).
     """
     ip_key, user_key = _make_keys(request, username)
@@ -99,7 +99,7 @@ def record_successful_login(request: HttpRequest, username: str | None = None) -
 
 def check_login_rate_limit(request: HttpRequest, username: str | None = None) -> tuple[bool, int]:
     """Check if login should be rate limited.
-    
+
     Returns (is_allowed, retry_after_seconds).
     """
     is_locked, retry_after = _is_locked_out(request, username)

@@ -263,7 +263,9 @@ def playbook_json(playbook: Playbook) -> dict[str, Any]:
     }
 
 
-def case_json(case: Case, *, detail: bool = False, timeline_after: str | None = None, timeline_limit: int = 50) -> dict[str, Any]:
+def case_json(
+    case: Case, *, detail: bool = False, timeline_after: str | None = None, timeline_limit: int = 50
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "_id": str(case.id),
         "id": str(case.id),
@@ -306,7 +308,7 @@ def case_json(case: Case, *, detail: bool = False, timeline_after: str | None = 
 
         timeline_events = events_after(str(case.id), timeline_after_uuid)
         # Apply limit
-        timeline_events = list(timeline_events[:timeline_limit + 1])  # +1 to detect has_more
+        timeline_events = list(timeline_events[: timeline_limit + 1])  # +1 to detect has_more
         has_more = len(timeline_events) > timeline_limit
         if has_more:
             timeline_events = timeline_events[:timeline_limit]

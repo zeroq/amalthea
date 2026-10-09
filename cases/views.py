@@ -260,7 +260,9 @@ def case_detail(request: Request, case_id: str) -> Response:
             limit = max(1, min(int(timeline_limit), 200))  # cap at 200
         except ValueError:
             pass
-    return Response(case_json(case, detail=True, timeline_after=timeline_after, timeline_limit=limit))
+    return Response(
+        case_json(case, detail=True, timeline_after=timeline_after, timeline_limit=limit)
+    )
 
 
 def _create_case(request: Request) -> Response:
@@ -895,7 +897,11 @@ def observable_detail(request: Request, observable_id: str) -> Response:
     if request.method == "DELETE":
         if case_count > 1 and not force:
             case_links = [
-                {"case_id": str(link.case.id), "case_number": link.case.number, "case_title": link.case.title}
+                {
+                    "case_id": str(link.case.id),
+                    "case_number": link.case.number,
+                    "case_title": link.case.title,
+                }
                 for link in linked_cases
             ]
             return Response(
@@ -912,7 +918,11 @@ def observable_detail(request: Request, observable_id: str) -> Response:
     if request.method == "PATCH":
         if case_count > 1 and not force:
             case_links = [
-                {"case_id": str(link.case.id), "case_number": link.case.number, "case_title": link.case.title}
+                {
+                    "case_id": str(link.case.id),
+                    "case_number": link.case.number,
+                    "case_title": link.case.title,
+                }
                 for link in linked_cases
             ]
             return Response(

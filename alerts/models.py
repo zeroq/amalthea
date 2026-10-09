@@ -184,6 +184,9 @@ class AlertObservable(UUIDModel):
     ``created_at``. It declares that field directly rather than inheriting
     ``TimeStampedModel``, whose ``updated_at`` would be a column nothing ever writes — and
     whose ``created_at`` this model used to shadow (REVIEW-2026-10-03 **M7**).
+
+    Per-link tags (Plan §13 #11): tags specific to this alert-observable relationship,
+    distinct from the global tags on the Observable itself.
     """
 
     # Both FKs are left-prefix-covered, so both implicit single-column indexes are redundant
@@ -202,6 +205,9 @@ class AlertObservable(UUIDModel):
         related_name="alert_observables",
         db_index=False,
     )
+    # Per-link tags: tags specific to this alert-observable relationship,
+    # distinct from the global tags on the Observable itself.
+    tags = models.JSONField(default=list, blank=True)
     added_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

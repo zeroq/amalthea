@@ -791,14 +791,17 @@ def playbook_run(request: HttpRequest, playbook_id: str) -> HttpResponse:
 # 6.9 — T2 UI catch-up views
 # =============================================================================
 
+
 @login_required
 @require_GET
 def case_export(request: HttpRequest, case_id: str) -> HttpResponse:
     """Download case export (JSON)."""
     case = _resolve_case(case_id)
     from cases.views import _case_export_document
+
     doc = _case_export_document(case)
     import json
+
     response = HttpResponse(
         json.dumps(doc, indent=2, default=str),
         content_type="application/json",
@@ -859,6 +862,7 @@ def case_apply_template(request: HttpRequest, case_id: str) -> HttpResponse:
         return redirect("ui-case-apply-template", case_id=case.number)
     template = get_object_or_404(CaseTemplate, pk=template_id)
     from cases.views import _apply_template_to_case
+
     _apply_template_to_case(case, template)
     messages.success(request, f"Applied template '{template.name}' to case {case.number}.")
     return redirect("ui-case-detail", case_id=case.number)
@@ -894,6 +898,7 @@ def case_attachment_upload(request: HttpRequest, case_id: str) -> HttpResponse:
     case = _resolve_case(case_id)
     # Reuse the API logic but adapt for UI
     from django.http import QueryDict
+
     request.POST = QueryDict(mutable=True)
     for key, value in request.POST.items():
         request.POST[key] = value
@@ -901,6 +906,7 @@ def case_attachment_upload(request: HttpRequest, case_id: str) -> HttpResponse:
         request.FILES[key] = value
     # Call the API view logic directly
     from cases.views import case_attachment_list as api_view
+
     response = api_view(request, case_id=case.id)
     if response.status_code == 201:
         messages.success(request, "Attachment uploaded.")
@@ -911,10 +917,13 @@ def case_attachment_upload(request: HttpRequest, case_id: str) -> HttpResponse:
 
 @login_required
 @require_GET
-def case_attachment_download(request: HttpRequest, case_id: str, attachment_id: str) -> HttpResponse:
+def case_attachment_download(
+    request: HttpRequest, case_id: str, attachment_id: str
+) -> HttpResponse:
     """Download an attachment."""
 
     from cases.views import case_attachment_download as api_view
+
     # Reuse API logic
     return api_view(request, case_id=case_id, attachment_id=attachment_id)
 
@@ -924,6 +933,7 @@ def case_attachment_download(request: HttpRequest, case_id: str, attachment_id: 
 def case_attachment_delete(request: HttpRequest, case_id: str, attachment_id: str) -> HttpResponse:
     """Delete an attachment."""
     from cases.views import case_attachment_detail as api_view
+
     response = api_view(request, case_id=case_id, attachment_id=attachment_id)
     if response.status_code == 204:
         messages.success(request, "Attachment deleted.")
@@ -933,6 +943,7 @@ def case_attachment_delete(request: HttpRequest, case_id: str, attachment_id: st
 
 
 # --- Case Templates ---
+
 
 @login_required
 @require_GET
@@ -984,6 +995,7 @@ def case_template_detail(request: HttpRequest, template_id: str) -> HttpResponse
     """View or edit a case template."""
     try:
         import uuid
+
         uuid.UUID(template_id)
         template = get_object_or_404(CaseTemplate, pk=template_id)
     except ValueError:
@@ -999,11 +1011,11 @@ def case_template_detail(request: HttpRequest, template_id: str) -> HttpResponse
     # Update logic similar to playbook_detail
     # Simplified for brevity
     template.name = (request.POST.get("name") or template.name)[:200]
-    template.display_name = (request.POST.get("display_name") or template.display_name)
-    template.title_prefix = (request.POST.get("title_prefix") or template.title_prefix)
-    template.description = (request.POST.get("description") or template.description)
-    template.summary = (request.POST.get("summary") or template.summary)
-    template.flag = (request.POST.get("flag") or template.flag)
+    template.display_name = request.POST.get("display_name") or template.display_name
+    template.title_prefix = request.POST.get("title_prefix") or template.title_prefix
+    template.description = request.POST.get("description") or template.description
+    template.summary = request.POST.get("summary") or template.summary
+    template.flag = request.POST.get("flag") or template.flag
     template.severity = int(request.POST.get("severity") or template.severity)
     template.tlp = int(request.POST.get("tlp") or template.tlp)
     template.pap = int(request.POST.get("pap") or template.pap)
@@ -1019,6 +1031,7 @@ def case_template_delete(request: HttpRequest, template_id: str) -> HttpResponse
     """Delete a case template."""
     try:
         import uuid
+
         uuid.UUID(template_id)
         template = get_object_or_404(CaseTemplate, pk=template_id)
     except ValueError:
@@ -1030,6 +1043,7 @@ def case_template_delete(request: HttpRequest, template_id: str) -> HttpResponse
 
 
 # --- Tags ---
+
 
 @login_required
 @require_GET
@@ -1067,6 +1081,7 @@ def tag_detail(request: HttpRequest, tag_id: str) -> HttpResponse:
     """View or edit a tag."""
     try:
         import uuid
+
         uuid.UUID(tag_id)
         tag = get_object_or_404(Tag, pk=tag_id)
     except ValueError:
@@ -1086,6 +1101,7 @@ def tag_delete(request: HttpRequest, tag_id: str) -> HttpResponse:
     """Delete a tag."""
     try:
         import uuid
+
         uuid.UUID(tag_id)
         tag = get_object_or_404(Tag, pk=tag_id)
     except ValueError:
@@ -1097,6 +1113,7 @@ def tag_delete(request: HttpRequest, tag_id: str) -> HttpResponse:
 
 
 # --- Observables ---
+
 
 @login_required
 @require_GET
@@ -1120,6 +1137,7 @@ def observable_detail(request: HttpRequest, observable_id: str) -> HttpResponse:
     """Observable detail with cross-case fan-out."""
     try:
         import uuid
+
         uuid.UUID(observable_id)
         observable = get_object_or_404(Observable, pk=observable_id)
     except ValueError:
@@ -1137,12 +1155,14 @@ def observable_detail(request: HttpRequest, observable_id: str) -> HttpResponse:
 
 # --- Taxonomy ---
 
+
 @login_required
 @require_GET
 def taxonomy(request: HttpRequest) -> HttpResponse:
     """Aggregate taxonomy page for UI pickers."""
     from alerts.models import AlertStatus
     from cases.models import TTP, CaseStatus
+
     return render(
         request,
         "ui/taxonomy.html",
@@ -1163,11 +1183,18 @@ def taxonomy(request: HttpRequest) -> HttpResponse:
 def case_merge(request: HttpRequest, case_id: str) -> HttpResponse:
     """Merge cases via UI."""
     from alerts.escalation import merge_cases as merge_cases_fn
+
     case = _resolve_case(case_id)
     if request.method == "GET":
         # Show merge form with candidate cases
-        candidates = Case.objects.filter(closed_date__isnull=True).exclude(pk=case.pk).order_by("-start_date")
-        return render(request, "ui/case_merge.html", _base_context(request, case=case, candidates=candidates))
+        candidates = (
+            Case.objects.filter(closed_date__isnull=True)
+            .exclude(pk=case.pk)
+            .order_by("-start_date")
+        )
+        return render(
+            request, "ui/case_merge.html", _base_context(request, case=case, candidates=candidates)
+        )
     # POST
     target_id = request.POST.get("target_case")
     if not target_id:
@@ -1196,13 +1223,18 @@ def case_bulk(request: HttpRequest, case_id: str) -> HttpResponse:
 @require_GET
 def case_attachment_list(request: HttpRequest, case_id: str) -> HttpResponse:
     case = _resolve_case(case_id)
-    return render(request, "ui/case_attachments.html", _base_context(request, case=case, attachments=case.attachments.all()))
+    return render(
+        request,
+        "ui/case_attachments.html",
+        _base_context(request, case=case, attachments=case.attachments.all()),
+    )
 
 
 @login_required
 @require_POST
 def case_attachment_upload(request: HttpRequest, case_id: str) -> HttpResponse:
     from cases.views import case_attachment_list as api_view
+
     case = _resolve_case(case_id)
     # The API view expects multipart/form-data with 'attachments' field
     # We just pass through
@@ -1216,8 +1248,11 @@ def case_attachment_upload(request: HttpRequest, case_id: str) -> HttpResponse:
 
 @login_required
 @require_GET
-def case_attachment_download(request: HttpRequest, case_id: str, attachment_id: str) -> HttpResponse:
+def case_attachment_download(
+    request: HttpRequest, case_id: str, attachment_id: str
+) -> HttpResponse:
     from cases.views import case_attachment_download as api_view
+
     return api_view(request, case_id=case_id, attachment_id=attachment_id)
 
 
@@ -1225,6 +1260,7 @@ def case_attachment_download(request: HttpRequest, case_id: str, attachment_id: 
 @require_POST
 def case_attachment_delete(request: HttpRequest, case_id: str, attachment_id: str) -> HttpResponse:
     from cases.views import case_attachment_detail as api_view
+
     response = api_view(request, case_id=case_id, attachment_id=attachment_id)
     if response.status_code == 204:
         messages.success(request, "Attachment deleted.")
@@ -1238,6 +1274,7 @@ def case_attachment_delete(request: HttpRequest, case_id: str, attachment_id: st
 def case_attachment_detail(request: HttpRequest, case_id: str, attachment_id: str) -> HttpResponse:
     """Attachment detail (download or delete)."""
     from cases.views import case_attachment_detail as api_view
+
     return api_view(request, case_id=case_id, attachment_id=attachment_id)
 
 
@@ -1246,6 +1283,7 @@ def case_attachment_detail(request: HttpRequest, case_id: str, attachment_id: st
 def case_procedure_create(request: HttpRequest, case_id: str) -> HttpResponse:
     """Create a procedure on a case."""
     from cases.views import case_procedure_create as api_view
+
     return api_view(request, case_id=case_id)
 
 
@@ -1254,4 +1292,5 @@ def case_procedure_create(request: HttpRequest, case_id: str) -> HttpResponse:
 def case_procedures_create(request: HttpRequest, case_id: str) -> HttpResponse:
     """Bulk create procedures on a case."""
     from cases.views import case_procedures_create as api_view
+
     return api_view(request, case_id=case_id)
