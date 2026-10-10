@@ -862,6 +862,53 @@ def custom_field_list(request: Request) -> Response:
     )
 
 
+def _observable_affected_cases(observable: Observable) -> list[dict[str, Any]]:
+    """The cases an observable is linked to, in the shape both surfaces report (TODO 6.5)."""
+    return [
+        {
+            "case_id": str(link.case.id),
+            "case_number": link.case.number,
+            "case_title": link.case.title,
+        }
+        for link in observable.case_observables.select_related("case").all()
+    ]
+
+
+def _cross_case_error(case_links: list[dict[str, Any]], action: str) -> Response:
+    """Build the shared `CrossCaseMutationError` 409 body for the force guard."""
+    return Response(
+        {
+            "type": "CrossCaseMutationError",
+            "message": (
+                f"Observable is linked to {len(case_links)} cases. "
+                f"Use ?force=true to confirm {action} across all cases."
+            ),
+            "fields": {"force": ["required when observable is linked to multiple cases"]},
+            "affected_cases": case_links,
+        },
+        status=status.HTTP_409_CONFLICT,
+    )
+
+
+def _observable_cross_case_guard(
+    observable: Observable, force: bool, *, action: str = "mutation"
+) -> Response | None:
+    """TODO 6.5 — a multi-case observable needs `?force=true` to be mutated.
+
+    Returns the 409 `CrossCaseMutationError` (listing the affected cases) when `observable` is
+    linked to more than one case and the caller did not force, else `None`. Both the single-item
+    `observable_detail` (PATCH and DELETE) and `observable_bulk_update` route through here so the
+    rule cannot drift between the two surfaces; `action` only tunes the wording ("mutation" vs
+    "deletion"), not the rule.
+    """
+    if force:
+        return None
+    case_links = _observable_affected_cases(observable)
+    if len(case_links) <= 1:
+        return None
+    return _cross_case_error(case_links, action)
+
+
 @api_view(["GET", "PATCH", "DELETE"])
 @renderer_classes([JSONRenderer])
 def observable_detail(request: Request, observable_id: str) -> Response:
@@ -889,51 +936,20 @@ def observable_detail(request: Request, observable_id: str) -> Response:
     if observable is None:
         return _not_found("Observable")
 
-    # Check if observable is linked to multiple cases
-    linked_cases = list(observable.case_observables.select_related("case").all())
-    case_count = len(linked_cases)
+    # Cross-case protection (TODO 6.5) is enforced through the shared guard below, so PATCH/DELETE
+    # agree exactly with the bulk surface.
     force = request.query_params.get("force", "").lower() == "true"
 
     if request.method == "DELETE":
-        if case_count > 1 and not force:
-            case_links = [
-                {
-                    "case_id": str(link.case.id),
-                    "case_number": link.case.number,
-                    "case_title": link.case.title,
-                }
-                for link in linked_cases
-            ]
-            return Response(
-                {
-                    "type": "CrossCaseMutationError",
-                    "message": f"Observable is linked to {case_count} cases. Use ?force=true to confirm deletion across all cases.",
-                    "fields": {"force": ["required when observable is linked to multiple cases"]},
-                    "affected_cases": case_links,
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
+        guard = _observable_cross_case_guard(observable, force, action="deletion")
+        if guard is not None:
+            return guard
         observable.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
     if request.method == "PATCH":
-        if case_count > 1 and not force:
-            case_links = [
-                {
-                    "case_id": str(link.case.id),
-                    "case_number": link.case.number,
-                    "case_title": link.case.title,
-                }
-                for link in linked_cases
-            ]
-            return Response(
-                {
-                    "type": "CrossCaseMutationError",
-                    "message": f"Observable is linked to {case_count} cases. Use ?force=true to confirm mutation across all cases.",
-                    "fields": {"force": ["required when observable is linked to multiple cases"]},
-                    "affected_cases": case_links,
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
+        guard = _observable_cross_case_guard(observable, force)
+        if guard is not None:
+            return guard
         return _update_observable(observable, request)
     return _observable_detail_payload(observable)
 
@@ -1802,10 +1818,50 @@ def _resolve_observable_for_bulk(_request: Request, raw: str) -> Observable | No
     return Observable.objects.filter(pk=pk).first()
 
 
+def _bulk_cross_case_guard(request: Request, ids: list[Any]) -> Response | None:
+    """Pre-flight the TODO 6.5 guard over every id before `bulk_patch` mutates anything.
+
+    The single-item endpoint refuses a shared observable; the bulk surface must not offer a way
+    around it. Each id is resolved (org-unscoped, exactly as the single-item endpoint is — §6.4/F2
+    is a separate, deferred concern) and run through the same `_observable_cross_case_guard`. If
+    any target is linked to more than one case and the request lacks `?force=true`, the whole
+    request aborts with the same 409 the single-item endpoint returns, and the affected cases from
+    every offending observable are merged (deduplicated by case id) so the caller sees the full
+    blast radius. `?force=true` skips the check, exactly as it does for a single row.
+    """
+    force = request.query_params.get("force", "").lower() == "true"
+    affected: dict[str, dict[str, Any]] = {}
+    for raw in ids:
+        observable = _resolve_observable_for_bulk(request, str(raw))
+        if observable is None:
+            continue
+        guard = _observable_cross_case_guard(observable, force)
+        if guard is None:
+            continue
+        for link in guard.data["affected_cases"]:
+            affected.setdefault(link["case_id"], link)
+    if not affected:
+        return None
+    return _cross_case_error(list(affected.values()), "mutation")
+
+
 @api_view(["PATCH"])
 @renderer_classes([JSONRenderer])
 def observable_bulk_update(request: Request) -> Response:
-    """`PATCH /api/v1/observable/_bulk` — apply one field set to many observables."""
+    """`PATCH /api/v1/observable/_bulk` — apply one field set to many observables.
+
+    The TODO 6.5 cross-case guard is a pre-flight over every resolved id, so a shared target
+    aborts the batch with a 409 before any row is written (the caller must repeat with
+    `?force=true`, mirroring `PATCH /observable/{id}`). Once the guard passes, `bulk_patch`'s
+    per-item boundary still governs the non-guard failures (unknown id, bad field): one bad id
+    does not roll back its siblings.
+    """
+    payload = request.data if isinstance(request.data, dict) else {}
+    ids = payload.get("ids")
+    if isinstance(ids, list) and ids:
+        guard = _bulk_cross_case_guard(request, ids)
+        if guard is not None:
+            return guard
     return bulk_patch(
         request,
         ids_key="ids",
