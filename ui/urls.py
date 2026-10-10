@@ -29,11 +29,29 @@ urlpatterns = [
     # Case sub-resources (P2-P5 UI)
     path("cases/<str:case_id>/export", views.case_export, name="ui-case-export"),
     path("cases/<str:case_id>/tags", views.case_tags, name="ui-case-tags"),
+    path(
+        "cases/<str:case_id>/tags/<uuid:tag_id>/toggle",
+        views.case_tag_toggle,
+        name="ui-case-tag-toggle",
+    ),
     path("cases/<str:case_id>/template", views.case_apply_template, name="ui-case-apply-template"),
     path("cases/<str:case_id>/merge", views.case_merge, name="ui-case-merge"),
     path("cases/<str:case_id>/bulk", views.case_bulk, name="ui-case-bulk"),
     path(
         "cases/<str:case_id>/attachment", views.case_attachment_list, name="ui-case-attachment-list"
+    ),
+    # The specific `upload` / `.../delete` routes are registered before the generic
+    # `attachment/<uuid:attachment_id>` ones so a literal segment can never be swallowed by a
+    # converter the way a later, broader pattern would swallow it.
+    path(
+        "cases/<str:case_id>/attachment/upload",
+        views.case_attachment_upload,
+        name="ui-case-attachment-upload",
+    ),
+    path(
+        "cases/<str:case_id>/attachment/<uuid:attachment_id>/delete",
+        views.case_attachment_delete,
+        name="ui-case-attachment-delete",
     ),
     path(
         "cases/<str:case_id>/attachment/<uuid:attachment_id>/download",
@@ -55,7 +73,6 @@ urlpatterns = [
         views.case_procedures_create,
         name="ui-case-procedures-create",
     ),
-    path("cases/<str:case_id>/export", views.case_export, name="ui-case-export"),
     # Case templates
     path("case-templates", views.case_template_list, name="ui-case-template-list"),
     path("case-templates/new", views.case_template_create, name="ui-case-template-create"),
@@ -91,8 +108,6 @@ urlpatterns = [
         views.case_procedures_create,
         name="ui-case-procedures-create",
     ),
-    # Case export
-    path("cases/<str:case_id>/export", views.case_export, name="ui-case-export"),
     # Automation/Playbooks
     path("automation", views.automation_list, name="ui-automation-list"),
     path("automation/playbooks", views.playbook_list, name="ui-playbook-list"),

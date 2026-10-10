@@ -29,6 +29,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView as DjangoLoginView
 from django.contrib.auth.views import LogoutView
+from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import Count
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
@@ -45,7 +46,7 @@ from alerts.escalation import (
 from alerts.models import Alert
 from automation.models import AutomationRun, Playbook
 from cases.ledger import append_timeline_event
-from cases.models import Case, CaseStatus, CaseTemplate, Comment, Tag, Task
+from cases.models import Attachment, Case, CaseStatus, CaseTemplate, Comment, Tag, Task
 from core.enums import SEVERITY_CHOICES
 from identity.models import User
 from identity.ratelimit import check_login_rate_limit, record_failed_login, record_successful_login
@@ -1185,14 +1186,24 @@ def case_attachment_download(
 @login_required
 @require_POST
 def case_attachment_delete(request: HttpRequest, case_id: str, attachment_id: str) -> HttpResponse:
-    from cases.views import case_attachment_detail as api_view
+    """Delete an attachment from the UI.
 
-    response = api_view(request, case_id=case_id, attachment_id=attachment_id)
-    if response.status_code == 204:
-        messages.success(request, "Attachment deleted.")
-    else:
-        messages.error(request, "Delete failed.")
-    return redirect("ui-case-attachment-list", case_id=case_id)
+    The API endpoint is `DELETE`-only and a browser form can only `POST`, so the UI performs the
+    deletion itself instead of delegating (which used to answer this POST with a 405 and silently
+    leave the row and blob in place). The attachment is reached *through* its case, so a foreign
+    case id cannot address it — the same scoping `cases.views.case_attachment_detail` applies, and
+    only an authenticated analyst (`@login_required`) may act.
+
+    Ordering mirrors the API: the row goes first, so a missing blob cannot turn a delete into a 500.
+    """
+    case = _resolve_case(case_id)
+    attachment = get_object_or_404(Attachment, pk=attachment_id, case=case)
+    name = attachment.name
+    path = attachment.path
+    attachment.delete()
+    default_storage.delete(path)
+    messages.success(request, f"Deleted attachment '{name}'.")
+    return redirect("ui-case-attachment-list", case_id=case.number)
 
 
 @login_required
