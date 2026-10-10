@@ -5,12 +5,12 @@ WebSocket upgrade), they get a 404 from the HTTP router. This module provides
 friendly fallback views that explain what went wrong.
 """
 
-from django.http import HttpResponse
+from django.http import HttpRequest, HttpResponse
 from django.views.decorators.http import require_GET
 
 
 @require_GET
-def websocket_fallback(request, case_id: str) -> HttpResponse:
+def websocket_fallback(request: HttpRequest, case_id: str) -> HttpResponse:
     """Friendly fallback for WebSocket endpoint accessed via HTTP.
 
     Returns a helpful error message explaining that this endpoint requires

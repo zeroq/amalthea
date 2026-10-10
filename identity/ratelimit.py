@@ -6,6 +6,8 @@ Uses Django's cache framework (Redis in production, locmem in dev).
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from django.core.cache import cache
 from django.http import HttpRequest
 
@@ -19,8 +21,8 @@ def _get_client_ip(request: HttpRequest) -> str:
     """Extract client IP from request, handling proxies."""
     x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
     if x_forwarded_for:
-        return x_forwarded_for.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR", "unknown")
+        return str(x_forwarded_for).split(",")[0].strip()
+    return str(request.META.get("REMOTE_ADDR", "unknown"))
 
 
 def _make_keys(request: HttpRequest, username: str | None = None) -> tuple[str, str | None]:
@@ -33,12 +35,12 @@ def _make_keys(request: HttpRequest, username: str | None = None) -> tuple[str, 
 
 def _get_attempts(key: str) -> int:
     """Get current failed attempt count for a key."""
-    return cache.get(key, 0)
+    return int(cache.get(key, 0))
 
 
 def _increment_attempts(key: str) -> int:
     """Increment and return failed attempt count for a key."""
-    current = cache.get(key, 0)
+    current = int(cache.get(key, 0))
     new_count = current + 1
     cache.set(key, new_count, LOGIN_WINDOW)
     return new_count
@@ -75,7 +77,7 @@ def _is_locked_out(request: HttpRequest, username: str | None = None) -> tuple[b
 def _get_cache_ttl(key: str) -> int:
     """Get TTL for a cache key, with fallback for LocMemCache which doesn't support ttl()."""
     try:
-        return cache.ttl(key)
+        return int(cast("Any", cache).ttl(key))
     except AttributeError:
         # LocMemCache doesn't support ttl(), fall back to window duration
         return LOGIN_WINDOW

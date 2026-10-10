@@ -306,19 +306,18 @@ def case_json(
             except ValueError:
                 pass
 
-        timeline_events = events_after(str(case.id), timeline_after_uuid)
-        # Apply limit
-        timeline_events = list(timeline_events[: timeline_limit + 1])  # +1 to detect has_more
-        has_more = len(timeline_events) > timeline_limit
+        timeline_items = list(events_after(str(case.id), timeline_after_uuid)[: timeline_limit + 1])
+        # +1 fetched above to detect has_more
+        has_more = len(timeline_items) > timeline_limit
         if has_more:
-            timeline_events = timeline_events[:timeline_limit]
+            timeline_items = timeline_items[:timeline_limit]
 
         next_cursor = None
-        if has_more and timeline_events:
-            last_event = timeline_events[-1]
+        if has_more and timeline_items:
+            last_event = timeline_items[-1]
             next_cursor = str(last_event.id)
 
-        payload["timeline"] = [timeline_event_json(e) for e in timeline_events]
+        payload["timeline"] = [timeline_event_json(e) for e in timeline_items]
         payload["timelinePagination"] = {
             "hasMore": has_more,
             "nextCursor": next_cursor,
