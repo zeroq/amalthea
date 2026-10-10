@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     "django.contrib.postgres",
     "rest_framework",
     "channels",
+    "csp",
     "core",
     "identity",
     "compat",
@@ -50,6 +51,31 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# Content Security Policy — strict 'self' only (ADR-003). All assets (HTMX, Font Awesome,
+# Tailwind-compiled CSS) are self-hosted under /static/, so nothing external is allowed and
+# neither `'unsafe-inline'` nor `'unsafe-eval'` is needed. Defined here rather than in `prod.py`
+# so every environment (test included) translates it identically and one end-to-end response
+# assertion exercises the exact directive set production emits.
+#
+# django-csp 4.x reads ONLY `CONTENT_SECURITY_POLICY`; the legacy `CSP_*` names are a silent
+# no-op (and were never even validated while the `csp` app was absent from INSTALLED_APPS —
+# `csp.E001`). `object-src 'none'` and `frame-ancestors 'none'` re-state the X-Frame-Options:
+# DENY / MIME-sniffing hardening at the CSP layer for older or non-header-honouring agents.
+CONTENT_SECURITY_POLICY = {
+    "DIRECTIVES": {
+        "default-src": ["'self'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'"],
+        "font-src": ["'self'"],
+        "img-src": ["'self'", "data:"],
+        "connect-src": ["'self'"],
+        "frame-ancestors": ["'none'"],
+        "form-action": ["'self'"],
+        "base-uri": ["'self'"],
+        "object-src": ["'none'"],
+    }
+}
 
 ROOT_URLCONF = "amalthea.urls"
 WSGI_APPLICATION = "amalthea.wsgi.application"

@@ -1,9 +1,12 @@
 """Production settings must fail closed at import time (plan §T1, AC1.1—AC1.3; deviation F9).
 
 `amalthea.settings.prod` raises `ImproperlyConfigured` *while the module is being imported*, so
-each case runs in a fresh subprocess: raising inside the pytest process would poison
+each fail-closed case runs in a fresh subprocess: raising inside the pytest process would poison
 `sys.modules` for every later test, while a child's exit code and stderr make the refusal
 directly observable.
+
+The CSP case at the bottom is the exception: the policy is defined in `base.py` and inherited by
+production, so it can be asserted against a real response in-process (see its docstring).
 
 The child environment starts from `os.environ` with the vars under test removed, then applies
 per-case overrides. `base.py` runs `load_dotenv(BASE_DIR / ".env", override=False)`, so a var we
@@ -20,6 +23,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from django.test import Client
 from dotenv import dotenv_values
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -165,3 +169,28 @@ def test_hardening_flags_are_forced_in_production() -> None:
     assert content_type_nosniff == "True", "SECURE_CONTENT_TYPE_NOSNIFF is not forced"
     assert referrer_policy == "same-origin", "SECURE_REFERRER_POLICY is not same-origin"
     assert x_frame_options == "DENY", "X_FRAME_OPTIONS is not DENY"
+
+
+# --- B2: Content-Security-Policy is a real response header ---------------------------
+
+
+def test_the_strict_csp_is_emitted_on_a_real_response() -> None:
+    """B2 — the strict policy is a real header, not an inert legacy `CSP_*` setting.
+
+    `django-csp` 4.x reads only `CONTENT_SECURITY_POLICY`. The old `CSP_*` names this project set
+    were never validated (the `csp` app was not even installed), so no response carried a
+    `Content-Security-Policy` header at all. This drives the real middleware stack through the
+    framework test client and asks `/healthz` (a 200 with no auth, DB or external service) for a
+    real response. The policy lives in `base.py`, which production imports unchanged, so this
+    guards the exact directive set production emits.
+
+    Non-vacuous by construction: drop `CONTENT_SECURITY_POLICY` from `base.py` (or revert to the
+    `CSP_*` names) and `csp.utils.build_policy()` returns `""` — the middleware sets no header and
+    this test fails on the missing header.
+    """
+    response = Client().get("/healthz")
+
+    assert response.status_code == 200, response.content
+    policy = response.headers["Content-Security-Policy"]
+    assert "default-src 'self'" in policy, policy
+    assert "object-src 'none'" in policy, policy

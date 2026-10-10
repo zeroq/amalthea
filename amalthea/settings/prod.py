@@ -36,18 +36,9 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 X_FRAME_OPTIONS = "DENY"
 
-# Content Security Policy — strict 'self' only (ADR-003)
-# All assets (HTMX, Font Awesome, Tailwind-compiled CSS) are self-hosted under /static/
-CSP_DEFAULT_SRC = ("'self'",)
-CSP_SCRIPT_SRC = ("'self'",)
-CSP_STYLE_SRC = ("'self'",)
-CSP_FONT_SRC = ("'self'",)
-CSP_IMG_SRC = ("'self'", "data:")
-CSP_CONNECT_SRC = ("'self'",)
-CSP_FRAME_ANCESTORS = ("'none'",)
-CSP_FORM_ACTION = ("'self'",)
-CSP_BASE_URI = ("'self'",)
-CSP_OBJECT_SRC = ("'none'",)
+# Content Security Policy — the strict 'self'-only policy (ADR-003) lives in `base.py`
+# (`CONTENT_SECURITY_POLICY`), which is where `django-csp` 4.x reads it from. Production imports
+# it unchanged rather than restating it, so there is a single definition to keep strict.
 
 # Session cookie hardening — prevents XSS from accessing session cookie (TODO 6.11)
 SESSION_COOKIE_HTTPONLY = True
