@@ -9,16 +9,18 @@
 
 {% block content %}
 <div class="card">
+  <div class="table-wrap">
   <table class="grid">
+    <caption class="sr-only">Case templates</caption>
     <thead>
       <tr>
-        <th>Name</th>
-        <th>Display Name</th>
-        <th>Severity</th>
-        <th>TLP</th>
-        <th>PAP</th>
-        <th>Flags</th>
-        <th></th>
+        <th scope="col">Name</th>
+        <th scope="col">Display Name</th>
+        <th scope="col">Severity</th>
+        <th scope="col">TLP</th>
+        <th scope="col">PAP</th>
+        <th scope="col">Flags</th>
+        <th scope="col"></th>
       </tr>
     </thead>
     <tbody>
@@ -32,16 +34,20 @@
         <td>{{ t.flag|default:"—" }}</td>
         <td>
           <a class="btn" href="{% url 'ui-case-template-detail' t.id %}">Edit</a>
-          <form method="post" action="{% url 'ui-case-template-delete' t.id %}" class="inline-form" onsubmit="return confirm('Delete this template?');">
-            {% csrf_token %}
-            <button class="btn" type="submit" style="background:var(--color-err);border-color:var(--color-err);color:white;">Delete</button>
-          </form>
+          {% url 'ui-case-template-delete' t.id as delete_url %}
+          {% with modal_id="delete-template-"|add:t.id|stringformat:"s" %}
+          {% include "ui/_modal.html" with modal_id=modal_id title="Delete template?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
+          {% endwith %}
+          <button type="button" class="btn btn-err" data-modal-open="delete-template-{{ t.id }}">Delete</button>
         </td>
       </tr>
       {% empty %}
-      <tr><td colspan="7" class="empty">No templates yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
+  {% if not templates %}
+  <p class="empty">No templates yet.</p>
+  {% endif %}
 </div>
 {% endblock %}

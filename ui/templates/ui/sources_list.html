@@ -9,6 +9,7 @@
 </p>
 
 {% if sources %}
+  <div class="table-wrap">
   <table class="grid">
     <caption class="sr-only">Configured ingestion sources</caption>
     <thead>
@@ -40,6 +41,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 
   <p class="hint">
     A source marked <em>open</em> accepts unauthenticated posts. That is fine for a local trial and

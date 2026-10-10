@@ -19,15 +19,17 @@
 </div>
 
 <div class="card">
+  <div class="table-wrap">
   <table class="grid">
+    <caption class="sr-only">Observables</caption>
     <thead>
       <tr>
-        <th>Type</th>
-        <th>Value</th>
-        <th>Cases</th>
-        <th>First seen</th>
-        <th>Last seen</th>
-        <th></th>
+        <th scope="col">Type</th>
+        <th scope="col">Value</th>
+        <th scope="col">Cases</th>
+        <th scope="col">First seen</th>
+        <th scope="col">Last seen</th>
+        <th scope="col"></th>
       </tr>
     </thead>
     <tbody>
@@ -41,9 +43,12 @@
         <td><a class="btn" href="{% url 'ui-observable-detail' obs.id %}">View</a></td>
       </tr>
       {% empty %}
-      <tr><td colspan="6" class="empty">No observables found.</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
+  {% if not observables %}
+  <p class="empty">No observables found.</p>
+  {% endif %}
 </div>
 {% endblock %}

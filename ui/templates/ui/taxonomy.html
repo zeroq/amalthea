@@ -8,9 +8,12 @@
   <div class="stack">
     <div class="card">
       <h3>Case Statuses</h3>
+      {% if case_statuses %}
+      <div class="table-wrap">
       <table class="grid">
+        <caption class="sr-only">Case statuses</caption>
         <thead>
-          <tr><th>Value</th><th>Stage</th><th>Order</th><th>Hidden</th></tr>
+          <tr><th scope="col">Value</th><th scope="col">Stage</th><th scope="col">Order</th><th scope="col">Hidden</th></tr>
         </thead>
         <tbody>
           {% for s in case_statuses %}
@@ -23,13 +26,20 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
+      {% else %}
+      <p class="empty">No case statuses defined.</p>
+      {% endif %}
     </div>
 
     <div class="card">
       <h3>Alert Statuses</h3>
+      {% if alert_statuses %}
+      <div class="table-wrap">
       <table class="grid">
+        <caption class="sr-only">Alert statuses</caption>
         <thead>
-          <tr><th>Value</th><th>Stage</th><th>Order</th><th>Hidden</th></tr>
+          <tr><th scope="col">Value</th><th scope="col">Stage</th><th scope="col">Order</th><th scope="col">Hidden</th></tr>
         </thead>
         <tbody>
           {% for s in alert_statuses %}
@@ -42,15 +52,22 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
+      {% else %}
+      <p class="empty">No alert statuses defined.</p>
+      {% endif %}
     </div>
   </div>
 
   <div class="stack">
     <div class="card">
       <h3>Observable Types</h3>
+      {% if observable_types %}
+      <div class="table-wrap">
       <table class="grid">
+        <caption class="sr-only">Observable types</caption>
         <thead>
-          <tr><th>Name</th><th>Case Sensitive</th><th>Attachment</th></tr>
+          <tr><th scope="col">Name</th><th scope="col">Case Sensitive</th><th scope="col">Attachment</th></tr>
         </thead>
         <tbody>
           {% for t in observable_types %}
@@ -62,13 +79,20 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
+      {% else %}
+      <p class="empty">No observable types defined.</p>
+      {% endif %}
     </div>
 
     <div class="card">
       <h3>Case Templates</h3>
+      {% if case_templates %}
+      <div class="table-wrap">
       <table class="grid">
+        <caption class="sr-only">Case templates</caption>
         <thead>
-          <tr><th>Name</th><th>Display Name</th><th>Severity</th></tr>
+          <tr><th scope="col">Name</th><th scope="col">Display Name</th><th scope="col">Severity</th></tr>
         </thead>
         <tbody>
           {% for t in case_templates %}
@@ -80,15 +104,22 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
+      {% else %}
+      <p class="empty">No case templates defined.</p>
+      {% endif %}
     </div>
   </div>
 
   <div class="stack">
     <div class="card">
       <h3>Tags</h3>
+      {% if tags %}
+      <div class="table-wrap">
       <table class="grid">
+        <caption class="sr-only">Tags</caption>
         <thead>
-          <tr><th>Name</th><th>Cases</th><th>Alerts</th><th>Observables</th></tr>
+          <tr><th scope="col">Name</th><th scope="col">Cases</th><th scope="col">Alerts</th><th scope="col">Observables</th></tr>
         </thead>
         <tbody>
           {% for t in tags %}
@@ -101,13 +132,20 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
+      {% else %}
+      <p class="empty">No tags defined.</p>
+      {% endif %}
     </div>
 
     <div class="card">
       <h3>TTPs (ATT&CK)</h3>
+      {% if ttps %}
+      <div class="table-wrap">
       <table class="grid">
+        <caption class="sr-only">TTPs (ATT&CK)</caption>
         <thead>
-          <tr><th>Name</th><th>Code</th><th>Tactic</th></tr>
+          <tr><th scope="col">Name</th><th scope="col">Code</th><th scope="col">Tactic</th></tr>
         </thead>
         <tbody>
           {% for t in ttps %}
@@ -119,6 +157,10 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
+      {% else %}
+      <p class="empty">No TTPs defined.</p>
+      {% endif %}
     </div>
   </div>
 {% endblock %}

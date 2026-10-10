@@ -30,10 +30,12 @@
 </section>
 
 <div class="cols">
-  <section class="card" aria-labelledby="h-alerts">
+<section class="card" aria-labelledby="h-alerts">
     <h2 id="h-alerts">Newest alerts awaiting triage</h2>
     {% if recent_alerts %}
+      <div class="table-wrap">
       <table class="grid">
+        <caption class="sr-only">Recent alerts awaiting triage</caption>
         <thead>
           <tr>
             <th scope="col">Severity</th><th scope="col">Title</th>
@@ -51,15 +53,18 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
-      <p class="empty">Nothing waiting. Post to <code>/api/v1/alerts/webhook/&lt;slug&gt;/</code> to watch an alert land here.</p>
+      <p class="empty">Nothing waiting. Post to <code>/api/v1/alerts/webhook/<slug>/</code> to watch an alert land here.</p>
     {% endif %}
   </section>
 
   <section class="card" aria-labelledby="h-cases">
     <h2 id="h-cases">Open cases by severity</h2>
     {% if open_cases %}
+      <div class="table-wrap">
       <table class="grid">
+        <caption class="sr-only">Open cases by severity</caption>
         <thead>
           <tr>
             <th scope="col">Case</th><th scope="col">Severity</th>
@@ -77,6 +82,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p class="empty">No open cases.</p>
     {% endif %}
@@ -86,7 +92,9 @@
 <section class="card" aria-labelledby="h-runs">
   <h2 id="h-runs">Recent automation runs</h2>
   {% if runs %}
+    <div class="table-wrap">
     <table class="grid">
+      <caption class="sr-only">Recent automation runs</caption>
       <thead>
         <tr>
           <th scope="col">Playbook</th><th scope="col">Status</th>
@@ -104,6 +112,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   {% else %}
     <p class="empty">No playbook has fired yet. Bind one to <code>observable.created</code> and the loop starts on its own.</p>
   {% endif %}

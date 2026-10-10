@@ -67,3 +67,9 @@ dialog.cheatsheet-modal::backdrop {
   font: 600 11px/1.6 var(--font-mono);
   color: var(--color-text-dim);
 }
+
+/* Responsive table wrapper */
+.table-wrap { overflow-x: auto; }
+@media (max-width: 768px) {
+  .grid th, .grid td { white-space: nowrap; }
+}

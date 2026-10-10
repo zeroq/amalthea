@@ -78,7 +78,9 @@
     <section class="card" aria-labelledby="h-obs">
       <h2 id="h-obs">Artifacts <span class="count">{{ observables|length }}</span></h2>
       {% if observables %}
+        <div class="table-wrap">
         <table class="grid grid-tight">
+          <caption class="sr-only">Artifacts linked to this case</caption>
           <thead><tr><th scope="col">Type</th><th scope="col">Value</th><th scope="col">Seen in</th></tr></thead>
           <tbody>
             {% for link in observables %}
@@ -90,6 +92,7 @@
             {% endfor %}
           </tbody>
         </table>
+        </div>
       {% else %}
         <p class="empty">No artifacts extracted yet. Use <em>Re-extract artifacts</em> above.</p>
       {% endif %}
@@ -98,7 +101,9 @@
     <section class="card" aria-labelledby="h-runs">
       <h2 id="h-runs">Automation runs <span class="count">{{ runs|length }}</span></h2>
       {% if runs %}
+        <div class="table-wrap">
         <table class="grid grid-tight">
+          <caption class="sr-only">Automation runs for this case</caption>
           <thead><tr><th scope="col">Playbook</th><th scope="col">Status</th><th scope="col">Output</th></tr></thead>
           <tbody>
             {% for run in runs %}
@@ -114,6 +119,7 @@
             {% endfor %}
           </tbody>
         </table>
+        </div>
       {% else %}
         <p class="empty">No playbook has run for this case.</p>
       {% endif %}

@@ -14,6 +14,7 @@
 
 {% block content %}
 {% if cases %}
+  <div class="table-wrap">
   <table class="grid">
     <caption class="sr-only">Cases by severity, newest first</caption>
     <thead>
@@ -35,6 +36,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 {% else %}
   <p class="empty">No cases {% if not show_closed %}open{% endif %}.</p>
 {% endif %}

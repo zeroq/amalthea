@@ -19,6 +19,7 @@
 </p>
 
 {% if alerts %}
+  <div class="table-wrap">
   <table class="grid">
     <caption class="sr-only">Alerts, newest first</caption>
     <thead>
@@ -46,6 +47,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 {% else %}
   <p class="empty">No alerts in this scope.</p>
 {% endif %}

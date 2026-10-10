@@ -9,16 +9,18 @@
 
 {% block content %}
 <div class="card">
+  <div class="table-wrap">
   <table class="grid">
+    <caption class="sr-only">Playbooks</caption>
     <thead>
       <tr>
-        <th>Name</th>
-        <th>Trigger</th>
-        <th>Action</th>
-        <th>Active</th>
-        <th>Last run</th>
-        <th>Runs</th>
-        <th></th>
+        <th scope="col">Name</th>
+        <th scope="col">Trigger</th>
+        <th scope="col">Action</th>
+        <th scope="col">Active</th>
+        <th scope="col">Last run</th>
+        <th scope="col">Runs</th>
+        <th scope="col"></th>
       </tr>
     </thead>
     <tbody>
@@ -53,19 +55,21 @@
         <td>
           <a class="btn" href="{% url 'ui-playbook-detail' pb.id %}">Open</a>
           {% if pb.runs.count == 0 %}
-          <form method="post" action="{% url 'ui-playbook-delete' pb.id %}" class="inline-form" style="margin:0">
-            {% csrf_token %}
-            <button class="btn" type="submit" onclick="return confirm('Delete this playbook?')">Delete</button>
-          </form>
+          {% url 'ui-playbook-delete' pb.id as delete_url %}
+          {% with modal_id="delete-playbook-"|add:pb.id|stringformat:"s" %}
+          {% include "ui/_modal.html" with modal_id=modal_id title="Delete playbook?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
+          {% endwith %}
+          <button type="button" class="btn btn-err" data-modal-open="delete-playbook-{{ pb.id }}">Delete</button>
           {% endif %}
         </td>
       </tr>
       {% empty %}
-      <tr>
-        <td colspan="7" class="empty">No playbooks yet. <a href="{% url 'ui-playbook-create' %}">Create one</a>.</td>
-      </tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
+  {% if not playbooks %}
+  <p class="empty">No playbooks yet. <a href="{% url 'ui-playbook-create' %}">Create one</a>.</p>
+  {% endif %}
 </div>
 {% endblock %}
