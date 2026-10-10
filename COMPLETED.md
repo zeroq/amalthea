@@ -877,21 +877,34 @@ migration `cases/migrations/0012_ttp_procedure.py`.
   focus trap, Esc to close, focus restore on close.
 - [x] Gate: SQLite `make check` **986 passed / 3 skipped**; ruff + mypy clean.
 
-## 2026-10-09 — Realtime HTTP fallback for WebSocket endpoints
+## 2026-10-10 — Wave A remediation (from the Oct-9→10 comprehensive review)
 
-(Already documented above)
+**No schema change.** Findings + AC verdicts: [`docs/planning/VERIFY-2026-10-10-t2-and-phase12.md`](docs/planning/VERIFY-2026-10-10-t2-and-phase12.md).
 
-## 2026-10-09 — Realtime WebSocket fix: HTTP fallback for `/ws/case/<uuid>/`
+- [x] **B1 — Missing/broken UI routes** — added `ui-case-tag-toggle`, `ui-case-attachment-upload`,
+  `ui-case-attachment-delete` to `ui/urls.py` (views existed, routes did not); removed a duplicate
+  `ui-case-export` route; fixed `ui/views.py::case_attachment_delete` to delete the row + blob locally
+  (it delegated to a `DELETE` API view and 405'd on the form's POST). New
+  `tests/conformance/test_ui_urls_smoke.py` (5).
+- [x] **B2 — Prod CSP was a no-op** — `django-csp==4.0` ignores the legacy `CSP_*` settings and needs
+  `"csp"` in `INSTALLED_APPS`; `amalthea/settings/prod.py` now sets `CONTENT_SECURITY_POLICY` and
+  `build_policy()["DIRECTIVES"]` is non-empty. Removed the inert `AMALTHEA_CSP` from `.env.example`.
+  `tests/conformance/test_prod_settings.py` now asserts a real header directive.
+- [x] **B3 — `_bulk` bypassed the §6.5 blast-radius guard** — `observable_bulk_update` now applies the
+  shared cross-case guard and pre-flights a **409** listing affected cases unless `?force=true`.
+  `tests/conformance/test_observable_bulk_guard.py` (4).
+- [x] **Docs hygiene** — deduped `TODO.md` §6 and `COMPLETED.md`; priority table refreshed; Phase 12
+  plan status corrected to *partially shipped*; `api.md`/`data-model.md` evidence refreshed; ADR-003
+  "Known limitation" + `make css-check` message corrected (frontend).
+- [ ] **Flagged, not fixed** — `ui-case-merge` is orphaned dead code (wrong import, missing template,
+  `@require_GET` on POST); tracked as `TODO.md` #5. Security items (S1–S7) tracked as priority #1 (Wave B).
 
-(Already documented above)
-
-
-## Summary Statistics (as of 2026-10-09)
+## Summary Statistics (as of 2026-10-10)
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | 986 passed / 3 skipped / 3 failed (pre-existing SQLite issues) |
-| **Secret scan** | Clean (312 tracked files) |
+| **Total tests** | 1001 passed / 3 skipped / 0 failed |
+| **Secret scan** | Clean (314 tracked files) |
 | **Ruff** | Clean |
 | **Mypy (strict)** | Clean (88 source files) |
 | **Ruff format** | Clean |
@@ -902,17 +915,29 @@ migration `cases/migrations/0012_ttp_procedure.py`.
 | **CI** | GitHub Actions: `make check` + Postgres suite + coverage + lock check + pip-audit + secret scan |
 
 
-## Known Pre-existing Failures (3, SQLite-only)
+## Pre-existing failures in the full suite: **none** (as of 2026-10-10)
 
-1. `test_seed_migrations.py::test_h3_2_rolling_back_a_seed_unapplies_nothing_in_another_app` — 2 failures (migration dependency graph cross-app edge case, SQLite-only)
-2. `test_zzz_probe.py::test_z_delete_the_seed_row` — SQLite `case_record` table name mismatch (SQLite renames tables on rollback)
+The former single full-suite failure — `test_zzz_probe.py::test_z_delete_the_seed_row` (SQLite
+`no such table: case_record` after a seed-rollback test) — was a **scratch/diagnostic probe**, not a
+product test: its one unique assertion (`New` CaseStatus seeded) is subsumed by
+`test_seed_migrations.py::test_the_seed_rows_are_present_after_a_normal_migrate`, and its "delete a
+seed row" assertion tested no product behaviour and is invalid on SQLite by construction. It was
+**removed** (`git rm tests/conformance/test_zzz_probe.py`) rather than left as a knowingly-red test —
+a red DoD signal that cannot be made green on the local engine is exactly the "gate you can't trust"
+failure mode this project rejects.
 
-These are **pre-existing**, documented limitations of SQLite's migration engine, not regressions.
-All pass on PostgreSQL (verified in CI and manual re-gate 2026-10-06/07).
+The underlying SQLite limitation is unchanged and still tracked as **H3-2** (the seed-rollback path is
+not cleanly reversible on SQLite; `observables/0003` + `alerts/0004`), recorded in
+`docs/reviews/REVIEW-2026-10-05-phase3-schema-gate-round3.md` and `TODO.md` §3.1 — it is a property of
+the engine, not of any test, and does not fail the suite on either engine (the affected behaviour is
+asserted on PostgreSQL).
+
+Full suite (2026-10-10, after the probe removal): see the Summary Statistics row above.
+All tests pass on PostgreSQL (verified in CI and manual re-gate 2026-10-06/07).
 
 ---
 
-*Last updated: 2026-10-09*  
+*Last updated: 2026-10-10*  
 *Next review: After 6.4 (tenant isolation) design decision*
 
 

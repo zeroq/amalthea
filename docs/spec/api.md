@@ -354,9 +354,13 @@ model has no creator column (`organisation_json`, the status renderers), and `ta
 
 ## Evidence
 
-Contract tests: `tests/conformance/test_t1_surface.py` (53), `test_unknown_fields.py` (33),
-`test_authz.py` (131), `test_thehive_fixtures.py` (13, pinned golden fixtures from thehive4py 2.1.0),
-`test_webhook_hardening.py` (37), `test_t2_p1_surface.py` (19, the T2 P1 surface: identity,
-observable types, statuses, tags, describe), `test_t2_p2_surface.py` (12, collaboration),
-`test_t2_p3_attachments.py` (9, attachments). TheHive shape decisions: `docs/decisions/ADR-002`.
-Deviations: [`deviations.md`](./deviations.md).
+Contract tests (collected counts, 2026-10-10): `tests/conformance/test_t1_surface.py` (56),
+`test_unknown_fields.py` (33), `test_authz.py` (263), `test_thehive_fixtures.py` (13, pinned golden
+fixtures from thehive4py 2.1.0), `test_webhook_hardening.py` (37), `test_t2_p1_surface.py` (19, the T2
+P1 surface: identity, observable types, statuses, tags, describe), `test_t2_p2_surface.py` (12,
+collaboration), `test_t2_p3_attachments.py` (9, attachments), `test_t2_p4_surface.py` (10, bulk/merge/
+templates/taxonomy), `test_t2_p5_surface.py` (7, export/TTP), `test_playbook_authoring.py` (15,
+Amalthea playbook extension), `test_wire_boundary.py` (3, the one-way literal boundary),
+`test_observable_bulk_guard.py` (4, §6.5 blast radius on `_bulk`). TheHive shape decisions:
+`docs/decisions/ADR-002`. Deviations: [`deviations.md`](./deviations.md). Independent verification:
+[`../planning/VERIFY-2026-10-10-t2-and-phase12.md`](../planning/VERIFY-2026-10-10-t2-and-phase12.md).

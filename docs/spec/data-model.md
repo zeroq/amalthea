@@ -238,8 +238,13 @@ Builders `in_range(...)`/`in_values(...)` emit the CheckConstraints quoted above
 
 ## Evidence
 
-Conformance pins: `tests/conformance/test_phase3_schema.py` / `test_enum_contracts.py` /
-`test_indexes.py`; behaviour pins (numbering, hashing, status semantics): `tests/conformance/
-test_case_numbering.py`, `test_observable_hashing.py`, `test_mutation_standard.py`,
-`test_seed_migrations.py`. Deviations register: [`deviations.md`](./deviations.md). PostgreSQL-only
-semantics (partial index, sequences, CHECK): plan §12 R4/R10 and `docs/planning/VERIFY-2026-10-07-phase10.md`.
+Conformance pins: `tests/conformance/test_phase3_schema.py`, `test_enum_contracts.py`,
+`test_indexes.py`, and the T2 model suites `test_t2_p1_surface.py`..`test_t2_p5_surface.py`
+(Comment/Page/Share/Attachment/CaseTemplate/TTP/Procedure; migrations `cases/0009`–`0014`,
+`automation/0004`–`0006`). Behaviour pins (numbering, hashing, status semantics):
+`tests/conformance/test_case_numbering.py`, `test_observable_hashing.py`,
+`test_mutation_standard.py`, `test_seed_migrations.py`. FK integrity: `test_fk_audit.py`. GIN JSONB
+indexes (§6.2) are Postgres-only. Deviations register: [`deviations.md`](./deviations.md).
+Independent verification: [`../planning/VERIFY-2026-10-10-t2-and-phase12.md`](../planning/VERIFY-2026-10-10-t2-and-phase12.md).
+Postgres-only semantics (partial index, sequences, CHECK): plan §12 R4/R10 and
+`docs/planning/VERIFY-2026-10-07-phase10.md`.

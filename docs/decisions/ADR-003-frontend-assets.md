@@ -28,14 +28,14 @@ The repo previously shipped:
 2. **Tailwind CSS** — compiled at build time via standalone CLI binary (`scripts/tailwindcss`), compiled artifact committed to `ui/static/ui/app.css`. No Node.js toolchain required at runtime or in CI.
 3. **Font Awesome Free** — subset of webfonts (`.woff2`) + minimal CSS subset committed under `ui/static/vendor/fontawesome/`. Only icons actually used are included.
 4. **CSP** — strict `Content-Security-Policy` allowing only `'self'` for scripts/styles/fonts. No `unsafe-inline`, no `unsafe-eval`, no external origins.
-4. **Build pipeline** — `make css` compiles Tailwind; `make css-check` verifies compilation succeeds; both run in CI. No Node.js in CI pipeline.
+5. **Build pipeline** — `make css` compiles Tailwind; `make css-check` verifies the input still compiles (it compiles `ui/static/ui/app.css` to `/dev/null`) and runs as part of `make check`, hence in CI. It is a **compile check, not a drift check**. No Node.js in CI.
 
 ## Rationale
 
 - **Offline-capable / air-gapped deployments** — no external network requests at runtime, compatible with air-gapped SOC environments.
 - **CSP simplicity** — `'self'` only policy is trivial to reason about; no hash/nonces for inline scripts needed because we have zero inline scripts/styles.
 - **Supply chain integrity** — pinned versions, committed artifacts, no runtime CDN fetches that could be compromised.
-- **Deterministic builds** — `make css` produces identical output; `make css-check` in CI prevents drift.
+- **Reproducible toolchain, not yet a reproducible artifact** — the pinned standalone binary and the committed output need no network. This is **not** a claim of drift-free builds: the input and the committed artifact are the same file, so the pipeline is not idempotent and `css-check` cannot detect drift (see *Known limitation*).
 - **License compliance** — Font Awesome Free (CC BY 4.0 icons / SIL OFL 1.1 fonts) requires attribution; self-hosting makes this trivial via `THIRD-PARTY.md`.
 - **No Node.js dependency** — Tailwind standalone binary + `scripts/tailwindcss` keeps the toolchain minimal (single binary, no `package.json`, no `node_modules`).
 
@@ -51,17 +51,27 @@ The repo previously shipped:
 ## Consequences
 
 - **Added files**: `scripts/tailwindcss` (binary), `ui/static/vendor/htmx/htmx.min.js`, `ui/static/vendor/fontawesome/webfonts/*.woff2`, `ui/static/vendor/fontawesome/css/fontawesome-subset.min.css`, `tailwind.config.js`, `THIRD-PARTY.md`, `docs/decisions/ADR-003-frontend-assets.md`.
-- **Modified files**: `ui/templates/ui/base.html` (asset includes), `Makefile` (`css`/`css-check` targets), `amalthea/settings/prod.py` (CSP), `ui/static/ui/app.css` (Tailwind source).
-- **CI** runs `make css-check` as part of `make check`.
+- **Modified files**: `ui/templates/ui/base.html` (asset includes), `Makefile` (`css`/`css-check` targets), `amalthea/settings/prod.py` (CSP), `ui/static/ui/app.css` (Tailwind source — and the committed compiled artifact: the **same** file).
+- **CI** runs `make css-check` as part of `make check`. That is a compile check; it does **not** detect drift.
 - **Developers** run `make css` after modifying `ui/static/ui/app.css` (Tailwind source).
 - **No Node.js** in repo, CI, or production.
+
+### Known limitation — the pipeline is not yet reproducible
+
+`ui/static/ui/app.css` is both the Tailwind **input** and the committed **output**. `make css`
+(`-i app.css -o app.css`) therefore rewrites the file it just read: compiling it in place is **not
+idempotent**, and `make css-check` (which compiles the input to `/dev/null`) proves only that the
+input still parses — it **cannot** prove the committed artifact is current. Splitting the source
+(`ui/static/ui/app.src.css`) from the committed artifact, with a drift check that fails when the
+two diverge, is tracked as **TODO §7.4**. Until then, treat this ADR as describing a compile-checked
+toolchain, not a reproducible build.
 
 ## Verification
 
 - `make css` compiles cleanly
-- `make css-check` passes in CI (`make check`)
+- `make css-check` passes in CI (`make check`) — a compile check, **not** a drift check
 - CSP headers present in prod (`scripts/secret-scan.sh --tracked` clean)
-- `make check` passes (ruff, mypy, tests, migrations)
+- `make check` passes (ruff, mypy, tests, migrations, css compile)
 - Font Awesome license recorded in `THIRD-PARTY.md`
 
 ## References

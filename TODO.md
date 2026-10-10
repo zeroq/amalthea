@@ -16,11 +16,11 @@ be traced, and `Blocks` when it gates other work. Review IDs (`C1`, `H2`, `M5`�
 
 | Priority | Item | Description | Impact |
 |----------|------|-------------|--------|
-| **1** | **6.11 — Login rate-limiting / brute-force hardening** | Webhooks throttled; session/API login wide open. Add throttling + `SESSION_COOKIE_HTTPONLY` assert. | **Critical** for any internet-facing deployment. |
-| **2** | **6.5 — Observable PATCH/DELETE blast radius** | Globally-deduped observables; free PATCH/DELETE corrupts other cases. Need policy (`?force=true` + impact warning). | **High** — data integrity. |
-| **3** | **6.2 — Postgres-only indexes** | GIN on `raw_payload`/`Observable.tags`, `INCLUDE` covering indexes. | **Medium** — perf at scale; defer until data volume. |
-| **4** | **6.3 — Per-link tags on observable link tables** | Per-link `tags` agreed; per-link `is_ioc` rejected. | **Low** — nice-to-have. |
-| **5** | **6.4 — Tenant isolation** | Deferred per 2026-10-09 decision. Requires design decision (middleware org-scope vs per-view filters, roles). | **Deferred** — blocked on decision. |
+| **1** | **Security remediation (Wave B)** | From `VERIFY-2026-10-10-t2-and-phase12.md` / SEC-AUDIT: apply the case/share scope guard (`_case_access`) to the legacy case sub-resource routes, the WebSocket consumer, **and the Wave-A-activated UI delete route `ui-case-attachment-delete` (verifier N1)** (F2/S1/S2); put the per-account lockout on the **API** login and stop trusting client `XFF` (S3); object-level authz on `run_now` (S4); attachment aggregate caps + extension from content type (S5); SSRF DNS-rebinding TOCTOU + runtime timeout clamp (S6); merge share-copy widening (S7). | **Critical/High** for any multi-user deployment. |
+| **2** | **6.4 — Tenant isolation** | Deferred per 2026-10-09 decision. Requires design decision (middleware org-scope vs per-view filters, roles). | **Deferred** — blocked on decision. |
+| **3** | **Test hardening (Phase 12 / T2)** | QA list from `VERIFY-2026-10-10`: delete-with-runs row survival, merge children matrix, attachment boundaries (exact cap/empty/batch partial), timeout cap 30/31, run-now `Success`+`output_log`, `SESSION_COOKIE_HTTPONLY`, UI login-throttle; §8.5 mutation guards for blast-radius/share/TTP/delete-with-runs/attachment. Extend `test_ui_urls_smoke.py` to Python-only `redirect` names (verifier N3). | **Medium** — regression prevention. |
+| **4** | **7.4 — Tailwind source/artifact split** | `ui/static/ui/app.css` is both the Tailwind input and the committed output; the pipeline is not idempotent so `css-check` cannot detect drift. Split `app.src.css` (source) → `app.css` (artifact). See ADR-003 "Known limitation". | **Low** — build hygiene. |
+| **5** | **7.5 — Orphaned routes / `ui-case-merge`** | `ui/views.py::case_merge` imports `merge_cases` from the wrong module, renders a missing `ui/case_merge.html`, and is blocked by `@require_GET` on POST. Verifier N2: six routes (`ui-case-export/bulk/taxonomy/procedure(s)/attachment-detail`) have no entry point anywhere. Either build the missing UI or delete the dead routes/views. | **Low** — dead code that 500s if hit. |
 
 ---
 
@@ -115,13 +115,11 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
 - [ ] **6.4 — Tenant isolation** Phase 10 SEC-AUDIT F2, plan §13 deferred (a) — **DEFERRED** (requires design decision)
 - [x] **6.5 — Observable PATCH/DELETE cross-case blast radius** Phase 10 SEC-AUDIT F3, plan §13 deferred (b) — **SHIPPED 2026-10-09**
 - [x] **6.6 — Production cookie/secret hardening** Phase 10 SEC-AUDIT F9, plan §13 deferred (c) — **CLOSED 2026-10-08 via §4.6**
-- [x] **6.6 — Login rate-limiting / brute-force hardening** §6.6 leftover — **SHIPPED 2026-10-09**
 - [x] **6.7 — Paged case-detail timeline** Phase 10 PERF F2, plan §13 deferred (d) — **SHIPPED 2026-10-09**
-- [x] **6.7 — Paged case-detail timeline** — **SHIPPED 2026-10-09**
 - [x] **6.8 — Orchestration authoring surface** — **SHIPPED 2026-10-09**
 - [x] **6.9 — Analyst UI catch-up to the T2 surface** — **SHIPPED 2026-10-09**
 - [x] **6.10 — Frontend stack actually in place (HTMX + Tailwind + Font Awesome)** — **SHIPPED 2026-10-09**
-- [x] **6.11 — Login rate-limiting / brute-force hardening** §6.6 leftover — **SHIPPED 2026-10-09**
+- [x] **6.11 — Login rate-limiting / brute-force hardening** §6.6 leftover — **SHIPPED 2026-10-09** (note: per-account lockout is UI-only so far — see priority #1, S3)
 
 ---
 
@@ -130,6 +128,11 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
 - [ ] **7.1 — Demonstrate failure modes for every AC** `R11`
 - [ ] **7.2 — Keep the domain-expert gate on every phase, not just Phase 3**
 - [ ] **7.3 — Require subagents to deliver the report they promise**
+- [ ] **7.4 — Split the Tailwind source from the committed artifact** `ADR-003` — Today
+  `ui/static/ui/app.css` is both the Tailwind input and the committed output, so `make css` is not
+  idempotent and `make css-check` only proves the input compiles (it cannot detect drift). Introduce
+  `ui/static/ui/app.src.css`, generate `app.css` from it, and make `css-check` fail when the tree's
+  artifact is stale. Visual-regression risk: verify the tokens before switching the pipeline.
 
 ---
 
@@ -148,23 +151,19 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
 ## 9. Scratch/probe hygiene
 
 - [x] **9.1 — Stale `__pycache__` from deleted scratch tests** Verifier recommendation 7 — **DONE (2026-10-07)**
+- [x] **9.2 — `tests/conformance/test_zzz_probe.py`** (scratch probe) — **REMOVED 2026-10-10.** Its one unique assertion was subsumed by `test_seed_migrations.py::test_the_seed_rows_are_present_after_a_normal_migrate`, and its delete-seed-row test was invalid on SQLite by construction (H3-2), making the DoD gate permanently red. This was the sole cause of the CI `gate` job failing (`make check` + the coverage step).
 
 ---
 
 ## 🎯 Next Recommended Items
 
-| Priority | Item | Rationale |
-|----------|------|-----------|
-| **1** | **6.11 — Login rate-limiting** | **SHIPPED** (API: 100/min DRF throttle; UI: custom 5/15min/5min; `SESSION_COOKIE_HTTPONLY`) |
-| **2** | **6.5 — Observable blast radius** | **SHIPPED** (`?force=true` required for multi-case observables) |
-| **3** | **6.3 — Per-link tags** | **SHIPPED** (JSONField on link tables) |
-| **4** | **6.2 — Postgres-only GIN indexes** | **SHIPPED** |
-| **5** | **6.7 — Paged timeline** | **SHIPPED** (keyset pagination) |
-| **5** | **6.3 — Per-link tags** | **SHIPPED** (JSONField on link tables) |
-| **6** | **6.4 — Tenant isolation** | **DEFERRED** — needs design decision |
-| **6** | **6.3 — Per-link tags** | **DONE** |
-| **7** | **6.2 — Postgres GIN indexes** | **DONE** (shipped) |
+See the canonical **NEXT HIGHEST-IMPACT ITEMS** table at the top of this file (it is the single source of
+truth and is kept current). As of 2026-10-10 the open items are: **Wave B security remediation** (priority
+#1), **§6.4 tenant isolation** (deferred, needs a design decision), **test hardening** and the two low
+follow-ups (#3–#5).
 
----
-
-All planned Phase 12 items (usability & orchestration wave) are **SHIPPED**. The remaining open item is **6.4 — Tenant isolation**, which is deferred pending a design decision.
+Phase 12 code landed (P1–P3, P5–P6), but it is **not** fully shipped: independent verification on
+2026-10-10 found 3 ACs MET / 3 DEVIATED / 10 NOT MET (see `VERIFY-2026-10-10-t2-and-phase12.md`). Wave A
+closed the three unambiguous bugs (B1/B2/B3) + a mypy gate regression; the remaining AC gaps and security
+items are tracked as priorities #1 and #3 above. The only item still genuinely *deferred* is **6.4 — Tenant
+isolation**, pending a design decision.

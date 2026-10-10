@@ -1,7 +1,8 @@
 # PLAN — Phase 12: Usability & Orchestration
 
 - **Date:** 2026-10-09
-- **Status:** Approved 2026-10-09 — ready for implementation (Q1–Q5 resolved, §12)
+- **Status:** **Partially shipped 2026-10-09** (P1–P3, P5–P6 code landed). Independent verification on 2026-10-10 found 3 ACs MET, 3 DEVIATED, 10 NOT MET — see
+  [`VERIFY-2026-10-10-t2-and-phase12.md`](./VERIFY-2026-10-10-t2-and-phase12.md). Outstanding: T1.4 Font Awesome subset/a11y (icons not rolled out), P2/P3/P4 UI tests, real `429` login lockout, `css-check` drift, GIN index test, spec-doc evidence; remediation tracked in `TODO.md` priority #1/#3/#4. Do not mark fully shipped until those ACs pass.
 - **Owner:** planner (tech lead)
 - **Source:** `TODO.md` §6.8–§6.11 (review 2026-10-09) · §6.2/§6.4/§6.5/§6.7 · `AGENTS.md` §1, §2 (Modules B/C/D), §6
 - **Related:** `docs/decisions/ADR-001` (Django/DRF/Channels), `ADR-002` (TheHive-compatible wire), `docs/spec/{api,data-model,realtime,automation,deviations}.md`, `PLAN-2026-10-03-thehive-compatible-mvp.md`
@@ -94,8 +95,9 @@ Minimal, additive. All migrations forward-only.
     migration per trigger).
   - No `db_table`/index change. `playbook_trigger_idx` already covers dispatch.
 - **`AutomationRun`** (existing): add a nullable `triggered_by` `CharField(max_length=20)` with values
-  `event` / `manual` (default `"event"`) so the ledger can distinguish a human-run playbook from an
-  event-driven one. Migration + a CHECK via `in_values`. Index no change.
+  `trigger` / `manual` (default `"trigger"`) so the ledger can distinguish a human-run playbook from an
+  event-driven one. Migration + a CHECK via `in_values`. Index no change. (Corrected 2026-10-10: the
+  implemented default is `"trigger"`, not `"event"` as first drafted — see `automation/models.py`.)
 - **`Case` / `Observable`/`CaseTemplate`/`Procedure`:** **unchanged.** The UI is a view over existing
   rows.
 - No schema change is needed for Phase P3 (observables graph) or Phase P4 (UI catch-up): the fan-out query

@@ -29,12 +29,13 @@ help: ## Show this help
 ## The Definition of Done
 ## ---------------------------------------------------------------------------------------------
 
-check: ## Full DoD gate — run this before committing (lint, types, tests, migrations)
+check: ## Full DoD gate — run this before committing (lint, types, tests, migrations, css compile)
 	@echo "── ruff check";        $(RUFF) check .
 	@echo "── ruff format";       $(RUFF) format --check . --quiet || $(RUFF) format --check .
 	@echo "── mypy (scope pinned in pyproject.toml: 73 files)"; $(MYPY)
 	@echo "── django check";      $(PY) manage.py check
 	@echo "── migrations in sync"; $(PY) manage.py makemigrations --check --dry-run
+	@echo "── css compile check (no Node needed)"; $(MAKE) --no-print-directory css-check
 	@echo "── pytest";            $(PYTEST) -q
 	@echo ""
 	@echo "✓ check passed"
@@ -91,9 +92,9 @@ hooks: ## Install the pre-commit + pre-push git hooks
 css: ## Compile Tailwind CSS to ui/static/ui/app.css
 	@$(TAILWIND) -i ui/static/ui/app.css -o ui/static/ui/app.css --minify
 
-css-check: ## Verify CSS compiles without errors
+css-check: ## Compile-check the Tailwind input — NOT a drift check (input and output are the same file)
 	@$(TAILWIND) -i ui/static/ui/app.css -o /dev/null --minify
-	@echo "✓ CSS compiles cleanly"
+	@echo "✓ Tailwind input compiles (compile check only — this does NOT detect drift)"
 
 ## ---------------------------------------------------------------------------------------------
 
