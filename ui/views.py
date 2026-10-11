@@ -28,15 +28,18 @@ from typing import Any
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView as DjangoLoginView
-from django.contrib.auth.views import LogoutView
+from django.contrib.auth.views import (  # noqa: F401 (re-exported for ui/urls.py)
+    LogoutView,
+    PasswordChangeView,
+)
 from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import Count
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse
+from django.urls import reverse, reverse_lazy  # noqa: F401 (re-exported for ui/urls.py)
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from alerts.escalation import (
     import_alert_to_case,
@@ -342,6 +345,7 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             )[:PAGE_SIZE],
             is_owner=is_owner,
             is_cross_org=is_cross_org,
+            attachments=case.attachments.select_related("created_by").order_by("-created_at"),
         ),
     )
 
@@ -960,17 +964,6 @@ def case_apply_template(request: HttpRequest, case_id: str) -> HttpResponse:
     return redirect("ui-case-detail", case_id=case.number)
 
 
-@login_required
-@require_POST
-def case_bulk(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Bulk update cases (stub for UI integration)."""
-    case = resolve_case(request.user, case_id, write=True)
-    if case is None:
-        return render(request, "ui/404.html", status=404)
-    messages.info(request, "Bulk operations available via API.")
-    return redirect("ui-case-list")
-
-
 # --- Case Templates ---
 
 
@@ -988,40 +981,113 @@ def case_template_list(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required
-def case_template_create(request: HttpRequest) -> HttpResponse:
-    """Create a case template."""
-    if request.method == "GET":
-        return render(request, "ui/case_template_form.html", _base_context(request))
-    # POST
+def _parse_template_form(request: HttpRequest) -> dict:
+    """Parse and validate case template form data. Returns dict of cleaned values or raises ValueError."""
+    import json
+
     name = (request.POST.get("name") or "").strip()
     if not name:
-        messages.error(request, "Name is required.")
+        raise ValueError("Name is required.")
+    if len(name) > 200:
+        name = name[:200]
+
+    # Parse tasks JSON
+    tasks_raw = (request.POST.get("tasks") or "").strip()
+    tasks = []
+    if tasks_raw:
+        try:
+            tasks = json.loads(tasks_raw)
+            if not isinstance(tasks, list):
+                raise ValueError("Tasks must be a JSON array.")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid tasks JSON: {e}") from e
+
+    # Parse custom_fields JSON
+    custom_fields_raw = (request.POST.get("custom_fields") or "").strip()
+    custom_fields = []
+    if custom_fields_raw:
+        try:
+            custom_fields = json.loads(custom_fields_raw)
+            if not isinstance(custom_fields, list):
+                raise ValueError("Custom fields must be a JSON array.")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid custom_fields JSON: {e}") from e
+
+    # flag is a boolean field - checkbox sends "on" when checked
+    flag_raw = request.POST.get("flag")
+    flag = flag_raw in ("on", "true", "1", True)
+
+    return {
+        "name": name,
+        "display_name": (request.POST.get("display_name") or "").strip(),
+        "title_prefix": (request.POST.get("title_prefix") or "").strip(),
+        "description": (request.POST.get("description") or "").strip(),
+        "summary": (request.POST.get("summary") or "").strip(),
+        "flag": flag,
+        "severity": int(request.POST.get("severity") or 2),
+        "tlp": int(request.POST.get("tlp") or 2),
+        "pap": int(request.POST.get("pap") or 2),
+        "tags": [t.strip() for t in (request.POST.get("tags") or "").split(",") if t.strip()],
+        "tasks": tasks,
+        "custom_fields": custom_fields,
+    }
+
+
+@login_required
+def case_template_create(request: HttpRequest) -> HttpResponse:
+    """Create a case template.
+
+    GET: any authenticated user.
+    POST: requires analyst role or above (excludes read-only).
+    """
+    if request.method == "GET":
+        return render(request, "ui/case_template_form.html", _base_context(request))
+
+    # POST - requires analyst role or above (mirrors playbook_create gate)
+    if request.user.role not in ("analyst", "admin", "superAdmin"):
+        return render(request, "ui/404.html", status=404)
+
+    try:
+        data = _parse_template_form(request)
+    except ValueError as exc:
+        messages.error(request, str(exc))
         return redirect("ui-case-template-create")
-    if CaseTemplate.objects.filter(name=name[:200]).exists():
+
+    if CaseTemplate.objects.filter(name=data["name"]).exists():
         messages.error(request, "Template with that name already exists.")
         return redirect("ui-case-template-create")
-    CaseTemplate.objects.create(
-        name=name[:200],
-        display_name=(request.POST.get("display_name") or "").strip(),
-        title_prefix=(request.POST.get("title_prefix") or "").strip(),
-        description=(request.POST.get("description") or "").strip(),
-        summary=(request.POST.get("summary") or "").strip(),
-        flag=(request.POST.get("flag") or "").strip(),
-        severity=int(request.POST.get("severity") or 2),
-        tlp=int(request.POST.get("tlp") or 2),
-        pap=int(request.POST.get("pap") or 2),
-        tags=[t.strip() for t in (request.POST.get("tags") or "").split(",") if t.strip()],
-        tasks=[],
-        custom_fields=[],
-    )
-    messages.success(request, f"Template '{name}' created.")
+
+    CaseTemplate.objects.create(**data)
+    messages.success(request, f"Template '{data['name']}' created.")
     return redirect("ui-case-template-list")
 
 
 @login_required
 def case_template_detail(request: HttpRequest, template_id: str) -> HttpResponse:
-    """View or edit a case template."""
+    """View a case template."""
+    try:
+        import uuid
+
+        uuid.UUID(template_id)
+        template = get_object_or_404(CaseTemplate, pk=template_id)
+    except ValueError:
+        template = get_object_or_404(CaseTemplate, name=template_id)
+
+    return render(
+        request,
+        "ui/case_template_detail.html",
+        _base_context(request, template=template),
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def case_template_edit(request: HttpRequest, template_id: str) -> HttpResponse:
+    """Edit a case template.
+
+    GET: any authenticated user.
+    POST: requires analyst role or above (excludes read-only).
+    """
     try:
         import uuid
 
@@ -1033,23 +1099,43 @@ def case_template_detail(request: HttpRequest, template_id: str) -> HttpResponse
     if request.method == "GET":
         return render(
             request,
-            "ui/case_template_detail.html",
-            _base_context(request, template=template),
+            "ui/case_template_form.html",
+            _base_context(request, template=template, mode="edit"),
         )
-    # PATCH/POST
-    # Update logic similar to playbook_detail
-    # Simplified for brevity
-    template.name = (request.POST.get("name") or template.name)[:200]
-    template.display_name = request.POST.get("display_name") or template.display_name
-    template.title_prefix = request.POST.get("title_prefix") or template.title_prefix
-    template.description = request.POST.get("description") or template.description
-    template.summary = request.POST.get("summary") or template.summary
-    template.flag = request.POST.get("flag") or template.flag
-    template.severity = int(request.POST.get("severity") or template.severity)
-    template.tlp = int(request.POST.get("tlp") or template.tlp)
-    template.pap = int(request.POST.get("pap") or template.pap)
-    template.tags = [t.strip() for t in (request.POST.get("tags") or "").split(",") if t.strip()]
+
+    # POST - requires analyst role or above (mirrors playbook_detail update gate)
+    if request.user.role not in ("analyst", "admin", "superAdmin"):
+        return render(request, "ui/404.html", status=404)
+
+    # POST - update
+    try:
+        data = _parse_template_form(request)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect("ui-case-template-edit", template_id=template.id)
+
+    # Check name uniqueness (excluding self)
+    if CaseTemplate.objects.exclude(pk=template.pk).filter(name=data["name"]).exists():
+        messages.error(request, "Template with that name already exists.")
+        return redirect("ui-case-template-edit", template_id=template.id)
+
+    for field, value in data.items():
+        setattr(template, field, value)
     template.save()
+
+    # Audit the mutation (mirror API audit pattern)
+    from identity.models import AuditLog
+
+    AuditLog.objects.create(
+        actor=request.user,
+        actor_org=getattr(request.user, "org", None),
+        target_org=None,  # templates are global
+        action="template.updated",
+        target_type="CaseTemplate",
+        target_id=str(template.id),
+        ip=request.META.get("REMOTE_ADDR"),
+    )
+
     messages.success(request, f"Template '{template.name}' updated.")
     return redirect("ui-case-template-detail", template_id=template.id)
 
@@ -1057,7 +1143,10 @@ def case_template_detail(request: HttpRequest, template_id: str) -> HttpResponse
 @login_required
 @require_POST
 def case_template_delete(request: HttpRequest, template_id: str) -> HttpResponse:
-    """Delete a case template."""
+    """Delete a case template. Requires analyst role or above (excludes read-only)."""
+    if request.user.role not in ("analyst", "admin", "superAdmin"):
+        return render(request, "ui/404.html", status=404)
+
     try:
         import uuid
 
@@ -1352,7 +1441,7 @@ def case_attachment_upload(request: HttpRequest, case_id: str) -> HttpResponse:
         messages.success(request, "Attachment uploaded.")
     else:
         messages.error(request, f"Upload failed: {response.content.decode()[:200]}")
-    return redirect("ui-case-attachment-list", case_id=case.number)
+    return redirect("ui-case-detail", case_id=case.number)
 
 
 @login_required
@@ -1390,7 +1479,7 @@ def case_attachment_delete(request: HttpRequest, case_id: str, attachment_id: st
     attachment.delete()
     default_storage.delete(path)
     messages.success(request, f"Deleted attachment '{name}'.")
-    return redirect("ui-case-attachment-list", case_id=case.number)
+    return redirect("ui-case-detail", case_id=case.number)
 
 
 @login_required
@@ -1838,3 +1927,32 @@ def settings_users_delete(request: HttpRequest, user_id: str) -> HttpResponse:
     delete_user(user, actor=request.user, request=request)
     messages.success(request, f"User '{user.login}' deleted.")
     return redirect("ui-settings-users")
+
+
+# =============================================================================
+# Error handlers (D2)
+# =============================================================================
+
+
+def handler404(request: HttpRequest, exception: Exception | None = None) -> HttpResponse:
+    """Custom 404 handler — renders themed 404 template."""
+    return render(request, "ui/404.html", status=404)
+
+
+def handler500(request: HttpRequest) -> HttpResponse:
+    """Custom 500 handler — renders themed 500 template without DB access.
+
+    Must not query the database because a 500 often means the DB is unavailable
+    or the connection is broken. Renders the template WITHOUT request context
+    processors (no `request=`) so that `auth` and `messages` processors don't
+    touch the session/user tables.
+    """
+    from django.http import HttpResponseServerError
+    from django.template import loader
+
+    return HttpResponseServerError(loader.render_to_string("ui/500.html"))
+
+
+def handler403(request: HttpRequest, exception: Exception | None = None) -> HttpResponse:
+    """Custom 403 handler — renders themed 403 template."""
+    return render(request, "ui/403.html", status=403)

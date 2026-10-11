@@ -34,39 +34,70 @@ Accessibility notes that are not optional:
     <ul class="rail-links">
       <li>
         <a href="{% url 'ui-dashboard' %}" {% if request.resolver_match.url_name == 'ui-dashboard' %}aria-current="page"{% endif %}>
+          <i class="fa-solid fa-gauge-high" aria-hidden="true"></i>
           <span class="k">g</span> Dashboard
         </a>
       </li>
       <li>
         <a href="{% url 'ui-alert-list' %}" {% if request.resolver_match.url_name == 'ui-alert-list' %}aria-current="page"{% endif %}>
+          <i class="fa-solid fa-bell" aria-hidden="true"></i>
           <span class="k">a</span> Alerts
           {% if nav_alert_count %}<span class="badge" title="{{ nav_alert_count }} unlinked alerts">{{ nav_alert_count }}</span>{% endif %}
         </a>
       </li>
       <li>
         <a href="{% url 'ui-case-list' %}" {% if request.resolver_match.url_name == 'ui-case-list' %}aria-current="page"{% endif %}>
+          <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
           <span class="k">c</span> Cases
           {% if nav_case_count %}<span class="badge" title="{{ nav_case_count }} open cases">{{ nav_case_count }}</span>{% endif %}
         </a>
       </li>
       <li>
+        <a href="{% url 'ui-observable-list' %}" {% if request.resolver_match.url_name == 'ui-observable-list' %}aria-current="page"{% endif %}>
+          <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+          <span class="k">o</span> Observables
+        </a>
+      </li>
+      <li>
         <a href="{% url 'ui-automation-list' %}" {% if request.resolver_match.url_name == 'ui-automation-list' %}aria-current="page"{% endif %}>
+          <i class="fa-solid fa-robot" aria-hidden="true"></i>
           <span class="k">r</span> Automation
         </a>
       </li>
       <li>
         <a href="{% url 'ui-playbook-list' %}" {% if request.resolver_match.url_name == 'ui-playbook-list' %}aria-current="page"{% endif %}>
+          <i class="fa-solid fa-book" aria-hidden="true"></i>
           <span class="k">p</span> Playbooks
         </a>
       </li>
       <li>
         <a href="{% url 'ui-sources-list' %}" {% if request.resolver_match.url_name == 'ui-sources-list' %}aria-current="page"{% endif %}>
+          <i class="fa-solid fa-rss" aria-hidden="true"></i>
           <span class="k">s</span> Sources
+        </a>
+      </li>
+      <li>
+        <a href="{% url 'ui-tag-list' %}" {% if request.resolver_match.url_name == 'ui-tag-list' %}aria-current="page"{% endif %}>
+          <i class="fa-solid fa-tag" aria-hidden="true"></i>
+          <span class="k">t</span> Tags
+        </a>
+      </li>
+      <li>
+        <a href="{% url 'ui-case-template-list' %}" {% if request.resolver_match.url_name == 'ui-case-template-list' %}aria-current="page"{% endif %}>
+          <i class="fa-solid fa-file-lines" aria-hidden="true"></i>
+          <span class="k">m</span> Case templates
+        </a>
+      </li>
+      <li>
+        <a href="{% url 'ui-taxonomy' %}" {% if request.resolver_match.url_name == 'ui-taxonomy' %}aria-current="page"{% endif %}>
+          <i class="fa-solid fa-sitemap" aria-hidden="true"></i>
+          <span class="k">x</span> Taxonomy
         </a>
       </li>
       {% if request.user.role == "superAdmin" %}
       <li>
         <a href="{% url 'ui-settings-organisations' %}" {% if request.resolver_match.url_name == 'ui-settings-organisations' or request.resolver_match.url_name == 'ui-settings-users' %}aria-current="page"{% endif %}>
+          <i class="fa-solid fa-gear" aria-hidden="true"></i>
           <span class="k">,</span> Settings
         </a>
       </li>
@@ -75,6 +106,15 @@ Accessibility notes that are not optional:
 
     <div class="rail-foot">
       {% if request.user.is_authenticated %}
+        {% if request.user.org %}
+          <p class="dim tenant-indicator">{{ request.user.org.name }}</p>
+        {% elif request.user.role == "superAdmin" %}
+          <a class="dim tenant-indicator" href="{% url 'ui-settings-organisations' %}">All organisations</a>
+        {% else %}
+          <p class="dim tenant-indicator">No organisation</p>
+        {% endif %}
+        <a class="linkish" href="{% url 'ui-password-change' %}">Change password</a>
+        <button type="button" class="linkish" data-modal-open="cheatsheet-modal">Keyboard shortcuts <span class="k">?</span></button>
         <form method="post" action="{% url 'logout' %}">{% csrf_token %}
           <button type="submit" class="linkish">Sign out {{ request.user.login }}</button>
         </form>
@@ -99,6 +139,42 @@ Accessibility notes that are not optional:
     {% block content %}{% endblock %}
   </main>
 </div>
+
+{# Server-rendered cheat-sheet modal (D6) — single source of truth for shortcuts #}
+<dialog id="cheatsheet-modal" class="cheatsheet-modal" role="dialog" aria-modal="true" aria-labelledby="cheatsheet-title">
+  <div class="modal-backdrop" tabindex="-1"></div>
+  <div class="modal-content">
+    <header class="cheatsheet-header">
+      <h2 id="cheatsheet-title" class="cheatsheet-header-title">Keyboard shortcuts</h2>
+      <button type="button" class="cheatsheet-close" aria-label="Close" data-modal-close="cheatsheet-modal">&times;</button>
+    </header>
+    <table class="cheatsheet-table data-table">
+      <thead>
+        <tr>
+          <th scope="col">Key</th>
+          <th scope="col">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="cheatsheet-key"><kbd>g</kbd></td><td>Go to Dashboard</td></tr>
+        <tr><td class="cheatsheet-key"><kbd>a</kbd></td><td>Alerts list</td></tr>
+        <tr><td class="cheatsheet-key"><kbd>c</kbd></td><td>Cases list</td></tr>
+        <tr><td class="cheatsheet-key"><kbd>o</kbd></td><td>Observables list</td></tr>
+        <tr><td class="cheatsheet-key"><kbd>r</kbd></td><td>Automation runs</td></tr>
+        <tr><td class="cheatsheet-key"><kbd>p</kbd></td><td>Playbooks list</td></tr>
+        <tr><td class="cheatsheet-key"><kbd>s</kbd></td><td>Sources</td></tr>
+        <tr><td class="cheatsheet-key"><kbd>t</kbd></td><td>Tags list</td></tr>
+        <tr><td class="cheatsheet-key"><kbd>m</kbd></td><td>Case templates</td></tr>
+        <tr><td class="cheatsheet-key"><kbd>x</kbd></td><td>Taxonomy</td></tr>
+        {% if request.user.role == "superAdmin" %}
+        <tr><td class="cheatsheet-key"><kbd>,</kbd></td><td>Settings (Organisations)</td></tr>
+        {% endif %}
+        <tr><td class="cheatsheet-key"><kbd>/</kbd></td><td>Focus search / first input</td></tr>
+        <tr><td class="cheatsheet-key"><kbd>?</kbd></td><td>Show this cheat sheet</td></tr>
+      </tbody>
+    </table>
+  </div>
+</dialog>
 
 <script src="{% static 'vendor/htmx/htmx.min.js' %}" defer></script>
 <script src="{% static 'ui/keys.js' %}" defer></script>

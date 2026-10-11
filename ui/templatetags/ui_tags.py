@@ -11,6 +11,7 @@ the product and must never be conveyed by hue alone (WCAG 1.4.1).
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from django import template
@@ -48,3 +49,25 @@ def get_item(mapping: Any, key: Any) -> Any:
         return mapping.get(key)
     except AttributeError:
         return None
+
+
+@register.filter
+def prettyjson(value: Any) -> str:
+    """Render a JSON-able value as indented JSON for a `<pre>`/`<textarea>`.
+
+    The value is formatted **server-side** so the page needs no inline `<script>` to
+    pretty-print it (ADR-003: `script-src 'self'`). Returns a plain string; the template
+    engine escapes it for the surrounding element. Strings are parsed first so a
+    JSONField that round-trips as text still formats; non-JSON strings pass through.
+    """
+    if value is None or value == "":
+        return ""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return value
+    try:
+        return json.dumps(value, indent=2, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(value)

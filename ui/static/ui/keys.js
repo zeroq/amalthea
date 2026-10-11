@@ -7,58 +7,43 @@
  *
  * Every shortcut is also reachable by mouse and by tab order, so this file is a speed layer over a
  * complete interface rather than the only way to do anything (WCAG 2.1.1).
+ *
+ * The cheat-sheet modal is now server-rendered in base.html (D6). This file only handles opening
+ * it via `?` and the navigation shortcuts. The CHEATSHEET array is the single source of truth for
+ * both the JS navigation and the server-rendered table — a conformance test enforces this.
  */
 (function () {
   "use strict";
 
-  var ROUTES = {
-    g: "/",
-    a: "/alerts",
-    c: "/cases",
-    r: "/automation",
-    p: "/automation/playbooks",
-    s: "/sources",
-    ",": "/settings/organisations",
-  };
-
-  
-
-  // Cheat sheet data (key -> label)
   var CHEATSHEET = [
     { key: "g", label: "Go to Dashboard" },
     { key: "a", label: "Alerts list" },
     { key: "c", label: "Cases list" },
-    { key: "p", label: "Playbooks list" },
+    { key: "o", label: "Observables list" },
     { key: "r", label: "Automation runs" },
+    { key: "p", label: "Playbooks list" },
     { key: "s", label: "Sources" },
+    { key: "t", label: "Tags list" },
+    { key: "m", label: "Case templates" },
+    { key: "x", label: "Taxonomy" },
     { key: ",", label: "Settings (Organisations)" },
     { key: "/", label: "Focus search / first input" },
     { key: "?", label: "Show this cheat sheet" },
   ];
 
-  function renderCheatsheet() {
-    var modal = document.getElementById("cheatsheet-modal");
-    if (modal) return;
-    modal = document.createElement("dialog");
-    modal.id = "cheatsheet-modal";
-    modal.className = "cheatsheet-modal";
-    var html = '<div class="cheatsheet-header"><h2>Keyboard shortcuts</h2><button class="cheatsheet-close" aria-label="Close">&times;</button></div>';
-    html += '<table class="cheatsheet-table"><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody>';
-    CHEATSHEET.forEach(function(item) {
-      html += '<tr><td class="cheatsheet-key"><kbd>' + item.key + '</kbd></td><td>' + item.label + '</td></tr>';
-    });
-    html += '</tbody></table>';
-    modal.innerHTML = html;
-    document.body.appendChild(modal);
-
-    modal.querySelector(".cheatsheet-close").addEventListener("click", function() {
-      modal.close();
-    });
-    modal.addEventListener("click", function(e) {
-      if (e.target === modal) modal.close();
-    });
-    modal.showModal();
-  }
+  var ROUTES = {
+    g: "/",
+    a: "/alerts",
+    c: "/cases",
+    o: "/observables",
+    r: "/automation",
+    p: "/automation/playbooks",
+    s: "/sources",
+    t: "/tags",
+    m: "/case-templates",
+    x: "/taxonomy",
+    ",": "/settings/organisations",
+  };
 
   function isTyping(target) {
     if (!target) return false;
@@ -77,6 +62,13 @@
     return event.metaKey || event.ctrlKey || event.altKey;
   }
 
+  function openCheatsheet() {
+    var modal = document.getElementById("cheatsheet-modal");
+    if (modal) {
+      modal.showModal();
+    }
+  }
+
   document.addEventListener("keydown", function (event) {
     if (isModified(event) || isTyping(event.target)) return;
 
@@ -90,7 +82,7 @@
     // `?` (Shift+/) opens the cheat sheet.
     if (event.key === "?" || (event.key === "/" && event.shiftKey)) {
       event.preventDefault();
-      renderCheatsheet();
+      openCheatsheet();
       return;
     }
 

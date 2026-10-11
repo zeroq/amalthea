@@ -1,0 +1,8 @@
+{% comment %}
+Partial form fields for the "Merge into case…" modal body.
+Included directly by case_detail.html inside the case-merge-modal dialog.
+Fields use `form="{{ form_id }}"` to associate with the footer form.
+{% endcomment %}
+<label for="f-target-case">Target case number</label>
+<input type="text" id="f-target-case" name="target_case" required placeholder="e.g. 42" autocomplete="off" form="{{ form_id }}">
+<p class="hint">Enter the case number to merge <strong>{{ case.number }}</strong> into. The source case will be closed and its timeline, observables, tasks, and attachments moved to the target.</p>

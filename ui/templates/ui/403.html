@@ -1,0 +1,16 @@
+{% extends "ui/base.html" %}
+{% load static %}
+
+{% block title %}Forbidden · Amalthea{% endblock %}
+
+{% block heading %}Forbidden{% endblock %}
+
+{% block content %}
+<section class="card notfound">
+  <h2 class="notfound-code">403</h2>
+  <p class="notfound-text">
+    You do not have permission to access this resource.
+  </p>
+  <a class="btn" href="{% url 'ui-dashboard' %}">Back to dashboard</a>
+</section>
+{% endblock %}

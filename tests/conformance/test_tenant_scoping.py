@@ -842,7 +842,6 @@ _UI_WRITE_ONLY_ROUTES: set[str] = {
     "ui-case-apply-template",
     "ui-case-merge",
     "ui-case-share-revoke",
-    "ui-case-bulk",
     "ui-case-attachment-upload",
     "ui-case-attachment-delete",
     "ui-case-attachment-download",
@@ -851,6 +850,7 @@ _UI_WRITE_ONLY_ROUTES: set[str] = {
     "ui-case-procedures-create",
     "ui-case-template-create",
     "ui-case-template-delete",
+    "ui-case-template-edit",
     "ui-tag-create",
     "ui-tag-delete",
     "ui-tag-toggle",
@@ -1547,6 +1547,7 @@ class TestUIRouteEnumerationConformance:
             "ui-observable-list",
             "ui-automation-list",
             "ui-sources-list",
+            "ui-password-change",
         }
 
         # Routes with known issues that can't be tested generically (allow-listed with justification)

@@ -46,7 +46,7 @@
 
     <div class="meta-inline">
       <label for="id_action">Action type</label>
-      <select id="id_action" name="action" required onchange="toggleActionFields()">
+      <select id="id_action" name="action" required>
         <option value="">— select —</option>
         {% for a in actions %}
         <option value="{{ a }}">{{ a|upper }}</option>
@@ -54,7 +54,7 @@
       </select>
     </div>
 
-    <div id="http-fields" style="display:none;">
+    <div id="http-fields" class="hidden">
       <div class="meta-inline">
         <label for="id_url">URL <span class="dim">(templated; use {observable}, {case}, {case_id}, etc.)</span></label>
         <input type="url" id="id_url" name="url" placeholder="https://api.example.com/lookup/{observable}">
@@ -75,16 +75,17 @@
       </div>
 
       <div class="meta-inline">
-        <label>Headers (key/value pairs)</label>
-        <div id="headers-container">
-          {% for i in "1234" %}
-          <div class="header-row" style="display:flex; gap:8px; margin:4px 0;">
-            <input type="text" name="header_key_{{ i }}" placeholder="Header name" style="flex:1;">
-            <input type="text" name="header_val_{{ i }}" placeholder="Header value" style="flex:2;">
+        <label>Headers (name → value)</label>
+        <div id="headers">
+          {% for i in "0123" %}
+          <div class="field-row">
+            <input type="text" name="header_key_{{ i }}" placeholder="Header name">
+            <input type="text" class="field-wide" name="header_val_{{ i }}" placeholder="Header value">
+            <button type="button" class="btn remove-header">Remove</button>
           </div>
           {% endfor %}
         </div>
-        <button type="button" class="btn" onclick="addHeaderRow()" style="margin-top:4px;">Add header</button>
+        <button type="button" class="btn btn-tight" id="add-header">Add header</button>
         <input type="hidden" name="header_count" value="4" id="header_count">
       </div>
 
@@ -94,7 +95,7 @@
       </div>
     </div>
 
-    <div id="python-fields" style="display:none;">
+    <div id="python-fields" class="hidden">
       <div class="meta-inline">
         <label for="id_action_path">Action path (registered python function)</label>
         <select id="id_action_path" name="action_path">
@@ -112,29 +113,13 @@
   </form>
 </div>
 
-<script>
-function toggleActionFields() {
-  const action = document.getElementById('id_action').value;
-  document.getElementById('http-fields').style.display = action === 'http' ? 'block' : 'none';
-  document.getElementById('python-fields').style.display = action === 'python' ? 'block' : 'none';
-}
+<template id="header-row-template">
+  <div class="field-row">
+    <input type="text" name="header_key_{i}" placeholder="Header name">
+    <input type="text" class="field-wide" name="header_val_{i}" placeholder="Header value">
+    <button type="button" class="btn remove-header">Remove</button>
+  </div>
+</template>
 
-function addHeaderRow() {
-  const container = document.getElementById('headers-container');
-  const count = parseInt(document.getElementById('header_count').value) + 1;
-  document.getElementById('header_count').value = count;
-  const div = document.createElement('div');
-  div.className = 'header-row';
-  div.style = 'display:flex; gap:8px; margin:4px 0;';
-  div.innerHTML = `
-    <input type="text" name="header_key_${count}" placeholder="Header name" style="flex:1;">
-    <input type="text" name="header_val_${count}" placeholder="Header value" style="flex:2;">
-    <button type="button" class="btn" onclick="this.parentElement.remove()">Remove</button>
-  `;
-  container.appendChild(div);
-}
-
-// Initialize on load
-document.addEventListener('DOMContentLoaded', toggleActionFields);
-</script>
+<script src="{% static 'ui/playbook_form.js' %}" defer></script>
 {% endblock %}

@@ -3,6 +3,13 @@ from django.urls import include, path
 
 from realtime.routing import http_fallback_urlpatterns
 
+# Error handlers are referenced by dotted path, not imported. `ui` is deliberately outside the
+# mypy pinned scope (pyproject `[tool.mypy].files`), so importing it here would drag the whole
+# untyped UI module into the type gate. Django resolves string handlers via `get_callable`.
+handler404 = "ui.views.handler404"
+handler500 = "ui.views.handler500"
+handler403 = "ui.views.handler403"
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     # The UI is mounted last-but-one so `compat.urls` stays the final catch-all (BRIEF §0.4 note on

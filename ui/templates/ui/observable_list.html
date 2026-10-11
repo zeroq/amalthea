@@ -5,9 +5,9 @@
 
 {% block content %}
 <div class="card">
-  <form method="get" class="inline-form" style="margin-bottom: 16px;">
-    <input type="text" name="q" value="{{ query|default:'' }}" placeholder="Filter by value..." style="flex:1; max-width:300px;">
-    <select name="type" style="max-width:180px;">
+  <form method="get" class="inline-form filter-bar">
+    <input type="text" name="q" value="{{ query|default:'' }}" placeholder="Filter by value..." class="filter-q">
+    <select name="type" class="filter-type">
       <option value="">All types</option>
       {% for t in observable_types %}
       <option value="{{ t.id }}" {% if t.id|stringformat:"s" == type_filter %}selected{% endif %}>{{ t.name }}</option>

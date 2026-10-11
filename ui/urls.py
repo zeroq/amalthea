@@ -5,7 +5,7 @@ unprefixed names would collide with the `/api/v1/` ones in any shared template o
 made by someone who has read the other side of the codebase.
 """
 
-from django.urls import path
+from django.urls import path, reverse_lazy
 
 from . import views
 
@@ -42,7 +42,6 @@ urlpatterns = [
         views.case_share_revoke,
         name="ui-case-share-revoke",
     ),
-    path("cases/<str:case_id>/bulk", views.case_bulk, name="ui-case-bulk"),
     path(
         "cases/<str:case_id>/attachment", views.case_attachment_list, name="ui-case-attachment-list"
     ),
@@ -86,6 +85,11 @@ urlpatterns = [
         "case-templates/<str:template_id>",
         views.case_template_detail,
         name="ui-case-template-detail",
+    ),
+    path(
+        "case-templates/<str:template_id>/edit",
+        views.case_template_edit,
+        name="ui-case-template-edit",
     ),
     path(
         "case-templates/<str:template_id>/delete",
@@ -132,6 +136,14 @@ urlpatterns = [
     # Auth
     path("login", views.SignInView.as_view(), name="login"),
     path("logout", views.sign_out, name="logout"),
+    path(
+        "password/change",
+        views.PasswordChangeView.as_view(
+            template_name="ui/password_change.html",
+            success_url=reverse_lazy("ui-dashboard"),
+        ),
+        name="ui-password-change",
+    ),
     # Settings (superAdmin only)
     path("settings/organisations", views.settings_organisations, name="ui-settings-organisations"),
     path(

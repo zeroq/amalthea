@@ -1,11 +1,12 @@
 {% extends "ui/base.html" %}
-{% load static %}
+{% load static ui_tags %}
 
 {% block heading %}{{ template.display_name|default:template.name }}{% endblock %}
 
 {% block actions %}
 <a class="btn" href="{% url 'ui-case-template-list' %}">Back</a>
 <a class="btn" href="{% url 'ui-case-template-create' %}">New template</a>
+<a class="btn" href="{% url 'ui-case-template-edit' template.id %}">Edit</a>
 {% endblock %}
 
 {% block content %}
@@ -67,26 +68,13 @@
 
       <div class="card">
         <h3>Task Definitions</h3>
-        <pre class="body">{{ template.tasks|json_script:"tasks-json" }}</pre>
+        <pre class="body">{{ template.tasks|prettyjson }}</pre>
       </div>
 
       <div class="card">
         <h3>Custom Field Definitions</h3>
-        <pre class="body">{{ template.custom_fields|json_script:"cf-json" }}</pre>
+        <pre class="body">{{ template.custom_fields|prettyjson }}</pre>
       </div>
-
-      <script>
-      document.addEventListener('DOMContentLoaded', function() {
-        try {
-          const tasks = JSON.parse(document.getElementById('tasks-json').textContent);
-          document.querySelector('pre:first-of-type').textContent = JSON.stringify(tasks, null, 2);
-        } catch (e) {}
-        try {
-          const cf = JSON.parse(document.getElementById('cf-json').textContent);
-          document.querySelectorAll('pre')[1].textContent = JSON.stringify(cf, null, 2);
-        } catch (e) {}
-      });
-      </script>
     </div>
   </div>
 </div>

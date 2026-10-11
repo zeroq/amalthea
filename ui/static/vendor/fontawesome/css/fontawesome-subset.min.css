@@ -45,6 +45,10 @@
 .fa-bell::before { content: "\f0f3"; }
 .fa-folder-open::before { content: "\f07c"; }
 .fa-cogs::before { content: "\f085"; }
+.fa-gauge-high::before { content: "\f625"; }
+.fa-book::before { content: "\f02d"; }
+.fa-rss::before { content: "\f09e"; }
+.fa-gear::before { content: "\f013"; }
 .fa-server::before { content: "\f233"; }
 .fa-right-from-bracket::before { content: "\f2f5"; }
 .fa-magnifying-glass::before { content: "\f002"; }

@@ -1,11 +1,11 @@
 {% extends "ui/base.html" %}
-{% load static %}
+{% load static ui_tags %}
 
 {% block heading %}
   {{ observable.data_type.name }}: {{ observable.data }}
   {% if is_cross_org %}
   <span class="badge badge-cross-org" title="This observable belongs to another organisation">
-    <i class="fa-solid fa-building-lock" aria-hidden="true"></i>
+    <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
     Cross-org ({{ observable.owner_org.name }})
   </span>
   {% endif %}
@@ -62,7 +62,7 @@
         <dt>Enrichment</dt>
         <dd>
           {% if observable.enrichment_data %}
-          <pre class="body">{{ observable.enrichment_data|json_script:"enrichment" }}</pre>
+          <pre class="body">{{ observable.enrichment_data|prettyjson }}</pre>
           {% else %}—{% endif %}
         </dd>
       </dl>
@@ -102,15 +102,6 @@
       <p class="empty">This observable is not linked to any case.</p>
       {% endif %}
     </div>
-
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      try {
-        const enrichment = JSON.parse(document.getElementById('enrichment').textContent);
-        document.querySelector('pre.body').textContent = JSON.stringify(enrichment, null, 2);
-      } catch (e) {}
-    });
-    </script>
   </div>
 </div>
 {% endblock %}

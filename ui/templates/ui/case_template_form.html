@@ -1,8 +1,8 @@
 {% extends "ui/base.html" %}
-{% load static %}
+{% load static ui_tags %}
 
 {% block heading %}
-{% if template %}Edit{% else %}New{% endif %} Case Template
+{% if template %}{% if mode == "edit" %}Edit{% else %}View{% endif %} Case Template{% else %}New Case Template{% endif %}
 {% endblock %}
 
 {% block actions %}
@@ -16,7 +16,7 @@
 
     <div class="meta-inline">
       <label for="id_name">Name (unique)</label>
-      <input type="text" id="id_name" name="name" value="{{ template.name|default:'' }}" maxlength="200" required {% if template %}readonly{% endif %}>
+      <input type="text" id="id_name" name="name" value="{{ template.name|default:'' }}" maxlength="200" required {% if template and mode != "edit" %}readonly{% endif %}>
     </div>
 
     <div class="meta-inline">
@@ -41,7 +41,7 @@
 
     <div class="meta-inline">
       <label for="id_flag">Flag</label>
-      <input type="text" id="id_flag" name="flag" value="{{ template.flag|default:'' }}" maxlength="50">
+      <input type="checkbox" id="id_flag" name="flag" {% if template.flag %}checked{% endif %}>
     </div>
 
     <div class="cols">
@@ -82,35 +82,16 @@
 
     <div class="meta-inline">
       <label for="id_tasks">Tasks (JSON array of objects)</label>
-      <textarea id="id_tasks" name="tasks" rows="4" placeholder='[{"title": "Task 1", "status": "Waiting"}]'>{{ template.tasks|json_script:"tasks" }}</textarea>
+      <textarea id="id_tasks" name="tasks" rows="4" placeholder='[{"title": "Task 1", "status": "Waiting"}]'>{{ template.tasks|prettyjson }}</textarea>
     </div>
 
     <div class="meta-inline">
       <label for="id_custom_fields">Custom Fields (JSON array)</label>
-      <textarea id="id_custom_fields" name="custom_fields" rows="4" placeholder='[{"name": "Field", "type": "string", "value": ""}]'>{{ template.custom_fields|json_script:"custom_fields" }}</textarea>
+      <textarea id="id_custom_fields" name="custom_fields" rows="4" placeholder='[{"name": "Field", "type": "string", "value": ""}]'>{{ template.custom_fields|prettyjson }}</textarea>
     </div>
 
-    <button class="btn btn-primary" type="submit">{% if template %}Update{% else %}Create{% endif %}</button>
+    <button class="btn btn-primary" type="submit">{% if template and mode == "edit" %}Update{% elif template %}View{% else %}Create{% endif %}</button>
     <a class="btn" href="{% url 'ui-case-template-list' %}">Cancel</a>
   </form>
 </div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-  const tasksEl = document.getElementById('tasks');
-  const cfEl = document.getElementById('custom_fields');
-  if (tasksEl) {
-    try {
-      const data = JSON.parse(tasksEl.textContent || '[]');
-      tasksEl.value = JSON.stringify(data, null, 2);
-    } catch (e) {}
-  }
-  if (cfEl) {
-    try {
-      const data = JSON.parse(cfEl.textContent || '[]');
-      cfEl.value = JSON.stringify(data, null, 2);
-    } catch (e) {}
-  }
-});
-</script>
 {% endblock %}

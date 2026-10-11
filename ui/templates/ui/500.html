@@ -1,0 +1,30 @@
+{% comment %}
+Server-error page (handler500). Deliberately standalone — it does **not** extend `base.html`.
+
+A 500 most often means the database (or a dependency) is unavailable, so this template must
+render without touching the DB. `base.html` reads `request.user` and `request.resolver_match`
+and loads the nav counts; `ui.views.handler500` therefore renders this file with
+`loader.render_to_string` (no request context processors), and this template references nothing
+request-scoped: no `{% url %}`, no `request`, no `messages`.
+
+Styling uses only component classes already emitted by `ui/static/ui/app.css` (`.card`,
+`.notfound`, `.notfound-code`, `.notfound-text`). No Tailwind utilities, because app.css is its own
+Tailwind input (no template rescan) and an unlisted utility would silently no-op.
+{% endcomment %}
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Server error · Amalthea</title>
+  <link rel="stylesheet" href="{% static 'ui/app.css' %}">
+</head>
+<body>
+  <main class="notfound" role="alert">
+    <p class="notfound-code">500</p>
+    <p class="notfound-text">Something went wrong on our end. The team has been notified.</p>
+    <a class="btn" href="/">Back to Amalthea</a>
+  </main>
+</body>
+</html>
