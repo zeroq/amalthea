@@ -33,9 +33,9 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+import identity.scoping
 from alerts.escalation import (
     link_alert_from_identifier,
-    link_case_from_identifier,
     resolve_case_status,
 )
 from alerts.models import Alert, AlertStatus
@@ -84,6 +84,7 @@ from core.serializers import (
     task_json,
     ttp_json,
 )
+from identity.audit import maybe_record_cross_org_read
 from identity.models import Organisation
 from observables.extractor import add_observable, extract_into_case
 from observables.models import Observable, ObservableTagLink, ObservableType
@@ -108,13 +109,6 @@ def _bad(message: str, fields: dict[str, list[str]]) -> Response:
         {"type": "BadRequest", "message": message, "fields": fields},
         status=status.HTTP_400_BAD_REQUEST,
     )
-
-
-def _resolve_case(identifier: str) -> Case | None:
-    try:
-        return link_case_from_identifier(identifier)
-    except Case.DoesNotExist:
-        return None
 
 
 def _as_uuid(value: Any) -> UUID | None:
@@ -147,44 +141,54 @@ def _as_int(value: Any) -> int | None:
 
 
 def _case_org_scope(request: Request) -> Q:
-    """Org guard for rows reached *through* a case (deviation **P10-w**).
+    """Org guard for rows reached *through* a case.
 
-    A row whose case belongs to no organisation is visible to every authenticated caller —
-    every API-created case today is org-NULL, so gating on `= user.org` alone would make
-    every task lookup a 404 and turn the guard into a lock-out rather than a control. A row
-    whose case *is* org-owned is visible only inside that organisation.
+    Returns a `Q` filtering rows by the caller's organisation via the case's
+    `owner_org`. SuperAdmin gets an unfiltered `Q()`; org-less callers get
+    a deny-by-default `Q(pk__in=[])`.
     """
-    org_id = getattr(getattr(request, "user", None), "org_id", None)
-    return Q(case__owner_org__isnull=True) | Q(case__owner_org_id=org_id)
+    return identity.scoping.org_q("case__owner_org", request.user)
 
 
 def _case_access(request: Request, identifier: str, *, write: bool) -> Case | None:
     """Resolve a case the caller may reach, or `None` (which callers turn into a 404).
 
-    This is the **share** guard (plan §6-P2, deviation **P10-w**). A case that belongs to no
-    organisation stays visible to every authenticated caller — the same choice `_case_org_scope`
-    makes, and the reason this cannot be `= user.org` alone. A case that *is* org-owned is visible
-    only inside that organisation, or to an organisation holding a `Share`:
-    `read` is enough to look, `write=True` also demands `permissions.write`. A share therefore only
-    ever *adds* access for one tenant; it cannot narrow the owner's or leak across cases.
+    Thin wrapper over `identity.scoping.resolve_case` — kept so existing call sites
+    don't churn. This is the **share** guard (plan §6-P2, deviation **P10-w**).
+    A case that belongs to no organisation stays visible to every authenticated
+    caller — the same choice `_case_org_scope` makes. A case that *is* org-owned
+    is visible only inside that organisation, or to an organisation holding a
+    `Share`: `read` is enough to look, `write=True` also demands
+    `permissions.write`. A share therefore only ever *adds* access for one
+    tenant; it cannot narrow the owner's or leak across cases.
     """
-    case = _resolve_case(identifier)
-    if case is None:
+    return identity.scoping.resolve_case(request.user, identifier, write=write)
+
+
+def _resolve_task(request: Request, task_id: str, *, write: bool = False) -> Task | None:
+    """Resolve a task the caller may reach, or `None` (callers turn into 404).
+
+    Tasks are scoped through their owning case. Uses `identity.scoping.resolve_case`
+    with the `write` flag to properly handle share permissions.
+    """
+    pk = _as_uuid(task_id)
+    if pk is None:
         return None
-    if case.owner_org_id is None:
-        # A case that belongs to no organisation stays visible to every authenticated caller.
-        return case
-    org_id = getattr(getattr(request, "user", None), "org_id", None)
-    if org_id is None:
-        # An org-owned case with no org on the caller: deny rather than fall through to a
-        # self-share lookup that could never match.
+    # First resolve the case with appropriate write access
+    task = Task.objects.select_related("case", "assignee").filter(pk=pk).first()
+    if task is None:
         return None
-    if case.owner_org_id == org_id:
-        return case
-    shares = case.shares.filter(organisation_id=org_id)
-    if write:
-        shares = shares.filter(permissions__write=True)
-    return case if shares.exists() else None
+    # Check case access with write flag
+    case = identity.scoping.resolve_case(request.user, str(task.case_id), write=write)
+    return task if case is not None else None
+
+
+def _resolve_observable_scoped(request: Request, observable_id: str) -> Observable | None:
+    """Resolve an observable the caller may reach (direct org ownership)."""
+    pk = _as_uuid(observable_id)
+    if pk is None:
+        return None
+    return identity.scoping.resolve_observable(request.user, str(pk))
 
 
 def _resolve_org(identifier: Any) -> Organisation | None:
@@ -209,7 +213,9 @@ def case_collection(request: Request) -> Response:
     """
     if request.method == "POST":
         return _create_case(request)
+    # Scope to user's org (and shares) — uniform 404 for cross-tenant handled by case_visible_q
     queryset = Case.objects.select_related("status", "assignee").order_by("-start_date")
+    queryset = queryset.filter(identity.scoping.case_visible_q(request.user))
     status_filter = request.query_params.get("status")
     if status_filter:
         queryset = queryset.filter(status__value=status_filter)
@@ -242,7 +248,9 @@ def case_detail(request: Request, case_id: str) -> Response:
     - `timelineAfter` (UUID, optional): Cursor for timeline pagination (event ID to fetch after)
     - `timelineLimit` (int, optional): Page size for timeline (default 50, max 200)
     """
-    case = _resolve_case(case_id)
+    case = identity.scoping.resolve_case(
+        request.user, case_id, write=request.method in ("PATCH", "PUT", "DELETE")
+    )
     if case is None:
         return _not_found("Case")
     if request.method == "DELETE":
@@ -250,6 +258,16 @@ def case_detail(request: Request, case_id: str) -> Response:
         return Response(status=status.HTTP_204_NO_CONTENT)
     if request.method in ("PATCH", "PUT"):
         return _update_case(request, case)
+
+    # Audit superAdmin cross-org read
+    maybe_record_cross_org_read(
+        request,
+        actor=request.user,
+        target_obj=case,
+        target_type="Case",
+        target_id=str(case.id),
+        target_org_field="owner_org",
+    )
 
     # GET with timeline pagination
     timeline_after = request.query_params.get("timelineAfter")
@@ -278,6 +296,16 @@ def _create_case(request: Request) -> Response:
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
+    user = _actor(request)
+    org = getattr(user, "org", None) if user else None
+    if org is None:
+        return Response(
+            {
+                "type": "AuthorizationError",
+                "message": "User must belong to an organisation to create cases",
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
     warnings: list[str] = []
     case = Case.objects.create(
         title=title[:500],
@@ -285,6 +313,7 @@ def _create_case(request: Request) -> Response:
         severity=int(payload.get("severity") or 2),
         status=resolve_case_status(str(payload.get("status") or "InProgress"), warnings=warnings),
         start_date=timezone.now(),
+        owner_org=org,
     )
     texts = [case.title, case.description]
     if payload.get("extract") or payload.get("observables"):
@@ -295,7 +324,7 @@ def _create_case(request: Request) -> Response:
         title="Case created",
         description=case.description[:500],
         kind="case-created",
-        actor=_actor(request),
+        actor=user,
     )
     case.refresh_from_db()
     return Response(case_json(case, detail=True), status=status.HTTP_201_CREATED)
@@ -408,7 +437,7 @@ def case_task_create(request: Request, case_id: str) -> Response:
     HttpRequest)` and the endpoint answers 500 for every POST. The route is registered once,
     against `case_task_list`, which dispatches GET/POST itself.
     """
-    case = _resolve_case(case_id)
+    case = identity.scoping.resolve_case(request.user, case_id, write=True)
     if case is None:
         return _not_found("Case")
     payload = request.data if isinstance(request.data, dict) else {}
@@ -445,9 +474,20 @@ def case_task_list(request: Request, case_id: str) -> Response:
     """
     if request.method == "POST":
         return case_task_create(request, case_id)
-    case = _resolve_case(case_id)
+    case = identity.scoping.resolve_case(request.user, case_id, write=False)
     if case is None:
         return _not_found("Case")
+
+    # Audit superAdmin cross-org read
+    maybe_record_cross_org_read(
+        request,
+        actor=request.user,
+        target_obj=case,
+        target_type="Case",
+        target_id=str(case.id),
+        target_org_field="owner_org",
+    )
+
     return Response(
         [
             {
@@ -467,15 +507,14 @@ def case_task_list(request: Request, case_id: str) -> Response:
 def task_detail(request: Request, task_id: str) -> Response:
     """`GET|PATCH|DELETE /api/v1/task/{taskId}` — one task, T1 detail (plan §7.2).
 
-    Org-scoped through the owning case (`_case_org_scope`, deviation **P10-w**): a task's UUID
-    is guessable-shaped like any other id, and the id must not become a cross-organisation read
-    path the moment `owner_org` starts being set.
+    Org-scoped through the owning case using `identity.scoping.resolve_case` with the
+    appropriate `write` flag: a task's UUID is guessable-shaped like any other id, and
+    the id must not become a cross-organisation read/write path.
 
-    PATCH is "no field, no write" (ADR D11): only keys present in the body are touched, an
-    empty body is a 400 naming that nothing arrived, and `status` is validated against
-    `TASK_STATUS_CHOICES` rather than left for the database CHECK to turn into a 500.
+    PATCH/DELETE require write access; GET requires read access.
     """
-    task = _lookup_task(request, task_id)
+    write = request.method in ("PATCH", "DELETE")
+    task = _resolve_task(request, task_id, write=write)
     if task is None:
         return _not_found("Task")
     if request.method == "DELETE":
@@ -483,6 +522,17 @@ def task_detail(request: Request, task_id: str) -> Response:
         return Response(status=status.HTTP_204_NO_CONTENT)
     if request.method == "PATCH":
         return _update_task(request, task)
+
+    # Audit superAdmin cross-org read
+    maybe_record_cross_org_read(
+        request,
+        actor=request.user,
+        target_obj=task.case,
+        target_type="Task",
+        target_id=str(task.id),
+        target_org_field="owner_org",
+    )
+
     return Response(task_json(task))
 
 
@@ -594,8 +644,10 @@ def case_observable_add(request: Request, case_id: str) -> Response:
     `initialize_request()` on it — `Request.__init__` then asserts `isinstance(request,
     HttpRequest)` and the endpoint answers 500 for every POST. Exactly the trap
     `case_task_create` documents; the two helpers must stay undecorated together.
+
+    Tenant isolation: requires write access to the case (T4-a).
     """
-    case = _resolve_case(case_id)
+    case = identity.scoping.resolve_case(request.user, case_id, write=True)
     if case is None:
         return _not_found("Case")
     payload = request.data if isinstance(request.data, dict) else {}
@@ -631,9 +683,20 @@ def case_observable_list(request: Request, case_id: str) -> Response:
     """
     if request.method == "POST":
         return case_observable_add(request, case_id)
-    case = _resolve_case(case_id)
+    case = identity.scoping.resolve_case(request.user, case_id, write=False)
     if case is None:
         return _not_found("Case")
+
+    # Audit superAdmin cross-org read
+    maybe_record_cross_org_read(
+        request,
+        actor=request.user,
+        target_obj=case,
+        target_type="Case",
+        target_id=str(case.id),
+        target_org_field="owner_org",
+    )
+
     links = case.case_observables.select_related("observable__data_type").order_by("-created_at")
     return Response([observable_json(link) for link in links])
 
@@ -649,7 +712,7 @@ def case_alert_remove(request: Request, case_id: str, alert_id: str) -> Response
     of the case can still see the alert left), because a silently shrinking alert list is how a
     team loses track of what it already triaged.
     """
-    case = _resolve_case(case_id)
+    case = identity.scoping.resolve_case(request.user, case_id, write=True)
     if case is None:
         return _not_found("Case")
     alert = _lookup_alert_for_case(case, alert_id)
@@ -697,7 +760,7 @@ def case_custom_event_create(request: Request, case_id: str) -> Response:
     `append_timeline_event` publishes the row it created, and patching the date afterwards would
     broadcast a timestamp the ledger no longer holds.
     """
-    case = _resolve_case(case_id)
+    case = identity.scoping.resolve_case(request.user, case_id, write=True)
     if case is None:
         return _not_found("Case")
     payload = request.data if isinstance(request.data, dict) else {}
@@ -775,9 +838,20 @@ def case_timeline(request: Request, case_id: str) -> Response:
     The `{"events": [...]}` envelope (not a bare array) is what 5.8.0's OpenAPI and thehive4py's
     `case.get_timeline()` consume — recorded as plan deviation P8-1 in §13.
     """
-    case = _resolve_case(case_id)
+    case = identity.scoping.resolve_case(request.user, case_id, write=False)
     if case is None:
         return _not_found("Case")
+
+    # Audit superAdmin cross-org read
+    maybe_record_cross_org_read(
+        request,
+        actor=request.user,
+        target_obj=case,
+        target_type="Case",
+        target_id=str(case.id),
+        target_org_field="owner_org",
+    )
+
     events = TimelineEvent.objects.filter(case=case).order_by("date", "id")
     return Response({"events": [_timeline_event_wire(event) for event in events]})
 
@@ -914,16 +988,13 @@ def _observable_cross_case_guard(
 def observable_detail(request: Request, observable_id: str) -> Response:
     """`GET|PATCH|DELETE /api/v1/observable/{id}` — one artifact plus the cases it appears in.
 
-    PATCH/DELETE are deliberately **not** org-scoped (plan §5, A5): an `Observable` is globally
-    deduplicated (Module C), so the same row is shared by every case that ever saw the value and
-    an org filter would let one organisation edit — or refuse to edit — evidence another owns.
-    The permission check is therefore the auth-level one (authenticated, writable key), exactly
-    as the GET half has always been.
+    PATCH/DELETE are org-scoped (ADR-004): an `Observable` is per-org deduplicated, so each org
+    owns its own rows. Cross-org access is 404 (uniform, no existence oracle).
 
     `dataType` is the interesting PATCH field: re-typing changes the case-fold rule the identity
     digest is taken under, and `Observable.save()` re-hashes `data_hash` in the same write —
-    without which `(data_type, data_hash)` would still describe the old type and the unique
-    constraint would admit a duplicate of a value already on file.
+    without which `(owner_org, data_type, data_hash)` would still describe the old type and the
+    unique constraint would admit a duplicate of a value already on file.
 
     **Cross-case protection (TODO 6.5):** If an observable is linked to multiple cases, PATCH/DELETE
     require the `force=true` query parameter. Without it, a 409 is returned listing the affected
@@ -932,7 +1003,7 @@ def observable_detail(request: Request, observable_id: str) -> Response:
     pk = _as_uuid(observable_id)
     if pk is None:
         return _not_found("Observable")
-    observable = Observable.objects.select_related("data_type").filter(pk=pk).first()
+    observable = identity.scoping.resolve_observable(request.user, str(pk))
     if observable is None:
         return _not_found("Observable")
 
@@ -951,6 +1022,17 @@ def observable_detail(request: Request, observable_id: str) -> Response:
         if guard is not None:
             return guard
         return _update_observable(observable, request)
+
+    # Audit superAdmin cross-org read
+    maybe_record_cross_org_read(
+        request,
+        actor=request.user,
+        target_obj=observable,
+        target_type="Observable",
+        target_id=str(observable.id),
+        target_org_field="owner_org",
+    )
+
     return _observable_detail_payload(observable)
 
 
@@ -1254,7 +1336,7 @@ def case_tag_link(request: Request, case_id: str) -> Response:
     absent tag are both no-ops — and returns the case's current tag set so the caller can render
     it without a follow-up read (recorded in `docs/spec/deviations.md`).
     """
-    case = _resolve_case(case_id)
+    case = identity.scoping.resolve_case(request.user, case_id, write=True)
     if case is None:
         return _not_found("Case")
     names = _requested_tags(request)
@@ -1274,12 +1356,13 @@ def case_tag_link(request: Request, case_id: str) -> Response:
 def observable_tag_link(request: Request, observable_id: str) -> Response:
     """`POST|DELETE /api/v1/observable/{id}/tag` — attach or detach tags (200 with the set).
 
-    Deliberately **not** org-scoped, matching `observable_detail` (plan §5/A5): an observable is
-    globally deduplicated, so the same row is shared by every case that ever saw the value and an
-    org filter could not apply without splitting the artifact.
+    Org-scoped (ADR-004): an `Observable` is per-org deduplicated, so each org owns its own rows.
+    Cross-org access returns uniform 404 (no existence oracle).
     """
     pk = _as_uuid(observable_id)
-    observable = Observable.objects.filter(pk=pk).first() if pk is not None else None
+    if pk is None:
+        return _not_found("Observable")
+    observable = identity.scoping.resolve_observable(request.user, str(pk))
     if observable is None:
         return _not_found("Observable")
     names = _requested_tags(request)
@@ -1347,14 +1430,24 @@ def comment_detail(request: Request, comment_id: str) -> Response:
 
     A comment reached through a case obeys the case's share guard: a read-only share can list the
     comment but cannot edit or delete it (AC6.1-P2-b).
+    An alert comment is guarded by the alert's org ownership (write access required).
     """
     pk = _as_uuid(comment_id)
     comment = (
-        Comment.objects.select_related("case").filter(pk=pk).first() if pk is not None else None
+        Comment.objects.select_related("case", "alert").filter(pk=pk).first()
+        if pk is not None
+        else None
     )
     if comment is None:
         return _not_found("Comment")
-    if comment.case_id and _case_access(request, str(comment.case_id), write=True) is None:
+    if comment.case_id:
+        if identity.scoping.resolve_case(request.user, str(comment.case_id), write=True) is None:
+            return _not_found("Comment")
+    elif comment.alert_id:
+        if identity.scoping.resolve_alert(request.user, str(comment.alert_id)) is None:
+            return _not_found("Comment")
+    else:
+        # Orphaned comment with no parent — deny
         return _not_found("Comment")
     if request.method == "DELETE":
         comment.delete()
@@ -1382,6 +1475,16 @@ def case_page_list(request: Request, case_id: str) -> Response:
     if case is None:
         return _not_found("Case")
     if request.method == "GET":
+        # Audit superAdmin cross-org read
+        maybe_record_cross_org_read(
+            request,
+            actor=request.user,
+            target_obj=case,
+            target_type="Case",
+            target_id=str(case.id),
+            target_org_field="owner_org",
+        )
+
         pages = case.pages.select_related("created_by", "updated_by").order_by(
             "order", "created_at"
         )
@@ -1422,6 +1525,15 @@ def case_page_detail(request: Request, case_id: str, page_id: str) -> Response:
         page.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
     if request.method == "GET":
+        # Audit superAdmin cross-org read
+        maybe_record_cross_org_read(
+            request,
+            actor=request.user,
+            target_obj=case,
+            target_type="Page",
+            target_id=str(page.id),
+            target_org_field="owner_org",
+        )
         return Response(page_json(page))
     payload = request.data if isinstance(request.data, dict) else {}
     fields: list[str] = []
@@ -1462,6 +1574,17 @@ def case_flow(request: Request, case_id: str) -> Response:
     case = _case_access(request, case_id, write=False)
     if case is None:
         return _not_found("Case")
+
+    # Audit superAdmin cross-org read
+    maybe_record_cross_org_read(
+        request,
+        actor=request.user,
+        target_obj=case,
+        target_type="Case",
+        target_id=str(case.id),
+        target_org_field="owner_org",
+    )
+
     alerts = case.alerts.select_related("status", "assignee").order_by("-date")
     observables = (
         CaseObservable.objects.select_related("observable__data_type")
@@ -1485,17 +1608,34 @@ def case_flow(request: Request, case_id: str) -> Response:
 def case_share_list(request: Request, case_id: str) -> Response:
     """`GET|POST|PUT /api/v1/case/{idOrNumber}/shares` — read, add or replace shares.
 
-    **Default deny** (plan §6-P2): reading the share list needs read access, mutating it needs
-    write access, so an organisation the case was merely shared *read-only* with cannot widen its
-    own grant. `POST` adds (TheHive's `share`); `PUT` replaces the whole set (TheHive's `set_share`).
-    A share only ever adds access for one tenant and cannot touch the owner's.
+    **Default deny** (plan §6-P2): reading the share list needs read access; mutating it
+    (POST/PUT) requires the caller to be in the case's **owner organisation** (or superAdmin).
+    A share holder with write access may mutate the case body, but only the owner org may
+    manage the share ACL itself. `POST` adds (TheHive's `share`); `PUT` replaces the whole set
+    (TheHive's `set_share`). A share only ever adds access for one tenant and cannot touch
+    the owner's.
     """
     case = _case_access(request, case_id, write=request.method in ("POST", "PUT"))
     if case is None:
         return _not_found("Case")
     if request.method == "GET":
+        # Audit superAdmin cross-org read
+        maybe_record_cross_org_read(
+            request,
+            actor=request.user,
+            target_obj=case,
+            target_type="Case",
+            target_id=str(case.id),
+            target_org_field="owner_org",
+        )
+
         shares = case.shares.select_related("organisation").order_by("created_at")
         return Response([share_json(share) for share in shares])
+
+    # POST/PUT: require owner organisation (or superAdmin) — not merely a write share
+    if not identity.scoping.is_case_owner(request.user, case):
+        return _not_found("Case")
+
     payload = request.data if isinstance(request.data, dict) else {}
     entries = payload.get("shares")
     if not isinstance(entries, list) or not entries:
@@ -1535,10 +1675,20 @@ def case_share_list(request: Request, case_id: str) -> Response:
 @api_view(["DELETE"])
 @renderer_classes([JSONRenderer])
 def share_detail(request: Request, case_id: str, share_id: str) -> Response:
-    """`DELETE /api/v1/case/{idOrNumber}/share/{shareId}` — revoke one share (TheHive 5.8)."""
+    """`DELETE /api/v1/case/{idOrNumber}/share/{shareId}` — revoke one share (TheHive 5.8).
+
+    Requires the caller to be in the case's **owner organisation** (or superAdmin).
+    A share holder with write access may mutate the case body, but only the owner org
+    may revoke shares.
+    """
     case = _case_access(request, case_id, write=True)
     if case is None:
         return _not_found("Case")
+
+    # DELETE: require owner organisation (or superAdmin) — not merely a write share
+    if not identity.scoping.is_case_owner(request.user, case):
+        return _not_found("Case")
+
     share_pk = _as_uuid(share_id)
     share = Share.objects.filter(pk=share_pk, case=case).first() if share_pk is not None else None
     if share is None:
@@ -1804,30 +1954,35 @@ def case_bulk_update(request: Request) -> Response:
     )
 
 
+def _resolve_task_for_bulk(request: Request, raw: str) -> Task | None:
+    """Resolve a task for bulk update (requires write access)."""
+    return _resolve_task(request, raw, write=True)
+
+
 @api_view(["PATCH"])
 @renderer_classes([JSONRenderer])
 def task_bulk_update(request: Request) -> Response:
     """`PATCH /api/v1/task/_bulk` — apply one field set to many tasks."""
-    return bulk_patch(request, ids_key="ids", resolve=_lookup_task, apply=_set_task_fields)
+    return bulk_patch(
+        request, ids_key="ids", resolve=_resolve_task_for_bulk, apply=_set_task_fields
+    )
 
 
-def _resolve_observable_for_bulk(_request: Request, raw: str) -> Observable | None:
-    pk = _as_uuid(raw)
-    if pk is None:
-        return None
-    return Observable.objects.filter(pk=pk).first()
+def _resolve_observable_for_bulk(request: Request, raw: str) -> Observable | None:
+    """Resolve an observable for bulk update with tenant scoping."""
+    return _resolve_observable_scoped(request, raw)
 
 
 def _bulk_cross_case_guard(request: Request, ids: list[Any]) -> Response | None:
     """Pre-flight the TODO 6.5 guard over every id before `bulk_patch` mutates anything.
 
     The single-item endpoint refuses a shared observable; the bulk surface must not offer a way
-    around it. Each id is resolved (org-unscoped, exactly as the single-item endpoint is — §6.4/F2
-    is a separate, deferred concern) and run through the same `_observable_cross_case_guard`. If
-    any target is linked to more than one case and the request lacks `?force=true`, the whole
-    request aborts with the same 409 the single-item endpoint returns, and the affected cases from
-    every offending observable are merged (deduplicated by case id) so the caller sees the full
-    blast radius. `?force=true` skips the check, exactly as it does for a single row.
+    around it. Each id is resolved with tenant scoping and run through the same
+    `_observable_cross_case_guard`. If any target is linked to more than one case and the request
+    lacks `?force=true`, the whole request aborts with the same 409 the single-item endpoint
+    returns, and the affected cases from every offending observable are merged (deduplicated by
+    case id) so the caller sees the full blast radius. `?force=true` skips the check, exactly as
+    it does for a single row.
     """
     force = request.query_params.get("force", "").lower() == "true"
     affected: dict[str, dict[str, Any]] = {}
@@ -2196,16 +2351,12 @@ def _create_procedures(
     return Response(created, status=status.HTTP_201_CREATED)
 
 
-def _procedure_for_write(procedure_id: str) -> Procedure | None:
-    pk = _as_uuid(procedure_id)
-    return Procedure.objects.filter(pk=pk).first() if pk is not None else None
-
-
 @api_view(["GET", "PATCH", "DELETE"])
 @renderer_classes([JSONRenderer])
 def procedure_detail(request: Request, procedure_id: str) -> Response:
     """`GET|PATCH|DELETE /api/v1/procedure/{id}`."""
-    procedure = _resolve_procedure(procedure_id)
+    write = request.method in ("PATCH", "DELETE")
+    procedure = _resolve_procedure(request, procedure_id, write=write)
     if procedure is None:
         return _not_found("Procedure")
     if request.method == "DELETE":
@@ -2213,14 +2364,42 @@ def procedure_detail(request: Request, procedure_id: str) -> Response:
         return Response(status=status.HTTP_204_NO_CONTENT)
     if request.method == "PATCH":
         return _update_procedure(procedure, request)
+
+    # Audit superAdmin cross-org read
+    target_obj = procedure.case if procedure.case_id else procedure.alert
+    target_type = "Procedure"
+    target_org_field = "owner_org"
+    if target_obj is not None:
+        maybe_record_cross_org_read(
+            request,
+            actor=request.user,
+            target_obj=target_obj,
+            target_type=target_type,
+            target_id=str(procedure.id),
+            target_org_field=target_org_field,
+        )
+
     return Response(procedure_json(procedure))
 
 
-def _resolve_procedure(procedure_id: str) -> Procedure | None:
+def _resolve_procedure(
+    request: Request, procedure_id: str, *, write: bool = False
+) -> Procedure | None:
+    """Resolve a procedure the caller may reach (via case or alert org scoping)."""
     pk = _as_uuid(procedure_id)
     if pk is None:
         return None
-    return Procedure.objects.filter(pk=pk).first()
+    procedure = Procedure.objects.select_related("case", "alert").filter(pk=pk).first()
+    if procedure is None:
+        return None
+    # Check access via parent case or alert
+    if procedure.case_id:
+        case = identity.scoping.resolve_case(request.user, str(procedure.case_id), write=write)
+        return procedure if case is not None else None
+    if procedure.alert_id:
+        alert = identity.scoping.resolve_alert(request.user, str(procedure.alert_id))
+        return procedure if alert is not None else None
+    return None
 
 
 def _update_procedure(procedure: Procedure, request: Request) -> Response:
@@ -2262,8 +2441,14 @@ def procedure_bulk_delete(request: Request) -> Response:
     ids = payload.get("ids")
     if not isinstance(ids, list) or not ids:
         return _bad("ids is required", {"ids": ["required"]})
-    pks = [pk for raw in ids if (pk := _as_uuid(str(raw))) is not None]
-    Procedure.objects.filter(pk__in=pks).delete()
+    # Resolve each procedure with write access to enforce tenant isolation
+    procedures = []
+    for raw in ids:
+        proc = _resolve_procedure(request, str(raw), write=True)
+        if proc is not None:
+            procedures.append(proc)
+    if procedures:
+        Procedure.objects.filter(pk__in=[p.pk for p in procedures]).delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -2376,6 +2561,17 @@ def case_export(request: Request, case_id: str) -> Response:
     case = _case_access(request, case_id, write=False)
     if case is None:
         return _not_found("Case")
+
+    # Audit superAdmin cross-org read
+    maybe_record_cross_org_read(
+        request,
+        actor=request.user,
+        target_obj=case,
+        target_type="Case",
+        target_id=str(case.id),
+        target_org_field="owner_org",
+    )
+
     return Response(_case_export_document(case))
 
 

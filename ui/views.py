@@ -48,8 +48,21 @@ from automation.models import AutomationRun, Playbook
 from cases.ledger import append_timeline_event
 from cases.models import Attachment, Case, CaseStatus, CaseTemplate, Comment, Tag, Task
 from core.enums import SEVERITY_CHOICES
-from identity.models import User
+from identity.models import Organisation, User
 from identity.ratelimit import check_login_rate_limit, record_failed_login, record_successful_login
+from identity.scoping import (
+    case_visible_q,
+    is_case_owner,
+    org_filtered,
+    org_q,
+    resolve_alert,
+    resolve_case,
+    resolve_observable,
+)
+from identity.services import (
+    resolve_organisation,
+    serializes_superadmin_changes,
+)
 from ingest.models import IngestionSource
 from observables.extractor import extract_into_case
 from observables.models import Observable, ObservableType
@@ -62,18 +75,6 @@ CASE_STAGE_VALUES = ("New", "InProgress", "Closed")
 PAGE_SIZE = 200
 
 
-def _resolve_case(case_id: str) -> Case:
-    """A case by UUID *or* by human number.
-
-    An analyst reads a case number off a ticket and a UUID off a log line; making them pick one would
-    mean a "case not found" that is really a lookup mistake. `isdigit` is the discriminator because a
-    UUID is never all-digits.
-    """
-    return get_object_or_404(
-        Case, **({"number": int(case_id)} if case_id.isdigit() else {"pk": case_id})
-    )
-
-
 def _base_context(request: HttpRequest, **extra: Any) -> dict[str, Any]:
     """Everything every page needs, in one place.
 
@@ -81,9 +82,15 @@ def _base_context(request: HttpRequest, **extra: Any) -> dict[str, Any]:
     a navigation bar starts lying about what is waiting.
     """
     return {
-        "nav_alert_count": Alert.objects.filter(case__isnull=True).count(),
-        "nav_case_count": Case.objects.filter(closed_date__isnull=True).count(),
-        "nav_task_count": Task.objects.exclude(status="Completed").count(),
+        "nav_alert_count": Alert.objects.filter(
+            org_q("owner_org", request.user), case__isnull=True
+        ).count(),
+        "nav_case_count": Case.objects.filter(
+            case_visible_q(request.user), closed_date__isnull=True
+        ).count(),
+        "nav_task_count": org_filtered(Task.objects.all(), request.user, path="case__owner_org")
+        .exclude(status="Completed")
+        .count(),
         "severity_labels": SEVERITY_LABELS,
         "severity_names": SEVERITY_NAMES,
         "case_stages": CASE_STAGE_VALUES,
@@ -139,17 +146,26 @@ sign_out = LogoutView.as_view()
 @require_GET
 def dashboard(request: HttpRequest) -> HttpResponse:
     """Landing page: what arrived, what is open, what automation has done."""
+
     counts = {
-        "alerts_total": Alert.objects.count(),
-        "alerts_unlinked": Alert.objects.filter(case__isnull=True).count(),
-        "cases_total": Case.objects.count(),
-        "cases_open": Case.objects.filter(closed_date__isnull=True).count(),
-        "runs_total": AutomationRun.objects.count(),
-        "runs_failed": AutomationRun.objects.filter(status="Failed").count(),
+        "alerts_total": Alert.objects.filter(org_q("owner_org", request.user)).count(),
+        "alerts_unlinked": Alert.objects.filter(
+            org_q("owner_org", request.user), case__isnull=True
+        ).count(),
+        "cases_total": Case.objects.filter(case_visible_q(request.user)).count(),
+        "cases_open": Case.objects.filter(
+            case_visible_q(request.user), closed_date__isnull=True
+        ).count(),
+        "runs_total": AutomationRun.objects.filter(
+            case__in=Case.objects.filter(case_visible_q(request.user))
+        ).count(),
+        "runs_failed": AutomationRun.objects.filter(
+            case__in=Case.objects.filter(case_visible_q(request.user)), status="Failed"
+        ).count(),
     }
     by_severity = {
         row["severity"]: row["n"]
-        for row in Case.objects.filter(closed_date__isnull=True)
+        for row in Case.objects.filter(case_visible_q(request.user), closed_date__isnull=True)
         .values("severity")
         .annotate(n=Count("id"))
     }
@@ -161,19 +177,19 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             counts=counts,
             by_severity=by_severity,
             recent_alerts=list(
-                Alert.objects.select_related("status")
-                .filter(case__isnull=True)
+                Alert.objects.select_related("status", "owner_org")
+                .filter(org_q("owner_org", request.user), case__isnull=True)
                 .order_by("-date")[:10]
             ),
             open_cases=list(
-                Case.objects.select_related("status", "assignee")
-                .filter(closed_date__isnull=True)
+                Case.objects.select_related("status", "assignee", "owner_org")
+                .filter(case_visible_q(request.user), closed_date__isnull=True)
                 .order_by("-severity", "-start_date")[:10]
             ),
             runs=list(
-                AutomationRun.objects.select_related("case", "playbook").order_by("-created_at")[
-                    :10
-                ]
+                AutomationRun.objects.select_related("case", "playbook")
+                .filter(case__in=Case.objects.filter(case_visible_q(request.user)))
+                .order_by("-created_at")[:10]
             ),
         ),
     )
@@ -184,7 +200,9 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 def alert_list(request: HttpRequest) -> HttpResponse:
     """The triage queue: unlinked alerts by default, because those are the decisions waiting."""
     scope = request.GET.get("scope", "unlinked")
-    queryset = Alert.objects.select_related("status", "assignee", "ingestion_source", "case")
+    queryset = Alert.objects.select_related(
+        "status", "assignee", "ingestion_source", "case", "owner_org"
+    ).filter(org_q("owner_org", request.user))
     if scope == "linked":
         queryset = queryset.filter(case__isnull=False)
     elif scope == "unlinked":
@@ -204,18 +222,21 @@ def alert_list(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_GET
 def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
-    alert = get_object_or_404(
-        Alert.objects.select_related("status", "ingestion_source", "case"), pk=alert_id
-    )
+    alert = resolve_alert(request.user, alert_id)
+    if alert is None:
+        return render(request, "ui/404.html", status=404)
+    user_org_id = getattr(request.user, "org_id", None)
+    is_cross_org = alert.owner_org_id != user_org_id
     return render(
         request,
         "ui/alert_detail.html",
         _base_context(
             request,
             alert=alert,
-            merge_candidates=Case.objects.filter(closed_date__isnull=True).order_by("-start_date")[
-                :PAGE_SIZE
-            ],
+            merge_candidates=Case.objects.filter(case_visible_q(request.user))
+            .filter(closed_date__isnull=True)
+            .order_by("-start_date")[:PAGE_SIZE],
+            is_cross_org=is_cross_org,
         ),
     )
 
@@ -229,7 +250,9 @@ def alert_escalate(request: HttpRequest, alert_id: str) -> HttpResponse:
     observables and appends a timeline entry; a rollback halfway through would leave the alert marked
     `Imported` with no case, which is the one state the caller cannot recover from.
     """
-    alert = get_object_or_404(Alert, pk=alert_id)
+    alert = resolve_alert(request.user, alert_id)
+    if alert is None:
+        return render(request, "ui/404.html", status=404)
     try:
         with transaction.atomic():
             case, warnings = import_alert_to_case(
@@ -253,8 +276,12 @@ def alert_escalate(request: HttpRequest, alert_id: str) -> HttpResponse:
 @require_POST
 def alert_merge(request: HttpRequest, alert_id: str) -> HttpResponse:
     """Fold this alert into an existing case."""
-    alert = get_object_or_404(Alert, pk=alert_id)
-    case = _resolve_case(request.POST.get("case_id") or "")
+    alert = resolve_alert(request.user, alert_id)
+    if alert is None:
+        return render(request, "ui/404.html", status=404)
+    case = resolve_case(request.user, request.POST.get("case_id") or "", write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     with transaction.atomic():
         merge_alert_into_case(alert, case, actor=request.user)
     messages.success(request, f"Alert merged into case {case.number}.")
@@ -265,8 +292,12 @@ def alert_merge(request: HttpRequest, alert_id: str) -> HttpResponse:
 @require_GET
 def case_list(request: HttpRequest) -> HttpResponse:
     """Open cases by default; closed ones on request."""
+    from identity.scoping import case_visible_q
+
     show_closed = request.GET.get("closed") == "1"
-    queryset = Case.objects.select_related("status", "assignee")
+    queryset = Case.objects.select_related("status", "assignee", "owner_org").filter(
+        case_visible_q(request.user)
+    )
     if not show_closed:
         queryset = queryset.filter(closed_date__isnull=True)
     return render(
@@ -284,7 +315,12 @@ def case_list(request: HttpRequest) -> HttpResponse:
 @require_GET
 def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     """The ledger: timeline, observables, tasks and automation runs for one case."""
-    case = _resolve_case(case_id)
+    case = resolve_case(request.user, case_id, write=False)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
+    is_owner = is_case_owner(request.user, case)
+    user_org_id = getattr(request.user, "org_id", None)
+    is_cross_org = case.owner_org_id != user_org_id
     return render(
         request,
         "ui/case_detail.html",
@@ -301,7 +337,11 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             .select_related("playbook", "triggered_by_observable")
             .order_by("-created_at"),
             status_choices=CaseStatus.objects.filter(hidden=False).order_by("order", "value"),
-            assignees=User.objects.filter(is_active=True).order_by("login")[:PAGE_SIZE],
+            assignees=User.objects.filter(org_q("org", request.user), is_active=True).order_by(
+                "login"
+            )[:PAGE_SIZE],
+            is_owner=is_owner,
+            is_cross_org=is_cross_org,
         ),
     )
 
@@ -315,7 +355,9 @@ def case_set_status(request: HttpRequest, case_id: str) -> HttpResponse:
     `closed_date IS NULL`, so a case marked `Closed` without one would vanish from the "open" list and
     still appear in the dashboard's open count.
     """
-    case = _resolve_case(case_id)
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     warnings: list[str] = []
     stage = resolve_case_status(request.POST.get("stage") or "InProgress", warnings=warnings)
     case.status = stage
@@ -353,7 +395,9 @@ def case_comment(request: HttpRequest, case_id: str) -> HttpResponse:
     `GET /case/{id}/comment` returns. Both land in one transaction so a note can never be visible in
     one view of the case but not the other.
     """
-    case = _resolve_case(case_id)
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     body = (request.POST.get("body") or "").strip()
     if not body:
         # A 400, not a redirect: HTMX only swaps 2xx, so the flash error below would have nowhere
@@ -379,7 +423,9 @@ def case_comment(request: HttpRequest, case_id: str) -> HttpResponse:
 @require_POST
 def case_task_create(request: HttpRequest, case_id: str) -> HttpResponse:
     """Add a task. An unrecognised assignee is left unassigned rather than auto-created (ADR-002 §D11)."""
-    case = _resolve_case(case_id)
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     title = (request.POST.get("title") or "").strip()
     if not title:
         messages.error(request, "A task needs a title.")
@@ -389,7 +435,9 @@ def case_task_create(request: HttpRequest, case_id: str) -> HttpResponse:
         case=case,
         title=title[:500],
         status=request.POST.get("status") or "Waiting",
-        assignee=User.objects.filter(login=login).first() if login else None,
+        assignee=User.objects.filter(org_q("org", request.user), login=login).first()
+        if login
+        else None,
         description=(request.POST.get("description") or "").strip(),
     )
     messages.success(request, "Task added.")
@@ -400,7 +448,9 @@ def case_task_create(request: HttpRequest, case_id: str) -> HttpResponse:
 @require_POST
 def case_task_toggle(request: HttpRequest, case_id: str, task_id: str) -> HttpResponse:
     """Flip a task between `Waiting` and `Completed`."""
-    case = _resolve_case(case_id)
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     task = get_object_or_404(Task, pk=task_id, case=case)
     task.status = "Waiting" if task.status == "Completed" else "Completed"
     task.save(update_fields=["status", "updated_at"])
@@ -416,7 +466,9 @@ def case_extract_observables(request: HttpRequest, case_id: str) -> HttpResponse
     for a *new* `CaseObservable` link, so pressing this repeatedly is safe and a press after editing
     the description picks up what was missed.
     """
-    case = _resolve_case(case_id)
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     with transaction.atomic():
         found = extract_into_case(case, case.title, case.description)
     messages.success(
@@ -429,16 +481,20 @@ def case_extract_observables(request: HttpRequest, case_id: str) -> HttpResponse
 @login_required
 @require_GET
 def automation_list(request: HttpRequest) -> HttpResponse:
-    """Every automation run, newest first: the Module D ledger across all cases."""
+    """Every automation run, newest first: the Module D ledger across all cases (org-scoped)."""
+    from identity.scoping import case_visible_q
+
+    visible_cases = Case.objects.filter(case_visible_q(request.user))
     return render(
         request,
         "ui/automation_list.html",
         _base_context(
             request,
-            runs=AutomationRun.objects.select_related(
-                "case", "playbook", "triggered_by_observable"
-            ).order_by("-created_at")[:PAGE_SIZE],
-            playbooks=AutomationRun.objects.values("playbook_name")
+            runs=AutomationRun.objects.select_related("case", "playbook", "triggered_by_observable")
+            .filter(case__in=visible_cases)
+            .order_by("-created_at")[:PAGE_SIZE],
+            playbooks=AutomationRun.objects.filter(case__in=visible_cases)
+            .values("playbook_name")
             .annotate(n=Count("id"))
             .order_by("playbook_name"),
         ),
@@ -448,13 +504,23 @@ def automation_list(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_GET
 def sources_list(request: HttpRequest) -> HttpResponse:
-    """Configured feeds and how many alerts each has produced."""
+    """Configured feeds and how many alerts each has produced (org-scoped)."""
+    from django.db.models import Q
+
+    user_org_id = getattr(request.user, "org_id", None)
+    if user_org_id is None:
+        alert_filter = Q(pk__in=[])
+    else:
+        alert_filter = Q(alerts__owner_org_id=user_org_id)
+
     return render(
         request,
         "ui/sources_list.html",
         _base_context(
             request,
-            sources=IngestionSource.objects.annotate(alert_count=Count("alerts")).order_by("slug"),
+            sources=IngestionSource.objects.annotate(
+                alert_count=Count("alerts", filter=alert_filter)
+            ).order_by("slug"),
         ),
     )
 
@@ -476,6 +542,11 @@ def playbook_list(request: HttpRequest) -> HttpResponse:
 @login_required
 def playbook_create(request: HttpRequest) -> HttpResponse:
     """Create a new playbook. GET shows the form, POST creates it."""
+    # GET: any authenticated org member; POST: requires analyst or above
+    if request.method == "POST":
+        if request.user.role not in ("analyst", "admin", "superAdmin"):
+            return render(request, "ui/404.html", status=404)
+
     from automation.dispatcher import TRIGGER_EVENTS
     from automation.executor import registered_actions
     from automation.playbooks import ACTIONS, HTTP_METHODS
@@ -585,10 +656,15 @@ def playbook_create(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
-    """View or edit a playbook."""
+    """View or edit a playbook.
+
+    GET: any authenticated org member.
+    POST (update): requires analyst role or above.
+    """
     from automation.dispatcher import TRIGGER_EVENTS
     from automation.executor import registered_actions
     from automation.playbooks import ACTIONS, HTTP_METHODS
+    from identity.scoping import case_visible_q
 
     # Resolve by UUID or name
     playbook = None
@@ -601,7 +677,12 @@ def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
         playbook = get_object_or_404(Playbook, name=playbook_id)
 
     if request.method == "GET":
-        runs = AutomationRun.objects.filter(playbook=playbook).order_by("-created_at")[:50]
+        visible_cases = Case.objects.filter(case_visible_q(request.user))
+        runs = (
+            AutomationRun.objects.filter(playbook=playbook, case__in=visible_cases)
+            .select_related("case", "triggered_by_observable")
+            .order_by("-created_at")[:50]
+        )
         return render(
             request,
             "ui/playbook_detail.html",
@@ -616,7 +697,10 @@ def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
             ),
         )
 
-    # POST - update the playbook
+    # POST - update the playbook: requires analyst or above
+    if request.user.role not in ("analyst", "admin", "superAdmin"):
+        return render(request, "ui/404.html", status=404)
+
     description = (request.POST.get("description") or "").strip()
     trigger_event = (request.POST.get("trigger_event") or "").strip()
     if trigger_event and trigger_event not in TRIGGER_EVENTS:
@@ -707,7 +791,10 @@ def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
 @login_required
 @require_POST
 def playbook_delete(request: HttpRequest, playbook_id: str) -> HttpResponse:
-    """Delete a playbook if it has no runs."""
+    """Delete a playbook if it has no runs. Requires analyst role or above."""
+    if request.user.role not in ("analyst", "admin", "superAdmin"):
+        return render(request, "ui/404.html", status=404)
+
     try:
         import uuid
 
@@ -729,9 +816,11 @@ def playbook_delete(request: HttpRequest, playbook_id: str) -> HttpResponse:
 @login_required
 @require_POST
 def playbook_run(request: HttpRequest, playbook_id: str) -> HttpResponse:
-    """Manually trigger a playbook run."""
+    """Manually trigger a playbook run. Requires analyst role or above."""
+    if request.user.role not in ("analyst", "admin", "superAdmin"):
+        return render(request, "ui/404.html", status=404)
+
     from automation.dispatcher import run_now
-    from cases.models import Case
 
     try:
         import uuid
@@ -750,25 +839,15 @@ def playbook_run(request: HttpRequest, playbook_id: str) -> HttpResponse:
 
     case = None
     if case_id:
-        try:
-            case = Case.objects.get(number=int(case_id))
-        except (ValueError, Case.DoesNotExist):
-            try:
-                case = Case.objects.get(pk=case_id)
-            except Case.DoesNotExist:
-                messages.error(request, "Case not found.")
-                return redirect("ui-playbook-detail", playbook_id=playbook_id)
+        case = resolve_case(request.user, case_id, write=True)
+        if case is None:
+            return render(request, "ui/404.html", status=404)
 
     observable = None
     if observable_id:
-        try:
-            import uuid
-
-            uuid.UUID(observable_id)
-            observable = get_object_or_404(Observable, pk=observable_id)
-        except ValueError:
-            messages.error(request, "Invalid observable ID.")
-            return redirect("ui-playbook-detail", playbook_id=playbook_id)
+        observable = resolve_observable(request.user, observable_id)
+        if observable is None:
+            return render(request, "ui/404.html", status=404)
 
     # Ensure observable is linked to case if case not provided
     if case is None and observable is not None:
@@ -777,6 +856,10 @@ def playbook_run(request: HttpRequest, playbook_id: str) -> HttpResponse:
             messages.error(request, "Observable is not linked to any case.")
             return redirect("ui-playbook-detail", playbook_id=playbook_id)
         case = link.case
+        # Verify the resolved case is also accessible (write)
+        case = resolve_case(request.user, str(case.id), write=True)
+        if case is None:
+            return render(request, "ui/404.html", status=404)
 
     try:
         run = run_now(playbook, case=case, observable=observable)
@@ -797,7 +880,9 @@ def playbook_run(request: HttpRequest, playbook_id: str) -> HttpResponse:
 @require_GET
 def case_export(request: HttpRequest, case_id: str) -> HttpResponse:
     """Download case export (JSON)."""
-    case = _resolve_case(case_id)
+    case = resolve_case(request.user, case_id, write=False)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     from cases.views import _case_export_document
 
     doc = _case_export_document(case)
@@ -815,7 +900,9 @@ def case_export(request: HttpRequest, case_id: str) -> HttpResponse:
 @require_GET
 def case_tags(request: HttpRequest, case_id: str) -> HttpResponse:
     """Manage tags on a case."""
-    case = _resolve_case(case_id)
+    case = resolve_case(request.user, case_id, write=False)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     tags = Tag.objects.all().order_by("name")
     case_tag_ids = set(case.tags.values_list("id", flat=True))
     return render(
@@ -834,7 +921,9 @@ def case_tags(request: HttpRequest, case_id: str) -> HttpResponse:
 @require_POST
 def case_tag_toggle(request: HttpRequest, case_id: str, tag_id: str) -> HttpResponse:
     """Add or remove a tag from a case."""
-    case = _resolve_case(case_id)
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     tag = get_object_or_404(Tag, pk=tag_id)
     if tag in case.tags.all():
         case.tags.remove(tag)
@@ -848,7 +937,9 @@ def case_tag_toggle(request: HttpRequest, case_id: str, tag_id: str) -> HttpResp
 @login_required
 def case_apply_template(request: HttpRequest, case_id: str) -> HttpResponse:
     """Apply a case template to a case."""
-    case = _resolve_case(case_id)
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     if request.method == "GET":
         templates = CaseTemplate.objects.all().order_by("name")
         return render(
@@ -862,9 +953,9 @@ def case_apply_template(request: HttpRequest, case_id: str) -> HttpResponse:
         messages.error(request, "Template is required.")
         return redirect("ui-case-apply-template", case_id=case.number)
     template = get_object_or_404(CaseTemplate, pk=template_id)
-    from cases.views import _apply_template_to_case
+    from cases.views import _apply_template
 
-    _apply_template_to_case(case, template)
+    _apply_template(case, template, actor=request.user)
     messages.success(request, f"Applied template '{template.name}' to case {case.number}.")
     return redirect("ui-case-detail", case_id=case.number)
 
@@ -873,6 +964,9 @@ def case_apply_template(request: HttpRequest, case_id: str) -> HttpResponse:
 @require_POST
 def case_bulk(request: HttpRequest, case_id: str) -> HttpResponse:
     """Bulk update cases (stub for UI integration)."""
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     messages.info(request, "Bulk operations available via API.")
     return redirect("ui-case-list")
 
@@ -1053,16 +1147,17 @@ def tag_delete(request: HttpRequest, tag_id: str) -> HttpResponse:
 @login_required
 @require_GET
 def observable_list(request: HttpRequest) -> HttpResponse:
-    """Global observables list with cross-case links."""
+    """Global observables list with cross-case links (org-scoped)."""
+    queryset = (
+        Observable.objects.select_related("data_type", "owner_org")
+        .prefetch_related("case_observables__case")
+        .filter(org_q("owner_org", request.user))
+        .order_by("-created_at")[:PAGE_SIZE]
+    )
     return render(
         request,
         "ui/observable_list.html",
-        _base_context(
-            request,
-            observables=Observable.objects.select_related("data_type")
-            .prefetch_related("case_observables__case")
-            .order_by("-created_at")[:PAGE_SIZE],
-        ),
+        _base_context(request, observables=queryset),
     )
 
 
@@ -1070,22 +1165,101 @@ def observable_list(request: HttpRequest) -> HttpResponse:
 @require_GET
 def observable_detail(request: HttpRequest, observable_id: str) -> HttpResponse:
     """Observable detail with cross-case fan-out."""
-    try:
-        import uuid
-
-        uuid.UUID(observable_id)
-        observable = get_object_or_404(Observable, pk=observable_id)
-    except ValueError:
-        observable = get_object_or_404(Observable, pk=observable_id)
+    observable = resolve_observable(request.user, observable_id)
+    if observable is None:
+        return render(request, "ui/404.html", status=404)
+    user_org_id = getattr(request.user, "org_id", None)
+    is_cross_org = observable.owner_org_id != user_org_id
     return render(
         request,
         "ui/observable_detail.html",
         _base_context(
             request,
             observable=observable,
-            cases=observable.case_observables.select_related("case").order_by("-case__start_date"),
+            cases=observable.case_observables.select_related("case__owner_org").order_by(
+                "-case__start_date"
+            ),
+            is_owner=is_cross_org is False,  # owner org can manage
+            is_cross_org=is_cross_org,
         ),
     )
+
+
+# --- Case share management (P7) ---
+
+
+@login_required
+def case_share_list(request: HttpRequest, case_id: str) -> HttpResponse:
+    """List and manage case shares (owner org only)."""
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
+    if not is_case_owner(request.user, case):
+        return render(request, "ui/404.html", status=404)
+
+    from cases.models import Share
+    from identity.models import Organisation
+
+    shares_qs = case.shares.select_related("organisation").order_by("created_at")
+    available_orgs = Organisation.objects.exclude(
+        id__in=shares_qs.values_list("organisation_id", flat=True)
+    ).exclude(id=case.owner_org_id)
+
+    if request.method == "POST":
+        org_id = request.POST.get("organisation")
+        permissions = request.POST.get("permissions", "read")
+        if org_id:
+            # A tampered/blank id must not raise out of the query compiler (F7 class).
+            org = resolve_organisation(org_id)
+            if org is None:
+                messages.error(request, "Select a valid organisation.")
+                return redirect("ui-case-share-list", case_id=case.number)
+            share, created = Share.objects.update_or_create(
+                case=case,
+                organisation=org,
+                defaults={"permissions": {"read": True, "write": permissions == "readwrite"}},
+            )
+            messages.success(
+                request, f"Share {'created' if created else 'updated'} for {org.name}."
+            )
+        return redirect("ui-case-share-list", case_id=case.number)
+
+    # Build share data with revoke URLs
+    shares = []
+    for share in shares_qs:
+        shares.append(
+            {
+                "share": share,
+                "revoke_url": reverse(
+                    "ui-case-share-revoke", kwargs={"case_id": case.number, "share_id": share.id}
+                ),
+            }
+        )
+
+    return render(
+        request,
+        "ui/case_share_list.html",
+        _base_context(request, case=case, shares=shares, available_orgs=available_orgs),
+    )
+
+
+@login_required
+@require_POST
+def case_share_revoke(request: HttpRequest, case_id: str, share_id: str) -> HttpResponse:
+    """Revoke a case share (owner org only)."""
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
+    if not is_case_owner(request.user, case):
+        return render(request, "ui/404.html", status=404)
+
+    from cases.models import Share
+
+    share = get_object_or_404(Share, pk=share_id, case=case)
+    org_name = share.organisation.name
+    share.delete()
+    messages.success(request, f"Revoked share for {org_name}.")
+    return redirect("ui-case-share-list", case_id=case.number)
 
 
 # --- Taxonomy ---
@@ -1114,16 +1288,18 @@ def taxonomy(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-@require_GET
 def case_merge(request: HttpRequest, case_id: str) -> HttpResponse:
     """Merge cases via UI."""
-    from alerts.escalation import merge_cases as merge_cases_fn
+    from cases.merge import merge_cases
 
-    case = _resolve_case(case_id)
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     if request.method == "GET":
         # Show merge form with candidate cases
         candidates = (
-            Case.objects.filter(closed_date__isnull=True)
+            Case.objects.filter(case_visible_q(request.user))
+            .filter(closed_date__isnull=True)
             .exclude(pk=case.pk)
             .order_by("-start_date")
         )
@@ -1135,10 +1311,12 @@ def case_merge(request: HttpRequest, case_id: str) -> HttpResponse:
     if not target_id:
         messages.error(request, "Target case is required.")
         return redirect("ui-case-merge", case_id=case.number)
-    target = _resolve_case(target_id)
+    target = resolve_case(request.user, target_id, write=True)
+    if target is None:
+        return render(request, "ui/404.html", status=404)
     try:
         with transaction.atomic():
-            merged = merge_cases_fn(target, [case])
+            merged = merge_cases([target, case], actor=request.user)
         messages.success(request, f"Merged case {case.number} into {merged.number}.")
         return redirect("ui-case-detail", case_id=merged.number)
     except ValueError as exc:
@@ -1149,7 +1327,9 @@ def case_merge(request: HttpRequest, case_id: str) -> HttpResponse:
 @login_required
 @require_GET
 def case_attachment_list(request: HttpRequest, case_id: str) -> HttpResponse:
-    case = _resolve_case(case_id)
+    case = resolve_case(request.user, case_id, write=False)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     return render(
         request,
         "ui/case_attachments.html",
@@ -1162,7 +1342,9 @@ def case_attachment_list(request: HttpRequest, case_id: str) -> HttpResponse:
 def case_attachment_upload(request: HttpRequest, case_id: str) -> HttpResponse:
     from cases.views import case_attachment_list as api_view
 
-    case = _resolve_case(case_id)
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     # The API view expects multipart/form-data with 'attachments' field
     # We just pass through
     response = api_view(request, case_id=case.id)
@@ -1180,6 +1362,9 @@ def case_attachment_download(
 ) -> HttpResponse:
     from cases.views import case_attachment_download as api_view
 
+    case = resolve_case(request.user, case_id, write=False)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     return api_view(request, case_id=case_id, attachment_id=attachment_id)
 
 
@@ -1196,7 +1381,9 @@ def case_attachment_delete(request: HttpRequest, case_id: str, attachment_id: st
 
     Ordering mirrors the API: the row goes first, so a missing blob cannot turn a delete into a 500.
     """
-    case = _resolve_case(case_id)
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     attachment = get_object_or_404(Attachment, pk=attachment_id, case=case)
     name = attachment.name
     path = attachment.path
@@ -1212,6 +1399,9 @@ def case_attachment_detail(request: HttpRequest, case_id: str, attachment_id: st
     """Attachment detail (download or delete)."""
     from cases.views import case_attachment_detail as api_view
 
+    case = resolve_case(request.user, case_id, write=False)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     return api_view(request, case_id=case_id, attachment_id=attachment_id)
 
 
@@ -1221,6 +1411,9 @@ def case_procedure_create(request: HttpRequest, case_id: str) -> HttpResponse:
     """Create a procedure on a case."""
     from cases.views import case_procedure_create as api_view
 
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     return api_view(request, case_id=case_id)
 
 
@@ -1230,4 +1423,418 @@ def case_procedures_create(request: HttpRequest, case_id: str) -> HttpResponse:
     """Bulk create procedures on a case."""
     from cases.views import case_procedures_create as api_view
 
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
     return api_view(request, case_id=case_id)
+
+
+# =============================================================================
+# O4 — Settings UI (superAdmin only)
+# =============================================================================
+
+
+def _require_superadmin_ui(request: HttpRequest) -> HttpResponse | None:
+    """Return a 404 response if the user is not a superAdmin, else None."""
+    if getattr(request.user, "role", "") != "superAdmin":
+        return render(request, "ui/404.html", status=404)
+    return None
+
+
+def _org_blockers_text(org: object) -> str:
+    """Human summary of the tenant data that PROTECTs an org from deletion.
+
+    Rendered server-side into the delete modal so the warning never depends on JS
+    building HTML from server data (F3/F10).
+    """
+    parts: list[str] = []
+    for count, singular in (
+        (getattr(org, "cases_count", 0), "case"),
+        (getattr(org, "alerts_count", 0), "alert"),
+        (getattr(org, "observables_count", 0), "observable"),
+        (getattr(org, "tokens_count", 0), "ingestion token"),
+    ):
+        if count:
+            parts.append(f"{count} {singular}{'' if count == 1 else 's'}")
+    return ", ".join(parts)
+
+
+@login_required
+def settings_organisations(request: HttpRequest) -> HttpResponse:
+    """Organisations list + create (superAdmin only)."""
+    guard = _require_superadmin_ui(request)
+    if guard:
+        return guard
+
+    if request.method == "POST":
+        name = (request.POST.get("name") or "").strip()[:200]
+        description = (request.POST.get("description") or "").strip()
+        if not name:
+            messages.error(request, "Name is required.")
+        elif Organisation.objects.filter(name=name).exists():
+            messages.error(request, "An organisation with that name already exists.")
+        else:
+            from django.db import IntegrityError
+
+            try:
+                org = Organisation.objects.create(name=name, description=description)
+            except IntegrityError:
+                # Truncation can make two input names collide after the pre-check (§F7).
+                messages.error(request, "An organisation with that name already exists.")
+            else:
+                from identity.audit import record_organisation_change
+
+                record_organisation_change(
+                    request,
+                    actor=request.user,
+                    action="organisation.created",
+                    target_org=org,
+                    target_id=str(org.id),
+                )
+                messages.success(request, f"Organisation '{org.name}' created.")
+                return redirect("ui-settings-organisations")
+
+    from django.db.models import Count
+
+    orgs = list(
+        Organisation.objects.annotate(
+            members_count=Count("users", distinct=True),
+            cases_count=Count("cases", distinct=True),
+            alerts_count=Count("alerts", distinct=True),
+            observables_count=Count("observables", distinct=True),
+            tokens_count=Count("ingestion_tokens", distinct=True),
+        ).order_by("name")
+    )
+    for org in orgs:
+        # Dynamic, template-only display attributes (not model fields).
+        org.blockers_text = _org_blockers_text(org)  # type: ignore[attr-defined]
+        org.is_blocked = bool(org.blockers_text)  # type: ignore[attr-defined]
+
+    return render(
+        request,
+        "ui/settings_organisations.html",
+        _base_context(request, organisations=orgs),
+    )
+
+
+@login_required
+def settings_organisations_edit(request: HttpRequest, org_id: str) -> HttpResponse:
+    """Edit an organisation (superAdmin only)."""
+    guard = _require_superadmin_ui(request)
+    if guard:
+        return guard
+
+    org = get_object_or_404(Organisation, pk=org_id)
+
+    if request.method == "POST":
+        name = (request.POST.get("name") or "").strip()[:200]
+        description = (request.POST.get("description") or "").strip()
+        if not name:
+            messages.error(request, "Name is required.")
+        elif Organisation.objects.exclude(pk=org.pk).filter(name=name).exists():
+            messages.error(request, "An organisation with that name already exists.")
+        else:
+            from django.db import IntegrityError
+
+            org.name = name
+            org.description = description
+            try:
+                org.save(update_fields=["name", "description", "updated_at"])
+            except IntegrityError:
+                messages.error(request, "An organisation with that name already exists.")
+            else:
+                from identity.audit import record_organisation_change
+
+                record_organisation_change(
+                    request,
+                    actor=request.user,
+                    action="organisation.updated",
+                    target_org=org,
+                    target_id=str(org.id),
+                )
+                messages.success(request, f"Organisation '{org.name}' updated.")
+                return redirect("ui-settings-organisations")
+
+    return render(
+        request,
+        "ui/settings_organisation_form.html",
+        _base_context(request, org=org, mode="edit"),
+    )
+
+
+@login_required
+@require_POST
+def settings_organisations_delete(request: HttpRequest, org_id: str) -> HttpResponse:
+    """Delete an organisation (superAdmin only)."""
+    guard = _require_superadmin_ui(request)
+    if guard:
+        return guard
+
+    org = get_object_or_404(Organisation, pk=org_id)
+    members_action = request.POST.get("members")
+    target_org_id = request.POST.get("target_org")
+    # Malformed ids resolve to None instead of raising out of the query compiler (F7).
+    target_org = resolve_organisation(target_org_id)
+
+    # Mirror the API's up-front validation: a reassign must name a real, different
+    # organisation, otherwise members would be orphaned (or reassigned to itself).
+    if members_action == "reassign" and (target_org is None or target_org.pk == org.pk):
+        messages.error(request, "Select a valid target organisation to reassign members to.")
+        return redirect("ui-settings-organisations")
+
+    from identity.services import OrganisationDeleteBlockedError, delete_organisation
+
+    try:
+        delete_organisation(
+            org,
+            members=members_action,
+            target=target_org,
+            actor=request.user,
+            request=request,
+        )
+        messages.success(request, "Organisation deleted.")
+    except OrganisationDeleteBlockedError as e:
+        if e.reason == "self_lockout":
+            messages.error(
+                request,
+                "Cannot delete your own account by deleting an organisation. "
+                "Reassign members instead.",
+            )
+        elif e.reason == "last_superadmin":
+            messages.error(
+                request,
+                "Cannot delete the last active superAdmin. Reassign members instead.",
+            )
+        elif e.reason == "invalid_target":
+            messages.error(request, "Select a valid target organisation to reassign members to.")
+        elif e.members is not None and not e.blockers.get("race"):
+            messages.error(request, "Organisation has members. Choose reassign or delete.")
+        else:
+            blockers_text = ", ".join(f"{k}: {v}" for k, v in e.blockers.items() if v)
+            messages.error(
+                request, f"Cannot delete: organisation owns tenant data ({blockers_text})."
+            )
+        return redirect("ui-settings-organisations")
+
+    return redirect("ui-settings-organisations")
+
+
+@login_required
+def settings_users(request: HttpRequest) -> HttpResponse:
+    """Users list + create (superAdmin only)."""
+    guard = _require_superadmin_ui(request)
+    if guard:
+        return guard
+
+    from core.enums import USER_ROLE_VALUES
+
+    if request.method == "POST":
+        username = (request.POST.get("username") or "").strip()
+        email = (request.POST.get("email") or "").strip()
+        password = request.POST.get("password") or ""
+        role = request.POST.get("role") or "analyst"
+        org_id = request.POST.get("org")
+        is_active = request.POST.get("is_active") == "on"
+
+        errors = {}
+        if not username:
+            errors["username"] = "required"
+        if not email:
+            errors["email"] = "required"
+        if not password:
+            errors["password"] = "required"  # noqa: S105
+        if role not in USER_ROLE_VALUES:
+            errors["role"] = f"must be one of {', '.join(USER_ROLE_VALUES)}"
+        if not org_id:
+            errors["org"] = "required"
+
+        org = resolve_organisation(org_id) if org_id else None
+        if org_id and org is None:
+            errors["org"] = "organisation not found"
+
+        if User.objects.filter(username=username).exists():
+            errors.setdefault("username", "already exists")
+        if User.objects.filter(login=username).exists():
+            errors.setdefault("username", "already exists")
+
+        if errors:
+            for field, msg in errors.items():
+                messages.error(request, f"{field}: {msg}")
+        else:
+            from django.contrib.auth.password_validation import validate_password
+            from django.core.exceptions import ValidationError
+
+            user = User(username=username, email=email, role=role, org=org, is_active=is_active)
+            try:
+                validate_password(password, user=user)
+            except ValidationError as e:
+                for msg in e.messages:
+                    messages.error(request, f"password: {msg}")
+            else:
+                user.set_password(password)
+                user.save()
+                from identity.audit import record_user_change
+
+                record_user_change(
+                    request,
+                    actor=request.user,
+                    action="user.created",
+                    target_id=str(user.id),
+                    target_org=org,
+                )
+                messages.success(request, f"User '{user.login}' created.")
+                return redirect("ui-settings-users")
+
+    users = User.objects.select_related("org").order_by("username")
+    orgs = Organisation.objects.order_by("name")
+
+    return render(
+        request,
+        "ui/settings_users.html",
+        _base_context(request, users=users, orgs=orgs, role_choices=USER_ROLE_VALUES),
+    )
+
+
+@login_required
+@serializes_superadmin_changes
+def settings_users_edit(request: HttpRequest, user_id: str) -> HttpResponse:
+    """Edit a user (superAdmin only)."""
+    guard = _require_superadmin_ui(request)
+    if guard:
+        return guard
+
+    user = get_object_or_404(User, pk=user_id)
+
+    from core.enums import USER_ROLE_VALUES
+
+    if request.method == "POST":
+        email = (request.POST.get("email") or "").strip()
+        role = request.POST.get("role")
+        org_id = request.POST.get("org")
+        is_active = request.POST.get("is_active") == "on"
+        password = request.POST.get("password") or None
+
+        errors = {}
+        if role and role not in USER_ROLE_VALUES:
+            errors["role"] = f"must be one of {', '.join(USER_ROLE_VALUES)}"
+
+        org = resolve_organisation(org_id) if org_id else None
+        if org_id and org is None:
+            errors["org"] = "organisation not found"
+
+        if errors:
+            for field, msg in errors.items():
+                messages.error(request, f"{field}: {msg}")
+        else:
+            from django.contrib.auth.password_validation import validate_password
+            from django.core.exceptions import ValidationError
+
+            changed = False
+            if user.email != email:
+                user.email = email
+                changed = True
+            if role and user.role != role:
+                # Guard: cannot change your own role away from superAdmin
+                if (
+                    user.pk == request.user.pk
+                    and request.user.role == "superAdmin"
+                    and role != "superAdmin"
+                ):
+                    messages.error(request, "Cannot change your own role away from superAdmin.")
+                    return redirect("ui-settings-users-edit", user_id=user_id)
+                # Guard: cannot demote the last active superAdmin
+                if user.role == "superAdmin" and role != "superAdmin":
+                    active_superadmins = User.objects.filter(
+                        role="superAdmin", is_active=True
+                    ).count()
+                    if active_superadmins == 1:
+                        messages.error(request, "Cannot demote the last active superAdmin.")
+                        return redirect("ui-settings-users-edit", user_id=user_id)
+                user.role = role
+                changed = True
+            if org and user.org_id != org.id:
+                user.org = org
+                changed = True
+            if user.is_active != is_active:
+                # Guard: cannot deactivate yourself as superAdmin
+                if (
+                    user.pk == request.user.pk
+                    and request.user.role == "superAdmin"
+                    and not is_active
+                ):
+                    messages.error(request, "Cannot deactivate yourself as superAdmin.")
+                    return redirect("ui-settings-users-edit", user_id=user_id)
+                # Guard: cannot deactivate the last active superAdmin
+                if user.role == "superAdmin" and user.is_active and not is_active:
+                    active_superadmins = User.objects.filter(
+                        role="superAdmin", is_active=True
+                    ).count()
+                    if active_superadmins == 1:
+                        messages.error(request, "Cannot deactivate the last active superAdmin.")
+                        return redirect("ui-settings-users-edit", user_id=user_id)
+                user.is_active = is_active
+                changed = True
+            if password:
+                try:
+                    validate_password(password, user=user)
+                except ValidationError as e:
+                    for msg in e.messages:
+                        messages.error(request, f"password: {msg}")
+                    return redirect("ui-settings-users-edit", user_id=user_id)
+                user.set_password(password)
+                changed = True
+
+            if changed:
+                user.save()
+                from identity.audit import record_user_change
+
+                record_user_change(
+                    request,
+                    actor=request.user,
+                    action="user.updated",
+                    target_id=str(user.id),
+                    target_org=user.org,
+                )
+                messages.success(request, f"User '{user.login}' updated.")
+            else:
+                messages.info(request, "No changes made.")
+            return redirect("ui-settings-users")
+
+    orgs = Organisation.objects.order_by("name")
+    return render(
+        request,
+        "ui/settings_user_form.html",
+        _base_context(
+            request, user_obj=user, orgs=orgs, role_choices=USER_ROLE_VALUES, mode="edit"
+        ),
+    )
+
+
+@login_required
+@require_POST
+@serializes_superadmin_changes
+def settings_users_delete(request: HttpRequest, user_id: str) -> HttpResponse:
+    """Delete a user (superAdmin only)."""
+    guard = _require_superadmin_ui(request)
+    if guard:
+        return guard
+
+    user = get_object_or_404(User, pk=user_id)
+
+    # Guard: cannot delete yourself
+    if user.pk == request.user.pk:
+        messages.error(request, "Cannot delete yourself.")
+        return redirect("ui-settings-users")
+
+    # Guard: cannot delete the last active superAdmin
+    if user.role == "superAdmin" and user.is_active:
+        active_superadmins = User.objects.filter(role="superAdmin", is_active=True).count()
+        if active_superadmins == 1:
+            messages.error(request, "Cannot delete the last active superAdmin.")
+            return redirect("ui-settings-users")
+
+    from identity.services import delete_user
+
+    delete_user(user, actor=request.user, request=request)
+    messages.success(request, f"User '{user.login}' deleted.")
+    return redirect("ui-settings-users")

@@ -52,7 +52,7 @@ def _no_connection_churn(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def org(db: None) -> Organisation:
-    return Organisation.objects.create(name="Test Org")
+    return Organisation.objects.get_or_create(name="Test Org")[0]
 
 
 @pytest.fixture
@@ -74,6 +74,11 @@ def browser(analyst: User) -> Client:
     client = Client()
     assert client.login(username="analyst", password="hunter2")
     return client
+
+
+@pytest.fixture
+def anonymous_api() -> APIClient:
+    return APIClient()
 
 
 def _owned_case(org: Organisation, title: str = "Owned") -> Case:
@@ -178,10 +183,10 @@ def test_a_case_page_create_publishes_a_page_event(
     async_to_sync(scenario)()
 
 
-def test_an_anonymous_socket_cannot_join_a_case_room(db: None) -> None:
+def test_an_anonymous_socket_cannot_join_a_case_room(org: Organisation) -> None:
     """PLAN AC6.1-P2-a: no session, no room — and the refused socket stays out of the group."""
     status = CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
-    case = Case.objects.create(title="Unlisted", status=status)
+    case = Case.objects.create(title="Unlisted", status=status, owner_org=org)
 
     async def scenario() -> None:
         communicator = WebsocketCommunicator(application, f"/ws/case/{case.id}/")
@@ -312,7 +317,7 @@ def test_case_comment_crud_shapes(api: APIClient, org: Organisation) -> None:
 
 
 def test_alert_comment_create_and_list(api: APIClient, org: Organisation) -> None:
-    alert: Alert = _alert("Phish", ref="p2-alert", case=None)
+    alert: Alert = _alert("Phish", ref="p2-alert", case=None, org=org)
     created = api.post(f"/api/v1/alert/{alert.id}/comment", {"message": "reported"}, format="json")
     assert created.status_code == 201, created.content
     listed = api.get(f"/api/v1/alert/{alert.id}/comment")
@@ -368,8 +373,8 @@ def test_case_flow_links_every_entity_without_raw_payload(
     api: APIClient, org: Organisation
 ) -> None:
     case = _owned_case(org)
-    alert = _alert("Linked", ref="flow-1", case=case)
-    observable = _observable("198.51.100.7")
+    alert = _alert("Linked", ref="flow-1", case=case, org=org)
+    observable = _observable("198.51.100.7", org=org)
     CaseObservable.objects.create(case=case, observable=observable)
 
     response = api.get(f"/api/v1/case/{case.id}/flow")
@@ -409,9 +414,11 @@ def test_comment_and_page_routes_are_not_swallowed_by_case_detail(
     assert Page.objects.filter(case=case, title="route check").count() == 1
 
 
-def test_the_whole_surface_is_401_without_credentials(anonymous_api: APIClient, db: None) -> None:
+def test_the_whole_surface_is_401_without_credentials(
+    anonymous_api: APIClient, org: Organisation
+) -> None:
     status = CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
-    case = Case.objects.create(title="Private", status=status)
+    case = Case.objects.create(title="Private", status=status, owner_org=org)
     for path, method in (
         (f"/api/v1/case/{case.id}/comment", "post"),
         (f"/api/v1/case/{case.id}/page", "post"),
@@ -422,8 +429,10 @@ def test_the_whole_surface_is_401_without_credentials(anonymous_api: APIClient, 
         assert response.status_code == 401, f"{method.upper()} {path} -> {response.status_code}"
 
 
-def test_alert_comment_route_is_not_swallowed_by_alert_detail(api: APIClient) -> None:
-    alert = _alert("Route", ref="route-1")
+def test_alert_comment_route_is_not_swallowed_by_alert_detail(
+    api: APIClient, org: Organisation
+) -> None:
+    alert = _alert("Route", ref="route-1", org=org)
     assert (
         api.post(
             f"/api/v1/alert/{alert.id}/comment", {"message": "route check"}, format="json"

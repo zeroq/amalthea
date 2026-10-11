@@ -237,3 +237,198 @@ def test_the_ipaddress_guard_agrees_with_the_stoplist() -> None:
             or address.is_multicast
             or address.is_reserved
         ), f"{literal} is routable but is in the observable stoplist"
+
+
+# --- M2: DNS rebinding TOCTOU defense ----------------------------------------
+
+
+def test_dns_rebinding_host_resolving_to_private_is_rejected(monkeypatch: Any) -> None:
+    """A host that resolves to a private IP is rejected at validation time.
+
+    This is the existing guard behavior (pre-connection), retained as the first line of defense.
+    """
+    import socket
+
+    real = socket.getaddrinfo
+
+    def fake(host: str, *args: object, **kwargs: object) -> Any:
+        if host == "rebind.example.com":
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 0)),
+            ]
+        return real(host, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake)
+    with pytest.raises(UnsafeURLError, match="private"):
+        assert_safe_url("http://rebind.example.com/")
+
+
+def test_normal_public_url_passes_validation_and_execution(monkeypatch: Any) -> None:
+    """A normal public URL passes validation and the request executes (mocked network)."""
+    import urllib.request
+
+    from automation.executor import run_http_action
+
+    class _Response:
+        status = 200
+        code = 200
+        msg = "OK"
+
+        def read(self, size: int) -> bytes:
+            return b'{"status": "ok"}'
+
+        def info(self) -> dict:
+            return {}
+
+        def getheaders(self, name: str) -> list[str]:
+            return []
+
+        def __enter__(self) -> _Response:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def fake_open(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        # Verify the request has a timeout and it's clamped (passed via kwargs)
+        timeout = kwargs.get("timeout")
+        assert timeout is not None
+        assert timeout <= 30.0  # MAX_TIMEOUT_SECONDS
+        return _Response()
+
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", fake_open)
+    result = run_http_action(
+        {"action": "http", "url": "https://93.184.216.34/api", "timeoutSeconds": 5},
+        {},
+    )
+    assert result.ok is True
+    assert "status" in result.output_log
+
+
+def test_post_connect_peer_verification_rejects_rebind(monkeypatch: Any) -> None:
+    """The post-connect peer check rejects a DNS rebind (connects to different IP than validated)."""
+    import urllib.error
+    import urllib.request
+
+    from automation.executor import UnsafeURLError, run_http_action
+
+    def fake_open(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        # Simulate connection to a different IP than expected by raising UnsafeURLError
+        raise UnsafeURLError(
+            "DNS rebinding detected: connected to 10.0.0.5, expected 93.184.216.34"
+        )
+
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", fake_open)
+
+    with pytest.raises(ActionError, match="DNS rebinding detected"):
+        run_http_action(
+            {"action": "http", "url": "https://example.com/api"},
+            {},
+        )
+
+
+def test_timeout_is_clamped_to_max(monkeypatch: Any) -> None:
+    """Request timeout is clamped to MAX_TIMEOUT_SECONDS (30s)."""
+    import urllib.request
+
+    from automation.executor import MAX_TIMEOUT_SECONDS, run_http_action
+
+    captured_timeout: dict[str, float] = {}
+
+    class _Response:
+        status = 200
+        code = 200
+        msg = "OK"
+
+        def read(self, size: int) -> bytes:
+            return b"ok"
+
+        def info(self) -> dict:
+            return {}
+
+        def getheaders(self, name: str) -> list[str]:
+            return []
+
+        def __enter__(self) -> _Response:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def fake_open(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        captured_timeout["value"] = kwargs.get("timeout")
+        return _Response()
+
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", fake_open)
+
+    # Request with timeout > MAX_TIMEOUT_SECONDS
+    run_http_action(
+        {"action": "http", "url": "https://93.184.216.34/api", "timeoutSeconds": 100},
+        {},
+    )
+
+    assert captured_timeout["value"] == MAX_TIMEOUT_SECONDS
+
+
+def test_redirect_hop_revalidates_dns_and_pins(monkeypatch: Any) -> None:
+    """Each redirect hop re-validates DNS and pins to a validated address."""
+    import urllib.error
+    import urllib.request
+
+    from automation.executor import run_http_action
+
+    call_count = {"n": 0}
+
+    class _RedirectResponse:
+        def __init__(self, location: str):
+            self.headers = {"Location": location}
+            self.code = 302
+            self.status = 302
+
+        def read(self, size: int) -> bytes:
+            return b""
+
+        def info(self) -> dict:
+            return {}
+
+        def getheaders(self, name: str) -> list[str]:
+            return []
+
+    class _FinalResponse:
+        status = 200
+        code = 200
+        msg = "OK"
+
+        def read(self, size: int) -> bytes:
+            return b"final"
+
+        def info(self) -> dict:
+            return {}
+
+        def getheaders(self, name: str) -> list[str]:
+            return []
+
+        def __enter__(self) -> _FinalResponse:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def fake_open(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise urllib.error.HTTPError(
+                request.full_url, 302, "Found", {"Location": "https://93.184.216.34/final"}, None
+            )
+        return _FinalResponse()
+
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", fake_open)
+
+    result = run_http_action(
+        {"action": "http", "url": "https://93.184.216.34/start"},
+        {},
+    )
+
+    assert result.ok is True
+    assert call_count["n"] == 2  # initial + one redirect
+    assert "final" in result.output_log

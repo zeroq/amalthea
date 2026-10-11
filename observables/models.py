@@ -77,17 +77,25 @@ class ObservableType(UUIDModel, TimeStampedModel):
 
 
 class Observable(UUIDModel, TimeStampedModel):
-    """A globally deduplicated forensic artifact (AGENTS.md Module C).
+    """A tenant-scoped forensic artifact (AGENTS.md Module C, ADR-004).
 
-    Unique on ``(data_type, data_hash)``, not ``(data_type, normalized_data)`` — see
-    `observables.hashing` for the two Postgres-only failure modes that motivates it.
-    `normalized_data` stays on the row (it is what analysts read and what enrichment
-    compares against); only the *indexed* form is the digest.
+    Unique on ``(owner_org, data_type, data_hash)`` — the same artifact value in two
+    orgs is two rows. Auto-linking via `CaseObservable` is confined to one org.
     """
 
-    # db_index=False: `data_type` is the left prefix of uniq_obs_dtype_hash below (M1).
+    # db_index=True: the unique constraint below leads with `owner_org`, so `data_type` is no
+    # longer a left prefix and needs its own index for type-scoped lookups.
     data_type = models.ForeignKey(
-        ObservableType, on_delete=models.PROTECT, related_name="observables", db_index=False
+        ObservableType, on_delete=models.PROTECT, related_name="observables", db_index=True
+    )
+    # Owner organisation — mandatory for tenant isolation (ADR-004). FK PROTECT so a tenant
+    # row can never orphan its observables. db_index=False: `obs_org_created_idx` (below)
+    # already leads with `owner_org`, so the implicit FK index would be redundant.
+    owner_org = models.ForeignKey(
+        "identity.Organisation",
+        on_delete=models.PROTECT,
+        related_name="observables",
+        db_index=False,
     )
     data = models.TextField()
     normalized_data = models.TextField()
@@ -108,12 +116,16 @@ class Observable(UUIDModel, TimeStampedModel):
     class Meta:
         db_table = "observable"
         constraints = [
-            models.UniqueConstraint(fields=["data_type", "data_hash"], name="uniq_obs_dtype_hash"),
+            # Per-org uniqueness (ADR-004): same value in two orgs = two rows.
+            models.UniqueConstraint(
+                fields=["owner_org", "data_type", "data_hash"], name="uniq_obs_org_dtype_hash"
+            ),
             in_range("observable_tlp_range", "tlp", TLP_MIN, TLP_MAX),
             in_range("observable_pap_range", "pap", PAP_MIN, PAP_MAX),
         ]
         indexes = [
             models.Index(fields=["-created_at"], name="obs_created_at_idx"),
+            models.Index(fields=["owner_org", "-created_at"], name="obs_org_created_idx"),
             # GIN index on enrichment_data for efficient JSON querying (Postgres only)
             models.Index(
                 fields=["enrichment_data"],
@@ -133,8 +145,8 @@ class Observable(UUIDModel, TimeStampedModel):
         it safe for `normalized_data` to be caller-writable. But a save carrying
         `update_fields` writes *only* those columns, so `o.save(update_fields=[
         "normalized_data"])` left `data_hash` pointing at the previous value — and
-        `data_hash` is the right half of `uniq_obs_dtype_hash(data_type, data_hash)`, the
-        only constraint standing between a case file and a duplicate artifact. That made
+        `data_hash` is the right half of `uniq_obs_org_dtype_hash(owner_org, data_type, data_hash)`,
+        the only constraint standing between a case file and a duplicate artifact. That made
         the stale row collide with, or silently miss, a genuinely new artifact. Adding the
         column here is what makes the field's promise hold for partial saves too.
 

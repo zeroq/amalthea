@@ -2,6 +2,8 @@
 
 Covers: CRUD, _meta non-drift, config validation matrix, run-now -> run + timeline,
 DELETE-with-runs refused, P12-1 (TaskCompleted emission on completion only).
+
+L3: role gating — read-only users denied on mutating endpoints.
 """
 
 from __future__ import annotations
@@ -10,10 +12,34 @@ import pytest
 
 from automation.models import AutomationRun
 from cases.models import Task, TimelineEvent
-from identity.models import User
+from identity.models import Organisation, User
 from tests.conformance._t1_seed import _api_key_client, _call, _case, _observable
 
 pytestmark = pytest.mark.django_db
+
+
+@pytest.fixture
+def readonly_user(db: None) -> User:
+    """A read-only user in the same org as the analyst fixture."""
+    org = Organisation.objects.create(name="ReadOnly Org")
+    return User.objects.create(
+        login="readonly",
+        username="readonly",
+        email="readonly@example.net",
+        org=org,
+        is_active=True,
+        role="read-only",
+    )
+
+
+@pytest.fixture
+def readonly_client(readonly_user: User):
+    """API client authenticated as read-only user."""
+    from rest_framework.test import APIClient
+
+    client = APIClient()
+    client.force_authenticate(user=readonly_user)
+    return client
 
 
 def _post(client, path: str, data: dict):
@@ -323,8 +349,8 @@ def test_run_now_creates_run_and_timeline(analyst: User) -> None:
     assert code == 201
     pb_id = body["_id"]
 
-    case = _case("Run-now case")
-    obs = _observable("10.0.0.1")
+    case = _case("Run-now case", org=analyst.org)
+    obs = _observable("10.0.0.1", org=analyst.org)
     # link observable to case
     from cases.models import CaseObservable
 
@@ -358,10 +384,12 @@ def test_run_now_creates_run_and_timeline(analyst: User) -> None:
 # --- P12-1: TaskCompleted emission on completion only (AC6.12-P2-d) --------
 
 
-def test_task_completed_emits_on_transition_into_completed_only() -> None:
+def test_task_completed_emits_on_transition_into_completed_only(analyst: User) -> None:
     """Completing a task emits TaskCompleted; re-saving an already-complete task emits nothing."""
 
-    case = __import__("tests.conformance._t1_seed", fromlist=["_case"])._case("P12-1 test")
+    from tests.conformance._t1_seed import _case
+
+    case = _case("P12-1 test", org=analyst.org)
     task = Task.objects.create(case=case, title="p12-1 task", status="Waiting")
 
     # Mock dispatch to capture calls
@@ -433,3 +461,200 @@ def test_delete_playbook_with_runs_refused_400(analyst: User) -> None:
 
     code = _delete(c, f"/api/v1/playbook/{pb_id}")
     assert code == 400
+
+
+# --- L3: Role gating for playbook authoring/run --------------------------------
+
+
+def test_readonly_user_cannot_create_playbook(readonly_client) -> None:
+    """read-only user is denied creating a playbook (403)."""
+    code, body = _post(
+        readonly_client,
+        "/api/v1/playbook",
+        {
+            "name": "readonly-create",
+            "triggerEvent": "observable.created",
+            "config": {
+                "action": "python",
+                "action_path": "amalthea.automation.executor.enrichment_probe",
+            },
+        },
+    )
+    assert code == 403, body
+    assert body["type"] == "AuthorizationError"
+    assert "Analyst role or above required" in body["message"]
+
+
+def test_readonly_user_cannot_update_playbook(readonly_client, analyst: User) -> None:
+    """read-only user is denied updating a playbook (403)."""
+    # Create a playbook as analyst first
+    c, _ = _api_key_client(analyst, scope="readwrite")
+    code, body = _post(
+        c,
+        "/api/v1/playbook",
+        {
+            "name": "readonly-update-target",
+            "triggerEvent": "observable.created",
+            "config": {
+                "action": "python",
+                "action_path": "amalthea.automation.executor.enrichment_probe",
+            },
+        },
+    )
+    assert code == 201
+    pb_id = body["_id"]
+
+    # Try to update as read-only
+    code, body = _patch(readonly_client, f"/api/v1/playbook/{pb_id}", {"description": "hacked"})
+    assert code == 403, body
+    assert body["type"] == "AuthorizationError"
+
+
+def test_readonly_user_cannot_delete_playbook(readonly_client, analyst: User) -> None:
+    """read-only user is denied deleting a playbook (403)."""
+    # Create a playbook as analyst first
+    c, _ = _api_key_client(analyst, scope="readwrite")
+    code, body = _post(
+        c,
+        "/api/v1/playbook",
+        {
+            "name": "readonly-delete-target",
+            "triggerEvent": "observable.created",
+            "config": {
+                "action": "python",
+                "action_path": "amalthea.automation.executor.enrichment_probe",
+            },
+        },
+    )
+    assert code == 201
+    pb_id = body["_id"]
+
+    # Try to delete as read-only
+    code = _delete(readonly_client, f"/api/v1/playbook/{pb_id}")
+    assert code == 403
+
+
+def test_readonly_user_cannot_run_playbook(readonly_client, analyst: User) -> None:
+    """read-only user is denied manually running a playbook (403)."""
+    # Create a playbook as analyst first
+    c, _ = _api_key_client(analyst, scope="readwrite")
+    code, body = _post(
+        c,
+        "/api/v1/playbook",
+        {
+            "name": "readonly-run-target",
+            "triggerEvent": "observable.created",
+            "config": {
+                "action": "python",
+                "action_path": "amalthea.automation.executor.enrichment_probe",
+            },
+        },
+    )
+    assert code == 201
+    pb_id = body["_id"]
+
+    case = _case("Run-now case", org=analyst.org)
+    obs = _observable("10.0.0.1", org=analyst.org)
+    from cases.models import CaseObservable
+
+    CaseObservable.objects.create(case=case, observable=obs)
+
+    # Try to run as read-only
+    code, body = _post(
+        readonly_client,
+        f"/api/v1/playbook/{pb_id}/run",
+        {"case": str(case.id)},
+    )
+    assert code == 403, body
+    assert body["type"] == "AuthorizationError"
+
+
+def test_analyst_user_can_create_playbook(analyst: User) -> None:
+    """analyst user can create a playbook (201)."""
+    c, _ = _api_key_client(analyst, scope="readwrite")
+    code, body = _post(
+        c,
+        "/api/v1/playbook",
+        {
+            "name": "analyst-create",
+            "triggerEvent": "observable.created",
+            "config": {
+                "action": "python",
+                "action_path": "amalthea.automation.executor.enrichment_probe",
+            },
+        },
+    )
+    assert code == 201, body
+
+
+def test_analyst_user_can_update_playbook(analyst: User) -> None:
+    """analyst user can update a playbook (204)."""
+    c, _ = _api_key_client(analyst, scope="readwrite")
+    code, body = _post(
+        c,
+        "/api/v1/playbook",
+        {
+            "name": "analyst-update",
+            "triggerEvent": "observable.created",
+            "config": {
+                "action": "python",
+                "action_path": "amalthea.automation.executor.enrichment_probe",
+            },
+        },
+    )
+    assert code == 201
+    pb_id = body["_id"]
+
+    code, _ = _patch(c, f"/api/v1/playbook/{pb_id}", {"description": "updated by analyst"})
+    assert code == 204
+
+
+def test_analyst_user_can_delete_playbook(analyst: User) -> None:
+    """analyst user can delete a playbook (204)."""
+    c, _ = _api_key_client(analyst, scope="readwrite")
+    code, body = _post(
+        c,
+        "/api/v1/playbook",
+        {
+            "name": "analyst-delete",
+            "triggerEvent": "observable.created",
+            "config": {
+                "action": "python",
+                "action_path": "amalthea.automation.executor.enrichment_probe",
+            },
+        },
+    )
+    assert code == 201
+    pb_id = body["_id"]
+
+    code = _delete(c, f"/api/v1/playbook/{pb_id}")
+    assert code == 204
+
+
+def test_analyst_user_can_run_playbook(analyst: User) -> None:
+    """analyst user can manually run a playbook (202)."""
+    c, _ = _api_key_client(analyst, scope="readwrite")
+    code, body = _post(
+        c,
+        "/api/v1/playbook",
+        {
+            "name": "analyst-run",
+            "triggerEvent": "observable.created",
+            "config": {
+                "action": "python",
+                "action_path": "amalthea.automation.executor.enrichment_probe",
+            },
+        },
+    )
+    assert code == 201
+    pb_id = body["_id"]
+
+    case = _case("Analyst run case", org=analyst.org)
+    obs = _observable("10.0.0.2", org=analyst.org)
+    from cases.models import CaseObservable
+
+    CaseObservable.objects.create(case=case, observable=obs)
+
+    code, body = _post(c, f"/api/v1/playbook/{pb_id}/run", {"case": str(case.id)})
+    assert code == 202, body
+    assert body["triggeredBy"] == "manual"

@@ -60,8 +60,14 @@ def folded_type() -> ObservableType:
     return ObservableType.objects.create(name="rehash-folded", is_case_sensitive=False)
 
 
-def _add(observable_type: ObservableType, value: str) -> Observable:
-    return Observable.objects.create(data_type=observable_type, data=value, normalized_data=value)
+def _add(observable_type: ObservableType, value: str, org=None) -> Observable:
+    from identity.models import Organisation
+
+    if org is None:
+        org, _ = Organisation.objects.get_or_create(name="Default")
+    return Observable.objects.create(
+        data_type=observable_type, data=value, normalized_data=value, owner_org=org
+    )
 
 
 # ---------------------------------------------------------------------------------------

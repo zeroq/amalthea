@@ -1,0 +1,208 @@
+"""Single source of truth for tenant isolation scoping (P1 — Foundations).
+
+This module provides the authoritative helpers used by **both** HTTP views and
+WebSocket consumers to enforce org boundaries. The design goals are:
+
+* **Greppable** — one place to audit every org check.
+* **Fail-closed** — org-less callers get no access; `None`/empty Q means deny.
+* **Uniform 404** — cross-tenant and non-existent resolve identically to "not
+  found" (no existence oracle).
+* **Reusable** — `case_visible_q`, `resolve_case`, `org_filtered` cover the
+  three patterns in the codebase: list/retrieve on `Case`, object access via a
+  case FK, and direct-org rows (alerts, observables).
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
+
+from django.db.models import Q
+
+if TYPE_CHECKING:
+    from django.db.models import QuerySet
+
+    from alerts.models import Alert
+    from cases.models import Case
+    from identity.models import User
+    from observables.models import Observable
+
+
+def _user_org_id(user: User | None) -> UUID | None:
+    """Return the caller's organisation PK, or `None` if unauthenticated/org-less."""
+    if user is None or not getattr(user, "is_authenticated", False):
+        return None
+    return getattr(user, "org_id", None)
+
+
+def _is_superadmin(user: User | None) -> bool:
+    """True iff the caller is an authenticated superAdmin."""
+    return (
+        user is not None
+        and getattr(user, "is_authenticated", False)
+        and getattr(user, "role", "") == "superAdmin"
+    )
+
+
+def case_visible_q(user: User | None) -> Q:
+    """
+    Return a `Q` object matching cases visible to `user`.
+
+    Visible cases are those where:
+    - `owner_org == user.org` (the caller's own org), OR
+    - a `Share` grants read access to `user.org`, OR
+    - `user.role == "superAdmin"` (sees all, audited by callers).
+
+    Org-less or unauthenticated callers → empty `Q()` (matches nothing).
+    """
+    if _is_superadmin(user):
+        return Q()  # all cases
+    org_id = _user_org_id(user)
+    if org_id is None:
+        return Q(pk__in=[])  # deny: no org = no access
+    return Q(owner_org_id=org_id) | Q(shares__organisation_id=org_id)
+
+
+def org_q(field: str, user: User | None) -> Q:
+    """
+    Return a `Q` filtering `field` to the caller's organisation.
+
+    Used for direct-org rows (Alert, Observable) that carry `owner_org` directly.
+    Org-less/superAdmin handling mirrors `case_visible_q`.
+    """
+    if _is_superadmin(user):
+        return Q()
+    org_id = _user_org_id(user)
+    if org_id is None:
+        return Q(pk__in=[])
+    return Q(**{field: org_id})
+
+
+def org_filtered(
+    queryset: QuerySet[Any],
+    user: User | None,
+    *,
+    path: str = "case__owner_org",
+) -> QuerySet[Any]:
+    """
+    Scope a queryset reached *through* a case to the caller's organisation.
+
+    Example: `Task.objects.filter(case=case)` → `org_filtered(tasks, user, path="case__owner_org")`.
+
+    SuperAdmin → unfiltered. Org-less → empty queryset.
+    """
+    if _is_superadmin(user):
+        return queryset
+    org_id = _user_org_id(user)
+    if org_id is None:
+        return queryset.none()
+    return queryset.filter(**{f"{path}_id": org_id})
+
+
+def resolve_case(user: User | None, identifier: str, *, write: bool = False) -> Case | None:
+    """
+    Resolve a case the caller may reach, or `None` (caller turns into 404).
+
+    Used by HTTP **and** WebSocket consumers. The logic mirrors the legacy
+    `_case_access` in `cases/views.py` but is the single canonical implementation.
+
+    - SuperAdmin → any case (audited externally).
+    - Org-less → `None`.
+    - Owner org → allowed.
+    - Shared org → allowed if share exists; `write=True` demands `permissions.write`.
+    """
+    from alerts.escalation import link_case_from_identifier
+    from cases.models import Case, Share
+
+    if _is_superadmin(user):
+        try:
+            return link_case_from_identifier(identifier)
+        except Case.DoesNotExist:
+            return None
+
+    org_id = _user_org_id(user)
+    if org_id is None:
+        return None
+
+    try:
+        case = link_case_from_identifier(identifier)
+    except Case.DoesNotExist:
+        return None
+
+    # Owner org — full access
+    if case.owner_org_id == org_id:
+        return case
+
+    # Shared org — check share permissions
+    shares = Share.objects.filter(case=case, organisation_id=org_id)
+    if write:
+        shares = shares.filter(permissions__write=True)
+    return case if shares.exists() else None
+
+
+def resolve_alert(user: User | None, alert_id: str) -> Alert | None:
+    """Resolve an alert the caller may reach (direct org ownership)."""
+    from alerts.models import Alert
+
+    if _is_superadmin(user):
+        try:
+            return Alert.objects.get(pk=alert_id)
+        except Alert.DoesNotExist:
+            return None
+
+    org_id = _user_org_id(user)
+    if org_id is None:
+        return None
+
+    try:
+        return Alert.objects.get(pk=alert_id, owner_org_id=org_id)
+    except Alert.DoesNotExist:
+        return None
+
+
+def resolve_observable(user: User | None, observable_id: str) -> Observable | None:
+    """Resolve an observable the caller may reach (direct org ownership)."""
+    from observables.models import Observable
+
+    if _is_superadmin(user):
+        try:
+            return Observable.objects.get(pk=observable_id)
+        except Observable.DoesNotExist:
+            return None
+
+    org_id = _user_org_id(user)
+    if org_id is None:
+        return None
+
+    try:
+        return Observable.objects.get(pk=observable_id, owner_org_id=org_id)
+    except Observable.DoesNotExist:
+        return None
+
+
+def is_case_owner(user: User | None, case: Case) -> bool:
+    """
+    Return True iff the caller is the case's owner organisation (or superAdmin).
+
+    This is the predicate for **grant/revoke** operations on shares (plan §6-P2, P6).
+    A share holder with write access may mutate the case body, but only the owner
+    org (or superAdmin) may manage the share ACL itself. Returns False for org-less
+    callers and cross-tenant share holders.
+    """
+    if _is_superadmin(user):
+        return True
+    org_id = _user_org_id(user)
+    if org_id is None:
+        return False
+    return case.owner_org_id == org_id
+
+
+__all__ = [
+    "case_visible_q",
+    "is_case_owner",
+    "org_filtered",
+    "org_q",
+    "resolve_alert",
+    "resolve_case",
+    "resolve_observable",
+]

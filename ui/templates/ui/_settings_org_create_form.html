@@ -1,0 +1,12 @@
+{% comment %}
+Server-rendered body for the "New organisation" modal (F3/F10: no JS-built HTML).
+Fields target the modal's form via form="{{ form_id }}" so they work with JS disabled.
+{% endcomment %}
+<div class="meta-inline">
+  <label for="org-create-name">Name</label>
+  <input type="text" id="org-create-name" name="name" maxlength="200" required autofocus form="{{ form_id }}">
+</div>
+<div class="meta-inline">
+  <label for="org-create-description">Description</label>
+  <textarea id="org-create-description" name="description" rows="3" form="{{ form_id }}"></textarea>
+</div>

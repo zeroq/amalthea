@@ -148,10 +148,17 @@ def _duplicate_insert_raises(marker: str) -> bool:
     leave rows behind, or they collide with the *next* guard's remade table.
     """
     other = ObservableType.objects.get(name="other")
+    from identity.models import Organisation
+
+    org, _ = Organisation.objects.get_or_create(name="Default")
     try:
         with transaction.atomic():
-            Observable.objects.create(data_type=other, data=marker, normalized_data=marker)
-            Observable.objects.create(data_type=other, data=marker, normalized_data=marker)
+            Observable.objects.create(
+                data_type=other, data=marker, normalized_data=marker, owner_org=org
+            )
+            Observable.objects.create(
+                data_type=other, data=marker, normalized_data=marker, owner_org=org
+            )
             transaction.set_rollback(True)
         return False
     except IntegrityError:
@@ -160,7 +167,7 @@ def _duplicate_insert_raises(marker: str) -> bool:
 
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
 def test_mutation_5_integrity_detects_a_dropped_unique_constraint():
-    """Drop `uniq_obs_dtype_hash` for real, and prove both that it went and that it mattered.
+    """Drop `uniq_obs_org_dtype_hash` for real, and prove both that it went and that it mattered.
 
     Guards the REVIEW **H3** fix — moving observable uniqueness off the unbounded `normalized_data`
     onto `data_hash`, which bounds the btree index tuple and removes the collation dependence that
@@ -173,10 +180,12 @@ def test_mutation_5_integrity_detects_a_dropped_unique_constraint():
     back out; duplicates were rejected throughout while the test printed `duplicate insert accepted`
     and reported a pass. `schema_mutation` makes that failure structurally impossible now, and
     `detach_constraint` supplies the technique SQLite actually requires.
+
+    The unique constraint is now `uniq_obs_org_dtype_hash` (per-org dedupe, ADR-004).
     """
-    with schema_mutation("observable", label="drop uniq_obs_dtype_hash") as m:
-        m.detach_constraint(Observable, "uniq_obs_dtype_hash")
-        m.assert_ddl_delta(missing=["uniq_obs_dtype_hash"])
+    with schema_mutation("observable", label="drop uniq_obs_org_dtype_hash") as m:
+        m.detach_constraint(Observable, "uniq_obs_org_dtype_hash")
+        m.assert_ddl_delta(missing=["uniq_obs_org_dtype_hash"])
         assert not _duplicate_insert_raises("mut5"), (
             "duplicate was still rejected — the constraint is somehow still enforced"
         )
@@ -184,7 +193,7 @@ def test_mutation_5_integrity_detects_a_dropped_unique_constraint():
     assert _duplicate_insert_raises("mut5-restored"), (
         "constraint was restored but duplicates are accepted again — restore did not take effect"
     )
-    print("MUTATION-5: uniq_obs_dtype_hash absent from DDL, duplicate accepted, then restored")
+    print("MUTATION-5: uniq_obs_org_dtype_hash absent from DDL, duplicate accepted, then restored")
 
 
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
@@ -198,12 +207,19 @@ def test_mutation_6_enum_contract_detects_a_dropped_check_constraint():
     matters most for data integrity.
     """
     other = ObservableType.objects.get(name="other")
+    from identity.models import Organisation
+
+    org, _ = Organisation.objects.get_or_create(name="Default")
 
     def out_of_range_tlp(marker: str) -> bool:
         try:
             with transaction.atomic():
                 Observable.objects.create(
-                    data_type=other, data=marker, normalized_data=marker, tlp=99
+                    data_type=other,
+                    data=marker,
+                    normalized_data=marker,
+                    tlp=99,
+                    owner_org=org,
                 )
                 transaction.set_rollback(True)
             return False
@@ -416,12 +432,15 @@ def test_mutation_13_idempotency_key_unique_detects_a_deletion() -> None:
     """
     from automation.models import AutomationRun
     from cases.models import Case, CaseStatus
+    from identity.models import Organisation
 
+    org, _ = Organisation.objects.get_or_create(name="Default")
     case = Case.objects.create(
         title="guard-13",
         status=CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[
             0
         ],
+        owner_org=org,
     )
     with schema_mutation("automation_run", label="drop idempotency_key UNIQUE") as m:
         m.detach_field_unique(AutomationRun, "idempotency_key")

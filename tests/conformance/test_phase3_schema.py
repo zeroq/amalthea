@@ -199,7 +199,7 @@ def test_case_number_is_unique_and_not_client_supplied() -> None:
 
 @pytest.mark.django_db
 def test_observable_uniqueness_is_bounded() -> None:
-    """H3: the unique key is `(data_type, data_hash)`, never the unbounded text column."""
+    """H3: the unique key is `(owner_org, data_type, data_hash)`, never the unbounded text column (ADR-004)."""
     from observables.models import Observable
 
     unique_fields = [
@@ -207,9 +207,13 @@ def test_observable_uniqueness_is_bounded() -> None:
         for constraint in Observable._meta.constraints
         if isinstance(constraint, models.UniqueConstraint)
     ]
-    assert ("data_type_id", "data_hash") in unique_fields, unique_fields
+    assert ("owner_org_id", "data_type_id", "data_hash") in unique_fields, unique_fields
     hash_field = Observable._meta.get_field("data_hash")
     assert hash_field.max_length == 64 and hash_field.null is False and not hash_field.editable
     assert ("data_type_id", "normalized_data") not in unique_fields, (
         "H3: uniqueness on unbounded `normalized_data` exceeds the Postgres btree tuple limit"
+    )
+    # The old global unique key is gone (ADR-004: per-org dedupe)
+    assert ("data_type_id", "data_hash") not in unique_fields, (
+        "ADR-004: global dedupe replaced by per-org dedupe"
     )

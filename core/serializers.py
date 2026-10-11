@@ -520,11 +520,10 @@ def procedure_json(procedure: Procedure) -> dict[str, Any]:
 def organisation_json(org: Organisation) -> dict[str, Any]:
     """`OutputOrganisation` for the caller's own organisation.
 
-    `Organisation` is `UUIDModel`-only (plan §4: no timestamps minted for it), so the audit
-    pair the recorded schema requires degrades to `null` rather than being invented — the
-    same honest-bucket choice `task_json` makes for its creator columns. `taskRule`/
-    `observableRule`/`locked` have no column yet and are emitted as the schema-shaped
-    constants the stored tenant actually implies.
+    Now that `Organisation` extends `TimeStampedModel`, the audit pair is populated
+    from the model's `created_at`/`updated_at` (previously `null` — see deviation
+    **P1-2**). `taskRule`/`observableRule`/`locked` have no column and are emitted
+    as the schema-shaped constants the stored tenant actually implies.
     """
     return {
         "_id": str(org.id),
@@ -536,10 +535,49 @@ def organisation_json(org: Organisation) -> dict[str, Any]:
         "observableRule": "",
         "locked": False,
         "_createdBy": None,
-        "_createdAt": None,
+        "_createdAt": _iso(org.created_at),
         "_updatedBy": None,
-        "_updatedAt": None,
+        "_updatedAt": _iso(org.updated_at),
         "extraData": {},
+    }
+
+
+def organisation_admin_json(
+    org: Organisation, counts: dict[str, int] | None = None
+) -> dict[str, Any]:
+    """`OutputOrganisation` extended with per-org counts for the superAdmin directory.
+
+    This is an additive serializer — callers that do not need counts can continue
+    using `organisation_json`. When `counts` is provided it is inlined under the
+    `counts` key; otherwise the key is omitted to keep the payload stable for
+    existing consumers.
+    """
+    payload = organisation_json(org)
+    if counts is not None:
+        payload["counts"] = counts
+    return payload
+
+
+def user_admin_json(user: User) -> dict[str, Any]:
+    """`OutputUser` for the superAdmin user directory/mutation responses.
+
+    Includes all fields needed for the Settings → Users table: `login`, `name`,
+    `email`, `role`, `org` (name), `orgId`, `isActive`, `lastLogin`, plus the
+    standard `_id`, `_type`, `_createdAt` (from `date_joined`). `login` is derived
+    from `username` on save and never accepted from the client.
+    """
+    return {
+        "_id": str(user.id),
+        "_type": "user",
+        "login": user.login,
+        "name": user.get_full_name() or user.username,
+        "email": user.email,
+        "role": user.role,
+        "org": user.org.name if user.org else None,
+        "orgId": str(user.org_id) if user.org_id else None,
+        "isActive": user.is_active,
+        "_createdAt": _iso(user.date_joined),
+        "lastLogin": _iso(user.last_login),
     }
 
 

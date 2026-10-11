@@ -13,6 +13,10 @@ Two rules the shapes follow:
 * **The vocabulary is read from the code.** `playbook_meta` renders `TRIGGER_EVENTS` and
   `registered_actions()` directly, so the pickers a UI builds cannot drift from what dispatch and the
   executor will actually accept (AC6.12-P2-c).
+
+Permissions: mutating endpoints (POST/PATCH/DELETE on playbooks, POST on run) require
+`IsAnalystOrAbove` (analyst/admin/superAdmin). Read endpoints allow any authenticated org member.
+`read-only` role is denied on all mutating operations.
 """
 
 from __future__ import annotations
@@ -26,14 +30,13 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from alerts.escalation import link_case_from_identifier
+import identity.scoping
 from automation.dispatcher import TRIGGER_EVENTS, run_now
 from automation.executor import registered_actions
 from automation.models import Playbook
 from automation.playbooks import ACTIONS, HTTP_METHODS, MAX_TIMEOUT_SECONDS, validate_config
-from cases.models import Case
 from core.serializers import automation_run_json, playbook_json
-from observables.models import Observable
+from identity.permissions import IsAnalystOrAbove
 
 __all__ = ["playbook_collection", "playbook_detail", "playbook_meta", "playbook_run"]
 
@@ -83,8 +86,19 @@ def _trigger_event_error(value: object) -> list[str] | None:
 @api_view(["GET", "POST"])
 @renderer_classes([JSONRenderer])
 def playbook_collection(request: Request) -> Response:
-    """`GET /api/v1/playbook` lists; `POST` creates (201)."""
+    """`GET /api/v1/playbook` lists; `POST` creates (201).
+
+    GET: any authenticated org member.
+    POST: requires analyst role or above (IsAnalystOrAbove).
+    """
     if request.method == "POST":
+        # Apply write permission for create
+        perm = IsAnalystOrAbove()
+        if not perm.has_permission(request, None):
+            return Response(
+                {"type": "AuthorizationError", "message": perm.message},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         return _create_playbook(request)
     return Response([playbook_json(p) for p in Playbook.objects.order_by("name")])
 
@@ -155,10 +169,22 @@ def playbook_meta(request: Request) -> Response:
 @api_view(["GET", "PATCH", "DELETE"])
 @renderer_classes([JSONRenderer])
 def playbook_detail(request: Request, playbook_id: str) -> Response:
-    """`GET|PATCH|DELETE /api/v1/playbook/{idOrName}`; DELETE refuses a playbook that has runs."""
+    """`GET|PATCH|DELETE /api/v1/playbook/{idOrName}`; DELETE refuses a playbook that has runs.
+
+    GET: any authenticated org member.
+    PATCH/DELETE: requires analyst role or above (IsAnalystOrAbove).
+    """
     playbook = _resolve(playbook_id)
     if playbook is None:
         return _not_found("Playbook")
+
+    if request.method in ("PATCH", "DELETE"):
+        perm = IsAnalystOrAbove()
+        if not perm.has_permission(request, None):
+            return Response(
+                {"type": "AuthorizationError", "message": perm.message},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
     if request.method == "DELETE":
         # `AutomationRun.playbook` is `PROTECT` (REVIEW M14), so letting this fall through would
@@ -229,7 +255,20 @@ def playbook_run(request: Request, playbook_id: str) -> Response:
     least one required. The run is queued on commit and its result lands in `output_log` **and** the
     case timeline exactly as a triggered run's does — `run_now` shares the worker and the feedback
     loop, only the key and `triggered_by` differ.
+
+    Tenant isolation: the case and observable are resolved through `identity.scoping` helpers.
+    Cross-tenant access returns uniform 404 (no existence oracle). Triggering automation is a
+    write action, so `write=True` is used for case resolution (T4-d).
+
+    Requires analyst role or above (IsAnalystOrAbove).
     """
+    perm = IsAnalystOrAbove()
+    if not perm.has_permission(request, None):
+        return Response(
+            {"type": "AuthorizationError", "message": perm.message},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
     playbook = _resolve(playbook_id)
     if playbook is None:
         return _not_found("Playbook")
@@ -242,17 +281,15 @@ def playbook_run(request: Request, playbook_id: str) -> Response:
 
     case = None
     if raw_case not in (None, ""):
-        try:
-            case = link_case_from_identifier(str(raw_case))
-        except Case.DoesNotExist:
-            case = None
+        case = identity.scoping.resolve_case(request.user, str(raw_case), write=True)
         if case is None:
             return _not_found("Case")
 
     observable = None
     if raw_observable not in (None, ""):
         pk = _as_uuid(raw_observable)
-        observable = Observable.objects.filter(pk=pk).first() if pk is not None else None
+        if pk is not None:
+            observable = identity.scoping.resolve_observable(request.user, str(pk))
         if observable is None:
             return _not_found("Observable")
 

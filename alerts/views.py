@@ -22,15 +22,14 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+import identity.scoping
 from alerts.escalation import (
     import_alert_to_case,
-    link_alert_from_identifier,
-    link_case_from_identifier,
     merge_alert_into_case,
     resolve_alert_status,
 )
 from alerts.models import Alert, AlertObservable, AlertStatus, AlertTagLink
-from cases.models import TTP, Case, Comment, Tag
+from cases.models import TTP, Comment, Tag
 from cases.procedures import create_procedure
 from cases.tagging import tag_names_from_payload
 from compat.bulk import bulk_patch
@@ -45,6 +44,7 @@ from core.serializers import (
     procedure_json,
     tag_json,
 )
+from identity.audit import maybe_record_cross_org_read
 from observables.extractor import resolve_observable
 from observables.models import ObservableType
 from realtime.publisher import publish_case_event
@@ -66,31 +66,29 @@ def alert_detail(request: Request, alert_id: str) -> Response:
     DELETE is the recorded 5.8.0 "permanently delete": the row goes, its `AlertObservable`
     children go with it (CASCADE), and there is no recycle bin to appeal to (plan §13 non-goals).
     """
-    alert = _lookup_alert(alert_id)
-    if isinstance(alert, Response):
-        return alert
+    alert = identity.scoping.resolve_alert(request.user, alert_id)
+    if alert is None:
+        return Response(
+            {"type": "NotFoundError", "message": "Alert not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
     if request.method == "DELETE":
         alert.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
     if request.method in ("PATCH", "PUT"):
         return _update_alert(request, alert)
+
+    # Audit superAdmin cross-org read
+    maybe_record_cross_org_read(
+        request,
+        actor=request.user,
+        target_obj=alert,
+        target_type="Alert",
+        target_id=str(alert.id),
+        target_org_field="owner_org",
+    )
+
     return Response(alert_json(alert))
-
-
-def _lookup_alert(alert_id: str) -> Alert | Response:
-    """Resolve the identifier, or return the error response to hand straight back."""
-    try:
-        return link_alert_from_identifier(alert_id)
-    except Alert.DoesNotExist:
-        return Response(
-            {"type": "NotFoundError", "message": "Alert not found"},
-            status=status.HTTP_404_NOT_FOUND,
-        )
-    except Alert.MultipleObjectsReturned as exc:
-        return Response(
-            {"type": "BadRequest", "message": str(exc), "fields": {"alertId": [str(exc)]}},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
 
 
 @api_view(["GET"])
@@ -101,9 +99,23 @@ def alert_raw(request: Request, alert_id: str) -> Response:
     D9 promised this returns what the sender sent, not our normalized view of it. That is why it is
     a separate endpoint instead of a flag on `alert_detail`: re-mapped fields would defeat it.
     """
-    alert = _lookup_alert(alert_id)
-    if isinstance(alert, Response):
-        return alert
+    alert = identity.scoping.resolve_alert(request.user, alert_id)
+    if alert is None:
+        return Response(
+            {"type": "NotFoundError", "message": "Alert not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Audit superAdmin cross-org read
+    maybe_record_cross_org_read(
+        request,
+        actor=request.user,
+        target_obj=alert,
+        target_type="Alert",
+        target_id=str(alert.id),
+        target_org_field="owner_org",
+    )
+
     return Response(alert.raw_payload)
 
 
@@ -133,9 +145,9 @@ def alert_observable_add(request: Request, alert_id: str) -> Response:
     The body follows `InputCreateObservable`: `data` is a string or an array of strings; both
     spellings produce the same array-shaped 201, which is what `OutputObservable[]` promises.
     """
-    alert = _lookup_alert(alert_id)
-    if isinstance(alert, Response):
-        return alert
+    alert = _resolve_alert_scoped(request, alert_id)
+    if alert is None:
+        return _not_found_alert("Alert")
 
     payload = request.data if isinstance(request.data, dict) else {}
     type_name = str(payload.get("dataType") or "")
@@ -182,7 +194,9 @@ def alert_observable_add(request: Request, alert_id: str) -> Response:
 
     with transaction.atomic():
         for item in items:
-            resolved = resolve_observable(type_name, str(item), defaults=defaults)
+            resolved = resolve_observable(
+                type_name, str(item), owner_org=alert.owner_org, defaults=defaults
+            )
             if resolved is None:  # pragma: no cover — vocabulary checked above
                 return _bad(
                     f"unknown dataType {type_name!r}",
@@ -212,11 +226,11 @@ def alert_list(request: Request) -> Response:
     if request.method == "POST":
         return _create_alert(request)
     queryset = Alert.objects.select_related("status", "case").order_by("-date")
+    queryset = queryset.filter(identity.scoping.org_q("owner_org", request.user))
     case_filter = request.query_params.get("case")
     if case_filter:
-        try:
-            case = link_case_from_identifier(case_filter)
-        except Case.DoesNotExist:
+        case = identity.scoping.resolve_case(request.user, case_filter, write=False)
+        if case is None:
             return Response(
                 {"type": "NotFoundError", "message": "Case not found"},
                 status=status.HTTP_404_NOT_FOUND,
@@ -252,6 +266,17 @@ def _create_alert(request: Request) -> Response:
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    user = _actor(request)
+    org = getattr(user, "org", None) if user else None
+    if org is None:
+        return Response(
+            {
+                "type": "AuthorizationError",
+                "message": "User must belong to an organisation to create alerts",
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
     warnings: list[str] = []
     with transaction.atomic():
         alert = Alert.objects.create(
@@ -267,6 +292,7 @@ def _create_alert(request: Request) -> Response:
             pap=int(payload.get("pap") or 2),
             flag=bool(payload.get("flag") or False),
             status=resolve_alert_status(str(payload.get("status") or "New"), warnings=warnings),
+            owner_org=org,
         )
         # `date` is ms-epoch on the wire (5.8.0 format); keep the ingest path's tolerance.
         date_value = payload.get("date")
@@ -302,15 +328,12 @@ def _create_alert(request: Request) -> Response:
 @renderer_classes([JSONRenderer])
 def alert_merge(request: Request, alert_id: str, case_id: str) -> Response:
     """`POST /api/v1/alert/{alertId}/merge/{caseId}` — escalate into an existing case."""
-    alert = _lookup_alert(alert_id)
-    if isinstance(alert, Response):
-        return alert
-    try:
-        case = link_case_from_identifier(case_id)
-    except Case.DoesNotExist:
-        return Response(
-            {"type": "NotFoundError", "message": "Case not found"}, status=status.HTTP_404_NOT_FOUND
-        )
+    alert = _resolve_alert_scoped(request, alert_id)
+    if alert is None:
+        return _not_found_alert("Alert")
+    case = identity.scoping.resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return _not_found_alert("Case")
     merge_alert_into_case(alert, case, actor=_actor(request))
     return Response(case_json(case, detail=True))
 
@@ -319,9 +342,9 @@ def alert_merge(request: Request, alert_id: str, case_id: str) -> Response:
 @renderer_classes([JSONRenderer])
 def alert_import(request: Request, alert_id: str) -> Response:
     """`POST /api/v1/alert/{alertId}/import` — promote the alert into a new case."""
-    alert = _lookup_alert(alert_id)
-    if isinstance(alert, Response):
-        return alert
+    alert = _resolve_alert_scoped(request, alert_id)
+    if alert is None:
+        return _not_found_alert("Alert")
     if alert.case_id is not None:
         return Response(
             {
@@ -388,12 +411,9 @@ def _update_alert(request: Request, alert: Alert) -> Response:
     return Response(alert_json(alert))
 
 
-def _resolve_alert_for_bulk(_request: Request, raw: str) -> Alert | None:
-    """Best-effort `{idOrNumber}` resolution for `_bulk`; an unknown id is an item-level 404."""
-    try:
-        return link_alert_from_identifier(raw)
-    except (Alert.DoesNotExist, Alert.MultipleObjectsReturned):
-        return None
+def _resolve_alert_for_bulk(request: Request, raw: str) -> Alert | None:
+    """Resolve an alert for bulk update with tenant scoping."""
+    return identity.scoping.resolve_alert(request.user, raw)
 
 
 @api_view(["PATCH"])
@@ -425,20 +445,18 @@ def _parse_alert_procedure(payload: Any) -> Response | dict[str, Any]:
     return kwargs
 
 
-def _resolve_alert_or_404(alert_id: str) -> Alert | Response:
-    try:
-        return link_alert_from_identifier(alert_id)
-    except (Alert.DoesNotExist, Alert.MultipleObjectsReturned):
-        return _not_found_alert("Alert")
+def _resolve_alert_scoped(request: Request, alert_id: str) -> Alert | None:
+    """Resolve an alert the caller may reach (direct org ownership)."""
+    return identity.scoping.resolve_alert(request.user, alert_id)
 
 
 @api_view(["POST"])
 @renderer_classes([JSONRenderer])
 def alert_procedure_create(request: Request, alert_id: str) -> Response:
     """`POST /api/v1/alert/{id}/procedure` — attach one procedure to an alert (201)."""
-    alert = _resolve_alert_or_404(alert_id)
-    if isinstance(alert, Response):
-        return alert
+    alert = _resolve_alert_scoped(request, alert_id)
+    if alert is None:
+        return _not_found_alert("Alert")
     kwargs = _parse_alert_procedure(request.data)
     if isinstance(kwargs, Response):
         return kwargs
@@ -451,9 +469,9 @@ def alert_procedure_create(request: Request, alert_id: str) -> Response:
 @renderer_classes([JSONRenderer])
 def alert_procedures_create(request: Request, alert_id: str) -> Response:
     """`POST /api/v1/alert/{id}/procedures` — bulk attach `{"procedures": [...]}` (201)."""
-    alert = _resolve_alert_or_404(alert_id)
-    if isinstance(alert, Response):
-        return alert
+    alert = _resolve_alert_scoped(request, alert_id)
+    if alert is None:
+        return _not_found_alert("Alert")
     payload = request.data if isinstance(request.data, dict) else {}
     specs = payload.get("procedures")
     if not isinstance(specs, list) or not specs:
@@ -600,9 +618,9 @@ def alert_tag_link(request: Request, alert_id: str) -> Response:
     TheHive 5.8 has no such route (tags arrive in the create/update body); recorded in
     `docs/spec/deviations.md` with its case/observable siblings. Idempotent in both directions.
     """
-    alert = _lookup_alert(alert_id)
-    if isinstance(alert, Response):
-        return alert
+    alert = _resolve_alert_scoped(request, alert_id)
+    if alert is None:
+        return _not_found_alert("Alert")
     names = _requested_tags(request)
     if isinstance(names, Response):
         return names
@@ -625,10 +643,23 @@ def alert_comment_list(request: Request, alert_id: str) -> Response:
     open case view updates without a reload; an un-promoted alert has no socket and is fetched on
     navigation. The comment itself always hangs off the alert's stable `_id`.
     """
-    alert = _lookup_alert(alert_id)
-    if isinstance(alert, Response):
-        return alert
+    alert = identity.scoping.resolve_alert(request.user, alert_id)
+    if alert is None:
+        return Response(
+            {"type": "NotFoundError", "message": "Alert not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
     if request.method == "GET":
+        # Audit superAdmin cross-org read
+        maybe_record_cross_org_read(
+            request,
+            actor=request.user,
+            target_obj=alert,
+            target_type="Alert",
+            target_id=str(alert.id),
+            target_org_field="owner_org",
+        )
+
         comments = alert.comments.select_related("created_by", "updated_by").order_by(
             "-created_at", "-id"
         )

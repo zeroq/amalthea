@@ -1,7 +1,15 @@
 {% extends "ui/base.html" %}
 {% load static %}
 
-{% block heading %}{{ observable.data_type.name }}: {{ observable.data }}{% endblock %}
+{% block heading %}
+  {{ observable.data_type.name }}: {{ observable.data }}
+  {% if is_cross_org %}
+  <span class="badge badge-cross-org" title="This observable belongs to another organisation">
+    <i class="fa-solid fa-building-lock" aria-hidden="true"></i>
+    Cross-org ({{ observable.owner_org.name }})
+  </span>
+  {% endif %}
+{% endblock %}
 
 {% block actions %}
 <a class="btn" href="{% url 'ui-observable-list' %}">Back</a>
@@ -37,6 +45,9 @@
         <dt>IOC</dt>
         <dd>{{ observable.ioc|yesno:"Yes,No" }}</dd>
 
+        <dt>Owner org</dt>
+        <dd>{{ observable.owner_org.name }}</dd>
+
         <dt>Tags</dt>
         <dd>
           {% if observable.tags.all %}
@@ -61,7 +72,7 @@
       <h3>Linked Cases ({{ cases|length }})</h3>
       {% if cases %}
       <div class="table-wrap">
-      <table class="grid">
+      <table class="data-table">
         <caption class="sr-only">Linked cases</caption>
         <thead>
           <tr>

@@ -48,7 +48,7 @@ PHISHING_PAYLOAD = {
 
 @pytest.fixture
 def analyst(db: None) -> User:
-    org = Organisation.objects.create(name="Test Org")
+    org, _ = Organisation.objects.get_or_create(name="Test Org")
     return User.objects.create(
         login="analyst", username="analyst", email="analyst@example.net", org=org, is_active=True
     )
@@ -71,8 +71,8 @@ def anonymous_api() -> object:
 
 
 @pytest.fixture
-def source(db: None) -> IngestionSource:
-    return IngestionSource.objects.create(
+def source(db: None, analyst: User) -> IngestionSource:
+    source = IngestionSource.objects.create(
         slug="o365",
         name="Microsoft 365 hook",
         mapping_config={
@@ -82,6 +82,16 @@ def source(db: None) -> IngestionSource:
             "correlation_key": "$.sourceRef",
         },
     )
+    # Create an ingestion token for this source and the analyst's org
+    from identity.models import IngestionToken
+
+    _token, plaintext = IngestionToken.create_token(
+        source=source,
+        organisation=analyst.org,
+        name="Test token",
+    )
+    source._test_token = plaintext
+    return source
 
 
 @pytest.fixture
@@ -108,10 +118,12 @@ def mail_playbook(db: None) -> Playbook:
 
 
 def _escalate(anonymous_api: object, api: object, source: IngestionSource) -> Case:
+    headers = {"HTTP_X_WEBHOOK_SECRET": source._test_token}
     posted = anonymous_api.post(
         reverse("alerts-webhook", kwargs={"source_id": source.slug}),
         data=json.dumps(PHISHING_PAYLOAD),
         content_type="application/json",
+        **headers,
     )
     assert posted.status_code == 201, posted.content
     alert_id = posted.json()["_id"]
@@ -126,6 +138,7 @@ def test_mvp_loop_with_automation(
     source: IngestionSource,
     mail_playbook: Playbook,
     django_capture_on_commit_callbacks: object,
+    analyst,
 ) -> None:
     """All four legs of AGENTS.md §4, end to end, in one test."""
     # The work happens inside the capture; the assertions deliberately sit *after* it. The fixture
@@ -185,6 +198,7 @@ def test_dispatch_waits_for_the_commit(
     source: IngestionSource,
     mail_playbook: Playbook,
     django_capture_on_commit_callbacks: object,
+    analyst,
 ) -> None:
     """A run row exists before the worker runs: dispatch creates the ledger entry, then queues.
 
@@ -207,6 +221,7 @@ def test_automation_fires_only_on_a_new_link(
     source: IngestionSource,
     mail_playbook: Playbook,
     django_capture_on_commit_callbacks: object,
+    analyst,
 ) -> None:
     """Re-extraction over the same text does not re-run every playbook on the case."""
     with django_capture_on_commit_callbacks(execute=True):
@@ -222,7 +237,7 @@ def test_automation_fires_only_on_a_new_link(
 
 
 def test_a_shared_observable_fires_one_run_per_case(
-    api: object, mail_playbook: Playbook, django_capture_on_commit_callbacks: object
+    api: object, mail_playbook: Playbook, django_capture_on_commit_callbacks: object, analyst
 ) -> None:
     """An observable is shared (Module C): linking it into a second case must run the playbook
     for *that* case, not collapse onto the first case's run.
@@ -239,9 +254,14 @@ def test_a_shared_observable_fires_one_run_per_case(
         data_type=observable_type,
         data="attacker@example.net",
         normalized_data="attacker@example.net",
+        owner_org=analyst.org,
     )
-    case_a = Case.objects.create(title="Case A", status=CaseStatus.objects.get(value="New"))
-    case_b = Case.objects.create(title="Case B", status=CaseStatus.objects.get(value="New"))
+    case_a = Case.objects.create(
+        title="Case A", status=CaseStatus.objects.get(value="New"), owner_org=analyst.org
+    )
+    case_b = Case.objects.create(
+        title="Case B", status=CaseStatus.objects.get(value="New"), owner_org=analyst.org
+    )
     for case in (case_a, case_b):
         CaseObservable.objects.create(case=case, observable=observable)
 
@@ -264,7 +284,7 @@ def test_a_shared_observable_fires_one_run_per_case(
 
 
 def test_a_failing_action_records_failure_without_raising(
-    api: object, django_capture_on_commit_callbacks: object
+    api: object, django_capture_on_commit_callbacks: object, analyst
 ) -> None:
     """AC6.4 — a playbook that cannot run yields `Failed` and an error, and the loop continues."""
     Playbook.objects.create(
@@ -279,7 +299,10 @@ def test_a_failing_action_records_failure_without_raising(
 
     observable_type = ObservableType.objects.get(name="mail")
     observable = Observable.objects.create(
-        data_type=observable_type, data="a@b.example", normalized_data="a@b.example"
+        data_type=observable_type,
+        data="a@b.example",
+        normalized_data="a@b.example",
+        owner_org=analyst.org,
     )
     CaseObservable.objects.create(case=case, observable=observable)
 
@@ -302,7 +325,7 @@ def test_a_failing_action_records_failure_without_raising(
 
 
 def test_a_rolled_back_transaction_emits_no_run(
-    api: object, mail_playbook: Playbook, django_capture_on_commit_callbacks: object
+    api: object, mail_playbook: Playbook, django_capture_on_commit_callbacks: object, analyst
 ) -> None:
     """AC6.6 — dispatch is `on_commit`, so a rolled-back transaction leaves no run at all."""
     from django.db import transaction
@@ -310,12 +333,13 @@ def test_a_rolled_back_transaction_emits_no_run(
     status = CaseStatus.objects.get_or_create(
         value="InProgress", defaults={"stage": "InProgress", "order": 1}
     )[0]
-    case = Case.objects.create(title="Rolled back", status=status)
+    case = Case.objects.create(title="Rolled back", status=status, owner_org=analyst.org)
     observable_type = ObservableType.objects.get(name="mail")
     observable = Observable.objects.create(
         data_type=observable_type,
         data="rollback@evil.example",
         normalized_data="rollback@evil.example",
+        owner_org=analyst.org,
     )
 
     before = AutomationRun.objects.count()

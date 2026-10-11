@@ -7,11 +7,14 @@ The rule is deterministic and replay-safe:
 
 * the **first** case in the list is the target; every later case is folded into it;
 * children move by re-parenting the row (alerts, tasks, ledger entries, comments, pages,
-  attachments, custom-field values), so their ids survive the merge;
+  attachments, procedures, automation runs, custom-field values), so their ids survive the merge;
 * a value the target already holds is not duplicated: observables are globally deduped already
   (Module C), so a target that already links the same artifact drops the incoming link rather
-  than failing the whole merge on `uniq_case_observable`; a share or custom-field value the
-  target already carries is likewise kept once;
+  than failing the whole merge on `uniq_case_observable`; a custom-field value the target already
+  carries is likewise kept once;
+* **Shares are NOT copied.** A merge never adds a new `(case, organisation)` grant that the target
+  did not already hold; the target's own shares are preserved. This prevents share-widening
+  (S7/T4-c).
 * each merged-in case writes exactly one **provenance** ledger entry on the target *before* it is
   deleted, so the target's timeline can always answer "where did these artifacts come from?";
 * a source already absorbed by an earlier call simply is not in the list — the view resolves ids
@@ -29,6 +32,7 @@ from collections.abc import Sequence
 from django.db import transaction
 
 from alerts.models import Alert
+from automation.models import AutomationRun
 from cases.ledger import append_timeline_event
 from cases.models import (
     Attachment,
@@ -36,7 +40,7 @@ from cases.models import (
     CaseCustomFieldValue,
     Comment,
     Page,
-    Share,
+    Procedure,
     Task,
     TimelineEvent,
 )
@@ -66,6 +70,10 @@ def _absorb(target: Case, source: Case, *, actor: User | None) -> None:
     Page.objects.filter(case=source).update(case=target)
     Attachment.objects.filter(case=source).update(case=target)
     TimelineEvent.objects.filter(case=source).update(case=target)
+    # AutomationRun: re-parent so run history follows the merge (SET_NULL would orphan).
+    AutomationRun.objects.filter(case=source).update(case=target)
+    # Procedure: CASCADE on_delete would delete the source's procedures; re-parent them.
+    Procedure.objects.filter(case=source).update(case=target)
 
     # Observables: the target keeps one link per artifact. `get_or_create` on the target link
     # keeps the first `added_by`/`created_at` the target already had; the source link then dies
@@ -76,14 +84,8 @@ def _absorb(target: Case, source: Case, *, actor: User | None) -> None:
             defaults={"added_by_id": link.added_by_id},
         )
 
-    # Shares: a share is (case, organisation), so a target that already grants the same org keeps
-    # its own row rather than tripping `uniq_share_case_org`.
-    for share in source.shares.all():
-        Share.objects.get_or_create(
-            case=target,
-            organisation_id=share.organisation_id,
-            defaults={"permissions": share.permissions, "created_by_id": share.created_by_id},
-        )
+    # Shares are deliberately NOT copied. A merge must not widen the target's shares by adding
+    # grants that only the source had (S7/T4-c). The target's existing shares are preserved.
 
     # Custom-field values: first value wins, same reasoning as observables.
     for value in source.custom_field_values.all():

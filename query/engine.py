@@ -3,7 +3,7 @@
 The wire contract, pinned from thehive4py 2.1.0's own request builders and the recorded 5.8.0
 docs (BRIEF-2026-10-06):
 
-* a request body is ``{"query": [step, ...], "includeFields": [...], "excludeFields": [...]}``
+* a request body is ``{"query": [...], "includeFields": [...], "excludeFields": [...]}``
   — an object, never a bare array;
 * steps run in order, threading one result set, and the response is a **bare JSON array** of the
   T1 serializers' objects (``core.serializers``). The query path deliberately renders through
@@ -29,6 +29,10 @@ Shape decisions worth knowing before changing anything here:
   ``_from`` inclusive / ``_to`` exclusive, which is what makes adjacent pages disjoint (AC8.2).
 * **Deterministic paging:** every sort appends an ``id`` tie-break, and the start steps order by
   ``id`` so even an unsorted ``page`` is stable across runs.
+* **Tenant isolation:** all start-step querysets are scoped to the caller's organisation via
+  ``identity.scoping``. ``listCase`` respects case shares; ``listAlert`` and ``listObservable``
+  use direct org ownership. ``getCase`` resolves through ``resolve_case`` (read access). SuperAdmin
+  sees all (audited by callers). Org-less callers see nothing.
 """
 
 from __future__ import annotations
@@ -41,7 +45,7 @@ from typing import Any
 
 from django.db.models import Count, Q, QuerySet
 
-from alerts.escalation import link_case_from_identifier
+import identity.scoping
 from alerts.models import Alert
 from cases.models import Case, CaseObservable
 
@@ -477,8 +481,9 @@ def _sort_rows(rows: list[Row], terms: Sequence[tuple[str, str]]) -> list[Row]:
 class QueryEngine:
     """Execute one `{"query": [...], "includeFields": ..., "excludeFields": ...}` request."""
 
-    def __init__(self, payload: Mapping[str, Any]) -> None:
+    def __init__(self, payload: Mapping[str, Any], user: Any = None) -> None:
         self._payload = payload
+        self._user = user
         self._steps: list[Any] = []
         self._branches: list[_Branch] = []
         self._rows: list[Row] | None = None
@@ -550,19 +555,19 @@ class QueryEngine:
         self._count_result = None
         self.total = None
         if name == "listCase":
-            self._set([_Branch(KIND_CASE, _case_qs())])
+            self._set([_Branch(KIND_CASE, _case_qs(self._user))])
         elif name == "listAlert":
-            self._set([_Branch(KIND_ALERT, _alert_qs())])
+            self._set([_Branch(KIND_ALERT, _alert_qs(self._user))])
         elif name == "listObservable":
-            self._set([_Branch(KIND_OBSERVABLE, _observable_qs())])
+            self._set([_Branch(KIND_OBSERVABLE, _observable_qs(self._user))])
         elif name == "listAny":
             # Three branches, not one UNION: the kinds share no columns, and every later step
             # already works per branch.
             self._set(
                 [
-                    _Branch(KIND_CASE, _case_qs()),
-                    _Branch(KIND_ALERT, _alert_qs()),
-                    _Branch(KIND_OBSERVABLE, _observable_qs()),
+                    _Branch(KIND_CASE, _case_qs(self._user)),
+                    _Branch(KIND_ALERT, _alert_qs(self._user)),
+                    _Branch(KIND_OBSERVABLE, _observable_qs(self._user)),
                 ]
             )
         else:
@@ -578,13 +583,12 @@ class QueryEngine:
         if raw is None:
             raise QueryError("Unsupported query operation 'getCase': 'idOrName' is required")
         identifier = str(raw).lstrip("~")
-        try:
-            case = link_case_from_identifier(identifier)
-        except Case.DoesNotExist:
+        case = identity.scoping.resolve_case(self._user, identifier, write=False)
+        if case is None:
             # A miss is an empty result set, not an error: the step threads "zero cases", and
             # every later step (count included) then answers honestly.
             return _Branch(KIND_CASE, Case.objects.none())
-        return _Branch(KIND_CASE, _case_qs().filter(pk=case.pk))
+        return _Branch(KIND_CASE, _case_qs(self._user).filter(pk=case.pk))
 
     def _allowed(self) -> frozenset[str]:
         """Union of the active kinds' whitelists — the AC8.3 field boundary."""
@@ -726,23 +730,24 @@ class QueryEngine:
         return rows
 
 
-def _case_qs() -> QuerySet[Case]:
+def _case_qs(user: Any = None) -> QuerySet[Case]:
     # select_related: case_json reads status.value and assignee.login per row.
     # prefetch_related("alerts"): case_json counts alerts per row — the prefetch is what turns
     # that N+1 into one extra query (plan G5, measured in tests/conformance).
-    return (
-        Case.objects.select_related("status", "assignee").prefetch_related("alerts").order_by("id")
-    )
+    qs = Case.objects.select_related("status", "assignee").prefetch_related("alerts").order_by("id")
+    return qs.filter(identity.scoping.case_visible_q(user))
 
 
-def _alert_qs() -> QuerySet[Alert]:
-    return Alert.objects.select_related("status", "assignee").order_by("id")
+def _alert_qs(user: Any = None) -> QuerySet[Alert]:
+    qs = Alert.objects.select_related("status", "assignee").order_by("id")
+    return qs.filter(identity.scoping.org_q("owner_org", user))
 
 
-def _observable_qs() -> QuerySet[CaseObservable]:
+def _observable_qs(user: Any = None) -> QuerySet[CaseObservable]:
     # caseCount counts the observable's links — prefetched for the same reason as alertCount.
-    return (
+    qs = (
         CaseObservable.objects.select_related("observable__data_type")
         .prefetch_related("observable__case_observables")
         .order_by("id")
     )
+    return identity.scoping.org_filtered(qs, user, path="observable__owner_org")

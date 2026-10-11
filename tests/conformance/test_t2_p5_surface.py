@@ -22,8 +22,8 @@ from ._t1_seed import _alert, _api_key_client, _case
 # --- AC6.1-P5-a: procedure attach on a case and an alert -------------------------------
 
 
-def test_a_procedure_round_trips_on_a_case(api: APIClient, db: None) -> None:
-    case = _case("Procedure case")
+def test_a_procedure_round_trips_on_a_case(api: APIClient, analyst: User) -> None:
+    case = _case("Procedure case", org=analyst.org)
     created = api.post(
         f"/api/v1/case/{case.id}/procedure",
         {
@@ -55,8 +55,8 @@ def test_a_procedure_round_trips_on_a_case(api: APIClient, db: None) -> None:
     assert not Procedure.objects.filter(pk=pid).exists()
 
 
-def test_procedures_can_be_attached_in_bulk(api: APIClient, db: None) -> None:
-    case = _case("Bulk procedure case")
+def test_procedures_can_be_attached_in_bulk(api: APIClient, analyst: User) -> None:
+    case = _case("Bulk procedure case", org=analyst.org)
     created = api.post(
         f"/api/v1/case/{case.id}/procedures",
         {"procedures": [{"patternId": "T1001"}, {"patternId": "T1002"}]},
@@ -67,8 +67,8 @@ def test_procedures_can_be_attached_in_bulk(api: APIClient, db: None) -> None:
     assert case.procedures.count() == 2
 
 
-def test_a_procedure_attaches_to_an_alert(api: APIClient, db: None) -> None:
-    alert = _alert("Alert with a technique", ref="proc-alert")
+def test_a_procedure_attaches_to_an_alert(api: APIClient, analyst: User) -> None:
+    alert = _alert("Alert with a technique", ref="proc-alert", org=analyst.org)
     created = api.post(
         f"/api/v1/alert/{alert.id}/procedure",
         {"patternId": "T1071", "patternName": "Application Layer Protocol"},
@@ -80,8 +80,8 @@ def test_a_procedure_attaches_to_an_alert(api: APIClient, db: None) -> None:
     assert procedure.case_id is None
 
 
-def test_a_procedure_can_point_at_a_ttp(api: APIClient, db: None) -> None:
-    case = _case("TTP case")
+def test_a_procedure_can_point_at_a_ttp(api: APIClient, analyst: User) -> None:
+    case = _case("TTP case", org=analyst.org)
     ttp = TTP.objects.create(name="Command Shell", ttp_code="T1059")
     created = api.post(
         f"/api/v1/case/{case.id}/procedure",
@@ -95,7 +95,7 @@ def test_a_procedure_can_point_at_a_ttp(api: APIClient, db: None) -> None:
 # --- AC6.1-P5-b: the TTP vocabulary refuses to delete an in-use technique -------------
 
 
-def test_ttp_crud_and_the_in_use_guard(api: APIClient, db: None) -> None:
+def test_ttp_crud_and_the_in_use_guard(api: APIClient, analyst: User) -> None:
     created = api.post("/api/v1/ttp", {"name": "Phishing", "ttpCode": "T1566"}, format="json")
     assert created.status_code == 201, created.content
     ttp_id = created.json()["id"]
@@ -108,7 +108,7 @@ def test_ttp_crud_and_the_in_use_guard(api: APIClient, db: None) -> None:
     assert patched.status_code == 204, patched.content
     assert api.get(f"/api/v1/ttp/{ttp_id}").json()["tactic"] == "initial-access"
 
-    case = _case("In-use TTP case")
+    case = _case("In-use TTP case", org=analyst.org)
     procedure = api.post(
         f"/api/v1/case/{case.id}/procedure",
         {"ttpId": str(ttp_id), "patternId": "T1566"},
@@ -128,9 +128,11 @@ def test_ttp_crud_and_the_in_use_guard(api: APIClient, db: None) -> None:
 # --- AC6.1-P5-a: the export document ---------------------------------------------------
 
 
-def test_export_carries_the_linked_alert_raw_payload_verbatim(api: APIClient, db: None) -> None:
-    case = _case("Export case")
-    alert = _alert("Phishing report", ref="export-ref", case=case)
+def test_export_carries_the_linked_alert_raw_payload_verbatim(
+    api: APIClient, analyst: User
+) -> None:
+    case = _case("Export case", org=analyst.org)
+    alert = _alert("Phishing report", ref="export-ref", case=case, org=analyst.org)
     raw = {"src_ip": "203.0.113.7", "user": "victim@example.net", "subject": "Invoice"}
     alert.raw_payload = raw
     alert.save(update_fields=["raw_payload"])
@@ -149,7 +151,7 @@ def test_a_foreign_organisation_cannot_export_a_case(db: None) -> None:
     owner_org = Organisation.objects.create(name="Export Owner")
     outsider_org = Organisation.objects.create(name="Export Outsider")
 
-    case = _case("Owned export case", owner_org=owner_org)
+    case = _case("Owned export case", org=owner_org)
 
     outsider = User.objects.create(
         login="export-outsider",

@@ -194,3 +194,8 @@ CACHES = {
         "LOCATION": os.getenv("AMALTHEA_CACHE_LOCATION", "amalthea-webhook-throttle"),
     }
 }
+
+# --- Tenant Isolation (P1) -----------------------------------------------
+# Default organisation name used by the greenfield migration to backfill NULL
+# owner_org / User.org. Can be overridden via env var.
+AMALTHEA_DEFAULT_ORG_NAME = os.environ.get("AMALTHEA_DEFAULT_ORG_NAME", "Default")

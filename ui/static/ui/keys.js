@@ -18,6 +18,7 @@
     r: "/automation",
     p: "/automation/playbooks",
     s: "/sources",
+    ",": "/settings/organisations",
   };
 
   
@@ -30,6 +31,7 @@
     { key: "p", label: "Playbooks list" },
     { key: "r", label: "Automation runs" },
     { key: "s", label: "Sources" },
+    { key: ",", label: "Settings (Organisations)" },
     { key: "/", label: "Focus search / first input" },
     { key: "?", label: "Show this cheat sheet" },
   ];

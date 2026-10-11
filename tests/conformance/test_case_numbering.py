@@ -44,12 +44,23 @@ from cases.numbering import (
 
 
 @pytest.fixture
-def new_status() -> CaseStatus:
+def default_org(db):
+    """Reuse the default org for tenant isolation."""
+    from django.conf import settings
+
+    from identity.models import Organisation
+
+    name = getattr(settings, "AMALTHEA_DEFAULT_ORG_NAME", "Default")
+    return Organisation.objects.get_or_create(name=name)[0]
+
+
+@pytest.fixture
+def new_status(default_org) -> CaseStatus:
     return CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
 
 
 @pytest.mark.django_db
-def test_a_case_is_numbered_on_save(new_status: CaseStatus) -> None:
+def test_a_case_is_numbered_on_save(new_status: CaseStatus, default_org) -> None:
     """The INSERT path fills `number` — and a *fresh* sequence hands out 1.
 
     Freshness has to be established, not assumed. `case_number_seq` is non-transactional, so
@@ -59,7 +70,7 @@ def test_a_case_is_numbered_on_save(new_status: CaseStatus) -> None:
     sequence is rewound.
     """
     _rewind_case_number_sequence()
-    case = Case.objects.create(title="Phishing wave", status=new_status)
+    case = Case.objects.create(title="Phishing wave", status=new_status, owner_org=default_org)
     assert case.number is not None, "the allocator must fill the number"
     assert case.number == 1, "the first allocated number of a fresh sequence is 1"
 
@@ -83,8 +94,11 @@ def _rewind_case_number_sequence() -> None:
 
 
 @pytest.mark.django_db
-def test_numbers_increase_and_are_unique(new_status: CaseStatus) -> None:
-    numbers = [Case.objects.create(title=f"case {i}", status=new_status).number for i in range(5)]
+def test_numbers_increase_and_are_unique(new_status: CaseStatus, default_org) -> None:
+    numbers = [
+        Case.objects.create(title=f"case {i}", status=new_status, owner_org=default_org).number
+        for i in range(5)
+    ]
     # Relative, not absolute, and that matters on Postgres: a sequence is non-transactional,
     # so an earlier test's rolled-back `nextval` is still consumed and the start point is
     # suite-order dependent. What the allocator promises is monotonicity and uniqueness; the
@@ -96,23 +110,27 @@ def test_numbers_increase_and_are_unique(new_status: CaseStatus) -> None:
 
 
 @pytest.mark.django_db
-def test_an_explicit_number_is_preserved(new_status: CaseStatus) -> None:
+def test_an_explicit_number_is_preserved(new_status: CaseStatus, default_org) -> None:
     """Migrating a historical case file must be able to keep its original number."""
-    case = Case.objects.create(title="Imported", status=new_status, number=4242)
+    case = Case.objects.create(
+        title="Imported", status=new_status, number=4242, owner_org=default_org
+    )
     assert case.number == 4242
     # SQLite allocates MAX(number)+1, so an explicitly imported number moves the sequence
     # on. On Postgres the sequence is independent and would still hand out 1.
-    assert Case.objects.create(title="Next", status=new_status).number == 4243
+    assert (
+        Case.objects.create(title="Next", status=new_status, owner_org=default_org).number == 4243
+    )
 
 
 @pytest.mark.django_db
-def test_bulk_create_is_numbered_too(new_status: CaseStatus) -> None:
+def test_bulk_create_is_numbered_too(new_status: CaseStatus, default_org) -> None:
     """`bulk_create()` bypasses `save()`; the field's `pre_save` is what covers it."""
     cases = Case.objects.bulk_create(
         [
-            Case(title="bulk 1", status=new_status),
-            Case(title="bulk 2", status=new_status),
-            Case(title="bulk 3", status=new_status),
+            Case(title="bulk 1", status=new_status, owner_org=default_org),
+            Case(title="bulk 2", status=new_status, owner_org=default_org),
+            Case(title="bulk 3", status=new_status, owner_org=default_org),
         ]
     )
     allocated = sorted(case.number for case in cases)
@@ -125,20 +143,22 @@ def test_bulk_create_is_numbered_too(new_status: CaseStatus) -> None:
 
 
 @pytest.mark.django_db
-def test_bulk_create_numbering_does_not_collide_with_save(new_status: CaseStatus) -> None:
-    Case.objects.create(title="saved first", status=new_status)
-    Case.objects.bulk_create([Case(title="bulk", status=new_status)])
+def test_bulk_create_numbering_does_not_collide_with_save(
+    new_status: CaseStatus, default_org
+) -> None:
+    Case.objects.create(title="saved first", status=new_status, owner_org=default_org)
+    Case.objects.bulk_create([Case(title="bulk", status=new_status, owner_org=default_org)])
     numbers = sorted(Case.objects.values_list("number", flat=True))
     assert len(set(numbers)) == len(numbers), numbers
 
 
 @pytest.mark.django_db
-def test_the_number_is_unique_in_the_database(new_status: CaseStatus) -> None:
+def test_the_number_is_unique_in_the_database(new_status: CaseStatus, default_org) -> None:
     from django.db import IntegrityError
 
-    Case.objects.create(title="one", status=new_status, number=7)
+    Case.objects.create(title="one", status=new_status, number=7, owner_org=default_org)
     with pytest.raises(IntegrityError):
-        Case.objects.create(title="two", status=new_status, number=7)
+        Case.objects.create(title="two", status=new_status, number=7, owner_org=default_org)
 
 
 @pytest.mark.django_db
@@ -149,9 +169,9 @@ def test_number_is_read_only_for_api_consumers(new_status: CaseStatus) -> None:
 
 
 @pytest.mark.django_db
-def test_full_clean_still_works_with_an_unset_number(new_status: CaseStatus) -> None:
+def test_full_clean_still_works_with_an_unset_number(new_status: CaseStatus, default_org) -> None:
     """The runtime `if number is None` guard must survive the field change."""
-    case = Case(title="validates", status=new_status)
+    case = Case(title="validates", status=new_status, owner_org=default_org)
     case.full_clean(exclude=["case", "start_date", "end_date", "closed_date"])
     assert case.number is None, "full_clean must not allocate; only the write path does"
 
@@ -262,7 +282,7 @@ def test_h6_the_sync_is_a_noop_off_postgres() -> None:
 
 @pytest.mark.django_db
 def test_h6_an_explicit_number_syncs_the_sequence_on_insert(
-    new_status: CaseStatus, monkeypatch: pytest.MonkeyPatch
+    new_status: CaseStatus, default_org, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The sync is driven from `Field.pre_save`, so no INSERT path can skip it.
 
@@ -278,11 +298,13 @@ def test_h6_an_explicit_number_syncs_the_sequence_on_insert(
         numbering, "sync_case_number_sequence", lambda number, using=None: calls.append(number)
     )
 
-    imported = Case.objects.create(title="Imported", status=new_status, number=4242)
+    imported = Case.objects.create(
+        title="Imported", status=new_status, number=4242, owner_org=default_org
+    )
     assert calls == [4242], f"an explicit number must advance the sequence, got {calls}"
 
     calls.clear()
-    Case.objects.create(title="auto", status=new_status)
+    Case.objects.create(title="auto", status=new_status, owner_org=default_org)
     assert calls == [], "an auto-allocated number came from the sequence; re-syncing is waste"
 
     calls.clear()
@@ -293,7 +315,7 @@ def test_h6_an_explicit_number_syncs_the_sequence_on_insert(
 
 @pytest.mark.django_db
 def test_h6_bulk_create_with_explicit_numbers_syncs_too(
-    new_status: CaseStatus, monkeypatch: pytest.MonkeyPatch
+    new_status: CaseStatus, default_org, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`bulk_create()` is a different INSERT path; it must not be a hole in the fix."""
     import cases.numbering as numbering
@@ -304,14 +326,14 @@ def test_h6_bulk_create_with_explicit_numbers_syncs_too(
     )
     Case.objects.bulk_create(
         [
-            Case(title="imp a", status=new_status, number=900),
-            Case(title="imp b", status=new_status, number=901),
+            Case(title="imp a", status=new_status, number=900, owner_org=default_org),
+            Case(title="imp b", status=new_status, number=901, owner_org=default_org),
         ]
     )
     assert sorted(calls) == [900, 901], calls
 
     calls.clear()
-    Case.objects.bulk_create([Case(title="auto", status=new_status)])
+    Case.objects.bulk_create([Case(title="auto", status=new_status, owner_org=default_org)])
     assert calls == [], "an auto-allocated batch must not re-sync"
 
 
@@ -323,19 +345,23 @@ def test_h6_bulk_create_with_explicit_numbers_syncs_too(
     "Postgres (TODO 3.1) — deleting sync_case_number_sequence makes it fail there.",
 )
 def test_h6_on_postgres_the_next_auto_number_clears_an_imported_number(
-    new_status: CaseStatus,
+    new_status: CaseStatus, default_org
 ) -> None:
     """The end-to-end consequence, on the only engine that can exhibit it.
 
     Without the fix this raises ``IntegrityError: duplicate key value violates unique
     constraint "case_record_number_uniq"`` at the ``Case.objects.create`` below.
     """
-    Case.objects.create(title="imported at 500", status=new_status, number=500)
+    Case.objects.create(
+        title="imported at 500", status=new_status, number=500, owner_org=default_org
+    )
     with connection.cursor() as cursor:
         cursor.execute(f"SELECT last_value FROM {SEQUENCE_NAME}")  # noqa: S608 (module constant)
         assert cursor.fetchone()[0] >= 500, "setval did not advance the sequence"
 
-    following = Case.objects.create(title="auto after import", status=new_status)
+    following = Case.objects.create(
+        title="auto after import", status=new_status, owner_org=default_org
+    )
     assert following.number > 500, f"nextval re-issued an imported number: {following.number}"
     assert Case.objects.filter(number=500).count() == 1, (
         "the imported number must belong to exactly one case: the imported row"
@@ -349,7 +375,7 @@ def test_h6_on_postgres_the_next_auto_number_clears_an_imported_number(
     "SQLite has no sequence to race on",
 )
 def test_h6_concurrent_imports_cannot_walk_the_sequence_backwards(
-    new_status: CaseStatus,
+    new_status: CaseStatus, default_org
 ) -> None:
     """REVIEW-2026-10-05 §6(b): two concurrent imports must serialize on the sync.
 
@@ -368,7 +394,7 @@ def test_h6_concurrent_imports_cannot_walk_the_sequence_backwards(
     # which would turn this race test into a GREATEST test instead.
     with connection.cursor() as cursor:
         cursor.execute(f"SELECT setval('{SEQUENCE_NAME}', 100, true)")
-    Case.objects.create(title="seed at 100", status=new_status, number=100)
+    Case.objects.create(title="seed at 100", status=new_status, number=100, owner_org=default_org)
 
     start = threading.Barrier(2)  # both imports must be ready before either begins, to
     # widen the window in which both can read the stale last_value before either setval.
@@ -431,8 +457,10 @@ def investigating_status() -> CaseStatus:
 
 
 @pytest.mark.django_db
-def test_m2_a_closed_case_records_its_closed_date(new_status: CaseStatus, closed_status) -> None:
-    case = Case.objects.create(title="becomes closed", status=new_status)
+def test_m2_a_closed_case_records_its_closed_date(
+    new_status: CaseStatus, closed_status, default_org
+) -> None:
+    case = Case.objects.create(title="becomes closed", status=new_status, owner_org=default_org)
     assert case.closed_date is None, "an open case must not carry a closed_date"
 
     case.status = closed_status
@@ -443,9 +471,9 @@ def test_m2_a_closed_case_records_its_closed_date(new_status: CaseStatus, closed
 
 @pytest.mark.django_db
 def test_m2_closed_date_is_not_clobbered_by_a_later_write(
-    new_status: CaseStatus, closed_status: CaseStatus
+    new_status: CaseStatus, closed_status: CaseStatus, default_org
 ) -> None:
-    case = Case.objects.create(title="closed once", status=closed_status)
+    case = Case.objects.create(title="closed once", status=closed_status, owner_org=default_org)
     first_stamp = case.closed_date
     assert first_stamp is not None, "creating an already-closed case must stamp it"
 
@@ -457,10 +485,12 @@ def test_m2_closed_date_is_not_clobbered_by_a_later_write(
 
 @pytest.mark.django_db
 def test_m2_a_pre_existing_closed_date_is_never_overwritten(
-    new_status: CaseStatus, closed_status
+    new_status: CaseStatus, closed_status, default_org
 ) -> None:
     sentinel = timezone.now() - timedelta(days=7)
-    case = Case.objects.create(title="imported with a historic date", status=new_status)
+    case = Case.objects.create(
+        title="imported with a historic date", status=new_status, owner_org=default_org
+    )
     Case.objects.filter(pk=case.pk).update(closed_date=sentinel)
 
     case.refresh_from_db()

@@ -5,10 +5,19 @@
 {% block heading %}
   <span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span>
   #{{ case.number }} {{ case.title }}
+  {% if is_cross_org %}
+  <span class="badge badge-cross-org" title="This case belongs to another organisation">
+    <i class="fa-solid fa-building-lock" aria-hidden="true"></i>
+    Cross-org ({{ case.owner_org.name }})
+  </span>
+  {% endif %}
 {% endblock %}
 
 {% block actions %}
   <a class="btn" href="{% url 'ui-case-list' %}">All cases</a>
+  {% if is_owner %}
+  <a class="btn" href="{% url 'ui-case-share-list' case.number %}" data-modal-open="case-share-modal">Manage shares</a>
+  {% endif %}
 {% endblock %}
 
 {% block content %}
@@ -17,6 +26,7 @@
     <dl class="meta meta-inline">
       <dt>Status</dt><dd>{{ case.status.value }}</dd>
       <dt>Assignee</dt><dd>{{ case.assignee.login|default:"Unassigned" }}</dd>
+      <dt>Owner org</dt><dd>{{ case.owner_org.name }}</dd>
       <dt>Started</dt><dd class="mono">{{ case.start_date|date:"Y-m-d H:i" }}</dd>
       <dt>TLP / PAP</dt><dd>{{ case.tlp }} / {{ case.pap }}</dd>
       {% if case.closed_date %}<dt>Closed</dt><dd class="mono">{{ case.closed_date|date:"Y-m-d H:i" }}</dd>{% endif %}
@@ -79,7 +89,7 @@
       <h2 id="h-obs">Artifacts <span class="count">{{ observables|length }}</span></h2>
       {% if observables %}
         <div class="table-wrap">
-        <table class="grid grid-tight">
+        <table class="data-table data-table-tight">
           <caption class="sr-only">Artifacts linked to this case</caption>
           <thead><tr><th scope="col">Type</th><th scope="col">Value</th><th scope="col">Seen in</th></tr></thead>
           <tbody>
@@ -102,7 +112,7 @@
       <h2 id="h-runs">Automation runs <span class="count">{{ runs|length }}</span></h2>
       {% if runs %}
         <div class="table-wrap">
-        <table class="grid grid-tight">
+        <table class="data-table data-table-tight">
           <caption class="sr-only">Automation runs for this case</caption>
           <thead><tr><th scope="col">Playbook</th><th scope="col">Status</th><th scope="col">Output</th></tr></thead>
           <tbody>

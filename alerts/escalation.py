@@ -91,6 +91,7 @@ def import_alert_to_case(
         tlp=alert.tlp,
         pap=alert.pap,
         start_date=alert.date or timezone.now(),
+        owner_org=alert.owner_org,
         ingestion_warnings={"warnings": warnings},
     )
 

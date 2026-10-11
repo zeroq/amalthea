@@ -26,9 +26,11 @@ import hashlib
 import importlib
 
 import pytest
+from django.conf import settings
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.loader import MigrationLoader
 
+from identity.models import Organisation
 from observables.hashing import canonical_value, data_hash
 from observables.models import Observable, ObservableType
 
@@ -38,6 +40,13 @@ CASE_SENSITIVE_PAIR = ("C:\\Temp\\A.txt", "c:\\temp\\a.txt")
 #: Round-2 H-7. An uppercase hex hash for a type the runtime folds to lowercase — the exact
 #: row the old backfill hashed wrong.
 UPPERCASE_HASH = "D41D8CD98F00B204"
+
+
+@pytest.fixture
+def default_org(db):
+    """Reuse the default org for tenant isolation."""
+    name = getattr(settings, "AMALTHEA_DEFAULT_ORG_NAME", "Default")
+    return Organisation.objects.get_or_create(name=name)[0]
 
 
 @pytest.fixture
@@ -60,9 +69,9 @@ def test_the_digest_is_sha256_of_the_normalised_value() -> None:
 
 
 @pytest.mark.django_db
-def test_data_hash_is_populated_and_bounded(file_type: ObservableType) -> None:
+def test_data_hash_is_populated_and_bounded(file_type: ObservableType, default_org) -> None:
     long_observable = Observable.objects.create(
-        data_type=file_type, data=LONG_VALUE, normalized_data=LONG_VALUE
+        data_type=file_type, data=LONG_VALUE, normalized_data=LONG_VALUE, owner_org=default_org
     )
     long_observable.refresh_from_db()
     assert len(long_observable.data_hash) == 64
@@ -71,36 +80,52 @@ def test_data_hash_is_populated_and_bounded(file_type: ObservableType) -> None:
 
 
 @pytest.mark.django_db
-def test_two_long_observables_coexist(file_type: ObservableType) -> None:
+def test_two_long_observables_coexist(file_type: ObservableType, default_org) -> None:
     """H3's actual symptom: two valid long values collided on prod and one was rejected."""
     other = LONG_VALUE.replace("a" * 10, "a" * 10, 1) + "b"
     first = Observable.objects.create(
-        data_type=file_type, data=LONG_VALUE, normalized_data=LONG_VALUE
+        data_type=file_type, data=LONG_VALUE, normalized_data=LONG_VALUE, owner_org=default_org
     )
-    second = Observable.objects.create(data_type=file_type, data=other, normalized_data=other)
+    second = Observable.objects.create(
+        data_type=file_type, data=other, normalized_data=other, owner_org=default_org
+    )
     assert first.pk != second.pk
     assert Observable.objects.filter(data_type=file_type).count() == 2
 
 
 @pytest.mark.django_db
-def test_the_unique_key_is_the_hash_not_the_text(file_type: ObservableType) -> None:
+def test_the_unique_key_is_the_hash_not_the_text(file_type: ObservableType, default_org) -> None:
     Observable.objects.create(
-        data_type=file_type, data="C:\\Temp\\A.txt", normalized_data="C:\\Temp\\A.txt"
+        data_type=file_type,
+        data="C:\\Temp\\A.txt",
+        normalized_data="C:\\Temp\\A.txt",
+        owner_org=default_org,
     )
     with pytest.raises(IntegrityError), transaction.atomic():
         Observable.objects.create(
-            data_type=file_type, data="C:\\Temp\\A.txt", normalized_data="C:\\Temp\\A.txt"
+            data_type=file_type,
+            data="C:\\Temp\\A.txt",
+            normalized_data="C:\\Temp\\A.txt",
+            owner_org=default_org,
         )
 
 
 @pytest.mark.django_db
-def test_case_sensitive_values_that_differ_only_in_case_coexist(file_type: ObservableType) -> None:
+def test_case_sensitive_values_that_differ_only_in_case_coexist(
+    file_type: ObservableType, default_org
+) -> None:
     """AC5.4: a case-sensitive type must NOT normalise, so both spellings are distinct."""
     upper = Observable.objects.create(
-        data_type=file_type, data=CASE_SENSITIVE_PAIR[0], normalized_data=CASE_SENSITIVE_PAIR[0]
+        data_type=file_type,
+        data=CASE_SENSITIVE_PAIR[0],
+        normalized_data=CASE_SENSITIVE_PAIR[0],
+        owner_org=default_org,
     )
     lower = Observable.objects.create(
-        data_type=file_type, data=CASE_SENSITIVE_PAIR[1], normalized_data=CASE_SENSITIVE_PAIR[1]
+        data_type=file_type,
+        data=CASE_SENSITIVE_PAIR[1],
+        normalized_data=CASE_SENSITIVE_PAIR[1],
+        owner_org=default_org,
     )
     assert upper.normalized_data != lower.normalized_data
     assert upper.data_hash != lower.data_hash
@@ -108,26 +133,34 @@ def test_case_sensitive_values_that_differ_only_in_case_coexist(file_type: Obser
 
 
 @pytest.mark.django_db
-def test_hashes_normalise_case_insensitively(hash_type: ObservableType) -> None:
+def test_hashes_normalise_case_insensitively(hash_type: ObservableType, default_org) -> None:
     """AC5.4: hex hashes are not case-sensitive, so both spellings are the same artifact."""
     Observable.objects.create(
-        data_type=hash_type, data="D41D8CD98F00B204", normalized_data="d41d8cd98f00b204"
+        data_type=hash_type,
+        data="D41D8CD98F00B204",
+        normalized_data="d41d8cd98f00b204",
+        owner_org=default_org,
     )
     with pytest.raises(IntegrityError), transaction.atomic():
         Observable.objects.create(
             data_type=hash_type,
             data="D41D8CD98F00B204",
             normalized_data="D41D8CD98F00B204",
+            owner_org=default_org,
         )
 
 
 @pytest.mark.django_db
 def test_the_same_value_under_different_types_is_allowed(
-    file_type: ObservableType, hash_type: ObservableType
+    file_type: ObservableType, hash_type: ObservableType, default_org
 ) -> None:
     """`1.2.3.4` as a file name and as an IP are different observations."""
-    Observable.objects.create(data_type=file_type, data="1.2.3.4", normalized_data="1.2.3.4")
-    Observable.objects.create(data_type=hash_type, data="1.2.3.4", normalized_data="1.2.3.4")
+    Observable.objects.create(
+        data_type=file_type, data="1.2.3.4", normalized_data="1.2.3.4", owner_org=default_org
+    )
+    Observable.objects.create(
+        data_type=hash_type, data="1.2.3.4", normalized_data="1.2.3.4", owner_org=default_org
+    )
     assert Observable.objects.count() == 2
 
 
@@ -180,7 +213,7 @@ def test_h7_the_backfill_calls_the_runtime_canonicalisation() -> None:
 
 @pytest.mark.django_db
 def test_h7_a_backfilled_row_satisfies_the_same_invariant_as_a_runtime_row(
-    hash_type: ObservableType,
+    hash_type: ObservableType, default_org
 ) -> None:
     """The behavioural half: reproduce the bug, repair it, and prove the duplicate closes.
 
@@ -192,7 +225,10 @@ def test_h7_a_backfilled_row_satisfies_the_same_invariant_as_a_runtime_row(
          same artifact as far as the constraint is concerned.
     """
     migrated = Observable.objects.create(
-        data_type=hash_type, data=UPPERCASE_HASH, normalized_data=UPPERCASE_HASH
+        data_type=hash_type,
+        data=UPPERCASE_HASH,
+        normalized_data=UPPERCASE_HASH,
+        owner_org=default_org,
     )
     stale = hashlib.sha256(UPPERCASE_HASH.encode("utf-8")).hexdigest()
     Observable.objects.filter(pk=migrated.pk).update(data_hash=stale)
@@ -203,7 +239,7 @@ def test_h7_a_backfilled_row_satisfies_the_same_invariant_as_a_runtime_row(
 
     lowercase = UPPERCASE_HASH.lower()
     admitted = Observable.objects.create(
-        data_type=hash_type, data=lowercase, normalized_data=lowercase
+        data_type=hash_type, data=lowercase, normalized_data=lowercase, owner_org=default_org
     )
     assert admitted.pk, "the stale digest let a duplicate through — that is the H-7 defect"
     Observable.objects.filter(pk=admitted.pk).delete()
@@ -219,7 +255,10 @@ def test_h7_a_backfilled_row_satisfies_the_same_invariant_as_a_runtime_row(
     with pytest.raises(IntegrityError), transaction.atomic():
         (
             Observable.objects.create(
-                data_type=hash_type, data=lowercase, normalized_data=lowercase
+                data_type=hash_type,
+                data=lowercase,
+                normalized_data=lowercase,
+                owner_org=default_org,
             ),
             "a migrated row and a runtime row of one artifact must not both be admitted",
         )
@@ -227,7 +266,7 @@ def test_h7_a_backfilled_row_satisfies_the_same_invariant_as_a_runtime_row(
 
 @pytest.mark.django_db
 def test_h7_the_backfill_is_case_sensitive_for_a_case_sensitive_type(
-    file_type: ObservableType,
+    file_type: ObservableType, default_org
 ) -> None:
     """The other half of AC5.4: `file` must NOT be folded, by the migration either.
 
@@ -235,7 +274,9 @@ def test_h7_the_backfill_is_case_sensitive_for_a_case_sensitive_type(
     breaking the case-sensitive type.
     """
     path = CASE_SENSITIVE_PAIR[0]
-    migrated = Observable.objects.create(data_type=file_type, data=path, normalized_data=path)
+    migrated = Observable.objects.create(
+        data_type=file_type, data=path, normalized_data=path, owner_org=default_org
+    )
     stale_digest = "0" * 64
     Observable.objects.filter(pk=migrated.pk).update(data_hash=stale_digest)
     assert stale_digest != data_hash(canonical_value(Observable.objects.get(pk=migrated.pk)))
@@ -268,11 +309,13 @@ def test_h7_the_backfill_is_case_sensitive_for_a_case_sensitive_type(
 
 
 @pytest.mark.django_db
-def test_m5_a_partial_save_recomputes_the_digest(file_type: ObservableType) -> None:
+def test_m5_a_partial_save_recomputes_the_digest(file_type: ObservableType, default_org) -> None:
     # S108 noqa: these are string literals stored as observable *data* to exercise digest
     # recomputation; nothing is ever opened. Not temp-file usage.
     before, after = "/tmp/aaa.bin", "/tmp/bbb.bin"  # noqa: S108
-    observable = Observable.objects.create(data_type=file_type, data=before, normalized_data=before)
+    observable = Observable.objects.create(
+        data_type=file_type, data=before, normalized_data=before, owner_org=default_org
+    )
     assert observable.data_hash == data_hash(before)
 
     observable.normalized_data = after
@@ -287,13 +330,15 @@ def test_m5_a_partial_save_recomputes_the_digest(file_type: ObservableType) -> N
 
 @pytest.mark.django_db
 def test_m5_a_partial_save_of_data_type_recomputes_the_digest(
-    file_type: ObservableType,
+    file_type: ObservableType, default_org
 ) -> None:
     """`data_type` alone changes the digest, because case-folding is a property of the type."""
     folded_type = ObservableType.objects.create(name="path-folded", is_case_sensitive=False)
     value = "C:\\Temp\\A.txt"
 
-    observable = Observable.objects.create(data_type=folded_type, data=value, normalized_data=value)
+    observable = Observable.objects.create(
+        data_type=folded_type, data=value, normalized_data=value, owner_org=default_org
+    )
     assert observable.data_hash == data_hash(value.lower())
 
     observable.data_type = file_type  # now case-sensitive: digest of the value as written
@@ -308,13 +353,14 @@ def test_m5_a_partial_save_of_data_type_recomputes_the_digest(
 
 @pytest.mark.django_db
 def test_m5_an_unrelated_partial_save_leaves_the_digest_alone(
-    file_type: ObservableType,
+    file_type: ObservableType, default_org
 ) -> None:
     """The widened `update_fields` must not become a blanket full-row write."""
     observable = Observable.objects.create(
         data_type=file_type,
         data="p",
         normalized_data="/tmp/p.bin",  # noqa: S108 — string data, not I/O
+        owner_org=default_org,
     )
     expected = observable.data_hash
 
@@ -328,7 +374,7 @@ def test_m5_an_unrelated_partial_save_leaves_the_digest_alone(
 
 @pytest.mark.django_db
 def test_m5_a_stale_digest_no_longer_admits_a_duplicate_artifact(
-    file_type: ObservableType,
+    file_type: ObservableType, default_org
 ) -> None:
     """The consequence, not just the mechanism: the dedup guarantee must actually hold.
 
@@ -341,7 +387,9 @@ def test_m5_a_stale_digest_no_longer_admits_a_duplicate_artifact(
     """
     # S108 noqa: string data, not a path used for I/O — see above.
     first, second = "/tmp/first.bin", "/tmp/second.bin"  # noqa: S108
-    edited = Observable.objects.create(data_type=file_type, data=first, normalized_data=first)
+    edited = Observable.objects.create(
+        data_type=file_type, data=first, normalized_data=first, owner_org=default_org
+    )
 
     edited.normalized_data = second
     edited.save(update_fields=["normalized_data"])
@@ -349,7 +397,9 @@ def test_m5_a_stale_digest_no_longer_admits_a_duplicate_artifact(
 
     with pytest.raises(IntegrityError), transaction.atomic():
         (
-            Observable.objects.create(data_type=file_type, data=second, normalized_data=second),
+            Observable.objects.create(
+                data_type=file_type, data=second, normalized_data=second, owner_org=default_org
+            ),
             (
                 "this row already describes /tmp/second.bin, so re-adding it must be rejected. "
                 "It is admitted only if data_hash went stale on the partial save above, leaving "

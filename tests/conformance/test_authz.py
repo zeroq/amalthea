@@ -141,19 +141,20 @@ MATRIX = READ + MUTATING
 
 
 @pytest.fixture
-def ids(db: None) -> dict[str, str]:
+def ids(db: None, analyst: User) -> dict[str, str]:
     """One row of every shape the matrix addresses, keyed by the placeholder it fills."""
-    case = _case("Authz case")
+    org = analyst.org
+    case = _case("Authz case", org=org)
     procedure = Procedure.objects.create(
         case=case, pattern_id="T1059", pattern_name="Command Shell"
     )
     playbook = Playbook.objects.filter(name="enrich-observable").first()
     return {
         "case": str(case.id),
-        "alert": str(_alert("Authz alert", ref="authz-ref").id),
+        "alert": str(_alert("Authz alert", ref="authz-ref", org=org).id),
         "task": str(_task(case).id),
         "event": str(_event(case).id),
-        "observable": str(_observable("10.0.0.7").id),
+        "observable": str(_observable("10.0.0.7", org=org).id),
         "template": str(CaseTemplate.objects.create(name="authz-template").id),
         "procedure": str(procedure.id),
         "ttp": str(TTP.objects.create(name="authz-ttp", ttp_code="T1059").id),
@@ -233,11 +234,20 @@ def test_webhook_and_session_endpoints_are_reachable_anonymously(
 ) -> None:
     """The three endpoints that are public by contract must *not* be caught by the sweep.
 
-    The webhook is gated by its per-source secret, login by the password itself; both would
+    The webhook is gated by its per-source secret/token, login by the password itself; both would
     be 401s if `IsAuthenticated` applied to them, which is the exact overreach the matrix
     above is guarding against.
+
+    With P2 (tenant isolation), the webhook requires a valid IngestionToken. This test creates
+    one and verifies the webhook works with it.
     """
+    from identity.models import IngestionToken, Organisation
+
+    org = Organisation.objects.create(name="Webhook Org")
     source = IngestionSource.objects.create(slug="authz-src", name="authz source")
+    # Actually create a real token
+    _, plaintext = IngestionToken.create_token(source=source, organisation=org, name="test token")
+
     assert source.pk is not None
 
     login = anonymous_api.post(
@@ -249,13 +259,23 @@ def test_webhook_and_session_endpoints_are_reachable_anonymously(
     logout = anonymous_api.get("/api/v1/logout")
     assert logout.status_code == 200, logout.content
 
+    # Webhook with valid token → 201
     webhook = anonymous_api.post(
         f"/api/v1/alerts/webhook/{source.slug}",
         data=json.dumps({"title": "from the matrix", "sourceRef": "authz-1"}),
         content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {plaintext}",
     )
     assert webhook.status_code == 201, webhook.content
     assert webhook.status_code < 500
+
+    # Webhook without token → 401 (tenant isolation requirement)
+    webhook_no_token = anonymous_api.post(
+        f"/api/v1/alerts/webhook/{source.slug}",
+        data=json.dumps({"title": "no token", "sourceRef": "authz-2"}),
+        content_type="application/json",
+    )
+    assert webhook_no_token.status_code == 401, webhook_no_token.content
 
 
 # --- AC-B2: org boundaries on the direct lookups ---------------------------
@@ -281,7 +301,7 @@ def test_a_foreign_org_gets_a_404_on_the_org_scoped_direct_lookups(
     """
     owner_org = Organisation.objects.create(name="Boundary Owner")
     outsider_org = Organisation.objects.create(name="Boundary Outsider")
-    case = _case("Boundary case", owner_org=owner_org)
+    case = _case("Boundary case", org=owner_org)
     ids = {"task": str(_task(case).id), "event": str(_event(case).id)}
     path = template.format(**ids)
 

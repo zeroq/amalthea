@@ -35,6 +35,7 @@ from django.db import IntegrityError, transaction
 from alerts.models import Alert, AlertStatus
 from automation.models import AutomationRun, Playbook
 from cases.models import Case, CaseStatus, CaseTemplate, CustomField, Task
+from identity.models import User
 from ingest.models import IngestionSource
 from observables.models import Observable, ObservableType
 
@@ -66,6 +67,7 @@ CHOICE_FIELDS: dict[tuple[str, str], str] = {
     ("case_template", "pap"): "case_template_pap_range",
     ("custom_field", "type"): "custom_field_type_valid",
     ("identity_apikey", "scope"): "apikey_scope_valid",
+    ("identity_user", "role"): "identity_user_role_valid",
     ("ingestion_source", "default_severity"): "ingestion_source_severity_range",
     ("observable", "tlp"): "observable_tlp_range",
     ("observable", "pap"): "observable_pap_range",
@@ -74,8 +76,8 @@ CHOICE_FIELDS: dict[tuple[str, str], str] = {
 
 
 @pytest.fixture
-def case(new_case_status: CaseStatus) -> Case:
-    return Case.objects.create(title="enum probe", status=new_case_status)
+def case(new_case_status: CaseStatus, analyst: User) -> Case:
+    return Case.objects.create(title="enum probe", status=new_case_status, owner_org=analyst.org)
 
 
 @pytest.fixture
@@ -89,10 +91,32 @@ def alert_status() -> AlertStatus:
 
 
 @pytest.fixture
+def alert(alert_status: AlertStatus, analyst: User) -> Alert:
+    return Alert.objects.create(
+        type="t",
+        source="s",
+        source_ref="ref-1",
+        title="a",
+        status=alert_status,
+        owner_org=analyst.org,
+    )
+
+
+@pytest.fixture
 def hash_type() -> ObservableType:
     return ObservableType.objects.get_or_create(name="hash", defaults={"is_case_sensitive": False})[
         0
     ]
+
+
+@pytest.fixture
+def observable(hash_type: ObservableType, analyst: User) -> Observable:
+    return Observable.objects.create(
+        data_type=hash_type,
+        data="d41d8cd98f00b204",
+        normalized_data="d41d8cd98f00b204",
+        owner_org=analyst.org,
+    )
 
 
 @pytest.mark.django_db
@@ -124,20 +148,14 @@ def test_out_of_range_enum_values_fail_in_the_database(case: Case, field: str, v
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("value", OUT_OF_RANGE)
-def test_alert_severity_range_is_enforced(alert_status: AlertStatus, value: int) -> None:
-    alert = Alert.objects.create(
-        type="t", source="s", source_ref=f"ref-{value}", title="a", status=alert_status
-    )
+def test_alert_severity_range_is_enforced(alert: Alert, value: int) -> None:
     with pytest.raises(IntegrityError), transaction.atomic():
         type(alert).objects.filter(pk=alert.pk).update(severity=value)
 
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("value", OUT_OF_RANGE)
-def test_observable_tlp_range_is_enforced(hash_type: ObservableType, value: int) -> None:
-    observable = Observable.objects.create(
-        data_type=hash_type, data="d41d8cd98f00b204", normalized_data="d41d8cd98f00b204"
-    )
+def test_observable_tlp_range_is_enforced(observable: Observable, value: int) -> None:
     with pytest.raises(IntegrityError), transaction.atomic():
         type(observable).objects.filter(pk=observable.pk).update(tlp=value)
 
@@ -217,10 +235,6 @@ def test_every_choices_field_also_has_a_check_constraint() -> None:
 # and for a `stage` vocabulary it is a name outside `CASE_STAGES`/`ALERT_STAGES`.
 # ---------------------------------------------------------------------------------------
 
-#: `db_table -> builder producing one saved row with in-range values`. Declared after the
-#: builders so the `task` row can reuse the `case_record` one.
-_SAMPLE_ROW: dict[str, Callable[[], Any]]
-
 
 def _case_status() -> Any:
     return CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
@@ -230,40 +244,18 @@ def _alert_status() -> Any:
     return AlertStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
 
 
-def _alert() -> Alert:
+def _alert(analyst: User) -> Alert:
     return Alert.objects.create(
-        type="t", source="s", source_ref="enum-probe", title="a", status=_alert_status()
+        type="t",
+        source="s",
+        source_ref="enum-probe",
+        title="a",
+        status=_alert_status(),
+        owner_org=analyst.org,
     )
 
 
-_SAMPLE_ROW = {
-    "case_record": lambda: Case.objects.create(title="enum probe", status=_case_status()),
-    "case_status": _case_status,
-    "alert": _alert,
-    "alert_status": _alert_status,
-    "observable": lambda: Observable.objects.create(
-        data_type=ObservableType.objects.get_or_create(
-            name="other", defaults={"is_case_sensitive": False}
-        )[0],
-        data="enum-probe",
-        normalized_data="enum-probe",
-    ),
-    "task": lambda: Task.objects.create(case=_SAMPLE_ROW["case_record"](), title="t"),
-    "automation_run": lambda: AutomationRun.objects.create(
-        playbook=Playbook.objects.create(name="enum-probe", trigger_event="alert.created"),
-        playbook_name="enum-probe",
-        idempotency_key="enum-probe",
-    ),
-    "ingestion_source": lambda: IngestionSource.objects.create(
-        slug="enum-probe", name="enum probe"
-    ),
-    "custom_field": lambda: CustomField.objects.create(name="enum-probe", type="string"),
-    "case_template": lambda: CaseTemplate.objects.create(name="enum-probe"),
-    "identity_apikey": lambda: _apikey(),
-}
-
-
-def _apikey() -> Any:
+def _apikey(analyst: User) -> Any:
     from identity.models import ApiKey, User
 
     return ApiKey.objects.create(
@@ -271,7 +263,49 @@ def _apikey() -> Any:
     )
 
 
-#: `constraint name -> (row factory, field name, values the domain must refuse)`.
+#: Fixture-based sample rows. Each builder receives `analyst` and `default_org`.
+_SAMPLE_ROW_BUILDERS: dict[str, Callable[[User, Any], Any]] = {
+    "case_record": lambda analyst, default_org: Case.objects.create(
+        title="enum probe", status=_case_status(), owner_org=default_org
+    ),
+    "case_status": lambda *_: _case_status(),
+    "alert": lambda analyst, default_org: Alert.objects.create(
+        type="t",
+        source="s",
+        source_ref="enum-probe",
+        title="a",
+        status=_alert_status(),
+        owner_org=default_org,
+    ),
+    "alert_status": lambda *_: _alert_status(),
+    "observable": lambda analyst, default_org: Observable.objects.create(
+        data_type=ObservableType.objects.get_or_create(
+            name="other", defaults={"is_case_sensitive": False}
+        )[0],
+        data="enum-probe",
+        normalized_data="enum-probe",
+        owner_org=default_org,
+    ),
+    "task": lambda analyst, default_org: Task.objects.create(
+        case=_SAMPLE_ROW_BUILDERS["case_record"](analyst, default_org), title="t"
+    ),
+    "automation_run": lambda analyst, default_org: AutomationRun.objects.create(
+        playbook=Playbook.objects.create(name="enum-probe", trigger_event="alert.created"),
+        playbook_name="enum-probe",
+        idempotency_key="enum-probe",
+        case=_SAMPLE_ROW_BUILDERS["case_record"](analyst, default_org),
+    ),
+    "ingestion_source": lambda *_: IngestionSource.objects.create(
+        slug="enum-probe", name="enum probe"
+    ),
+    "custom_field": lambda *_: CustomField.objects.create(name="enum-probe", type="string"),
+    "case_template": lambda *_: CaseTemplate.objects.create(name="enum-probe"),
+    "identity_apikey": lambda analyst, *_: _apikey(analyst),
+    "identity_user": lambda analyst, *_: analyst,
+}
+
+
+#: `constraint name -> (table name, field name, values the domain must refuse)`.
 GRADED_DOMAIN: dict[str, tuple[str, str, tuple[Any, ...]]] = {
     "alert_severity_range": ("alert", "severity", (-1, 5, 99)),
     "alert_tlp_range": ("alert", "tlp", (-1, 5, 99)),
@@ -296,13 +330,20 @@ GRADED_DOMAIN: dict[str, tuple[str, str, tuple[Any, ...]]] = {
         "triggered_by",
         ("invalid", "event", ""),
     ),
+    "identity_user_role_valid": ("identity_user", "role", ("invalid", "superuser", "")),
 }
+
+
+@pytest.fixture
+def sample_rows(analyst: User) -> dict[str, Any]:
+    """Build sample rows for each table, stamped with the analyst's org."""
+    return {table: builder(analyst, analyst.org) for table, builder in _SAMPLE_ROW_BUILDERS.items()}
 
 
 @pytest.mark.django_db
 @pytest.mark.parametrize(("constraint", "spec"), sorted(GRADED_DOMAIN.items()))
 def test_h2_every_checked_enum_domain_is_refused_by_the_database(
-    constraint: str, spec: tuple[str, str, tuple[Any, ...]]
+    constraint: str, spec: tuple[str, str, tuple[Any, ...]], sample_rows: dict[str, Any]
 ) -> None:
     """Round-2 H-2: no CHECK may be name-only.
 
@@ -310,7 +351,7 @@ def test_h2_every_checked_enum_domain_is_refused_by_the_database(
     review found were name-only — fails here rather than in production.
     """
     table, field, bad_values = spec
-    row = _SAMPLE_ROW[table]()
+    row = sample_rows[table]
     # Everything in the block is provisional. If the database *fails* to refuse a value the
     # write succeeds, and an out-of-range row must not survive into the next test — or into
     # a mutation guard's schema restore, which would then fail with an unrelated

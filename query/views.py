@@ -26,6 +26,7 @@ from rest_framework.response import Response
 from alerts.models import Alert
 from cases.models import Case, CaseObservable
 from core.serializers import alert_json, case_json, observable_json
+from identity.audit import maybe_record_cross_org_read
 
 from .engine import QueryEngine, QueryError, Row
 
@@ -61,6 +62,82 @@ def _project(payload: dict[str, Any], engine: QueryEngine) -> dict[str, Any]:
     return payload
 
 
+def _audit_query_cross_org_read(request: Request, engine: QueryEngine, result: list[Row]) -> None:
+    """Audit superAdmin cross-org reads from the query API.
+
+    For each resource type in the result that belongs to a different org than the superAdmin's,
+    record a `cross_org_read` audit entry. This mirrors the detail-view audit logic but at the
+    query level since the query API can return multiple resource types in one request.
+    """
+
+    user = getattr(request, "user", None)
+    if not user or not getattr(user, "is_authenticated", False):
+        return
+    if getattr(user, "role", "") != "superAdmin":
+        return
+    actor_org = getattr(user, "org", None)
+    if not actor_org:
+        return
+
+    # Group results by resource type and target org
+    from collections import defaultdict
+
+    cross_org_by_type: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+
+    for row in result:
+        if isinstance(row, Case):
+            target_org = getattr(row, "owner_org", None)
+            if target_org and target_org.id != actor_org.id:
+                cross_org_by_type["Case"][str(target_org.id)].append(str(row.id))
+        elif isinstance(row, Alert):
+            target_org = getattr(row, "owner_org", None)
+            if target_org and target_org.id != actor_org.id:
+                cross_org_by_type["Alert"][str(target_org.id)].append(str(row.id))
+        elif isinstance(row, CaseObservable):
+            target_org = getattr(row.observable, "owner_org", None) if row.observable else None
+            if target_org and target_org.id != actor_org.id:
+                cross_org_by_type["Observable"][str(target_org.id)].append(str(row.observable_id))
+
+    # Record one audit entry per (resource_type, target_org) combination
+    for target_type, org_map in cross_org_by_type.items():
+        for target_org_id, target_ids in org_map.items():
+            from identity.models import AuditLog, Organisation
+
+            try:
+                target_org = Organisation.objects.get(pk=target_org_id)
+            except Organisation.DoesNotExist:
+                continue
+            # Use the first target ID as representative (query can return many)
+            representative_id = target_ids[0]
+            maybe_record_cross_org_read(
+                request,
+                actor=user,
+                target_obj=type(
+                    "obj", (), {"owner_org": target_org}
+                )(),  # dummy object with owner_org
+                target_type=target_type,
+                target_id=representative_id,
+                target_org_field="owner_org",
+            )
+            # Update the action to indicate it was via query API
+            log = (
+                AuditLog.objects.filter(
+                    actor=user,
+                    target_org=target_org,
+                    target_type=target_type,
+                    action="cross_org_read",
+                )
+                .order_by("-created_at")
+                .first()
+            )
+            if log:
+                log.action = "cross_org_read_query"
+                log.target_id = (
+                    f"query:{','.join(target_ids[:5])}{'...' if len(target_ids) > 5 else ''}"
+                )
+                log.save(update_fields=["action", "target_id"])
+
+
 @api_view(["POST"])
 @renderer_classes([JSONRenderer])
 def query_view(request: Request) -> Response:
@@ -75,7 +152,7 @@ def query_view(request: Request) -> Response:
         return _bad_request('Query body must be a JSON object of the form {"query": [...]}')
 
     try:
-        engine = QueryEngine(payload)
+        engine = QueryEngine(payload, user=request.user)
         result = engine.run()
     except QueryError as exc:
         return _bad_request(str(exc))
@@ -89,4 +166,9 @@ def query_view(request: Request) -> Response:
     if engine.total is not None:
         # The count of the *pre-page* set: X-Total spans all pages, not just this slice.
         response["X-Total"] = str(engine.total)
+
+    # Audit superAdmin cross-org reads for list/detail query results
+    if isinstance(result, list):
+        _audit_query_cross_org_read(request, engine, result)
+
     return response

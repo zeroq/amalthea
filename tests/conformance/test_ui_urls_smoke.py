@@ -57,12 +57,13 @@ def _media_root(tmp_path: Path, settings: Any) -> None:
 @pytest.fixture
 def case(db: None) -> Case:
     status = CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
-    return Case.objects.create(title="URL smoke case", status=status)
+    org, _ = Organisation.objects.get_or_create(name="URL Smoke Org")
+    return Case.objects.create(title="URL smoke case", status=status, owner_org=org)
 
 
 @pytest.fixture
 def analyst(db: None) -> User:
-    org = Organisation.objects.create(name="URL Smoke Org")
+    org = Organisation.objects.get_or_create(name="URL Smoke Org")[0]
     return User.objects.create_user(
         username="smoke", password="hunter2-correct", email="s@example.net", org=org
     )
@@ -120,6 +121,15 @@ def test_every_get_routable_ui_page_renders(browser: Client, case: Case) -> None
     # The B1 pages are reached from links/redirects, not always from a template tag, so they are
     # named explicitly as well as scanned.
     names = _template_url_names() | {"ui-case-tags", "ui-case-attachment-list"}
+
+    # SuperAdmin-only routes: these correctly return 404 for a regular analyst.
+    superadmin_only = {
+        "ui-settings-organisations",
+        "ui-settings-users",
+        "ui-settings-organisations-edit",
+        "ui-settings-users-edit",
+    }
+
     exercised: list[str] = []
     for name, kwargs in _reverse_candidates(names, case):
         try:
@@ -129,6 +139,11 @@ def test_every_get_routable_ui_page_renders(browser: Client, case: Case) -> None
         response = browser.get(url)
         if response.status_code == 405:
             continue  # POST-only view; not part of the GET surface.
+        if name in superadmin_only:
+            assert response.status_code == 404, (
+                f"GET {name} ({url}) -> {response.status_code}, expected 404 for non-superAdmin"
+            )
+            continue
         exercised.append(name)
         assert response.status_code in (200, 302), (
             f"GET {name} ({url}) -> {response.status_code}, expected 200/302"

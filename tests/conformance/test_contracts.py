@@ -43,7 +43,7 @@ def test_parse_timestamp_refuses_hostile_floats(hostile: float) -> None:
     ],
 )
 def test_an_endpoint_meets_a_hostile_timestamp_with_a_400_not_a_500(
-    raw_date: str, label: str, api: APIClient
+    raw_date: str, label: str, api: APIClient, analyst
 ) -> None:
     """The same values through `POST .../customEvent` — the endpoint contract, not just the unit.
 
@@ -53,7 +53,7 @@ def test_an_endpoint_meets_a_hostile_timestamp_with_a_400_not_a_500(
     finite-but-outrageous numbers (`1e18`) and the *strings* `"Infinity"`/`"NaN"`, whose
     `float()` fallback lands on the exact `fromtimestamp` explosions FIX-4 tamed.
     """
-    case = _case("Hostile timestamp case")
+    case = _case("Hostile timestamp case", org=analyst.org)
     response = api.post(
         f"/api/v1/case/{case.id}/customEvent",
         f'{{"title": "Bad clock", "date": {raw_date}}}',

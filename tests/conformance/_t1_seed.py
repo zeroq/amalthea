@@ -26,16 +26,18 @@ from rest_framework.test import APIClient
 from alerts.models import Alert, AlertStatus
 from cases.ledger import append_timeline_event
 from cases.models import Case, CaseStatus, Task, TimelineEvent
-from identity.models import ApiKey, User
+from identity.models import ApiKey, Organisation, User
 from observables.models import Observable, ObservableType
 
 
-def _case(title: str, **kwargs: Any) -> Case:
+def _case(title: str, org: Organisation | None = None, **kwargs: Any) -> Case:
     status = CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
-    return Case.objects.create(title=title, status=status, **kwargs)
+    return Case.objects.create(title=title, status=status, owner_org=org, **kwargs)
 
 
-def _alert(title: str, *, ref: str, case: Case | None = None) -> Alert:
+def _alert(
+    title: str, *, ref: str, case: Case | None = None, org: Organisation | None = None
+) -> Alert:
     status = AlertStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[
         0
     ]
@@ -46,6 +48,7 @@ def _alert(title: str, *, ref: str, case: Case | None = None) -> Alert:
         title=title,
         status=status,
         case=case,
+        owner_org=org,
     )
 
 
@@ -57,11 +60,13 @@ def _event(case: Case, title: str = "Analyst note") -> TimelineEvent:
     return append_timeline_event(case, title=title, kind="custom")
 
 
-def _observable(data: str, type_name: str = "ip") -> Observable:
+def _observable(data: str, type_name: str = "ip", org: Organisation | None = None) -> Observable:
     otype = ObservableType.objects.get_or_create(
         name=type_name, defaults={"is_case_sensitive": False}
     )[0]
-    return Observable.objects.create(data_type=otype, data=data, normalized_data=data)
+    return Observable.objects.create(
+        data_type=otype, data=data, normalized_data=data, owner_org=org
+    )
 
 
 def _call(client: APIClient, method: str, path: str, body: Any = None) -> Any:

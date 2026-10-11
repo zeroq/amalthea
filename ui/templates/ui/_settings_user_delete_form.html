@@ -1,0 +1,15 @@
+{% comment %}
+Server-rendered body for the "Delete user" modal.
+
+Self-delete is marked [data-modal-blocked] so modal.js disables the confirm button;
+the server enforces self/last-superAdmin guards regardless (F10: no inline script).
+{% endcomment %}
+{% if user.id == request.user.id %}
+<div class="blockers-warning" role="alert" data-modal-blocked="Cannot delete yourself">
+  <strong>Cannot delete:</strong> this is your own account.
+</div>
+{% else %}
+<p class="modal-body-text">
+  Delete <strong>{{ user.login }}</strong>? This cannot be undone.
+</p>
+{% endif %}

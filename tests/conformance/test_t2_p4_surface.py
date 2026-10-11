@@ -40,15 +40,27 @@ def case_status() -> CaseStatus:
     return CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
 
 
-def _case(status: CaseStatus, title: str, org: Any = None) -> Case:
+def _case(status: CaseStatus, title: str, org: Any = None, analyst: Any = None) -> Case:
+    if org is None and analyst is not None:
+        org = analyst.org
+    if org is None:
+        from identity.models import Organisation
+
+        org, _ = Organisation.objects.get_or_create(name="Default")
     return Case.objects.create(title=title, status=status, owner_org=org)
 
 
-def _observable(value: str) -> Observable:
+def _observable(value: str, org=None) -> Observable:
+    if org is None:
+        from identity.models import Organisation
+
+        org, _ = Organisation.objects.get_or_create(name="Default")
     obs_type = ObservableType.objects.get_or_create(
         name="ip", defaults={"is_case_sensitive": False}
     )[0]
-    return Observable.objects.create(data_type=obs_type, data=value, normalized_data=value)
+    return Observable.objects.create(
+        data_type=obs_type, data=value, normalized_data=value, owner_org=org
+    )
 
 
 # --- AC6.1-P4-a — the per-item failure boundary ----------------------------
@@ -57,8 +69,8 @@ def _observable(value: str) -> Observable:
 def test_bulk_case_patch_commits_the_others_when_one_id_is_unknown(
     api: APIClient, analyst: User, case_status: CaseStatus
 ) -> None:
-    first = _case(case_status, "Bulk A")
-    second = _case(case_status, "Bulk B")
+    first = _case(case_status, "Bulk A", analyst=analyst)
+    second = _case(case_status, "Bulk B", analyst=analyst)
 
     response = api.patch(
         "/api/v1/case/_bulk",
@@ -81,9 +93,9 @@ def test_bulk_case_patch_commits_the_others_when_one_id_is_unknown(
 
 
 def test_bulk_case_patch_reports_an_out_of_range_value_without_rolling_back_the_batch(
-    api: APIClient, case_status: CaseStatus
+    api: APIClient, analyst: User, case_status: CaseStatus
 ) -> None:
-    good = _case(case_status, "Bulk C")
+    good = _case(case_status, "Bulk C", analyst=analyst)
 
     response = api.patch(
         "/api/v1/case/_bulk",
@@ -99,10 +111,17 @@ def test_bulk_case_patch_reports_an_out_of_range_value_without_rolling_back_the_
     assert good.severity != 99, "an out-of-range value was stored"
 
 
-def test_bulk_alert_patch_updates_severity(api: APIClient, case_status: CaseStatus) -> None:
+def test_bulk_alert_patch_updates_severity(
+    api: APIClient, analyst: User, case_status: CaseStatus
+) -> None:
     status = AlertStatus.objects.get_or_create(value="New", defaults={"stage": "New"})[0]
     alert = Alert.objects.create(
-        type="t", source="s", source_ref="bulk-alert", title="a", status=status
+        type="t",
+        source="s",
+        source_ref="bulk-alert",
+        title="a",
+        status=status,
+        owner_org=analyst.org,
     )
 
     response = api.patch(
@@ -114,8 +133,10 @@ def test_bulk_alert_patch_updates_severity(api: APIClient, case_status: CaseStat
     assert alert.severity == 4
 
 
-def test_bulk_task_patch_updates_status(api: APIClient, case_status: CaseStatus) -> None:
-    case = _case(case_status, "Bulk task case")
+def test_bulk_task_patch_updates_status(
+    api: APIClient, analyst: User, case_status: CaseStatus
+) -> None:
+    case = _case(case_status, "Bulk task case", analyst=analyst)
     task = Task.objects.create(case=case, title="Do the thing")
 
     response = api.patch(
@@ -127,8 +148,8 @@ def test_bulk_task_patch_updates_status(api: APIClient, case_status: CaseStatus)
     assert task.status == "InProgress"
 
 
-def test_bulk_observable_patch_updates_flags(api: APIClient) -> None:
-    observable = _observable("192.0.2.44")
+def test_bulk_observable_patch_updates_flags(api: APIClient, analyst: User) -> None:
+    observable = _observable("192.0.2.44", org=analyst.org)
 
     response = api.patch(
         "/api/v1/observable/_bulk",
@@ -147,8 +168,8 @@ def test_bulk_observable_patch_updates_flags(api: APIClient) -> None:
 def test_case_merge_reparents_children_and_records_provenance(
     api: APIClient, analyst: User, case_status: CaseStatus
 ) -> None:
-    target = _case(case_status, "Target")
-    source = _case(case_status, "Source")
+    target = _case(case_status, "Target", analyst=analyst)
+    source = _case(case_status, "Source", analyst=analyst)
     Task.objects.create(case=source, title="From the source")
     link = CaseObservable.objects.create(case=source, observable=_observable("192.0.2.9"))
     assert link.pk is not None
@@ -167,9 +188,11 @@ def test_case_merge_reparents_children_and_records_provenance(
     assert str(source.id) in str(provenance[-1].metadata)
 
 
-def test_case_merge_is_idempotent_on_replay(api: APIClient, case_status: CaseStatus) -> None:
-    target = _case(case_status, "Target")
-    source = _case(case_status, "Source")
+def test_case_merge_is_idempotent_on_replay(
+    api: APIClient, analyst: User, case_status: CaseStatus
+) -> None:
+    target = _case(case_status, "Target", analyst=analyst)
+    source = _case(case_status, "Source", analyst=analyst)
 
     first = api.post(f"/api/v1/case/_merge/{target.id},{source.id}", {}, format="json")
     assert first.status_code == 200, first.content
@@ -190,7 +213,7 @@ def test_case_merge_is_idempotent_on_replay(api: APIClient, case_status: CaseSta
 
 
 def test_applying_a_template_copies_tasks_tags_and_scalars(
-    api: APIClient, case_status: CaseStatus
+    api: APIClient, analyst: User, case_status: CaseStatus
 ) -> None:
     CustomField.objects.create(name="phish-campaign", type="string")
     template = CaseTemplate.objects.create(
@@ -202,7 +225,7 @@ def test_applying_a_template_copies_tasks_tags_and_scalars(
         tasks=[{"title": "Contain mailbox"}, {"title": "Notify user"}],
         custom_fields=[{"name": "phish-campaign", "value": "wave-7"}],
     )
-    case = _case(case_status, "Reported mail")
+    case = _case(case_status, "Reported mail", analyst=analyst)
 
     response = api.post(
         "/api/v1/case/_bulk/caseTemplate",

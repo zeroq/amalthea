@@ -86,14 +86,15 @@ def _no_connection_churn(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def ids(db: None) -> dict[str, str]:
-    case = _case("Contract case")
+def ids(db: None, analyst: User) -> dict[str, str]:
+    org = analyst.org
+    case = _case("Contract case", org=org)
     return {
         "case": str(case.id),
-        "alert": str(_alert("Contract alert", ref="contract-ref", case=case).id),
+        "alert": str(_alert("Contract alert", ref="contract-ref", case=case, org=org).id),
         "task": str(_task(case).id),
         "event": str(_event(case).id),
-        "observable": str(_observable("10.0.0.9").id),
+        "observable": str(_observable("10.0.0.9", org=org).id),
     }
 
 
@@ -113,18 +114,26 @@ def writer(db: None) -> tuple[APIClient, User]:
     return client, user
 
 
+@pytest.fixture
+def default_org(db: None) -> Organisation:
+    """A default organisation for tests that need one without a full user context."""
+    return Organisation.objects.create(name="Default Test Org")
+
+
 # --- AC-A7 — the serializers against the golden corpus ---------------------
 
 
 @pytest.mark.django_db
-def test_task_serializer_emits_exactly_the_recorded_key_set() -> None:
-    task = _task(_case("Serializer case"))
+def test_task_serializer_emits_exactly_the_recorded_key_set(default_org: Organisation) -> None:
+    task = _task(_case("Serializer case", org=default_org))
     assert set(task_json(task)) == PINNED_KEYS["task_example.json"]
 
 
 @pytest.mark.django_db
-def test_custom_event_serializer_emits_exactly_the_recorded_key_set() -> None:
-    event = _event(_case("Serializer case"))
+def test_custom_event_serializer_emits_exactly_the_recorded_key_set(
+    default_org: Organisation,
+) -> None:
+    event = _event(_case("Serializer case", org=default_org))
     assert set(custom_event_json(event)) == PINNED_KEYS["custom_event_example.json"]
 
 
@@ -145,8 +154,8 @@ def test_user_serializer_emits_exactly_the_recorded_key_set() -> None:
 
 
 def test_task_get_returns_the_output_task_shape(writer: tuple[APIClient, User]) -> None:
-    client, _ = writer
-    task = _task(_case("Task shape"), title="Isolate affected workstation")
+    client, user = writer
+    task = _task(_case("Task shape", org=user.org), title="Isolate affected workstation")
     response = client.get(f"/api/v1/task/{task.id}")
     assert response.status_code == 200, response.content
 
@@ -164,7 +173,9 @@ def test_task_patch_updates_only_the_keys_that_are_present(
     writer: tuple[APIClient, User],
 ) -> None:
     client, user = writer
-    task = _task(_case("Task patch"), title="Before", description="untouched", status="Waiting")
+    task = _task(
+        _case("Task patch", org=user.org), title="Before", description="untouched", status="Waiting"
+    )
 
     response = client.patch(f"/api/v1/task/{task.id}", {"title": "After"}, format="json")
     assert response.status_code == 204, response.content
@@ -186,8 +197,8 @@ def test_task_patch_refuses_a_status_the_vocabulary_does_not_have(
     writer: tuple[APIClient, User],
 ) -> None:
     """`Todo` is TheHive's word, not ours — 400 here, not a CHECK violation's 500 on Postgres."""
-    client, _ = writer
-    task = _task(_case("Task status"))
+    client, user = writer
+    task = _task(_case("Task status", org=user.org))
     response = client.patch(f"/api/v1/task/{task.id}", {"status": "Todo"}, format="json")
     assert response.status_code == 400, response.content
     body = response.json()
@@ -199,8 +210,8 @@ def test_task_patch_refuses_a_status_the_vocabulary_does_not_have(
 
 
 def test_task_delete_is_204_then_404(writer: tuple[APIClient, User]) -> None:
-    client, _ = writer
-    task = _task(_case("Task delete"))
+    client, user = writer
+    task = _task(_case("Task delete", org=user.org))
     deleted = client.delete(f"/api/v1/task/{task.id}")
     assert deleted.status_code == 204, deleted.content
     assert deleted.content == b""
@@ -247,7 +258,7 @@ def test_alert_import_into_a_named_case_is_the_merge_spelling(
     200 with the `OutputCase`, and the alert's `case` FK now points at it.
     """
     case = Case.objects.get(pk=ids["case"])
-    fresh = _alert("Import-target alert", ref="import-into-ref")
+    fresh = _alert("Import-target alert", ref="import-into-ref", org=case.owner_org)
     response = api.post(f"/api/v1/alert/{fresh.id}/import/{case.id}", {}, format="json")
     assert response.status_code == 200, response.content
     assert response.json()["_id"] == str(case.id), "the response is the case, not the alert"
@@ -422,10 +433,10 @@ def test_a_custom_event_reaches_a_joined_case_room(
     on (see `test_realtime.py` for the long version of why).
     """
     org = Organisation.objects.create(name="Realtime Org")
-    User.objects.create_user(
+    _ = User.objects.create_user(
         username="realtime", password="hunter2-correct", email="rt@example.net", org=org
     )
-    case = _case("Published case")
+    case = _case("Published case", org=org)
     login_client = APIClient()
     login = login_client.post(
         "/api/v1/login", {"user": "realtime", "password": "hunter2-correct"}, format="json"
@@ -500,8 +511,10 @@ def test_observable_patch_applies_present_fields_and_rejects_empty_ones(
     assert empty.json()["type"] == "BadRequest"
 
 
-def test_observable_patch_that_retypes_the_artifact_rehashes_it(api: APIClient) -> None:
-    """`(data_type, data_hash)` is the uniqueness key; a type change must move both halves.
+def test_observable_patch_that_retypes_the_artifact_rehashes_it(
+    api: APIClient, analyst: User
+) -> None:
+    """`(owner_org, data_type, data_hash)` is the uniqueness key; a type change must move both halves.
 
     The two types differ only in `is_case_sensitive`, so re-typing is the one way the digest
     can change with `normalized_data` untouched — which is exactly the path a stale hash
@@ -510,7 +523,10 @@ def test_observable_patch_that_retypes_the_artifact_rehashes_it(api: APIClient) 
     sensitive = ObservableType.objects.create(name="t1-sensitive", is_case_sensitive=True)
     ObservableType.objects.create(name="t1-folded", is_case_sensitive=False)
     observable = Observable.objects.create(
-        data_type=sensitive, data=SENSITIVE_PATH, normalized_data=SENSITIVE_PATH
+        data_type=sensitive,
+        data=SENSITIVE_PATH,
+        normalized_data=SENSITIVE_PATH,
+        owner_org=analyst.org,
     )
     before = observable.data_hash
     assert before == data_hash(SENSITIVE_PATH), "precondition: hashed case-sensitively"
@@ -619,7 +635,7 @@ def test_observable_blast_radius_delete_requires_force(api: APIClient, db: None)
 
     ip_type = ObservableType.objects.get(name="ip")
     observable = Observable.objects.create(
-        data_type=ip_type, data="10.0.0.1", normalized_data="10.0.0.1"
+        data_type=ip_type, data="10.0.0.1", normalized_data="10.0.0.1", owner_org=org
     )
 
     open_status = CaseStatus.objects.get(value="New")
@@ -658,7 +674,7 @@ def test_observable_blast_radius_patch_requires_force(api: APIClient, db: None) 
 
     ip_type = ObservableType.objects.get(name="ip")
     observable = Observable.objects.create(
-        data_type=ip_type, data="10.0.0.2", normalized_data="10.0.0.2"
+        data_type=ip_type, data="10.0.0.2", normalized_data="10.0.0.2", owner_org=org
     )
 
     open_status = CaseStatus.objects.get(value="New")
@@ -704,7 +720,7 @@ def test_observable_single_case_mutation_works_without_force(api: APIClient, db:
 
     ip_type = ObservableType.objects.get(name="ip")
     observable = Observable.objects.create(
-        data_type=ip_type, data="10.0.0.3", normalized_data="10.0.0.3"
+        data_type=ip_type, data="10.0.0.3", normalized_data="10.0.0.3", owner_org=org
     )
 
     open_status = CaseStatus.objects.get(value="New")

@@ -112,9 +112,9 @@ class Case(UUIDModel, TimeStampedModel):
     start_date = models.DateTimeField(default=timezone.now)
     end_date = models.DateTimeField(null=True, blank=True)
     closed_date = models.DateTimeField(null=True, blank=True)
-    owner_org = models.ForeignKey(
-        Organisation, on_delete=models.SET_NULL, null=True, blank=True, related_name="cases"
-    )
+    # Mandatory tenant (ADR-004): a case always belongs to an organisation. PROTECT — deleting a
+    # tenant must not silently orphan its cases; remove or reassign the data first.
+    owner_org = models.ForeignKey(Organisation, on_delete=models.PROTECT, related_name="cases")
     ingestion_warnings = models.JSONField(blank=True, default=dict)
 
     objects = AllocatingQuerySet.as_manager()

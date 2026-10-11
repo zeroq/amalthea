@@ -51,7 +51,7 @@ QUERY_URL = "/api/v1/query"
 
 @pytest.fixture
 def analyst(db: None) -> User:
-    org = Organisation.objects.create(name="Test Org")
+    org, _ = Organisation.objects.get_or_create(name="Test Org")
     return User.objects.create(
         login="analyst",
         username="analyst",
@@ -85,12 +85,20 @@ def _reset_throttle_cache() -> None:
     cache.clear()
 
 
-def _case(title: str, severity: int = 2, **kwargs: Any) -> Case:
+def _case(title: str, severity: int = 2, org: Organisation = None, **kwargs: Any) -> Case:
+    if org is None:
+        org, _ = Organisation.objects.get_or_create(name="Test Org")
     status = CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
-    return Case.objects.create(title=title, severity=severity, status=status, **kwargs)
+    return Case.objects.create(
+        title=title, severity=severity, status=status, owner_org=org, **kwargs
+    )
 
 
-def _alert(title: str, *, ref: str, severity: int = 2, case: Case | None = None) -> Alert:
+def _alert(
+    title: str, *, ref: str, severity: int = 2, case: Case | None = None, org: Organisation = None
+) -> Alert:
+    if org is None:
+        org, _ = Organisation.objects.get_or_create(name="Test Org")
     status = AlertStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[
         0
     ]
@@ -102,14 +110,19 @@ def _alert(title: str, *, ref: str, severity: int = 2, case: Case | None = None)
         severity=severity,
         status=status,
         case=case,
+        owner_org=org,
     )
 
 
-def _observable(data: str, type_name: str = "ip") -> Observable:
+def _observable(data: str, type_name: str = "ip", org: Organisation = None) -> Observable:
+    if org is None:
+        org, _ = Organisation.objects.get_or_create(name="Test Org")
     otype = ObservableType.objects.get_or_create(
         name=type_name, defaults={"is_case_sensitive": False}
     )[0]
-    return Observable.objects.create(data_type=otype, data=data, normalized_data=data)
+    return Observable.objects.create(
+        data_type=otype, data=data, normalized_data=data, owner_org=org
+    )
 
 
 def _link(case: Case, observable: Observable) -> CaseObservable:

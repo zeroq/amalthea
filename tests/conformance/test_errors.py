@@ -41,7 +41,7 @@ def test_an_unhandled_exception_becomes_a_fixed_500_envelope() -> None:
 
 @pytest.mark.django_db
 def test_an_unhandled_error_on_a_real_endpoint_is_a_500_with_the_fixed_message(
-    api: APIClient, monkeypatch: pytest.MonkeyPatch
+    api: APIClient, analyst, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """End-to-end: a view-level crash (here, `parse_timestamp` raising) answers with the fixed body.
 
@@ -56,7 +56,7 @@ def test_an_unhandled_error_on_a_real_endpoint_is_a_500_with_the_fixed_message(
         raise ValueError("secret-dsn=hunter2-really")
 
     monkeypatch.setattr("cases.views.parse_timestamp", boom)
-    case = _case("Unhandled error case")
+    case = _case("Unhandled error case", org=analyst.org)
     response = api.post(
         f"/api/v1/case/{case.id}/customEvent",
         {"title": "Will crash", "date": 1745539200000},

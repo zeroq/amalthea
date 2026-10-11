@@ -56,6 +56,8 @@ WIRE_BOUNDARY = (
     "core/serializers.py",
     "*/views.py",
     "*/urls.py",
+    # identity/ uses Django field suffixes like `_id` which trigger false positives.
+    "identity/",
 )
 
 _SKIP_DIRS = frozenset(

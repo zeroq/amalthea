@@ -17,11 +17,14 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    # `current` before `<user_id>`: the literal would otherwise be read as a login.
+    # User routes — `current` before `<user_id>`: the literal would otherwise be read as a login.
     path("user/current", views.user_current, name="user-current"),
     path("user/current/", views.user_current, name="user-current-slash"),
-    path("user/<str:user_id>", views.user_detail, name="user-detail"),
-    path("user/<str:user_id>/", views.user_detail, name="user-detail-slash"),
+    path("user", views.user_collection, name="user-collection"),
+    path("user/", views.user_collection, name="user-collection-slash"),
+    path("user/<str:user_id>", views.user_detail_management, name="user-detail"),
+    path("user/<str:user_id>/", views.user_detail_management, name="user-detail-slash"),
+    # Organisation routes
     path("organisation", views.organisation_collection, name="organisation-collection"),
     path("organisation/", views.organisation_collection, name="organisation-collection-slash"),
     path("organisation/<str:org_id>", views.organisation_detail, name="organisation-detail"),

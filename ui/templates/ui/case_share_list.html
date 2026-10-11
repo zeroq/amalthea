@@ -1,0 +1,82 @@
+{% extends "ui/base.html" %}
+{% load static %}
+{% load ui_tags %}
+
+{% block title %}Shares for Case #{{ case.number }} · Amalthea{% endblock %}
+
+{% block heading %}
+  <span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span>
+  #{{ case.number }} {{ case.title }} — Shares
+{% endblock %}
+
+{% block actions %}
+  <a class="btn" href="{% url 'ui-case-detail' case.number %}">Back to case</a>
+{% endblock %}
+
+{% block content %}
+<section class="card" aria-labelledby="h-shares">
+  <h2 id="h-shares">Current shares</h2>
+  {% if shares %}
+    <div class="table-wrap">
+      <table class="data-table data-table-tight">
+        <caption class="sr-only">Organisations this case is shared with</caption>
+        <thead>
+          <tr>
+            <th scope="col">Organisation</th>
+            <th scope="col">Permissions</th>
+            <th scope="col">Created</th>
+            <th scope="col"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in shares %}
+          <tr>
+            <td>{{ item.share.organisation.name }}</td>
+            <td>
+              <span class="pill {% if item.share.permissions.write %}pill-readwrite{% else %}pill-read{% endif %}">
+                {% if item.share.permissions.write %}Read/Write{% else %}Read-only{% endif %}
+              </span>
+            </td>
+            <td class="mono dim">{{ item.share.created_at|date:"Y-m-d H:i" }}</td>
+            <td>
+              <button type="button" class="btn btn-err btn-sm" data-modal-open="revoke-share-{{ item.share.id }}">
+                Revoke
+              </button>
+              {% include "ui/_modal.html" with modal_id="revoke-share-"|add:item.share.id title="Revoke share?" body="Revoke access for " confirm_text="Revoke" confirm_class="btn-err" form_action=item.revoke_url size="sm" %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No shares configured. This case is private to your organisation.</p>
+  {% endif %}
+</section>
+
+<section class="card" aria-labelledby="h-grant">
+  <h2 id="h-grant">Grant access</h2>
+  {% if available_orgs %}
+    <form method="post" action="{% url 'ui-case-share-list' case.number %}" class="inline-form">
+      {% csrf_token %}
+      <label for="f-org" class="sr-only">Organisation</label>
+      <select id="f-org" name="organisation" required>
+        <option value="">Select organisation</option>
+        {% for org in available_orgs %}
+        <option value="{{ org.id }}">{{ org.name }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="f-perms" class="sr-only">Permissions</label>
+      <select id="f-perms" name="permissions">
+        <option value="read">Read-only</option>
+        <option value="readwrite">Read/Write</option>
+      </select>
+
+      <button type="submit" class="btn btn-primary">Grant access</button>
+    </form>
+  {% else %}
+    <p class="empty">No other organisations available to share with.</p>
+  {% endif %}
+</section>
+{% endblock %}

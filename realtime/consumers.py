@@ -6,6 +6,10 @@ from every open case tab:
 * **Handshake.** Auth is checked *before* `accept()`, so an anonymous socket never joins the group
   and never learns that the case id exists (AC7.2). Refusal is `4401` — the websocket equivalent of
   401 — which a browser can tell apart from a network drop.
+* **Visibility.** After auth, the caller must be allowed to *see* the case (owner org, read share,
+  or superAdmin). If not, the socket is refused with `4404` — the websocket equivalent of 404.
+  A non-existent case id and an existing-but-not-visible case both yield `4404` (no existence
+  oracle). Anonymous stays `4401`. SuperAdmin is allowed (resolve_case already handles it).
 * **`{"type": "sync", "after": <event-id|null>}`** → `{"type": "timeline", "events": [...]}`,
   strictly after `after` in `(date, id)` order, whole ledger when `after` is null (AC7.4). The
   anchor is resolved by `cases.ledger.events_after`, so the server's ordering promise lives with
@@ -27,12 +31,17 @@ from uuid import UUID
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 
+import identity.scoping
 from cases.ledger import events_after
 from core.serializers import timeline_event_json
 
 #: Handshake refused: no authenticated session on the socket. Not a retry — a browser should send
 #: its cookie, and a socket without one will be refused again.
 UNAUTHENTICATED = 4401
+#: Handshake refused: authenticated but not allowed to see this case (cross-tenant or non-existent).
+#: Uniform with non-existent to avoid an existence oracle. Distinct from 4401 so a client can tell
+#: "not logged in" from "not allowed".
+FORBIDDEN = 4404
 #: The client said something outside the protocol (unparseable frame, unknown type, malformed
 #: anchor). Closing beats guessing: a client that is out of sync is more useful debugging loud.
 PROTOCOL_ERROR = 4000
@@ -69,6 +78,7 @@ class CaseConsumer(AsyncWebsocketConsumer):
         self.joined = False
 
         user = self.scope.get("user")
+        # Channels supplies a UserLazyObject; it quacks like User for our checks.
         if user is None or not user.is_authenticated:
             await self.close(code=UNAUTHENTICATED)
             return
@@ -77,6 +87,17 @@ class CaseConsumer(AsyncWebsocketConsumer):
         # rather than joined as a group nobody will ever write to.
         if not _is_uuid(self.case_id):
             await self.close(code=PROTOCOL_ERROR)
+            return
+
+        # Visibility check: caller must be allowed to see this case (owner org, read share, or superAdmin).
+        # Non-existent and not-visible both yield FORBIDDEN (4404) — no existence oracle.
+        allowed = await sync_to_async(identity.scoping.resolve_case)(
+            user,  # type: ignore[arg-type]
+            self.case_id,
+            write=False,
+        )
+        if allowed is None:
+            await self.close(code=FORBIDDEN)
             return
 
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)

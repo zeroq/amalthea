@@ -108,6 +108,15 @@ CUSTOM_FIELD_TYPES: Final[tuple[tuple[str, str], ...]] = (
 #: `identity.ApiKey.scope` (plan §6.2).
 API_KEY_SCOPES: Final[tuple[str, ...]] = ("read", "readwrite")
 
+#: `identity.User.role` (ADR-004 Q3).
+USER_ROLE_CHOICES: Final[tuple[tuple[str, str], ...]] = (
+    ("superAdmin", "Super Administrator"),
+    ("admin", "Organisation Administrator"),
+    ("analyst", "Analyst"),
+    ("read-only", "Read-Only"),
+)
+USER_ROLE_VALUES: Final[tuple[str, ...]] = tuple(v for v, _ in USER_ROLE_CHOICES)
+
 
 # --- Constraint builders ------------------------------------------------------
 

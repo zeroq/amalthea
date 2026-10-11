@@ -41,7 +41,7 @@ PHISHING_PAYLOAD = {
 
 @pytest.fixture
 def analyst(db: None) -> User:
-    org = Organisation.objects.create(name="Test Org")
+    org, _ = Organisation.objects.get_or_create(name="Test Org")
     return User.objects.create(
         login="analyst",
         username="analyst",
@@ -68,8 +68,8 @@ def anonymous_api() -> object:
 
 
 @pytest.fixture
-def source(db: None) -> IngestionSource:
-    return IngestionSource.objects.create(
+def source(db: None, analyst: User) -> IngestionSource:
+    source = IngestionSource.objects.create(
         slug="o365",
         name="Microsoft 365 hook",
         mapping_config={
@@ -79,21 +79,35 @@ def source(db: None) -> IngestionSource:
             "correlation_key": "$.sourceRef",
         },
     )
+    # Create an ingestion token for this source and the analyst's org
+    from identity.models import IngestionToken
+
+    _token, plaintext = IngestionToken.create_token(
+        source=source,
+        organisation=analyst.org,
+        name="Test token",
+    )
+    # Store the plaintext token on the source for use in tests
+    source._test_token = plaintext
+    return source
 
 
 def _post_alert(anonymous_api: object, source: IngestionSource, **overrides: object) -> str:
     payload = {**PHISHING_PAYLOAD, **overrides}
+    # Include the ingestion token for authentication
+    headers = {"HTTP_X_WEBHOOK_SECRET": source._test_token}
     posted = anonymous_api.post(
         reverse("alerts-webhook", kwargs={"source_id": source.slug}),
         data=json.dumps(payload),
         content_type="application/json",
+        **headers,
     )
     assert posted.status_code == 201, posted.content
     return str(posted.json()["_id"])
 
 
 def test_mvp_loop_ingest_escalate_extract(
-    anonymous_api: object, api: object, source: IngestionSource
+    anonymous_api: object, api: object, source: IngestionSource, analyst
 ) -> None:
     """`POST webhook` → `POST import` → the email observable is on the case."""
     alert_id = _post_alert(anonymous_api, source)
@@ -132,14 +146,14 @@ def test_mvp_loop_ingest_escalate_extract(
 
 
 def test_mvp_loop_merge_into_existing_case(
-    anonymous_api: object, api: object, source: IngestionSource
+    anonymous_api: object, api: object, source: IngestionSource, analyst
 ) -> None:
     """A second alert merges into the same case; the shared address stays one artifact."""
     status = CaseStatus.objects.get_or_create(
         value="InProgress", defaults={"stage": "InProgress", "order": 1}
     )[0]
     case = Case.objects.create(
-        title="Phishing wave", description="Finance mailboxes", status=status
+        title="Phishing wave", description="Finance mailboxes", status=status, owner_org=analyst.org
     )
 
     alert_ids = [
@@ -169,13 +183,13 @@ def test_mvp_loop_merge_into_existing_case(
 
 
 def test_extraction_is_idempotent_across_repeated_merges(
-    anonymous_api: object, api: object, source: IngestionSource
+    anonymous_api: object, api: object, source: IngestionSource, analyst
 ) -> None:
     """Re-running extraction over the same text links nothing new."""
     status = CaseStatus.objects.get_or_create(
         value="InProgress", defaults={"stage": "InProgress", "order": 1}
     )[0]
-    case = Case.objects.create(title="Repeat", description="", status=status)
+    case = Case.objects.create(title="Repeat", description="", status=status, owner_org=analyst.org)
     alert_id = _post_alert(anonymous_api, source)
     api.post(f"/api/v1/alert/{alert_id}/merge/{case.number}", {}, format="json")
     before = CaseObservable.objects.filter(case=case).count()

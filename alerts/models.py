@@ -110,11 +110,11 @@ class Alert(UUIDModel, TimeStampedModel):
     )
     follow = models.BooleanField(default=False)
     ingestion_warnings = models.JSONField(blank=True, default=dict)
+    # Mandatory tenant (ADR-004): an alert always belongs to an organisation. PROTECT — deleting
+    # a tenant must not silently orphan its alerts.
     owner_org = models.ForeignKey(
         Organisation,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
+        on_delete=models.PROTECT,
         related_name="alerts",
     )
 
@@ -141,7 +141,8 @@ class Alert(UUIDModel, TimeStampedModel):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["source", "type", "source_ref"], name="uniq_alert_source_type_ref"
+                fields=["owner_org", "source", "type", "source_ref"],
+                name="uniq_alert_source_type_ref",
             ),
             in_range("alert_severity_range", "severity", SEVERITY_MIN, SEVERITY_MAX),
             in_range("alert_tlp_range", "tlp", TLP_MIN, TLP_MAX),

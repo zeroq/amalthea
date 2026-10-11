@@ -39,11 +39,13 @@ import re
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import channels.db
 import pytest
 from asgiref.sync import async_to_sync, sync_to_async
 from channels.testing import WebsocketCommunicator
+from django.conf import settings
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
@@ -52,9 +54,9 @@ from amalthea.asgi import application
 from automation.dispatcher import record_result
 from automation.models import AutomationRun, Playbook
 from cases.ledger import append_timeline_event
-from cases.models import Case, CaseStatus, TimelineEvent
+from cases.models import Case, CaseStatus, Share, TimelineEvent
 from identity.models import Organisation, User
-from realtime.consumers import PROTOCOL_ERROR, UNAUTHENTICATED
+from realtime.consumers import FORBIDDEN, PROTOCOL_ERROR, UNAUTHENTICATED
 from realtime.publisher import publish_case_event
 
 #: The literal the choke-point scan forbids outside `cases/ledger.py`. It lives here as one name so
@@ -84,10 +86,16 @@ def _no_connection_churn(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def analyst(db: None) -> User:
-    org = Organisation.objects.create(name="Test Org")
+def default_org(db: None) -> Organisation:
+    """Reuse the default org for tenant isolation."""
+    name = getattr(settings, "AMALTHEA_DEFAULT_ORG_NAME", "Default")
+    return Organisation.objects.get_or_create(name=name)[0]
+
+
+@pytest.fixture
+def analyst(db: None, default_org: Organisation) -> User:
     return User.objects.create_user(
-        username="analyst", password="hunter2-correct", email="a@example.net", org=org
+        username="analyst", password="hunter2-correct", email="a@example.net", org=default_org
     )
 
 
@@ -98,13 +106,15 @@ def browser(analyst: User) -> Client:
     return client
 
 
-def _case(title: str) -> Case:
+def _case(title: str, org: Organisation = None) -> Case:
     """A case with a valid status, as in `test_ui_loop` — `Case.status` is a required FK."""
+    if org is None:
+        org, _ = Organisation.objects.get_or_create(name="Test Org")
     status = (
         CaseStatus.objects.filter(value="New").first()
         or CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
     )
-    return Case.objects.create(title=title, status=status)
+    return Case.objects.create(title=title, status=status, owner_org=org)
 
 
 def _room(case: Case, browser: Client) -> WebsocketCommunicator:
@@ -229,14 +239,14 @@ def test_the_scan_would_fail_a_call_site_reverted_to_a_direct_create(tmp_path: P
 # --- AC7.2 — the handshake ------------------------------------------------
 
 
-def test_an_anonymous_handshake_is_refused_with_4401(db: None) -> None:
+def test_an_anonymous_handshake_is_refused_with_4401(default_org: Organisation) -> None:
     """No session, no room (PLAN AC7.2 / brief 4).
 
     The publish afterwards is the real claim: a consumer that refused the handshake must also have
     stayed out of the group, or a bug that joins before authenticating would still look correct
     from the close code alone.
     """
-    case = _case("Unlisted")
+    case = _case("Unlisted", org=default_org)
 
     async def scenario() -> None:
         communicator = WebsocketCommunicator(application, f"/ws/case/{case.id}/")
@@ -261,7 +271,7 @@ def test_an_anonymous_handshake_is_refused_with_4401(db: None) -> None:
 
 
 def test_a_comment_reaches_two_tabs_and_the_htmx_append(
-    browser: Client, django_capture_on_commit_callbacks: object
+    browser: Client, analyst: User, django_capture_on_commit_callbacks: object
 ) -> None:
     """Two concurrent clients see a new comment without reloading (PLAN AC7.1 / brief T3).
 
@@ -269,7 +279,7 @@ def test_a_comment_reaches_two_tabs_and_the_htmx_append(
     that `data-event-id` is then asserted to be the same id both sockets deliver, which ties the
     HTTP append and the WebSocket append to one event rather than two similar ones.
     """
-    case = _case("Two tabs")
+    case = _case("Two tabs", org=analyst.org)
 
     def post_note() -> str:
         with django_capture_on_commit_callbacks(execute=True):  # type: ignore[operator]
@@ -307,7 +317,7 @@ def test_a_comment_reaches_two_tabs_and_the_htmx_append(
 
 
 def test_status_changes_and_automation_results_are_published(
-    browser: Client, django_capture_on_commit_callbacks: object
+    browser: Client, analyst: User, django_capture_on_commit_callbacks: object
 ) -> None:
     """The other two emitters of brief T3: the UI status form and the worker's `record_result`.
 
@@ -315,7 +325,7 @@ def test_status_changes_and_automation_results_are_published(
     in the Celery worker after the request that triggered the automation has gone away. If either
     bypassed the choke point the case would look idle while it was changing.
     """
-    case = _case("Changing")
+    case = _case("Changing", org=analyst.org)
     playbook = Playbook.objects.create(name="enrich", trigger_event="observable.created")
 
     def post_status() -> None:
@@ -358,13 +368,15 @@ def test_status_changes_and_automation_results_are_published(
 # --- AC7.3 — room isolation ----------------------------------------------
 
 
-def test_a_publish_never_reaches_another_cases_room(db: None, browser: Client) -> None:
+def test_a_publish_never_reaches_another_cases_room(
+    default_org: Organisation, browser: Client
+) -> None:
     """Case-scoped events never leak (PLAN AC7.3).
 
     Both sockets are authenticated and connected before the publish, so the only variable is which
     room the event was addressed to.
     """
-    case_a, case_b = _case("Alpha"), _case("Beta")
+    case_a, case_b = _case("Alpha", org=default_org), _case("Beta", org=default_org)
     event_id = "6b3a2a8e-6d1f-4d0a-9a4a-0d5f6b7c8d9e"
 
     async def scenario() -> None:
@@ -390,14 +402,14 @@ def test_a_publish_never_reaches_another_cases_room(db: None, browser: Client) -
 
 
 def test_sync_resumes_from_the_anchor_after_a_reconnect_without_duplicates(
-    db: None, browser: Client, django_capture_on_commit_callbacks: object
+    default_org: Organisation, browser: Client, django_capture_on_commit_callbacks: object
 ) -> None:
     """Reconnect + re-sync from the timeline, once, without repeats (PLAN AC7.4 / brief 5).
 
     The seeded rows deliberately share a timestamp on their last two entries, so the "exactly the
     third event" assertion is also the assertion that the keyset tie-breaks on `id`.
     """
-    case = _case("Resync")
+    case = _case("Resync", org=default_org)
     seeded = _seed_events(case)
 
     def add_live_note() -> str:
@@ -450,14 +462,14 @@ def test_sync_resumes_from_the_anchor_after_a_reconnect_without_duplicates(
 
 
 def test_client_messages_outside_the_protocol_are_refused_with_4000(
-    db: None, browser: Client
+    default_org: Organisation, browser: Client
 ) -> None:
     """Unknown shapes are closed, not echoed (brief T2).
 
     The echo this consumer used to reply with would make a client bug look like a working protocol,
     so every refusal is asserted as a close code rather than as "the wrong thing came back".
     """
-    case = _case("Strict room")
+    case = _case("Strict room", org=default_org)
 
     async def expect_refusal(payload: dict[str, Any] | str) -> None:
         communicator = _room(case, browser)
@@ -484,13 +496,15 @@ def test_client_messages_outside_the_protocol_are_refused_with_4000(
 # --- T4 — the page wires the client --------------------------------------
 
 
-def test_the_case_page_wires_the_live_client_and_the_htmx_append(browser: Client) -> None:
+def test_the_case_page_wires_the_live_client_and_the_htmx_append(
+    browser: Client, analyst: User
+) -> None:
     """The page the two tabs load: script, socket URL and the HTMX append attributes (brief T4).
 
     The URL is asserted as a full `ws://…/ws/case/<uuid>/` rather than a substring: a template that
     dropped the scheme or the case id would still contain `ws/case/` and pass.
     """
-    case = _case("Wired")
+    case = _case("Wired", org=analyst.org)
     response = browser.get(reverse("ui-case-detail", kwargs={"case_id": case.id}))
     assert response.status_code == 200
     html = response.content.decode()
@@ -511,12 +525,163 @@ def test_the_case_page_wires_the_live_client_and_the_htmx_append(browser: Client
     assert action.group(1) == hx_post.group(1)
 
 
-def test_a_plain_browser_still_gets_the_redirect_fallback(browser: Client) -> None:
+def test_a_plain_browser_still_gets_the_redirect_fallback(browser: Client, analyst: User) -> None:
     """No `HX-Request` → the pre-HTMX behaviour, byte for byte (brief 6)."""
-    case = _case("No JS")
+    case = _case("No JS", org=analyst.org)
     response = browser.post(
         reverse("ui-case-comment", kwargs={"case_id": case.number}), {"body": "from a form"}
     )
     assert response.status_code == 302
     assert response["Location"] == reverse("ui-case-detail", kwargs={"case_id": case.number})
     assert case.timeline_events.filter(kind="comment").count() == 1
+
+
+# --- T5 — tenant isolation on the case room (PLAN §9 P5) ------------------
+#
+# The HTTP boundary is scoped by `identity.scoping.resolve_case`; the WebSocket handshake must
+# consult *the same* helper before `accept()`, or a tenant could read another tenant's live ledger
+# by guessing a UUID. `4404` is deliberately the same close code for a cross-org case and for a
+# non-existent one: a distinct code would turn the handshake into an existence oracle.
+
+
+def _org(name: str) -> Organisation:
+    return Organisation.objects.create(name=name)
+
+
+def _ws_browser(username: str, org: Organisation, role: str = "analyst") -> Client:
+    """A logged-in client whose session cookie the ASGI stack can read (see `_room`)."""
+    User.objects.create_user(
+        username=username,
+        password="hunter2-correct",
+        email=f"{username}@example.net",
+        org=org,
+        role=role,
+    )
+    client = Client()
+    assert client.login(username=username, password="hunter2-correct")
+    return client
+
+
+def _room_for(case_id: object, browser: Client) -> WebsocketCommunicator:
+    """A socket for an arbitrary case id, carrying `browser`'s real session cookie."""
+    cookie = browser.cookies["sessionid"].OutputString()
+    return WebsocketCommunicator(
+        application,
+        f"/ws/case/{case_id}/",
+        headers=[(b"cookie", cookie.encode("ascii"))],
+    )
+
+
+def test_t5a_cross_org_socket_is_refused_4404_and_receives_no_events(
+    default_org: Organisation,
+) -> None:
+    """A user in org B cannot join org A's room, and learns nothing after the refusal.
+
+    The `receive_nothing` after publishing is the load-bearing half: a consumer that closed the
+    handshake but still called `group_add` would pass a close-code-only assertion while leaking
+    every subsequent timeline event to the refused tenant.
+    """
+    org_b = _org("Org B")
+    case_a = _case("Org A secret", org=default_org)
+    foreign = _ws_browser("org-b-analyst", org_b)
+    event_id = "11111111-1111-4111-8111-111111111111"
+
+    async def scenario() -> None:
+        cross = _room_for(case_a.id, foreign)
+        connected, close_code = await cross.connect(timeout=5)
+        assert connected is False, "a cross-org socket was accepted"
+        assert close_code == FORBIDDEN, f"refused with {close_code}, expected 4404"
+
+        await _publish(str(case_a.id), {"id": event_id, "title": "leaked"})
+        assert await cross.receive_nothing(timeout=0.5), (
+            "the refused cross-org socket was still subscribed to the room"
+        )
+
+        await cross.disconnect()
+        await cross.wait(timeout=5)
+
+    async_to_sync(scenario)()
+
+
+def test_t5a_non_existent_case_uses_the_same_4404_no_existence_oracle(
+    default_org: Organisation,
+) -> None:
+    """Cross-org and non-existent cases are indistinguishable at the handshake (no oracle)."""
+    org_b = _org("Org B")
+    case_a = _case("Org A secret", org=default_org)
+    foreign = _ws_browser("org-b-prober", org_b)
+
+    async def scenario() -> None:
+        missing = _room_for(uuid4(), foreign)
+        missing_connected, missing_code = await missing.connect(timeout=5)
+
+        cross = _room_for(case_a.id, foreign)
+        cross_connected, cross_code = await cross.connect(timeout=5)
+
+        assert missing_connected is False and cross_connected is False
+        assert missing_code == cross_code == FORBIDDEN, (
+            f"existence oracle: missing={missing_code}, cross={cross_code}"
+        )
+
+        for communicator in (missing, cross):
+            await communicator.disconnect()
+            await communicator.wait(timeout=5)
+
+    async_to_sync(scenario)()
+
+
+def test_t5b_owner_org_stream_still_handshakes_syncs_and_relays(
+    browser: Client, analyst: User
+) -> None:
+    """The owner-org path is unchanged: accept, sync the ledger, relay a live event (T5-b)."""
+    case = _case("Owner stream", org=analyst.org)
+    seeded = _seed_events(case)
+    event_id = "22222222-2222-4222-8222-222222222222"
+
+    async def scenario() -> None:
+        communicator = _room(case, browser)
+        connected, close_code = await communicator.connect(timeout=5)
+        assert connected is True, f"owner-org socket refused with {close_code}"
+
+        await communicator.send_json_to({"type": "sync", "after": None})
+        payload = await communicator.receive_json_from(timeout=5)
+        assert payload["type"] == "timeline"
+        assert _ids(payload) == [str(event.id) for event in seeded]
+
+        await _publish(str(case.id), {"id": event_id, "title": "live from owner"})
+        live = await communicator.receive_json_from(timeout=5)
+        assert live["type"] == "event"
+        assert live["payload"]["event"]["id"] == event_id
+
+        await communicator.disconnect()
+        await communicator.wait(timeout=5)
+
+    async_to_sync(scenario)()
+
+
+def test_t5c_anonymous_4401_while_read_share_and_superadmin_may_subscribe(
+    default_org: Organisation,
+) -> None:
+    """Anonymous stays 4401; a read-share holder and a superAdmin are accepted (T5-c)."""
+    case = _case("Shared room", org=default_org)
+    org_b = _org("Org B")
+    Share.objects.create(case=case, organisation=org_b, permissions={"read": True})
+    reader = _ws_browser("org-b-reader", org_b)
+    superadmin = _ws_browser("org-b-super", org_b, role="superAdmin")
+
+    async def scenario() -> None:
+        anonymous = WebsocketCommunicator(application, f"/ws/case/{case.id}/")
+        connected, close_code = await anonymous.connect(timeout=5)
+        assert connected is False, "an anonymous socket was accepted"
+        assert close_code == UNAUTHENTICATED, f"refused with {close_code}, expected 4401"
+        await anonymous.disconnect()
+        await anonymous.wait(timeout=5)
+
+        for socket_browser in (reader, superadmin):
+            communicator = _room_for(case.id, socket_browser)
+            accepted, refused_code = await communicator.connect(timeout=5)
+            assert accepted is True, f"expected accept, got {refused_code}"
+            await communicator.disconnect()
+            await communicator.wait(timeout=5)
+
+    async_to_sync(scenario)()

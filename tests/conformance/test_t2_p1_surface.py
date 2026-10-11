@@ -32,6 +32,31 @@ from observables.models import ObservableType
 
 from ._t1_seed import _alert, _case, _observable
 
+
+@pytest.fixture
+def org(db: None) -> Organisation:
+    return Organisation.objects.get_or_create(name="Test Org")[0]
+
+
+@pytest.fixture
+def analyst(org: Organisation) -> User:
+    return User.objects.create_user(
+        username="analyst", login="analyst", password="hunter2", email="a@example.net", org=org
+    )
+
+
+@pytest.fixture
+def api(analyst: User) -> APIClient:
+    client = APIClient()
+    client.force_authenticate(user=analyst)
+    return client
+
+
+@pytest.fixture
+def anonymous_api() -> APIClient:
+    return APIClient()
+
+
 # --- AC-P1-1 — identity ----------------------------------------------------
 
 
@@ -123,8 +148,8 @@ def test_observable_type_crud_and_not_shadowed_by_observable_detail(
     assert not ObservableType.objects.filter(name="sha256").exists()
 
 
-def test_observable_type_in_use_is_a_400_not_a_cascade(api: APIClient, db: None) -> None:
-    _observable("10.20.30.40")  # creates type "ip" with one observable behind it
+def test_observable_type_in_use_is_a_400_not_a_cascade(api: APIClient, org: Organisation) -> None:
+    _observable("10.20.30.40", org=org)  # creates type "ip" with one observable behind it
     response = api.delete("/api/v1/observable/type/ip")
     assert response.status_code == 400, response.content
     assert response.json()["type"] == "BadRequest"
@@ -174,7 +199,7 @@ def test_alert_status_lists_and_refuses_an_unknown_stage(api: APIClient, db: Non
 # --- AC-P1-4 / AC-P1-5 — tags and links ------------------------------------
 
 
-def test_tag_crud_and_case_alert_observable_links(api: APIClient, db: None) -> None:
+def test_tag_crud_and_case_alert_observable_links(api: APIClient, org: Organisation) -> None:
     created = api.post("/api/v1/tag", {"name": "ransomware", "colour": "#e8560a"}, format="json")
     assert created.status_code == 201, created.content
     tag = created.json()
@@ -183,7 +208,7 @@ def test_tag_crud_and_case_alert_observable_links(api: APIClient, db: None) -> N
     assert tag["predicate"] == "ransomware"
     assert tag["colour"] == "#e8560a"
 
-    case = _case("Tagged case")
+    case = _case("Tagged case", org=org)
     linked = api.post(
         f"/api/v1/case/{case.id}/tag", {"tags": ["ransomware", "phishing"]}, format="json"
     )
@@ -191,14 +216,14 @@ def test_tag_crud_and_case_alert_observable_links(api: APIClient, db: None) -> N
     assert {entry["predicate"] for entry in linked.json()} == {"ransomware", "phishing"}
     assert CaseTagLink.objects.filter(case=case).count() == 2
 
-    observable = _observable("203.0.113.55")
+    observable = _observable("203.0.113.55", org=org)
     obs_link = api.post(
         f"/api/v1/observable/{observable.id}/tag", {"tags": ["phishing"]}, format="json"
     )
     assert obs_link.status_code == 200, obs_link.content
     assert {entry["predicate"] for entry in obs_link.json()} == {"phishing"}
 
-    alert = _alert("Tagged alert", ref="tag-link-ref")
+    alert = _alert("Tagged alert", ref="tag-link-ref", org=org)
     alert_link = api.post(f"/api/v1/alert/{alert.id}/tag", {"tags": ["phishing"]}, format="json")
     assert alert_link.status_code == 200, alert_link.content
     assert {entry["predicate"] for entry in alert_link.json()} == {"phishing"}
@@ -216,8 +241,8 @@ def test_tag_crud_and_case_alert_observable_links(api: APIClient, db: None) -> N
     assert Tag.objects.filter(name="ransomware").exists(), "un-link must not delete the tag"
 
 
-def test_tag_link_requires_a_tags_body(api: APIClient, db: None) -> None:
-    case = _case("Tagless case")
+def test_tag_link_requires_a_tags_body(api: APIClient, org: Organisation) -> None:
+    case = _case("Tagless case", org=org)
     response = api.post(f"/api/v1/case/{case.id}/tag", {}, format="json")
     assert response.status_code == 400, response.content
     assert response.json()["fields"] == {"tags": ["required"]}
@@ -273,7 +298,7 @@ def test_the_new_surface_requires_authentication(path: str, anonymous_api: APICl
     assert response.status_code == 401, (path, response.status_code, response.content)
 
 
-def test_slashless_and_slashed_body_routes_both_resolve(api: APIClient, db: None) -> None:
+def test_slashless_and_slashed_body_routes_both_resolve(api: APIClient, org: Organisation) -> None:
     """`APPEND_SLASH` would 301 a POST and drop its body, so both spellings must be explicit."""
     slashless = api.post("/api/v1/tag", {"name": "one"}, format="json")
     slashed = api.post("/api/v1/tag/", {"name": "two"}, format="json")

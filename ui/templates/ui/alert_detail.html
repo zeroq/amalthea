@@ -4,6 +4,12 @@
 {% block heading %}
   <span class="sev sev-{{ alert.severity|sev_class }}">{{ alert.severity|sev_label }}</span>
   {{ alert.title }}
+  {% if is_cross_org %}
+  <span class="badge badge-cross-org" title="This alert belongs to another organisation">
+    <i class="fa-solid fa-building-lock" aria-hidden="true"></i>
+    Cross-org ({{ alert.owner_org.name }})
+  </span>
+  {% endif %}
 {% endblock %}
 
 {% block actions %}
@@ -28,6 +34,7 @@
       <dt>Seen</dt><dd class="mono">{{ alert.date|date:"Y-m-d H:i:s" }}</dd>
       <dt>Ingested</dt><dd class="mono">{{ alert.created_at|date:"Y-m-d H:i:s" }}</dd>
       <dt>TLP / PAP</dt><dd>{{ alert.tlp }} / {{ alert.pap }}</dd>
+      <dt>Owner org</dt><dd>{{ alert.owner_org.name }}</dd>
     </dl>
 
     {% if alert.summary or alert.description %}

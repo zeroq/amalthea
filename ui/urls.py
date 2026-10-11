@@ -36,6 +36,12 @@ urlpatterns = [
     ),
     path("cases/<str:case_id>/template", views.case_apply_template, name="ui-case-apply-template"),
     path("cases/<str:case_id>/merge", views.case_merge, name="ui-case-merge"),
+    path("cases/<str:case_id>/shares", views.case_share_list, name="ui-case-share-list"),
+    path(
+        "cases/<str:case_id>/shares/<uuid:share_id>/revoke",
+        views.case_share_revoke,
+        name="ui-case-share-revoke",
+    ),
     path("cases/<str:case_id>/bulk", views.case_bulk, name="ui-case-bulk"),
     path(
         "cases/<str:case_id>/attachment", views.case_attachment_list, name="ui-case-attachment-list"
@@ -126,4 +132,27 @@ urlpatterns = [
     # Auth
     path("login", views.SignInView.as_view(), name="login"),
     path("logout", views.sign_out, name="logout"),
+    # Settings (superAdmin only)
+    path("settings/organisations", views.settings_organisations, name="ui-settings-organisations"),
+    path(
+        "settings/organisations/<uuid:org_id>/edit",
+        views.settings_organisations_edit,
+        name="ui-settings-organisations-edit",
+    ),
+    path(
+        "settings/organisations/<uuid:org_id>/delete",
+        views.settings_organisations_delete,
+        name="ui-settings-organisations-delete",
+    ),
+    path("settings/users", views.settings_users, name="ui-settings-users"),
+    path(
+        "settings/users/<uuid:user_id>/edit",
+        views.settings_users_edit,
+        name="ui-settings-users-edit",
+    ),
+    path(
+        "settings/users/<uuid:user_id>/delete",
+        views.settings_users_delete,
+        name="ui-settings-users-delete",
+    ),
 ]

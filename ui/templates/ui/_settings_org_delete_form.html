@@ -1,0 +1,38 @@
+{% comment %}
+Server-rendered body for the "Delete organisation" modal.
+
+Blockers (`org.is_blocked` / `org.blockers_text`) and the member choice are rendered
+server-side — no innerHTML sink (F3) and no reliance on inline script (F10). The
+reassign radio is checked by default and the target select is enabled, so the module
+works with JS disabled; modal.js only hides the select when "delete" is chosen, and
+disables the confirm button when [data-modal-blocked] is present.
+{% endcomment %}
+{% if org.is_blocked %}
+<div class="blockers-warning" role="alert" data-modal-blocked="Blocked by tenant data">
+  <strong>Cannot delete:</strong> this organisation owns tenant data ({{ org.blockers_text }}).
+  Move or delete the data first.
+</div>
+{% endif %}
+
+{% if org.members_count %}
+<fieldset class="member-choice">
+  <legend>This organisation has {{ org.members_count }} member{{ org.members_count|pluralize }}. Choose what happens to them:</legend>
+  <label class="choice">
+    <input type="radio" name="members" value="reassign" checked form="{{ form_id }}">
+    Reassign members to another organisation
+  </label>
+  <label class="choice">
+    <input type="radio" name="members" value="delete" form="{{ form_id }}">
+    Delete member accounts with this organisation
+  </label>
+  <div class="target-org" data-target-org>
+    <label for="target-org-{{ org.id }}">Target organisation</label>
+    <select id="target-org-{{ org.id }}" name="target_org" form="{{ form_id }}">
+      <option value="">— select —</option>
+      {% for other in organisations %}{% if other.id != org.id %}
+      <option value="{{ other.id }}">{{ other.name }}</option>
+      {% endif %}{% endfor %}
+    </select>
+  </div>
+</fieldset>
+{% endif %}

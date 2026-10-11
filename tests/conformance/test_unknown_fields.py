@@ -201,14 +201,15 @@ UNKNOWN_ONLY: list[Probe] = [
 
 
 @pytest.fixture
-def ids(db: None) -> dict[str, str]:
-    case = _case("Unknown-field case")
+def ids(db: None, analyst: User) -> dict[str, str]:
+    org = analyst.org
+    case = _case("Unknown-field case", org=org)
     return {
         "case": str(case.id),
-        "alert": str(_alert("Unknown-field alert", ref="unknown-ref", case=case).id),
+        "alert": str(_alert("Unknown-field alert", ref="unknown-ref", case=case, org=org).id),
         "task": str(_task(case).id),
         "event": str(_event(case).id),
-        "observable": str(_observable("10.0.0.11").id),
+        "observable": str(_observable("10.0.0.11", org=org).id),
     }
 
 

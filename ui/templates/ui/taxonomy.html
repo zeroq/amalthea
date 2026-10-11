@@ -10,7 +10,7 @@
       <h3>Case Statuses</h3>
       {% if case_statuses %}
       <div class="table-wrap">
-      <table class="grid">
+      <table class="data-table">
         <caption class="sr-only">Case statuses</caption>
         <thead>
           <tr><th scope="col">Value</th><th scope="col">Stage</th><th scope="col">Order</th><th scope="col">Hidden</th></tr>
@@ -36,7 +36,7 @@
       <h3>Alert Statuses</h3>
       {% if alert_statuses %}
       <div class="table-wrap">
-      <table class="grid">
+      <table class="data-table">
         <caption class="sr-only">Alert statuses</caption>
         <thead>
           <tr><th scope="col">Value</th><th scope="col">Stage</th><th scope="col">Order</th><th scope="col">Hidden</th></tr>
@@ -64,7 +64,7 @@
       <h3>Observable Types</h3>
       {% if observable_types %}
       <div class="table-wrap">
-      <table class="grid">
+      <table class="data-table">
         <caption class="sr-only">Observable types</caption>
         <thead>
           <tr><th scope="col">Name</th><th scope="col">Case Sensitive</th><th scope="col">Attachment</th></tr>
@@ -89,7 +89,7 @@
       <h3>Case Templates</h3>
       {% if case_templates %}
       <div class="table-wrap">
-      <table class="grid">
+      <table class="data-table">
         <caption class="sr-only">Case templates</caption>
         <thead>
           <tr><th scope="col">Name</th><th scope="col">Display Name</th><th scope="col">Severity</th></tr>
@@ -116,7 +116,7 @@
       <h3>Tags</h3>
       {% if tags %}
       <div class="table-wrap">
-      <table class="grid">
+      <table class="data-table">
         <caption class="sr-only">Tags</caption>
         <thead>
           <tr><th scope="col">Name</th><th scope="col">Cases</th><th scope="col">Alerts</th><th scope="col">Observables</th></tr>
@@ -142,7 +142,7 @@
       <h3>TTPs (ATT&CK)</h3>
       {% if ttps %}
       <div class="table-wrap">
-      <table class="grid">
+      <table class="data-table">
         <caption class="sr-only">TTPs (ATT&CK)</caption>
         <thead>
           <tr><th scope="col">Name</th><th scope="col">Code</th><th scope="col">Tactic</th></tr>

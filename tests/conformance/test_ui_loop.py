@@ -38,7 +38,7 @@ PHISHING = {
 
 @pytest.fixture
 def analyst(db: None) -> User:
-    org = Organisation.objects.create(name="Test Org")
+    org, _ = Organisation.objects.get_or_create(name="Default")
     user = User.objects.create_user(
         username="analyst", password="hunter2-correct", email="a@example.net", org=org
     )
@@ -80,24 +80,36 @@ def mail_playbook(db: None) -> Playbook:
     )[0]
 
 
-def _case(title: str, **kwargs) -> Case:
+def _case(title: str, org=None, **kwargs) -> Case:
     """`Case.status` is a required FK (ADR-002 §D4: statuses are domain data, seeded by migration
     0003), so a bare `Case.objects.create(title=...)` is not a valid case. Every test that wants a
     case goes through here so the fixture cannot silently drift from the schema."""
     from cases.models import CaseStatus
+    from identity.models import Organisation
+
+    if org is None:
+        org, _ = Organisation.objects.get_or_create(name="Default")
 
     status = (
         CaseStatus.objects.filter(value="New").first()
         or CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
     )
-    return Case.objects.create(title=title, status=status, **kwargs)
+    return Case.objects.create(title=title, status=status, owner_org=org, **kwargs)
 
 
 def _ingest(source: IngestionSource) -> Alert:
+    from identity.models import IngestionToken, Organisation
+
+    org, _ = Organisation.objects.get_or_create(name="Default")
+    _token, plaintext = IngestionToken.create_token(
+        source=source, organisation=org, name="test token"
+    )
+
     response = Client().post(
         reverse("alerts-webhook", kwargs={"source_id": source.slug}),
         data=json.dumps(PHISHING),
         content_type="application/json",
+        HTTP_AUTHORIZATION=f"Bearer {plaintext}",
     )
     assert response.status_code == 201, response.content
     return Alert.objects.get(pk=response.json()["_id"])
@@ -131,7 +143,10 @@ def test_every_ui_page_requires_a_session(db: None) -> None:
 
 
 def test_an_anonymous_post_cannot_escalate(db: None) -> None:
-    alert = _create_alert_directly()
+    from identity.models import Organisation
+
+    org, _ = Organisation.objects.get_or_create(name="Default")
+    alert = _create_alert_directly(org=org)
     response = Client().post(reverse("ui-alert-escalate", kwargs={"alert_id": alert.id}), {})
     assert response.status_code == 302
     assert Case.objects.count() == 0, "an anonymous POST created a case"
@@ -143,7 +158,10 @@ def test_a_get_cannot_mutate(db: None) -> None:
     Asserted per-view because a `@require_GET` on a mutating view is a CSRF-adjacent hole: a link, a
     prefetch or an image tag would perform the action.
     """
-    alert = _create_alert_directly()
+    from identity.models import Organisation
+
+    org, _ = Organisation.objects.get_or_create(name="Default")
+    alert = _create_alert_directly(org=org)
     user = User.objects.create_user(username="u1", password="pw-long-enough")
     client = Client()
     client.force_login(user)
@@ -155,9 +173,9 @@ def test_a_get_cannot_mutate(db: None) -> None:
     assert Case.objects.count() == 0
 
 
-def test_a_post_without_a_csrf_token_is_refused(browser: Client) -> None:
+def test_a_post_without_a_csrf_token_is_refused(browser: Client, analyst: User) -> None:
     """`Client(enforce_csrf_checks=True)` makes the missing token a real 403."""
-    alert = _create_alert_directly()
+    alert = _create_alert_directly(org=analyst.org)
     strict = Client(enforce_csrf_checks=True)
     strict.login(username="analyst", password="hunter2-correct")
 
@@ -563,9 +581,13 @@ def test_severity_is_shown_as_text_not_colour_alone(
     assert "sev-high" in body, "the severity class is missing"
 
 
-def _create_alert_directly() -> Alert:
+def _create_alert_directly(org=None) -> Alert:
     """An alert without going through the webhook, for tests about the alert pages themselves."""
     from alerts.models import AlertStatus
+    from identity.models import Organisation
+
+    if org is None:
+        org, _ = Organisation.objects.get_or_create(name="Default")
 
     status, _ = AlertStatus.objects.get_or_create(
         value="New", defaults={"stage": "New", "order": 1}
@@ -578,4 +600,5 @@ def _create_alert_directly() -> Alert:
         severity=2,
         status=status,
         raw_payload={"title": "Directly created"},
+        owner_org=org,
     )

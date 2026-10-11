@@ -50,8 +50,11 @@ M5 (reverse-direction indexes).
 from __future__ import annotations
 
 import pytest
+from django.conf import settings
 from django.db import connection, models
 from django.db.models.deletion import ProtectedError
+
+from identity.models import Organisation
 
 from ._schema import foreign_keys, own_models
 
@@ -99,7 +102,8 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     ("cases", "Case", "status"): models.PROTECT,
     # An analyst leaving the organisation must not delete the cases they worked.
     ("cases", "Case", "assignee"): models.SET_NULL,
-    ("cases", "Case", "owner_org"): models.SET_NULL,
+    # PROTECT: a tenant that still owns cases cannot be deleted out from under them (ADR-004).
+    ("cases", "Case", "owner_org"): models.PROTECT,
     # ---- Task: AGENTS.md §3 "Case 1 —— 0..* Task" ---------------------------------------
     # A task with a NULL case is not a lower-cardinality relationship, it is an orphan.
     ("cases", "Task", "case"): models.CASCADE,
@@ -149,7 +153,8 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     # that produced it, they go back to the triage queue.
     ("alerts", "Alert", "case"): models.SET_NULL,
     ("alerts", "Alert", "assignee"): models.SET_NULL,
-    ("alerts", "Alert", "owner_org"): models.SET_NULL,
+    # PROTECT: a tenant that still owns alerts cannot be deleted out from under them (ADR-004).
+    ("alerts", "Alert", "owner_org"): models.PROTECT,
     # Retiring a feed configuration must not rewrite history by deleting what it received.
     ("alerts", "Alert", "ingestion_source"): models.SET_NULL,
     ("alerts", "AlertCustomFieldValue", "alert"): models.CASCADE,
@@ -160,6 +165,8 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     # ---- Observable: ADR-002 §D5, globally deduplicated, never case-owned ---------------
     # PROTECT: deleting the type would silently re-type every artifact filed under it.
     ("observables", "Observable", "data_type"): models.PROTECT,
+    # PROTECT on owner_org: a tenant with observables cannot be deleted (ADR-004).
+    ("observables", "Observable", "owner_org"): models.PROTECT,
     # ---- AutomationRun: the Module D ledger -------------------------------------------
     ("automation", "AutomationRun", "playbook"): models.PROTECT,
     # A finished (or failed) run is audit evidence; it outlives the case that triggered it.
@@ -171,6 +178,14 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     # CASCADE, deliberately not SET_NULL: a bearer token whose owner no longer exists is a
     # credential nobody can revoke.
     ("identity", "ApiKey", "user"): models.CASCADE,
+    # IngestionToken: binds a source to an org; PROTECT on org so a tenant with tokens
+    # cannot be deleted, CASCADE on source so retiring the source removes its tokens.
+    ("identity", "IngestionToken", "organisation"): models.PROTECT,
+    ("identity", "IngestionToken", "source"): models.CASCADE,
+    # AuditLog: immutable trail; all org/user FKs are SET_NULL so the log survives deletion.
+    ("identity", "AuditLog", "actor"): models.SET_NULL,
+    ("identity", "AuditLog", "actor_org"): models.SET_NULL,
+    ("identity", "AuditLog", "target_org"): models.SET_NULL,
     # ---- M2M join rows (declared explicitly; see REVIEW L-2) ----------------------------
     # These exist only to carry the M2M edge, so CASCADE is the only correct answer in every
     # direction: the row has no independent meaning. Deleting the parent must delete the edge,
@@ -223,11 +238,11 @@ def test_fk_audit_covers_the_whole_model_inventory() -> None:
         f"undeclared={sorted(set(actual) - set(EXPECTED_ON_DELETE))}, "
         f"stale={sorted(set(EXPECTED_ON_DELETE) - set(actual))}"
     )
-    # 51 = the 48 pre-P5 FKs plus the three T2 P5 procedure FKs (case, alert, ttp). `CaseTemplate`
-    # contributes none. Kept as a literal on purpose: it is a tripwire for a model silently
+    # 57 = 51 previous + 6 new (IngestionToken x2, AuditLog x3, Observable.owner_org).
+    # Kept as a literal on purpose: it is a tripwire for a model silently
     # dropping out of `OWN_APPS`, and `EXPECTED_ON_DELETE` already pins the exact set, so a bump
     # here is always a real change.
-    assert len(actual) == 51, f"expected the full FK set, found only {len(actual)}"
+    assert len(actual) == 57, f"expected the full FK set, found only {len(actual)}"
 
 
 @pytest.mark.django_db
@@ -288,6 +303,7 @@ def test_no_cascade_is_reachable_from_a_longer_lived_row() -> None:
         ("alerts", "AlertObservable", "alert"),
         ("alerts", "AlertObservable", "observable"),
         ("identity", "ApiKey", "user"),
+        ("identity", "IngestionToken", "source"),
         # M2M join rows (L-2): pure edges with no independent lifetime, so no parent can
         # outlive them in either direction. Same reasoning as Task/TimelineEvent, but listed
         # separately because these were introduced after the original CASCADE review.
@@ -321,7 +337,14 @@ def test_no_cascade_is_reachable_from_a_longer_lived_row() -> None:
 
 
 @pytest.fixture
-def vocab() -> dict[str, object]:
+def default_org(db):
+    """Reuse the default org for tenant isolation."""
+    name = getattr(settings, "AMALTHEA_DEFAULT_ORG_NAME", "Default")
+    return Organisation.objects.get_or_create(name=name)[0]
+
+
+@pytest.fixture
+def vocab(default_org) -> dict[str, object]:
     from alerts.models import AlertStatus
     from cases.models import CaseStatus, CustomField
     from observables.models import ObservableType
@@ -341,7 +364,9 @@ def vocab() -> dict[str, object]:
 
 
 @pytest.mark.django_db
-def test_delete_semantics_deleting_a_case_unlinks_alerts_and_automation_runs(vocab) -> None:
+def test_delete_semantics_deleting_a_case_unlinks_alerts_and_automation_runs(
+    vocab, default_org
+) -> None:
     """`Alert.case` is SET_NULL (C-2): deleting a Case must not destroy its alerts.
 
     The mutation round 2 made and the suite accepted was `SET_NULL` → `CASCADE` here. With
@@ -352,9 +377,15 @@ def test_delete_semantics_deleting_a_case_unlinks_alerts_and_automation_runs(voc
     from automation.models import AutomationRun, Playbook
     from cases.models import Case
 
-    case = Case.objects.create(title="victim", status=vocab["case_status"])
+    case = Case.objects.create(title="victim", status=vocab["case_status"], owner_org=default_org)
     alert = Alert.objects.create(
-        type="t", source="s", source_ref="r1", title="a", status=vocab["alert_status"], case=case
+        type="t",
+        source="s",
+        source_ref="r1",
+        title="a",
+        status=vocab["alert_status"],
+        case=case,
+        owner_org=default_org,
     )
     playbook = Playbook.objects.create(name="enrich", trigger_event="alert.created")
     run = AutomationRun.objects.create(
@@ -372,7 +403,9 @@ def test_delete_semantics_deleting_a_case_unlinks_alerts_and_automation_runs(voc
 
 
 @pytest.mark.django_db
-def test_delete_semantics_deleting_a_case_cascades_to_tasks_and_the_ledger(vocab) -> None:
+def test_delete_semantics_deleting_a_case_cascades_to_tasks_and_the_ledger(
+    vocab, default_org
+) -> None:
     """The other half of C-2: `Task.case` CASCADE → SET_NULL orphans tasks.
 
     AGENTS.md §3 declares `Case 1 —— 0..* Task`. A task with `case_id IS NULL` is not a
@@ -380,7 +413,7 @@ def test_delete_semantics_deleting_a_case_cascades_to_tasks_and_the_ledger(vocab
     """
     from cases.models import Case, Task, TimelineEvent
 
-    case = Case.objects.create(title="victim", status=vocab["case_status"])
+    case = Case.objects.create(title="victim", status=vocab["case_status"], owner_org=default_org)
     task = Task.objects.create(case=case, title="contain")
     event = TimelineEvent.objects.create(case=case, title="analyst note", date=case.start_date)
 
@@ -391,7 +424,7 @@ def test_delete_semantics_deleting_a_case_cascades_to_tasks_and_the_ledger(vocab
 
 
 @pytest.mark.django_db
-def test_delete_semantics_deleting_a_user_unlinks_their_work(vocab) -> None:
+def test_delete_semantics_deleting_a_user_unlinks_their_work(vocab, default_org) -> None:
     """`Case.assignee` / `Alert.assignee` are SET_NULL — the opposite of C-2's mutation.
 
     Round 2 also flipped `Case.assignee` to CASCADE with a green suite, which would let one
@@ -401,8 +434,10 @@ def test_delete_semantics_deleting_a_user_unlinks_their_work(vocab) -> None:
     from cases.models import Case
     from identity.models import ApiKey, User
 
-    analyst = User.objects.create(username="ada")
-    case = Case.objects.create(title="mine", status=vocab["case_status"], assignee=analyst)
+    analyst = User.objects.create(username="ada", org=default_org)
+    case = Case.objects.create(
+        title="mine", status=vocab["case_status"], assignee=analyst, owner_org=default_org
+    )
     alert = Alert.objects.create(
         type="t",
         source="s",
@@ -410,6 +445,7 @@ def test_delete_semantics_deleting_a_user_unlinks_their_work(vocab) -> None:
         title="a",
         status=vocab["alert_status"],
         assignee=analyst,
+        owner_org=default_org,
     )
     key = ApiKey.objects.create(user=analyst, prefix="p1234567", key_hash="x")
 
@@ -428,7 +464,9 @@ def test_delete_semantics_deleting_a_user_unlinks_their_work(vocab) -> None:
 @pytest.mark.parametrize(
     "delete_target", ["case_status", "alert_status", "observable_type", "playbook"]
 )
-def test_delete_semantics_vocabulary_rows_are_protected(delete_target: str, vocab) -> None:
+def test_delete_semantics_vocabulary_rows_are_protected(
+    delete_target: str, vocab, default_org
+) -> None:
     """PROTECT where a live row points at the target.
 
     Without it, deleting one `ObservableType` row silently re-files every artifact of that
@@ -441,24 +479,32 @@ def test_delete_semantics_vocabulary_rows_are_protected(delete_target: str, voca
 
     if delete_target == "playbook":
         playbook = Playbook.objects.create(name="enrich", trigger_event="alert.created")
-        case = Case.objects.create(title="c", status=vocab["case_status"])
+        case = Case.objects.create(title="c", status=vocab["case_status"], owner_org=default_org)
         AutomationRun.objects.create(
             case=case, playbook=playbook, playbook_name="enrich", idempotency_key="k2"
         )
         target: object = playbook
     elif delete_target == "case_status":
-        case = Case.objects.create(title="c", status=vocab["case_status"])
+        case = Case.objects.create(title="c", status=vocab["case_status"], owner_org=default_org)
         target = case.status
     elif delete_target == "alert_status":
         from alerts.models import Alert
 
         alert = Alert.objects.create(
-            type="t", source="s", source_ref="r1", title="a", status=vocab["alert_status"]
+            type="t",
+            source="s",
+            source_ref="r1",
+            title="a",
+            status=vocab["alert_status"],
+            owner_org=default_org,
         )
         target = alert.status
     else:
         Observable.objects.create(
-            data_type=vocab["observable_type"], data="1.2.3.4", normalized_data="1.2.3.4"
+            data_type=vocab["observable_type"],
+            data="1.2.3.4",
+            normalized_data="1.2.3.4",
+            owner_org=default_org,
         )
         target = vocab["observable_type"]
 
@@ -467,11 +513,13 @@ def test_delete_semantics_vocabulary_rows_are_protected(delete_target: str, voca
 
 
 @pytest.mark.django_db
-def test_delete_semantics_deleting_a_custom_field_removes_only_its_values(vocab) -> None:
+def test_delete_semantics_deleting_a_custom_field_removes_only_its_values(
+    vocab, default_org
+) -> None:
     """`custom_field` CASCADE: a definition owns its values, and nothing else."""
     from cases.models import Case, CaseCustomFieldValue
 
-    case = Case.objects.create(title="c", status=vocab["case_status"])
+    case = Case.objects.create(title="c", status=vocab["case_status"], owner_org=default_org)
     value = CaseCustomFieldValue.objects.create(
         case=case, custom_field=vocab["custom_field"], value="High"
     )
@@ -483,15 +531,20 @@ def test_delete_semantics_deleting_a_custom_field_removes_only_its_values(vocab)
 
 
 @pytest.mark.django_db
-def test_delete_semantics_deleting_an_observable_removes_links_but_keeps_runs(vocab) -> None:
+def test_delete_semantics_deleting_an_observable_removes_links_but_keeps_runs(
+    vocab, default_org
+) -> None:
     """Module C: the artifact is global, so both link tables go, but the run ledger stays."""
     from automation.models import AutomationRun, Playbook
     from cases.models import Case, CaseObservable
     from observables.models import Observable
 
-    case = Case.objects.create(title="c", status=vocab["case_status"])
+    case = Case.objects.create(title="c", status=vocab["case_status"], owner_org=default_org)
     observable = Observable.objects.create(
-        data_type=vocab["observable_type"], data="9.9.9.9", normalized_data="9.9.9.9"
+        data_type=vocab["observable_type"],
+        data="9.9.9.9",
+        normalized_data="9.9.9.9",
+        owner_org=default_org,
     )
     link = CaseObservable.objects.create(case=case, observable=observable)
     playbook = Playbook.objects.create(name="vt", trigger_event="observable.created")
@@ -512,13 +565,13 @@ def test_delete_semantics_deleting_an_observable_removes_links_but_keeps_runs(vo
 
 @pytest.mark.django_db
 def test_delete_semantics_deleting_an_organisation_or_feed_unlinks(vocab) -> None:
-    """`owner_org` and `ingestion_source` are SET_NULL in both directions."""
+    """A live `owner_org` blocks deletion (PROTECT); retiring a feed SET_NULLs its alerts."""
     from alerts.models import Alert
     from cases.models import Case
     from identity.models import Organisation, User
     from ingest.models import IngestionSource
 
-    org = Organisation.objects.create(name="acme")
+    org = Organisation.objects.get_or_create(name="acme")[0]
     member = User.objects.create(username="bob", org=org)
     case = Case.objects.create(title="c", status=vocab["case_status"], owner_org=org)
     source = IngestionSource.objects.create(slug="splunk", name="Splunk")
@@ -532,15 +585,19 @@ def test_delete_semantics_deleting_an_organisation_or_feed_unlinks(vocab) -> Non
         ingestion_source=source,
     )
 
-    org.delete()
+    # A tenant that still owns cases/alerts cannot be deleted (PROTECT on owner_org).
+    with pytest.raises(ProtectedError):
+        org.delete()
+
+    # Retiring a feed unlinks (SET_NULL) the alerts it delivered — history is preserved.
     source.delete()
 
     case.refresh_from_db()
     alert.refresh_from_db()
     member.refresh_from_db()
-    assert case.pk is not None and case.owner_org_id is None
+    assert case.pk is not None and case.owner_org_id == org.id
     assert alert.pk is not None and alert.ingestion_source_id is None
-    assert member.pk is not None and member.org_id is None
+    assert member.pk is not None and member.org_id == org.id
 
 
 @pytest.mark.django_db

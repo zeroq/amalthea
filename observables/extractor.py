@@ -35,6 +35,7 @@ from observables.models import Observable, ObservableType
 
 if TYPE_CHECKING:  # pragma: no cover
     from cases.models import Case
+    from identity.models import Organisation
 
 #: Top-level domains the `fqdn` pattern will accept, longest-first so the alternation cannot match a
 #: shorter label and leave a tail behind (regex alternation is first-match, not longest-match).
@@ -296,7 +297,7 @@ def find_observables(*texts: str, types: dict[str, ObservableType]) -> list[Find
 
 @transaction.atomic
 def extract_into_case(case: Case, *texts: str) -> list[Observable]:
-    """Extract from `texts`, dedupe globally, link every finding to `case`, and fire the trigger.
+    """Extract from `texts`, dedupe per-org, link every finding to `case`, and fire the trigger.
 
     Re-running the extractor over the same text is idempotent: the second pass resolves the
     existing rows and adds nothing, because both the `Observable` and the `CaseObservable` link are
@@ -305,10 +306,13 @@ def extract_into_case(case: Case, *texts: str) -> list[Observable]:
 
     That is why the dispatch is here and not in a `post_save` receiver: `Observable.save()` fires
     before the `CaseObservable` row exists, so a receiver would have no case to scope the event to.
+
+    The `owner_org` is taken from the case's organisation. Auto-linking stays within one org.
     """
     from automation.registry import dispatch_observable_linked
     from cases.models import CaseObservable
 
+    org = case.owner_org
     vocabulary = {t.name: t for t in ObservableType.objects.all()}
     linked: list[Observable] = []
     for finding in find_observables(*texts, types=vocabulary):
@@ -317,6 +321,7 @@ def extract_into_case(case: Case, *texts: str) -> list[Observable]:
             finding.normalized, case_sensitive=obs_type.is_case_sensitive
         )
         observable, created = Observable.objects.get_or_create(
+            owner_org=org,
             data_type=obs_type,
             normalized_data=canonical,
             defaults={"data": finding.raw},
@@ -334,22 +339,27 @@ def resolve_observable(
     type_name: str,
     value: str,
     *,
+    owner_org: Organisation | None = None,
     defaults: dict[str, Any] | None = None,
 ) -> tuple[Observable, bool] | None:
     """Get-or-create one typed, normalized artifact row, linked to nothing.
 
     The shared half of "a caller names a type and a value": both `add_observable` (case
     context) and the alert-observable endpoint resolve the row the same way, so normalization,
-    global dedupe and the vocabulary refusal cannot drift between them. Returns
+    per-org dedupe and the vocabulary refusal cannot drift between them. Returns
     `(observable, created)` — the `created` flag is the dispatch signal its callers need —
     or `None` when `type_name` is not in the vocabulary, which is refused rather than coerced:
     a mislabelled artifact is worse than a missing one.
 
+    `owner_org` scopes the observable to a tenant (ADR-004). If `None`, the caller must ensure
+    the observable gets an org through other means (e.g., the alert's org for alert-observable links).
+
     `defaults` is merged over the stored `data` for a *new* row only. An existing row is left
-    exactly as it is: `Observable` is globally deduplicated, so letting one alert's payload
+    exactly as it is: `Observable` is per-org deduplicated, so letting one alert's payload
     rewrite the tlp/pap of an artifact four other cases are reading would be one caller
     mutating shared evidence. "No field, no write" applies across the seam.
     """
+
     obs_type = ObservableType.objects.filter(name=type_name).first()
     if obs_type is None:
         return None
@@ -361,7 +371,10 @@ def resolve_observable(
     if defaults:
         create_defaults.update(defaults)
     observable, created = Observable.objects.get_or_create(
-        data_type=obs_type, normalized_data=canonical, defaults=create_defaults
+        owner_org=owner_org,
+        data_type=obs_type,
+        normalized_data=canonical,
+        defaults=create_defaults,
     )
     return observable, created
 
@@ -372,10 +385,12 @@ def add_observable(case: Case, type_name: str, value: str) -> Observable | None:
 
     Returns `None` when `type_name` is not in the vocabulary: an unknown type is refused rather than
     silently coerced to `other`, because a mislabelled artifact is worse than a missing one.
+
+    The observable is created with the case's `owner_org`. Auto-linking stays within one org.
     """
     from cases.models import CaseObservable
 
-    resolved = resolve_observable(type_name, value)
+    resolved = resolve_observable(type_name, value, owner_org=case.owner_org)
     if resolved is None:
         return None
     observable, created = resolved

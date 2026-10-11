@@ -1,0 +1,16 @@
+{% extends "ui/base.html" %}
+{% load static %}
+
+{% block title %}Not found · Amalthea{% endblock %}
+
+{% block heading %}Not found{% endblock %}
+
+{% block content %}
+<section class="card" style="max-width: 480px; margin: 48px auto; text-align: center;">
+  <h2 style="font-size: 2rem; margin-bottom: 16px;">404</h2>
+  <p style="color: var(--color-text-dim); margin-bottom: 24px;">
+    The page you requested does not exist or you do not have permission to view it.
+  </p>
+  <a class="btn" href="{% url 'ui-dashboard' %}">Back to dashboard</a>
+</section>
+{% endblock %}

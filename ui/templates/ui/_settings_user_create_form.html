@@ -1,0 +1,42 @@
+{% comment %}
+Server-rendered body for the "New user" modal (F3/F10: no JS-built HTML).
+Fields target the modal's form via form="{{ form_id }}" and work with JS disabled.
+{% endcomment %}
+<div class="meta-inline">
+  <label for="user-create-username">Username</label>
+  <input type="text" id="user-create-username" name="username" maxlength="150" required autofocus form="{{ form_id }}">
+</div>
+<div class="meta-inline">
+  <label for="user-create-email">Email</label>
+  <input type="email" id="user-create-email" name="email" required form="{{ form_id }}">
+</div>
+<div class="meta-inline">
+  <label for="user-create-password">Password</label>
+  <input type="password" id="user-create-password" name="password" required autocomplete="new-password" form="{{ form_id }}">
+  <p class="hint">Must pass Django password validators.</p>
+</div>
+<div class="meta-inline">
+  <label for="user-create-role">Role</label>
+  <select id="user-create-role" name="role" required form="{{ form_id }}">
+    <option value="">— select —</option>
+    {% for role in role_choices %}
+    <option value="{{ role }}">{{ role }}</option>
+    {% endfor %}
+  </select>
+</div>
+<div class="meta-inline">
+  <label for="user-create-org">Organisation</label>
+  <select id="user-create-org" name="org" required form="{{ form_id }}">
+    <option value="">— select —</option>
+    {% for org in orgs %}
+    <option value="{{ org.id }}">{{ org.name }}</option>
+    {% endfor %}
+  </select>
+</div>
+<div class="meta-inline">
+  <label for="user-create-active">Active</label>
+  <div class="check">
+    <input type="checkbox" id="user-create-active" name="is_active" checked form="{{ form_id }}">
+    <label for="user-create-active">Enabled</label>
+  </div>
+</div>

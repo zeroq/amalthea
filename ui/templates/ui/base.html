@@ -19,6 +19,7 @@ Accessibility notes that are not optional:
   <title>{% block title %}Amalthea{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'vendor/fontawesome/css/fontawesome-subset.min.css' %}">
   <link rel="stylesheet" href="{% static 'ui/app.css' %}">
+  <link rel="stylesheet" href="{% static 'ui/modal.css' %}">
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to main content</a>
@@ -63,6 +64,13 @@ Accessibility notes that are not optional:
           <span class="k">s</span> Sources
         </a>
       </li>
+      {% if request.user.role == "superAdmin" %}
+      <li>
+        <a href="{% url 'ui-settings-organisations' %}" {% if request.resolver_match.url_name == 'ui-settings-organisations' or request.resolver_match.url_name == 'ui-settings-users' %}aria-current="page"{% endif %}>
+          <span class="k">,</span> Settings
+        </a>
+      </li>
+      {% endif %}
     </ul>
 
     <div class="rail-foot">
@@ -94,5 +102,6 @@ Accessibility notes that are not optional:
 
 <script src="{% static 'vendor/htmx/htmx.min.js' %}" defer></script>
 <script src="{% static 'ui/keys.js' %}" defer></script>
+<script src="{% static 'ui/modal.js' %}" defer></script>
 </body>
 </html>

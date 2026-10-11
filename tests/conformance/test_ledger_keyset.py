@@ -18,16 +18,25 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from django.conf import settings
 
 from cases.ledger import append_timeline_event, events_after
 from cases.models import TimelineEvent
+from identity.models import Organisation
 
 from ._t1_seed import _case
 
 
+@pytest.fixture
+def default_org(db):
+    """Reuse the default org for tenant isolation."""
+    name = getattr(settings, "AMALTHEA_DEFAULT_ORG_NAME", "Default")
+    return Organisation.objects.get_or_create(name=name)[0]
+
+
 @pytest.mark.django_db
-def test_events_after_returns_the_strictly_after_tail_in_date_id_order() -> None:
-    case = _case("Keyset case")
+def test_events_after_returns_the_strictly_after_tail_in_date_id_order(default_org) -> None:
+    case = _case("Keyset case", org=default_org)
     instant = datetime(2026, 5, 6, 7, 8, 9, 123456, tzinfo=UTC)
     earlier = append_timeline_event(
         case, title="Earlier", kind="custom", date=instant - timedelta(seconds=1)
@@ -68,13 +77,13 @@ def test_events_after_returns_the_strictly_after_tail_in_date_id_order() -> None
 
 
 @pytest.mark.django_db
-def test_events_after_without_a_resolvable_anchor_replays_the_whole_ledger() -> None:
+def test_events_after_without_a_resolvable_anchor_replays_the_whole_ledger(default_org) -> None:
     """The documented fallbacks: no anchor, or an anchor the case does not contain.
 
     A full replay is recoverable (the client dedupes by `data-event-id`); a dropped event
     would not be, which is why an unresolvable anchor must never resolve to "empty tail".
     """
-    case = _case("Replay case")
+    case = _case("Replay case", org=default_org)
     seeded = [append_timeline_event(case, title=f"Entry {i}", kind="custom") for i in range(3)]
     ordered = sorted(seeded, key=lambda event: (event.date, event.id))
 

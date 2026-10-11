@@ -23,6 +23,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from alerts.models import Alert, AlertStatus
+from identity.models import Organisation
 from ingest.models import IngestionSource
 
 from .mapping import extract_correlation_key
@@ -71,6 +72,7 @@ def store_ingested_alert(
     date: datetime | None = None,
     correlation_key: str = "",
     ingestion_source: IngestionSource | None = None,
+    owner_org: Organisation,
     extra_warnings: tuple[str, ...] = (),
 ) -> StoredAlert:
     """Persist one alert, or recognise `payload` as a replay of one already stored.
@@ -78,6 +80,9 @@ def store_ingested_alert(
     `wire_source` is the caller-supplied TheHive `source` value and is stored verbatim;
     `ingestion_source` is our own record of which configured feed accepted the payload.
     They are independent — see the `Alert` docstring.
+
+    `owner_org` is the organisation derived from the `IngestionToken` (ADR-004 P2). Every
+    ingested alert is stamped with it; there is no tokenless/ownerless ingestion path.
     """
     warnings: list[str] = list(extra_warnings)
 
@@ -104,6 +109,7 @@ def store_ingested_alert(
 
     with transaction.atomic():
         alert, created = Alert.objects.get_or_create(
+            owner_org=owner_org,
             source=wire_source,
             type=alert_type,
             source_ref=source_ref,
@@ -115,6 +121,7 @@ def store_ingested_alert(
                 "raw_payload": payload,
                 "correlation_key": correlation_key,
                 "ingestion_source": ingestion_source,
+                "owner_org": owner_org,
                 "ingestion_warnings": {"warnings": warnings},
             },
         )

@@ -34,11 +34,12 @@ def _case(title: str, analyst: User) -> Case:
     )
 
 
-def _observable(value: str) -> Observable:
+def _observable(value: str, analyst: User) -> Observable:
     return Observable.objects.create(
         data_type=ObservableType.objects.get(name="ip"),
         data=value,
         normalized_data=value,
+        owner_org=analyst.org,
     )
 
 
@@ -48,7 +49,7 @@ def test_bulk_patch_on_shared_observable_without_force_is_refused(
     """A 2-case observable PATCHed via `_bulk` without force is a 409 and is not written."""
     case1 = _case("Bulk Shared One", analyst)
     case2 = _case("Bulk Shared Two", analyst)
-    observable = _observable("10.20.30.40")
+    observable = _observable("10.20.30.40", analyst)
     CaseObservable.objects.create(case=case1, observable=observable)
     CaseObservable.objects.create(case=case2, observable=observable)
 
@@ -73,7 +74,7 @@ def test_bulk_patch_on_shared_observable_with_force_is_applied(
     """`?force=true` acknowledges the blast radius and the batch applies per-item."""
     case1 = _case("Bulk Forced One", analyst)
     case2 = _case("Bulk Forced Two", analyst)
-    observable = _observable("10.20.30.41")
+    observable = _observable("10.20.30.41", analyst)
     CaseObservable.objects.create(case=case1, observable=observable)
     CaseObservable.objects.create(case=case2, observable=observable)
 
@@ -95,7 +96,7 @@ def test_bulk_patch_on_shared_observable_with_force_is_applied(
 def test_bulk_patch_on_single_case_observable_needs_no_force(api: APIClient, analyst: User) -> None:
     """A single-case observable carries no blast radius, so the batch applies without force."""
     case = _case("Bulk Solo", analyst)
-    observable = _observable("10.20.30.42")
+    observable = _observable("10.20.30.42", analyst)
     CaseObservable.objects.create(case=case, observable=observable)
 
     response = api.patch(
@@ -118,8 +119,8 @@ def test_bulk_patch_aborts_atomically_when_any_target_is_shared(
     shared_case1 = _case("Mixed Shared One", analyst)
     shared_case2 = _case("Mixed Shared Two", analyst)
     solo_case = _case("Mixed Solo", analyst)
-    shared = _observable("10.20.30.43")
-    solo = _observable("10.20.30.44")
+    shared = _observable("10.20.30.43", analyst)
+    solo = _observable("10.20.30.44", analyst)
     CaseObservable.objects.create(case=shared_case1, observable=shared)
     CaseObservable.objects.create(case=shared_case2, observable=shared)
     CaseObservable.objects.create(case=solo_case, observable=solo)

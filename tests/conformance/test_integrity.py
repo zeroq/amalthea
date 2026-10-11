@@ -17,56 +17,101 @@ and regenerating the migration left the suite green.
 from __future__ import annotations
 
 import pytest
+from django.conf import settings
 from django.db import IntegrityError, transaction
 
 from alerts.models import Alert, AlertStatus
 from cases.models import Case, CaseStatus
+from identity.models import Organisation
 from observables.models import Observable, ObservableType
 
 
 @pytest.fixture
-def case() -> Case:
-    """A case created the way the application creates it: no explicit number."""
-    status = CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
-    return Case.objects.create(title="duplicate-ref fixture", status=status)
+def default_org(db):
+    """Reuse the default org for tenant isolation."""
+    name = getattr(settings, "AMALTHEA_DEFAULT_ORG_NAME", "Default")
+    return Organisation.objects.get_or_create(name=name)[0]
 
 
 @pytest.fixture
-def alert_status() -> AlertStatus:
+def case(default_org) -> Case:
+    """A case created the way the application creates it: no explicit number."""
+    status = CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
+    return Case.objects.create(title="duplicate-ref fixture", status=status, owner_org=default_org)
+
+
+@pytest.fixture
+def alert_status(default_org) -> AlertStatus:
     return AlertStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
 
 
 @pytest.mark.django_db
-def test_duplicate_source_ref_raises(alert_status: AlertStatus) -> None:
-    Alert.objects.create(type="t", source="s", source_ref="ref1", title="a1", status=alert_status)
+def test_duplicate_source_ref_raises(alert_status: AlertStatus, default_org) -> None:
+    Alert.objects.create(
+        type="t",
+        source="s",
+        source_ref="ref1",
+        title="a1",
+        status=alert_status,
+        owner_org=default_org,
+    )
     with pytest.raises(IntegrityError), transaction.atomic():
         Alert.objects.create(
-            type="t", source="s", source_ref="ref1", title="a2", status=alert_status
+            type="t",
+            source="s",
+            source_ref="ref1",
+            title="a2",
+            status=alert_status,
+            owner_org=default_org,
         )
 
 
 @pytest.mark.django_db
-def test_the_same_ref_from_another_source_type_is_allowed(alert_status: AlertStatus) -> None:
+def test_the_same_ref_from_another_source_type_is_allowed(
+    alert_status: AlertStatus, default_org
+) -> None:
     """The unique key is the triple `(source, type, source_ref)` — REVIEW C3."""
-    Alert.objects.create(type="t", source="s", source_ref="ref1", title="a1", status=alert_status)
+    Alert.objects.create(
+        type="t",
+        source="s",
+        source_ref="ref1",
+        title="a1",
+        status=alert_status,
+        owner_org=default_org,
+    )
     other_source = Alert.objects.create(
-        type="t", source="s2", source_ref="ref1", title="a2", status=alert_status
+        type="t",
+        source="s2",
+        source_ref="ref1",
+        title="a2",
+        status=alert_status,
+        owner_org=default_org,
     )
     other_type = Alert.objects.create(
-        type="t2", source="s", source_ref="ref1", title="a3", status=alert_status
+        type="t2",
+        source="s",
+        source_ref="ref1",
+        title="a3",
+        status=alert_status,
+        owner_org=default_org,
     )
     assert other_source.pk and other_type.pk
 
 
 @pytest.mark.django_db
-def test_duplicate_observable_raises() -> None:
+def test_duplicate_observable_raises(default_org) -> None:
     observable_type = ObservableType.objects.get_or_create(
         name="ip", defaults={"is_case_sensitive": False}
     )[0]
-    Observable.objects.create(data_type=observable_type, data="1.1.1.1", normalized_data="1.1.1.1")
+    Observable.objects.create(
+        data_type=observable_type, data="1.1.1.1", normalized_data="1.1.1.1", owner_org=default_org
+    )
     with pytest.raises(IntegrityError), transaction.atomic():
         Observable.objects.create(
-            data_type=observable_type, data="1.1.1.1", normalized_data="1.1.1.1"
+            data_type=observable_type,
+            data="1.1.1.1",
+            normalized_data="1.1.1.1",
+            owner_org=default_org,
         )
 
 
@@ -82,13 +127,13 @@ def test_duplicate_custom_field_value_raises(case: Case) -> None:
 
 
 @pytest.mark.django_db
-def test_duplicate_case_observable_link_raises(case: Case) -> None:
+def test_duplicate_case_observable_link_raises(case: Case, default_org) -> None:
     """AGENTS.md Module C: an observable is sighted once per case."""
     from cases.models import CaseObservable
 
     observable_type = ObservableType.objects.get_or_create(name="ip")[0]
     observable = Observable.objects.create(
-        data_type=observable_type, data="1.1.1.1", normalized_data="1.1.1.1"
+        data_type=observable_type, data="1.1.1.1", normalized_data="1.1.1.1", owner_org=default_org
     )
     CaseObservable.objects.create(case=case, observable=observable)
     with pytest.raises(IntegrityError), transaction.atomic():
