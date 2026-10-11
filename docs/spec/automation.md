@@ -54,6 +54,11 @@ extension** (deviation **P12-2** — TheHive 5 / `thehive4py` 2.1.0 expose no pl
 `POST /playbook/<idOrName>/run` body `{"case"?:idOrNumber,"observable"?:id}` with at least one required.
 Returns 202 + run JSON (`triggeredBy: "manual"`); the run uses a non-deduping key `manual:<uuid4>`,
 runs the same worker, and its result lands in `output_log` **and** the case timeline (AC6.12-P2-a).
+The authoring/run routes are **role-gated** (`identity.permissions.IsAnalystOrAbove`: `read-only`
+denied — REST 403, UI 404) and **org-scoped** (ADR-004): the case is resolved with
+`identity.scoping.resolve_case(user, …, write=True)` and an observable with
+`identity.scoping.resolve_observable`, so a cross-tenant case/observable is the uniform **404** and
+no run row is created.
 
 ## Dispatch (`automation/dispatcher.py::dispatch`)
 
@@ -145,6 +150,9 @@ result live (see [`realtime.md`](./realtime.md)).
 
 `tests/conformance/test_mvp_loop_automation.py` (ingest→escalate→extract→automate→ledger),
 `test_automation_executor.py` (SSRF/schemes, registered-action lookup, truncation, interpolation
-names), `test_indexes.py` (`ar_pending_idx` is a **Plan** index). Deviation register:
+names), `test_indexes.py` (`ar_pending_idx` is a **Plan** index),
+`tests/conformance/test_tenant_scoping.py` (`playbook_run` cross-tenant 404), `test_playbook_authoring.py`
+(role gating). Deviation register:
 [`deviations.md`](./deviations.md) — P12-1 (task.completed registered-but-unemitted) and P10-4
-(alert-observable links do not dispatch).
+(alert-observable links do not dispatch). Tenant isolation:
+[`../decisions/ADR-004-tenant-isolation.md`](../decisions/ADR-004-tenant-isolation.md).

@@ -899,17 +899,84 @@ migration `cases/migrations/0012_ttp_procedure.py`.
 - [ ] **Flagged, not fixed** — `ui-case-merge` is orphaned dead code (wrong import, missing template,
   `@require_GET` on POST); tracked as `TODO.md` #5. Security items (S1–S7) tracked as priority #1 (Wave B).
 
-## Summary Statistics (as of 2026-10-10)
+## 2026-10-11 — Tenant isolation (§6.4) + superAdmin Settings (§6.12) + Settings UI hardening (§6.14)
+
+Largest wave since the MVP: strict multi-tenant isolation, the operator-facing Settings area, and the
+security hardening from the org-management review. All one body of work on `main`.
+
+### §6.4 — Strict multi-tenant isolation (ADR-004, phases P1–P7)
+Plan: [`docs/planning/PLAN-2026-10-10-tenant-isolation.md`](docs/planning/PLAN-2026-10-10-tenant-isolation.md);
+ADR: [`docs/decisions/ADR-004-tenant-isolation.md`](docs/decisions/ADR-004-tenant-isolation.md); final security
+verdict `CLEAR TO BUILD ON` ([`SECURITY-2026-10-10-tenant-isolation-final.md`](docs/reviews/SECURITY-2026-10-10-tenant-isolation-final.md)).
+
+- [x] **Mandatory tenancy** — `Case/Alert/Observable.owner_org` are `NOT NULL`; every read/mutation flows
+  through `identity/scoping.py` and cross-tenant access is the same **404** as "does not exist" (no
+  enumeration oracle). `identity/permissions.py`, roles, superAdmin cross-org with audit.
+- [x] **Per-org webhook tokens** — `IngestionToken` (Argon2, show-once secret, `prefix` lookup index);
+  `/api/v1/alerts/webhook/{source_id}` binds source→org.
+- [x] **Per-org dedupe + org-scoped query/WebSocket/UI** — `uniq_obs_org_dtype_hash`; the Channels consumer
+  is org-scoped; the UI rail/nav is org-scoped.
+- [x] **Security follow-ups closed by the wave** — F2 org-blind resolution, global `Observable` PATCH/DELETE,
+  S1/S2 scope guards, S4 `run_now` object authz, S6 SSRF DNS-rebinding TOCTOU + timeout clamp, S7 merge
+  share-copy widening.
+- [x] Gate: SQLite `make check` **1110 passed / 3 skipped**; ruff + mypy clean; migrations in sync.
+
+### §6.12 — superAdmin Settings: Organisations + Users (plan O1–O5)
+Plan: [`PLAN-2026-10-10-org-management.md`](docs/planning/PLAN-2026-10-10-org-management.md); verification
+**24/24 ACs** ([`VERIFY-2026-10-11-org-management.md`](docs/planning/VERIFY-2026-10-11-org-management.md)).
+
+- [x] **API** — `GET|POST /api/v1/organisation`, `GET|PATCH|DELETE /api/v1/organisation/{idOrName}`;
+  `GET|POST /api/v1/user`, `GET|PATCH|DELETE /api/v1/user/{idOrLogin}`. Non-superAdmin keeps the existing
+  own-org GET/PATCH; every management route returns a uniform 404 for non-superAdmins.
+- [x] **Guarded delete** — shared `identity/services.py::delete_organisation` in one atomic transaction:
+  PROTECT-count blockers → 409; members require explicit `reassign` (real, different target) or `delete`;
+  self-last-superAdmin guards; audited.
+- [x] **UI** — superAdmin-only **Organisations** and **Users** Settings pages, rail item + `,` shortcut,
+  `<dialog>` modals with blocker counts + member choice; HTMX and plain-POST paths both work.
+- [x] Gate: `make check` **1218 passed / 3 skipped**.
+
+### §6.14 — Wave 6.3A: Settings UI hardening (F3/F5–F10)
+Findings: [`SECURITY-2026-10-11-org-user-management.md`](docs/reviews/SECURITY-2026-10-11-org-user-management.md);
+re-audit **clear** ([`SECURITY-2026-10-11-wave63a.md`](docs/reviews/SECURITY-2026-10-11-wave63a.md));
+verification 17/17 ([`VERIFY-2026-10-11-wave63a.md`](docs/planning/VERIFY-2026-10-11-wave63a.md)).
+
+- [x] **F10/F3** — externalised `ui/static/ui/modal.js` + `modal.css` (loaded from `base.html`); `_modal.html`
+  is markup-only with server-rendered bodies (four `_settings_*_form.html` partials). No `innerHTML`/`escapejs`
+  sink; CRUD works under `script-src 'self'` **and** without JS.
+- [x] **F5** — `lock_active_superadmins()` + `locks_active_superadmins`/`serializes_superadmin_changes`
+  decorators serialise every last-superAdmin guard (user update/delete **and** org delete) on Postgres.
+- [x] **F6** — superAdmin guard runs before target resolution → uniform 404 body (no existence oracle).
+- [x] **F7** — `as_uuid`/`resolve_organisation`/`resolve_user` + truncate-before-unique + `IntegrityError`
+  catch; also fixed the same-class `case_share_list` 500.
+- [x] **F8** — `parse_bool`: `"false"` no longer coerces to `True`; rejects other values with 400.
+- [x] **F9** — `IngestionTokenAdmin.secret_hash` is `exclude`d (not merely read-only) and add is disabled;
+  no migration.
+- [x] Gate: `make check` **1257 passed / 3 skipped**; ruff + mypy clean.
+
+### Housekeeping
+- [x] Table-header misalignment fixed: `.grid`→`.data-table`/`.data-table-tight` across 17 templates +
+  compiled stylesheet (utility-layer specificity beat the old class); guard
+  `tests/conformance/test_ui_table_markup.py`.
+- [x] New conformance modules: `test_tenant_scoping.py`, `test_org_user_management.py`,
+  `test_org_user_hardening.py`, `test_settings_ui.py`, `test_ui_table_markup.py`, `conftest.py`.
+- [x] Docs: `docs/spec/*` refreshed; `docs/spec/deviations.md` gained Wave 6.2 + Wave 6.3A sections;
+  ADR-004 added.
+- [ ] **Flagged, not fixed** — S3 (API `POST /api/v1/login` has no per-account lockout and trusts client
+  `X-Forwarded-For`) and S5 (attachment aggregate caps + extension-from-content-type) → priority #1;
+  §6.15 repo-wide ADR-003 (inline `<script>`/`style=` on 6 templates + `404.html`); coverage regressed to
+  79% → §2.6.
+
+## Summary Statistics (as of 2026-10-11)
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | 1001 passed / 3 skipped / 0 failed |
-| **Secret scan** | Clean (314 tracked files) |
+| **Total tests** | 1257 passed / 3 skipped / 0 failed |
+| **Secret scan** | Clean (317 tracked files) |
 | **Ruff** | Clean |
-| **Mypy (strict)** | Clean (88 source files) |
+| **Mypy (strict)** | Clean (104 source files) |
 | **Ruff format** | Clean |
 | **Migrations** | All in sync (`makemigrations --check --dry-run` clean) |
-| **Coverage** | 83.10% (≥80% gate) |
+| **Coverage** | 79% — **below the `fail_under = 80` gate** after the tenant-isolation + org-management waves (non-blocking by decision; reopened as `TODO §2.6`) |
 | **Pre-commit hooks** | Installed + verified (ruff + pytest) |
 | **Pre-push hooks** | `make check` + secret scan + mutation guard |
 | **CI** | GitHub Actions: `make check` + Postgres suite + coverage + lock check + pip-audit + secret scan |
@@ -937,8 +1004,8 @@ All tests pass on PostgreSQL (verified in CI and manual re-gate 2026-10-06/07).
 
 ---
 
-*Last updated: 2026-10-10*  
-*Next review: After 6.4 (tenant isolation) design decision*
+*Last updated: 2026-10-11 — tenant isolation (§6.4, ADR-004), superAdmin Settings (§6.12), Settings UI hardening (§6.14).*
+*Next review: after the S3/S5 security follow-ups (`TODO` priority #1).*
 
 
 

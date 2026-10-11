@@ -1,0 +1,51 @@
+# Final Security Re-Audit — Tenant Isolation (ADR-004) — Wave B
+
+**Date:** 2026-10-10 (re-audit of the remediation, per request)
+**Auditor:** security-auditor (read-only; no code modified)
+**Scope:** Wave B remediation of `docs/reviews/SECURITY-2026-10-10-tenant-isolation-final.md` (NEW-01…NEW-07, plus accepted residuals M2 and L3) on the working tree at commit `4c4c5f8` + uncommitted changes (56 files, +3005/−811). The earlier verdict was **NOT CLEAR TO BUILD ON**; this report independently re-checks every item with live tests and source evidence.
+**Gate observed:** `make check` → `1105 passed, 3 skipped in 70.96s (0:01:10)` → `✓ check passed`. (Previous baseline was 1070 passed / 3 skipped.)
+
+## Verdict
+
+**CLEAR TO BUILD ON.**
+
+Every prior finding is closed with test evidence: NEW-01..NEW-06 are fixed and guarded, NEW-07 is materially addressed (specific-route guard; enumerator gap remains as a documented, non-blocking residual), and the two accepted residuals — M2 SSRF (now IP-pinned + post-connect peer check + clamped timeout + re-validated redirects) and L3 playbook role-gating (REST and UI) — are remedied. All earlier Criticals (query-API read scoping, uniform-404 on every mutating route, WS 4404, per-org webhook dedupe, share ACL owner-only) are still green. No new blocking regression found.
+
+---
+
+## 1. Per-finding status table
+
+| # | Finding | Status | Evidence (file:line; test) |
+|---|---------|--------|---------------------------|
+| NEW-01 | UI playbook-run cross-tenant write | **FIXED** | `ui/views.py:810-863` — case resolved `resolve_case(user, case_id, write=True)` (:834), observable `resolve_observable(user, observable_id)` (:840), `None` → `ui/404.html` 404 (:836/:842); observable-only path re-resolves the derived case write-access before `run_now` (:846-854); `run_now` only called after both resolve (:857). No org-blind `Case.objects.get`/`get_object_or_404(Observable)` remains. Tests `test_ui_playbook_run_cross_tenant_case_returns_404` (test_tenant_scoping.py:2469) and `..._observable_...` (:2493) POST org-2 case/observable to org-1 user → **404 and `AutomationRun.objects.count()==0`** (no run row ⇒ no queued Celery execution). Own-org POST → 302 + exactly one run on the own case (:2517). |
+| NEW-02 | UI case-apply-template 500 (broken import) | **FIXED** | `ui/views.py:930-952` — `from cases.views import _apply_template` (:948) and `_apply_template(case, template, actor=request.user)` (:950); signature matches `cases/views.py:2059`. Tests: own-org POST → 302 and `case.description == template.description` (:2558); cross-tenant POST → 404 (:2545); GET own → 200 (:2577), GET cross → 404 (:2588). No 500. |
+| NEW-03 | UI case-merge 500 + dead POST branch | **FIXED** | `ui/views.py:1279-1312` — `from cases.merge import merge_cases` (:1281), `merge_cases([target, case], actor=request.user)` (:1307); `@require_GET` removed from the POST-capable view; candidates scoped `case_visible_q` (:1289). Tests: cross-tenant GET and cross-tenant target POST → 404 (:2596); own-org GET → 200 (:2609); own-org POST → 302 with source deleted / target kept (:2614). No 500. |
+| Sweep | Org-blind `get_object_or_404(Case\|Alert\|Observable)` / `.objects.get()` in `ui/views.py` | **CLEAN** | Grep of `ui/views.py`: remaining `get_object_or_404` calls are on `Task`(446, keyed `pk, case=scoped_case`), `Attachment`(1375, keyed `case=scoped_case`), `CaseTemplate`(947/1021/1023/1057/1059), `Tag`(1107/1127), `Playbook`(667/669/794/796/821/823), `Organisation`(1204), `Share`(1246) — all non-tenant or reached *through* a scoped parent. No tenant-scoped `.objects.get(pk=…)` remains. |
+| NEW-04 | UI nav/dashboard counts cross-tenant aggregates | **FIXED** | `ui/views.py:81-89` `_base_context` — `nav_alert_count` via `org_q("owner_org")`, `nav_case_count` via `case_visible_q`, `nav_task_count` via `org_filtered(Task…, path="case__owner_org")`. Dashboard counts (:146-161) all scoped. Test `test_ui_dashboard_counts_scoped_to_org` (:2631): org-1 and org-2 each see exactly own open cases (2 incl. shared), own unlinked alerts (1). |
+| NEW-05 | UI alert-detail merge candidates cross-tenant list | **FIXED** | `ui/views.py:232-234` — candidates filtered `case_visible_q(request.user)`. Test `test_ui_alert_detail_merge_candidates_scoped` (:2648): org-2 case id absent from org-1 user's candidates. |
+| NEW-06 | UI sources list + playbook detail cross-tenant volume/ledger | **FIXED** | `ui/views.py:502-514` `sources_list` — `alert_count = Count("alerts", filter=Q(alerts__owner_org_id=user_org_id))`. `ui/views.py:672-674` `playbook_detail` — runs filtered `case__in=Case.objects.filter(case_visible_q(user))`. Tests `test_ui_sources_list_alert_count_scoped` (:2663), `test_ui_playbook_detail_runs_scoped` (:2676 — each org sees exactly its own run row). |
+| NEW-07 | UI conformance guard gap | **PARTIAL — materially addressed, enumerator gap remains** | New `TestUITenantScoping` class (test_tenant_scoping.py:2420) — per-route UI conformance: `test_ui_playbook_run_cross_tenant_case_returns_404`, `test_ui_playbook_run_cross_tenant_observable_returns_404`, `test_ui_case_apply_template_cross_tenant_returns_404`, `test_ui_case_merge_cross_tenant_returns_404`, `test_ui_dashboard_counts_scoped_to_org`, `test_ui_alert_detail_merge_candidates_scoped`, `test_ui_sources_list_alert_count_scoped`, `test_ui_playbook_detail_runs_scoped`, plus core-route 404s (case/alert/observable detail, share list/revoke, non-owner share 404). **However** `_discover_tenant_write_routes` (:819-820) and `_discover_tenant_read_routes` (:873-874) still `continue` on any pattern not starting with `api/v1/` — there is **no URLconf-driven enumation over `ui/`**. Probe by reasoning: a brand-new unscoped `ui/` POST route added without a hand-written test would not be probed by the suite. The specific routes that were broken are now all guarded; the *general* "any UI route must be scoped" property is enforced only to the extent of the hand-written list. Non-blocking, keep extending the class (or make the discoverers walk `ui/` too). |
+| M2 | SSRF DNS-rebinding TOCTOU (accepted residual) | **FIXED (was residual)** | `automation/executor.py`: `assert_safe_url` validates every resolved address (:237-271); connection **pins to one validated IP** and dials it directly (`_PinnedHTTPConnection`/`_PinnedHTTPSConnection` :74-152, `host=pinned_ip`, original host kept for `Host` header/SNI); **post-connect peer check** via `getpeername()` (:98/:138) rejects rebind; timeout clamped `min(timeout, MAX_TIMEOUT_SECONDS)` (:301-304); redirects followed manually, **each hop re-validated and re-pinned** (:311-362, `_NoRedirect`). Tests: `test_post_connect_peer_verification_rejects_rebind` (:308), `test_redirect_hop_revalidates_dns_and_pins` (:373), `test_timeout_is_clamped_to_max` (:330), plus `test_dns_rebinding_host_resolving_to_private_is_rejected` (:245) — all pass. |
+| L3 | Playbook authoring/run not role-gated (accepted residual) | **FIXED** | REST: `automation/views.py` gates POST/PATCH/DELETE/run with `IsAnalystOrAbove` (:96, :182, :265); `identity/permissions.py:50-64` allows analyst/admin/superAdmin, denies read-only. UI: `ui/views.py:538-540` (create), `:693` (detail update), `:787` (delete), `:812` (run) — read-only → `ui/404.html` 404. Tests in test_playbook_authoring.py: read-only denied create/update/delete/run with 403 `AuthorizationError` (:469-569); analyst succeeds 201/204/202 (:572-660). |
+
+## 2. Earlier Criticals — still intact (verified in the green suite)
+
+- **Query-API read scoping** — `query/engine.py:586,738,743,753` scope start-steps via `identity.scoping` (`listCase` honours shares, `listAlert`/`listObservable` direct-org, superAdmin audited cross-org reads `query/views.py:65-105`). `query-api` is included in the enumerated read conformance (`test_cross_org_read_returns_uniform_404`, test_tenant_scoping.py:1049+).
+- **Every mutating API route cross-tenant → uniform 404** — `TestWriteRouteEnumerationConformance` (URLconf-driven, :1330) green in the full run.
+- **WebSocket 4404** — `realtime/consumers.py:93-105` auth before `accept()`, `resolve_case` gate; `test_t5a_cross_org_socket_is_refused_4404_and_receives_no_events` (:575), `test_t5a_non_existent_case_uses_the_same_4404_no_existence_oracle` (:606), `test_t5b_owner_org_stream…` (:633), `test_t5c_anonymous_4401_while_read_share_and_superadmin_may_subscribe` (:662) all pass.
+- **Per-org webhook dedupe** — `alerts/migrations/0014_tenant_dedupe_key.py` `UniqueConstraint(owner_org, source, type, source_ref)`; `test_same_source_different_tenants_by_token` (:572) and token-binding tests (:526-558) pass.
+- **Share ACL owner-only** — `TestP6SharingAuthz` (:2276): grant/replace/revoke denied for non-owner and read-only holders (404), owner allowed; `case_share_list`/`case_share_revoke` UI equivalents now also gated and tested (:2740-2792).
+- **No secrets in the change set** — `git diff` scan found no key/token/password material (only enum names and the hashing helpers); no `.env` staged.
+
+## 3. New observations (non-blocking)
+
+1. **UI assignee picker is org-global (Low, pre-existing — not introduced by this change set).** `ui/views.py:336` `assignees=User.objects.filter(is_active=True).order_by("login")` on every case-detail page, and `:432` resolves a task assignee by `login` with no org filter. Every analyst sees every org's usernames, and a task can be assigned to a user from another org. Present in HEAD (pre-ADR-004). Recommend `User.objects.filter(org_q("org", request.user), is_active=True)` and a matching org check on the assignee lookup.
+2. **NEW-07 enumerator gap** (see table) — the UI guard is complete per-route, not URLconf-driven.
+
+## 4. Regression check
+
+- `case_share_list` dead `@require_GET` branch removed (was "Noted (functional)"): the view now serves both GET and POST under `is_case_owner` gating (`ui/views.py:1183-1231`).
+- `case_export`, `case_tags`, `case_attachment_*`, `case_procedure*`, `ui-case-bulk`, `alert_escalate`/`alert_merge` all resolve through `identity.scoping` (confirmed by diff hunk sweep + full suite).
+- No `.env` committed, no new dev-dependency/CI secrets; `make check` and the pre-commit-relevant `check-fast` subset are green.
+
+**Gate observed:** `1105 passed, 3 skipped in 70.96s (0:01:10)` — `✓ check passed` (`make check`).

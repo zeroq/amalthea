@@ -12,13 +12,36 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 
 ## identity
 
-### Organisation (`identity_organisation`, extends `UUIDModel`)
+### Organisation (`identity_organisation`, extends `UUIDModel` + `TimeStampedModel`)
 - `name` — CharField(200), **unique** · `description` — TextField.
+- `created_at` / `updated_at` — `DateTimeField` (auto_now_add / auto_now), added 2026-10-11
+  (PLAN-2026-10-10 O1).
 
 ### User (`identity_user`; `AbstractUser` + `UUIDModel`)
 - `login` — CharField(150), **unique**; populated from `username` in `save()` when empty.
-- `role` — CharField. `org` — FK → `Organisation`, `on_delete=SET_NULL`, `related_name="users"`.
+- `role` — CharField(20), `choices = USER_ROLE_CHOICES` (`superAdmin/admin/analyst/read-only`),
+  default `analyst`; Constraint `identity_user_role_valid`.
+- `org` — FK → `Organisation`, `on_delete=SET_NULL`, `null=True`, `related_name="users"`. Kept
+  DB-nullable for `createsuperuser`, but **deny-by-default** in the app layer: an org-less user has
+  no tenant access (ADR-004).
 - Docstring (ADR-002 §D3/D11): unknown assignee logins are **not** auto-created.
+
+### IngestionToken (`identity_ingestion_token`, extends `UUIDModel` + `TimeStampedModel`) — ADR-004 Q6
+- `source` — FK → `ingest.IngestionSource`, `CASCADE`, `db_index=False`, `related_name="tokens"`.
+- `organisation` — FK → `Organisation`, `PROTECT`, `related_name="ingestion_tokens"`.
+- `name`(200) · `prefix` (CharField(12), **unique**, first 12 chars of the raw token) ·
+  `secret_hash` (argon2, plaintext shown once) · `revoked_at`/`last_used_at` nullable.
+- Index `ingest_token_src_revoked_idx ("source","revoked_at")`. Binds a source to exactly one org;
+  the webhook's `owner_org` comes from the token, never the body.
+
+### AuditLog (`identity_auditlog`, extends `UUIDModel`) — ADR-004 Q5
+- `actor` — FK → `User`, `SET_NULL`, `db_index=False` · `actor_org`/`target_org` — FK →
+  `Organisation`, `SET_NULL` · `action`, `target_type`, `target_id` (CharFields) ·
+  `ip` (GenericIPAddressField, nullable) · `created_at` (`auto_now_add`, indexed).
+- Indexes `auditlog_actor_created_idx ("actor","-created_at")`,
+  `auditlog_tgt_org_created_idx ("target_org","-created_at")`,
+  `auditlog_action_created_idx ("action","-created_at")`. Records superAdmin cross-org reads
+  (`cross_org_read`/`cross_org_read_query`); the designated home for role/org/share/token changes.
 
 ### ApiKey (`identity_apikey`, extends `UUIDModel` + `TimeStampedModel`)
 - `user` — FK → `User`, `on_delete=CASCADE`, `null=True` · `name` — CharField.
@@ -57,11 +80,13 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 - `correlation_key` — CharField(256), blank.
 - `ingestion_source` — FK → `IngestionSource`, `SET_NULL` — **independent of `source`** (M3).
 - `case` — FK → `cases.Case`, `SET_NULL`, `related_name="alerts"`.
-- `follow` · `ingestion_warnings` — JSONB · `owner_org` — FK → `Organisation`, `SET_NULL`.
+- `follow` · `ingestion_warnings` — JSONB · `owner_org` — FK → `Organisation`, **`NOT NULL`**,
+  `on_delete=PROTECT` (ADR-004; mandatory per-org row).
 - Indexes: `alert_status_date_idx ("status","-date")`, `alert_corrkey_date_idx
   ("correlation_key","date")`, `alert_created_at_idx ("-created_at")`.
-- Constraints: `uniq_alert_source_type_ref (source,type,source_ref)`, `alert_severity_range`,
-  `alert_tlp_range`, `alert_pap_range`.
+- Constraints: `uniq_alert_source_type_ref (owner_org,source,type,source_ref)` — per-org dedupe
+  (was `(source,type,source_ref)` until 2026-10-10), `alert_severity_range`, `alert_tlp_range`,
+  `alert_pap_range`.
 
 ### AlertCustomFieldValue (`alert_custom_field_value`)
 - `alert` (FK) · `custom_field` → `cases.CustomField` (the FK keeps its implicit index — REVIEW H-5).
@@ -98,7 +123,7 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
   `db_index=False`.
 - `assignee` — FK → `User` · `tags` — M2M through `CaseTagLink` · `flag` · `tlp` · `pap` · `summary`.
 - `start_date` (default now, NOT NULL) · `end_date` · `closed_date` · `owner_org` — FK →
-  `Organisation` · `ingestion_warnings` — JSONB.
+  `Organisation`, **`NOT NULL`**, `on_delete=PROTECT` (ADR-004) · `ingestion_warnings` — JSONB.
 - Manager: `AllocatingQuerySet.as_manager()` (number allocation covers `save` **and** `bulk_create`).
 - `Case.save()`: allocates `number` on first insert (`ALLOCATED_MARKER`), then
   `stamp_closed_date()` sets `closed_date` **once**, on entry to stage `Closed`.
@@ -188,15 +213,18 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
   `transaction.atomic()` via `observables/rehash.py::rehash_for_type` (REVIEW round-3 H3-1).
 
 ### Observable (`observable`, extends `UUIDModel` + `TimeStampedModel`)
-- `data_type` — FK → `ObservableType`, `PROTECT`, `db_index=False` · `data` · `normalized_data`.
+- `data_type` — FK → `ObservableType`, `PROTECT`, `db_index=True` · `owner_org` — FK →
+  `Organisation`, **`NOT NULL`**, `on_delete=PROTECT`, `db_index=False` (ADR-004) · `data` ·
+  `normalized_data`.
 - `data_hash` — `DataHashField` (sha256 hex of `normalized_data`, `max_length=64`,
   `editable=False`; recomputed on **every** INSERT incl. `bulk_create` — `observables/hashing.py`).
 - `tags` — M2M through `ObservableTagLink` · `ioc` · `sighted` · `sighted_at` ·
   `ignore_similarity` · `message` · `tlp` · `pap` · `enrichment_data` — JSONB · `external`.
-- Constraint: **`uniq_obs_dtype_hash (data_type, data_hash)`** — observables are deduplicated
-  **globally**, not per-case (deviation vs AGENTS.md §3).
-- Constraints `observable_tlp_range`, `observable_pap_range`; index `obs_created_at_idx
-  ("-created_at")`.
+- Constraint: **`uniq_obs_org_dtype_hash (owner_org, data_type, data_hash)`** — observables are
+  deduplicated **per organisation** (globally until 2026-10-10; ADR-004), so the same value in two
+  orgs is two rows and case auto-linking is confined to one org.
+- Constraints `observable_tlp_range`, `observable_pap_range`; indexes `obs_created_at_idx
+  ("-created_at")`, `obs_org_created_idx ("owner_org","-created_at")`.
 - `Observable.save()` appends `"data_hash"` to `update_fields` when the save is partial and touches
   `normalized_data` or `data_type`.
 
@@ -233,15 +261,28 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 (`White/Green/Amber/Red/Unknown`) · `PAP_CHOICES` 0..3 · `TASK_STATUS_CHOICES`
 (`Waiting/InProgress/Completed/Cancel`) · `AUTOMATION_RUN_STATUS_CHOICES`
 (`Pending/Running/Success/Failed`) · `CASE_STAGES` (`New/InProgress/Closed`) · `ALERT_STAGES`
-(`New/InProgress/Closed/Imported`) · `CUSTOM_FIELD_TYPES` · `API_KEY_SCOPES` (`read/readwrite`).
+(`New/InProgress/Closed/Imported`) · `CUSTOM_FIELD_TYPES` · `API_KEY_SCOPES` (`read/readwrite`) ·
+`USER_ROLE_CHOICES` (`superAdmin/admin/analyst/read-only`).
 Builders `in_range(...)`/`in_values(...)` emit the CheckConstraints quoted above.
+
+## Tenant isolation (ADR-004)
+
+Tenancy is **strict and mandatory**: `Case`/`Alert`/`Observable.owner_org` are `NOT NULL` with
+`on_delete=PROTECT`, and all scoping runs through **`identity/scoping.py`** (`case_visible_q`,
+`org_q`, `org_filtered`, `resolve_case`, `resolve_alert`, `resolve_observable`, `is_case_owner`).
+There is **no middleware org-scope and no Postgres RLS** — cross-tenant access is the same 404 as
+"does not exist", `Share` is the only sanctioned cross-org read, and `superAdmin` cross-org reads are
+written to `identity_auditlog`. See [`identity-auth.md`](./identity-auth.md) and
+[`../decisions/ADR-004-tenant-isolation.md`](../decisions/ADR-004-tenant-isolation.md).
 
 ## Evidence
 
 Conformance pins: `tests/conformance/test_phase3_schema.py`, `test_enum_contracts.py`,
 `test_indexes.py`, and the T2 model suites `test_t2_p1_surface.py`..`test_t2_p5_surface.py`
 (Comment/Page/Share/Attachment/CaseTemplate/TTP/Procedure; migrations `cases/0009`–`0014`,
-`automation/0004`–`0006`). Behaviour pins (numbering, hashing, status semantics):
+`automation/0004`–`0006`). Tenant-isolation schema pins: migrations `identity/0004`–`0006`,
+`cases/0015`, `alerts/0013`–`0014`, `observables/0007`, exercised by
+`tests/conformance/test_tenant_scoping.py`. Behaviour pins (numbering, hashing, status semantics):
 `tests/conformance/test_case_numbering.py`, `test_observable_hashing.py`,
 `test_mutation_standard.py`, `test_seed_migrations.py`. FK integrity: `test_fk_audit.py`. GIN JSONB
 indexes (§6.2) are Postgres-only. Deviations register: [`deviations.md`](./deviations.md).

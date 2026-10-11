@@ -52,6 +52,16 @@ IngestionSource.objects.create(slug='o365', name='M365',
 "
 ```
 
+For tenant administration, also create a `superAdmin` (only a `superAdmin` can open **Settings**):
+
+```bash
+python manage.py shell -c "
+from identity.models import Organisation, User
+org = Organisation.objects.get(name='Acme')
+User.objects.create_user(username='admin', password='change-me', org=org, role='superAdmin')
+"
+```
+
 Log in at <http://127.0.0.1:8000/> and fire a mock alert:
 
 ```bash

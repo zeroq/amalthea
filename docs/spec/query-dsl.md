@@ -4,6 +4,20 @@ Endpoint: `POST /api/v1/query` (+ no-slash twin). The view (`query/views.py`) ow
 step/operator logic is in `query/engine.py::QueryEngine`. The wire contract is pinned from thehive4py
 2.1.0's request builders (`docs/planning/BRIEF-2026-10-06-query-api.md`).
 
+## Tenant scoping (ADR-004)
+
+`query/views.py::query_view` threads the authenticated `request.user` into `QueryEngine`; every
+start step is org-scoped via `identity/scoping.py`:
+
+- `listCase` — `case_visible_q` (own org **or** a `Share` to the caller's org).
+- `listAlert` / `listObservable` — `org_q("owner_org", user)` (direct org ownership).
+- case-reached rows — `org_filtered(...)`.
+- `getCase` — `resolve_case(user, …, write=False)`; a miss (including a cross-tenant id) is an empty
+  set, not an error.
+
+`superAdmin` cross-org reads are audited (`cross_org_read_query`,
+`query/views.py::_audit_query_cross_org_read`). Cross-tenant rows never enter the result set.
+
 ## Request / response contract
 
 ```json
@@ -82,5 +96,7 @@ observables). Sort fields are checked against the same whitelist.
 ## Evidence
 
 `tests/conformance/test_query_api.py` (start steps, operators, `listAny` branches, whitelist, bare
-array, `X-Total`, thehive4py round-trips). Wire shape: `BRIEF-2026-10-06-query-api.md`; decisions:
-`docs/decisions/ADR-002-thehive-api-compatibility.md` §D6.
+array, `X-Total`, thehive4py round-trips), `tests/conformance/test_tenant_scoping.py` (query API
+cross-org returns only owning-org + shared rows). Wire shape: `BRIEF-2026-10-06-query-api.md`;
+decisions: `docs/decisions/ADR-002-thehive-api-compatibility.md` §D6; tenant isolation:
+`docs/decisions/ADR-004-tenant-isolation.md`.

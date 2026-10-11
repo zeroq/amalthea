@@ -37,13 +37,17 @@ inline themselves.
 - `@csrf_exempt`, `@require_POST`. Checks in order: `Content-Length` vs
   `settings.WEBHOOK_MAX_BODY_SIZE` (default 5 MiB) → **413** `entityTooLarge`; content-type must
   start with `application/json` / `application/cloudevents+json` / `application/problem+json` →
-  **415** `unsupportedMediaType`; unknown source → **404**; auth (`X-Webhook-Secret` ||
-  `X-Api-Key` || `Authorization: Bearer`) → **401/403**; throttle (cache keys `wh:src:{slug}:{window}`
-  + `wh:ip:{ip}:{window}`, per-source 60/min, per-IP 300/min defaults) → **429**
+  **415** `unsupportedMediaType`; unknown source → **404**; auth against the source's non-revoked
+  `IngestionToken` rows (`X-Webhook-Secret` || `X-Api-Key` || `Authorization: Bearer`) — tokenless,
+  invalid, **or no active token configured** ⇒ **401** `unauthorized` (strict since 2026-10-10,
+  ADR-004); the matched token's `organisation` is what stamps the alert's `owner_org`; throttle
+  (cache keys `wh:src:{slug}:{window}` + `wh:ip:{ip}:{window}` + `wh:token:{prefix}:{window}`,
+  per-source 60/min, per-IP 300/min defaults) → **429**
   `rateLimitExceeded`; then `json.loads` + object check + depth ≤ `WEBHOOK_MAX_DEPTH` (30) → **400**.
 - Mapping: `_mapped(payload, mapping, *keys)` — JSONPath first (`ingest/mapping.py`), literal
   fallback; severity coerced with the source's `default_severity` as fallback.
-- Persistence: `store_ingested_alert` dedupes on the unique triple `(source, type, source_ref)`;
+- Persistence: `store_ingested_alert` **requires** an `owner_org` (the token's) and dedupes on the
+  per-org unique quad `(owner_org, source, type, source_ref)` (ADR-004);
   missing `sourceRef` ⇒ synthesised `sha256:` of the canonical payload (content-based replay dedupe).
 - Response JSON: `_id,id,_type,title,severity,source,type,status,correlation_key,source_ref,
   sourceRef,date,created_at,ingestion_source,created,warnings` — **201 on first store, 200 on
@@ -107,10 +111,11 @@ inline themselves.
 | `case/<id>/share/<share_id>` (+ `/`) | DELETE | `share_detail` |
 | `alert/<id>/comment`, `…/comment/` | GET, POST | `alert_comment_list` |
 
-- Every route runs through `_case_access(request, id, write=…)`: a case with **no** `owner_org` is
-  visible to any authenticated caller; an org-owned case is visible to its org, or to an org holding
-  a `Share` (`read` for reads, `write` additionally for mutating verbs). Unauthorised ⇒ the same
-  **404** as "does not exist". Alerts have no share route (**P2-5**).
+- Every route runs through `identity.scoping.resolve_case` (the `_case_access` wrapper): a case is
+  visible to its owner org, or to an org holding a `Share` (`read` for reads, `write` additionally
+  for mutating verbs). `Case.owner_org` is `NOT NULL` (ADR-004), so there is **no** org-less
+  "visible to any authenticated caller" mode. Unauthorised ⇒ the same **404** as "does not exist".
+  Alerts have no share route (**P2-5**).
 - `comment` create: body `{"message": str}` required; 201 `comment_json`; **also** appends a
   `comment` ledger event in the same transaction, so the case's WebSocket room receives it
   (deviation **P2-1**). `comment_detail` edits/deletes the entity only.
@@ -155,7 +160,7 @@ inline themselves.
 - `task_detail` PATCH ⇒ **204, no body** (no plan number — see [`deviations.md`](./deviations.md));
   `status` validated against
   `TASK_STATUS_CHOICES`; accepts `dueDate/startDate/endDate` (epoch-ms or ISO). Org guard
-  `_case_org_scope` (P10-w).
+  `_case_org_scope` → `identity.scoping.org_q` (P10-w).
 - `case_observable_list` POST with no `data`/`extract` re-runs extraction over `case.title` +
   `case.description`.
 - `case_alert_remove`: unlinks only (`alert.case = None`), ledger `kind="alert-removed"`, 204.
@@ -168,7 +173,9 @@ inline themselves.
   updated or deleted"; PATCH/DELETE ⇒ 204.
 - `observable_detail` GET: payload incl. `cases[]` (cross-case linkage). PATCH ⇒ **204** (deliberate:
   alert/case PATCH echo, observable does not — recorded). `dataType` re-type allowed (re-hash on
-  save). **Not org-scoped** (global mutation deferred — see F2 in [`deviations.md`](./deviations.md)).
+  save). **Org-scoped** (ADR-004): resolution is `identity.scoping.resolve_observable`, so a
+  cross-tenant id is the same **404** as "does not exist", and observables dedupe per org on
+  `(owner_org, data_type, data_hash)` rather than globally.
 
 ### Bulk, merge and case templates (T2/Phase P4)
 
@@ -245,18 +252,35 @@ inline themselves.
 | Path | Methods | View |
 |---|---|---|
 | `user/current`, `user/current/` | GET | `user_current` |
-| `user/<idOrLogin>`, `user/<idOrLogin>/` | GET | `user_detail` |
-| `organisation`, `organisation/` | GET | `organisation_collection` |
-| `organisation/<idOrName>`, `organisation/<idOrName>/` | GET, PATCH | `organisation_detail` |
+| `user`, `user/` | GET, POST | `user_collection` (superAdmin only) |
+| `user/<idOrLogin>`, `user/<idOrLogin>/` | GET, PATCH, DELETE | `user_detail_management` |
+| `organisation`, `organisation/` | GET, POST | `organisation_collection` |
+| `organisation/<idOrName>`, `organisation/<idOrName>/` | GET, PATCH, DELETE | `organisation_detail` |
 
 - `user_current` ⇒ `user_json` of the authenticated caller (the cheapest way for a client to learn
-  the `login` it must send as an `assignee`). `user_detail` resolves `{idOrLogin}` as a UUID first,
-  then as `login`; unknown ⇒ 404.
-- `organisation_collection` is an **extension**: the recorded 5.8.0 bare path carries only
-  `POST /organisation` (create). It returns a list holding *at most* the caller's own organisation.
-- `organisation_detail` is scoped to the caller's own tenant: a foreign id/name is the **same 404**
-  as "does not exist" (no tenant-enumeration oracle). PATCH writes `name`/`description` only and is
-  **204, no body**; an empty body ⇒ 400; a rename onto an existing tenant ⇒ 400 (not a 500).
+  the `login` it must send as an `assignee`).
+- `user_collection` (`GET|POST /api/v1/user`) — superAdmin only. GET returns all users with
+  `user_admin_json` (login, email, role, org, isActive, lastLogin, _createdAt). POST creates a user
+  with `{username, email, role?, org, password, is_active?}`; `login` derived from `username`; runs
+  Django password validators; audits `user.created`.
+- `user_detail_management` (`GET|PATCH|DELETE /api/v1/user/{idOrLogin}`) — resolves `{idOrLogin}` as
+  a UUID first, then as `login`; unknown ⇒ 404. **GET** is available to any authenticated user (for
+  assignee resolution) and returns the documented **`user_json`** contract (`hasKey`/`hasPassword`/
+  `hasMFA`/`locked`) — this path is deliberately *not* swapped for `user_admin_json`, because
+  TheHive clients read those fields here. **PATCH/DELETE** are superAdmin only: PATCH updates
+  `email`, `role`, `org`, `is_active`, optional `password` reset. Guards: cannot demote/deactivate
+  the last active superAdmin, cannot change your own role away from superAdmin, cannot delete self.
+  Audits `user.updated`/`user.deleted`.
+- `organisation_collection` (`GET|POST /api/v1/organisation`) — GET: non-superAdmin returns own org
+  (unchanged); superAdmin returns ALL organisations annotated with counts (members, cases, alerts,
+  observables) via `organisation_admin_json`. POST (superAdmin only): creates org with `{name,
+  description?}`; duplicate name → 400; audits `organisation.created`.
+- `organisation_detail` (`GET|PATCH|DELETE /api/v1/organisation/{idOrName}`) — non-superAdmin:
+  own org only (GET/PATCH as before). SuperAdmin: any org. GET returns counts. PATCH updates
+  `name`/`description`; audits `organisation.updated`. DELETE (superAdmin only): guarded deletion.
+  Pre-flight checks for tenant data (cases/alerts/observables/ingestionTokens) → **409** with
+  blockers. If members exist: requires `members=reassign&target_org=<idOrName>` or `members=delete`.
+  All operations atomic; audits `organisation.deleted`.
 
 ## Observable types — `observable/type` (T2/Phase P1)
 
@@ -296,8 +320,8 @@ inline themselves.
   the recorded `InputUpdateTag` fields (`predicate`, `description`, `colour`) plus `name`. Tag DELETE
   refuses a tag still attached to a case/alert/observable with a **400** (TheHive cascades).
 - The link routes take `{"tags": <string | string[]>}` and return the owner's current tag set
-  (**200**); both directions are idempotent. `observable/<id>/tag` is **not org-scoped**, matching
-  `observable_detail`.
+  (**200**); both directions are idempotent. `observable/<id>/tag` is **org-scoped** (ADR-004),
+  matching `observable_detail` — a cross-tenant id is the same **404**.
 
 ## Describe — `GET /api/v1/describe/{model}` (T2/Phase P1)
 
@@ -317,6 +341,9 @@ a curated subset, not a mechanical dump of every column.
 `{"query": [step, ...], "includeFields": [...], "excludeFields": [...]}` → **bare JSON array** (or
 bare `int` for `count`). `X-Total` header when a `page` step used `extraData:["total"]`.
 `includeFields` wins over `excludeFields`. Legacy `?name=` accepted and ignored (ADR D12).
+**Org-scoped** (ADR-004): `QueryEngine` scopes every start step to the caller's organisation
+(cases honour shares; `superAdmin` cross-org reads are audited as `cross_org_read_query`) —
+cross-tenant rows never enter the result set.
 Full DSL in [`query-dsl.md`](./query-dsl.md).
 
 ## Compat (login/logout + catch-all)
@@ -343,13 +370,17 @@ Full DSL in [`query-dsl.md`](./query-dsl.md).
 ## Wire renderers (`core/serializers.py`)
 
 `alert_json`, `observable_json`, `timeline_event_json`, `task_json`, `custom_event_json`,
-`custom_field_json`, `user_json`, `automation_run_json`, `case_json(case, *, detail=False)`,
-`organisation_json`, `observable_type_json`, `case_status_json`, `alert_status_json`, `tag_json`,
+`custom_field_json`, `user_json`, `user_admin_json`, `automation_run_json`,
+`case_json(case, *, detail=False)`, `organisation_json`, `organisation_admin_json`,
+`observable_type_json`, `case_status_json`, `alert_status_json`, `tag_json`,
 `comment_json`, `page_json`, `share_json`, `attachment_json`.
 Conventions: `_id` and `id` both present; ISO-8601 `_iso` timestamps; `raw_payload` never inlined;
 `task_json` sets `_createdBy`/`_updatedBy` to `null`; `user_json` computes `hasKey`/`hasPassword`,
-`hasMFA:false`, `locked:false`. The new entity renderers emit the audit pair as `null` where the
-model has no creator column (`organisation_json`, the status renderers), and `tag_json` renders
+`hasMFA:false`, `locked:false`. `user_admin_json` (superAdmin directory) includes `login`, `email`,
+`role`, `org` (name), `orgId`, `isActive`, `lastLogin`, `_createdAt`. `organisation_json` now
+includes `_createdAt`/`_updatedAt` from `TimeStampedModel`; `organisation_admin_json` adds optional
+`counts` block (members, cases, alerts, observables). The entity renderers emit the audit pair as
+`null` where the model has no creator column (status renderers), and `tag_json` renders
 `namespace="_freetags_"` / `predicate=name` / `value=""` around our single `Tag.name`.
 
 ## Evidence

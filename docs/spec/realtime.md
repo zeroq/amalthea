@@ -10,10 +10,19 @@ realtime_routing.websocket_urlpatterns))})`.
 
 ## Connection & close codes (`realtime/consumers.py`)
 
+`connect()` checks in order **before `accept()`**: authentication, then **case visibility**.
+
 - `UNAUTHENTICATED = 4401` — anonymous socket refused **before `accept()`**; the client never learns
   whether the case exists (AC7.2).
+- `FORBIDDEN = 4404` — authenticated but the case is not visible to the caller's org (and not
+  `superAdmin`). The case is resolved with `identity.scoping.resolve_case(user, case_id,
+  write=False)`; a non-existent case id and an existing-but-other-org case both yield `4404` (no
+  existence oracle, ADR-004). SuperAdmin is allowed via `resolve_case`.
 - `PROTOCOL_ERROR = 4000` — any protocol violation (non-UUID `case_id`, non-dict frame, unparseable
   JSON, unknown `type`, malformed `after`).
+
+Because the visibility gate runs before `group_add`/`accept()`, an unreadable socket never joins the
+case room and never receives timeline events.
 
 ## Request frame
 
@@ -86,7 +95,8 @@ for this shape — M9.)
 
 ## Evidence
 
-`tests/conformance/test_realtime.py` (consumer protocol), `test_ledger_keyset.py` (keyset + the
-choke-point test guarding `ledger.py` as the sole write path). See also [`api.md`](./api.md) for the
-case-timeline REST rendering (ms-epoch on the wire, P8-1) and [`automation.md`](./automation.md) for
-the `automation-run` kinds.
+`tests/conformance/test_realtime.py` (consumer protocol + tenant scoping: cross-org refused `4404`,
+anonymous `4401`), `test_ledger_keyset.py` (keyset + the choke-point test guarding `ledger.py` as the
+sole write path). See also [`api.md`](./api.md) for the case-timeline REST rendering (ms-epoch on
+the wire, P8-1) and [`automation.md`](./automation.md) for the `automation-run` kinds. Tenant
+isolation: [`../decisions/ADR-004-tenant-isolation.md`](../decisions/ADR-004-tenant-isolation.md).

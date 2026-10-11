@@ -1,6 +1,7 @@
 # Amalthea — Implemented-System Specification
 
-Status: **derived from code** · Verified 2026-10-07 (Phase 11 complete) · Owner: planner
+Status: **derived from code** · Verified 2026-10-07 (Phase 11 complete) · Owner: planner ·
+**Tenant isolation shipped 2026-10-10 ([ADR-004](../decisions/ADR-004-tenant-isolation.md); deviation F2 retired)**
 
 This directory is the reference specification of the **implemented** Amalthea platform — not a
 statement of the original plan's intent. Where the plan and the code disagree, the code and this
@@ -15,7 +16,7 @@ spec win, and the disagreement is recorded in [`deviations.md`](./deviations.md)
 | [`realtime.md`](./realtime.md) | WebSocket protocol: `/ws/case/<id>/`, sync frames, ledger events |
 | [`automation.md`](./automation.md) | Domain events, playbook triggers, dispatch/idempotency, executor safety |
 | [`query-dsl.md`](./query-dsl.md) | `POST /api/v1/query` — steps, operators, field whitelists, paging |
-| [`identity-auth.md`](./identity-auth.md) | Users, organisations, API keys/scopes, DRF config, per-env settings |
+| [`identity-auth.md`](./identity-auth.md) | Users, organisations, roles, tenant isolation, API keys/scopes, ingestion tokens, DRF config, per-env settings |
 | [`deviations.md`](./deviations.md) | Register of every deviation from AGENTS.md §2/§3 and the plan, with evidence |
 
 ## Conformance statement (drift policy)
@@ -35,6 +36,8 @@ generated from code, not hand-written here (plan `PLAN-2026-10-07-docs-spec.md` 
 ## Evidence map
 
 - Master plan: `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` (§7 wire, §12/§13 deviations)
-- ADRs: `docs/decisions/ADR-001-backend-framework.md`, `docs/decisions/ADR-002-thehive-api-compatibility.md`
-- Reviews/verifies: `docs/reviews/REVIEW-2026-10-0{3,4,5}-*.md`, `docs/planning/VERIFY-2026-10-07-phase{10,11}.md`
+- ADRs: `docs/decisions/ADR-001-backend-framework.md`, `docs/decisions/ADR-002-thehive-api-compatibility.md`,
+  `docs/decisions/ADR-004-tenant-isolation.md` (strict multi-tenant — supersedes the tenant deferral / F2)
+- Reviews/verifies: `docs/reviews/REVIEW-2026-10-0{3,4,5}-*.md`, `docs/planning/VERIFY-2026-10-07-phase{10,11}.md`,
+  `docs/reviews/SECURITY-2026-10-10-tenant-isolation-final.md` (verdict: CLEAR TO BUILD ON)
 - Implementation plan for this directory: `docs/planning/PLAN-2026-10-07-docs-spec.md`

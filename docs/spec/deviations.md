@@ -18,7 +18,7 @@ a brief's letter alias is given where one exists (`P10-2 / y`, `P10-7 / z`, the 
 | **M9** | keyset paging on `date` | `timeline_case_date_idx ("case","-date","-id")` + negated tie-break in `events_after` | ACCEPTED | `cases/ledger.py::events_after` · `test_ledger_keyset.py` |
 | **M12** | free-enum statuses | `AlertStatus`/`CaseStatus` are DB entities; `compat/enums.py::stage_from_alert_status` | ACCEPTED | `alerts/models.py`, `cases/models.py` · `test_enum_contracts.py` |
 | **M14** | `AutomationRun.playbook` free text | FK `PROTECT` **plus** immutable `playbook_name` snapshot | ACCEPTED | `automation/models.py` · `REVIEW-…-round2.md` M14 |
-| **—** | observables are per-case | `uniq_obs_dtype_hash (data_type, data_hash)` dedupes **globally**; cases link via M2M `case_observable` | ACCEPTED | `observables/models.py:111` · `test_observable_hashing.py` |
+| **—** | observables are per-case | `uniq_obs_org_dtype_hash (owner_org, data_type, data_hash)` dedupes **per organisation** (was global until 2026-10-10 — ADR-004); cases link via M2M `case_observable` | ACCEPTED | `observables/models.py:121` · `test_observable_hashing.py` |
 | **—** | `Case.number` caller-supplied | allocated server-side (`allocate_case_number`), covers `save` and `bulk_create` | ACCEPTED | `cases/numbering.py` · `test_case_numbering.py` |
 
 ## API / wire deviations
@@ -41,7 +41,7 @@ a brief's letter alias is given where one exists (`P10-2 / y`, `P10-7 / z`, the 
 | **P10-12** | slashless `/case/{id}/observable` POST | merged into one GET+POST dispatcher; both spellings | `cases/views.py::case_observable_list` · `test_t1_surface.py` |
 | **P10-13** | several §7.2 rows untested | pinned (logout, alert-import-into, array-observable, per-IP throttle, slashless) | `test_t1_surface.py`, `test_webhook_hardening.py` |
 | **— (no number)** | task PATCH echoes | `PATCH /task/{id}` → **204, no body** (case/alert PATCH echo; task does not) | `cases/views.py::_update_task` · `test_t1_surface.py` |
-| **P10-w** | (code-only label) | sub-resources are **org-scoped through the owning case** (`_case_org_scope`) so a guessable id is not a future cross-org read | `cases/views.py:88,309` · REVIEW/plan §13; no-op until `owner_org` is populated (see F2) |
+| **P10-w** | (code-only label) | sub-resources are **org-scoped through the owning case** (`_case_org_scope` → `identity.scoping.org_q`) so a guessable id is not a cross-org read | `cases/views.py:143,150` · REVIEW/plan §13; **live since 2026-10-10** — `owner_org` is now populated and `NOT NULL` (ADR-004) |
 
 ## Automation deviations
 
@@ -119,12 +119,42 @@ Procedures (ATT&CK techniques observed on a case/alert) and case export.
 ## Security hardening findings
 
 Source: security-auditor Wave C, carried as **P10-10** (F1/F6/F3/F5/F7 fixed in the burst). **F9 is
-now fixed** (2026-10-08 hardening wave); **F2 remains deferred**.
+now fixed** (2026-10-08 hardening wave); **F2 is now fixed** (2026-10-10 tenant-isolation wave,
+ADR-004).
 
 | ID | Finding | Status / follow-up |
 |---|---|---|
-| **F2** | case/alert resolution is org-blind (`owner_org` never populated, so scoping is a no-op); **`Observable` PATCH/DELETE is global** (any authenticated user can mutate any observable) | **Deferred** — **decision 2026-10-09 (Q4): tenant isolation remains deferred**. A further deferral is recorded with the enforcement options (middleware org-scope vs per-view filters; superuser/analyst roles) in this register so the next wave starts from a decision, not a blank page. Until `owner_org` is set the filter changes nothing; the observable mutation path (AC6.12-P6-b) is the nearer gap. Plan: Phase 12 §12 Q4. |
+| **F2** | case/alert resolution is org-blind (`owner_org` never populated, so scoping is a no-op); **`Observable` PATCH/DELETE is global** (any authenticated user can mutate any observable) | **FIXED 2026-10-10 — superseded by ADR-004.** `Case/Alert/Observable.owner_org` are `NOT NULL`; every resolution/mutation runs through `identity/scoping.py` and cross-tenant access is a uniform **404**. Observable dedupe is per-org (`uniq_obs_org_dtype_hash`). Shipped across plan `PLAN-2026-10-10-tenant-isolation.md` P1–P7; verdict **CLEAR TO BUILD ON** (`docs/reviews/SECURITY-2026-10-10-tenant-isolation-final.md`). |
 | **F9** | prod did not fail closed on `SECRET_KEY` and did not force secure cookies | **Fixed 2026-10-08** — `amalthea/settings/prod.py` now raises `ImproperlyConfigured` unless `DJANGO_SECRET_KEY` is ≥50 chars and `DJANGO_ALLOWED_HOSTS` is non-empty, and forces `SESSION_COOKIE_SECURE`/`CSRF_COOKIE_SECURE`/`SECURE_SSL_REDIRECT`/HSTS/`SECURE_CONTENT_TYPE_NOSNIFF`/`X_FRAME_OPTIONS=DENY`; proven by `tests/conformance/test_prod_settings.py` (9 tests). Plan: [`PLAN-2026-10-08-secret-hygiene.md`](../planning/PLAN-2026-10-08-secret-hygiene.md) |
+
+## Wave 6.2 — O1–O4: SuperAdmin Organisation & User Management (2026-10-11)
+
+Per `PLAN-2026-10-10-org-management.md`, the superAdmin-only Settings area (API + UI).
+
+| ID | Plan / TheHive | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **O1-1** | TheHive: `POST /organisation` (bare) only | **`GET|POST /api/v1/organisation`**, `GET|PATCH|DELETE /api/v1/organisation/{idOrName}` | TheHive's bare path is create-only; Amalthea adds superAdmin directory (GET all with counts), create, update, guarded delete. Non-superAdmin GET/PATCH own org unchanged. `identity/views.py`, `tests/conformance/test_org_user_management.py` |
+| **O1-2** | no user collection/mutation | **`GET|POST /api/v1/user`**, `GET|PATCH|DELETE /api/v1/user/{idOrLogin}`** (superAdmin) | TheHive 5 has no user management REST API. Amalthea adds full CRUD with password validation, last-superAdmin guards, audit logging. `identity/views.py`, `tests/conformance/test_org_user_management.py` |
+| **O1-3** | Organisation: no timestamps | **`Organisation` extends `TimeStampedModel`** (`created_at`/`updated_at`) | Additive migration; `organisation_json` now emits real timestamps (was `null`). `identity/models.py`, `core/serializers.py` |
+| **O2-1** | Org delete: cascade or undefined | **Guarded delete** — pre-flight blockers (cases/alerts/observables/tokens) → **409**; members require explicit `reassign` or `delete` | TheHive 5 delete is undefined for non-empty orgs. Amalthea enforces safe deletion with an **atomic** transaction (member moves/removals + org delete share one `transaction.atomic()`), refuses `reassign` without a real different target, and audits. `identity/services.py::delete_organisation` (shared by `identity/views.py` and `ui/views.py`) |
+| **O3-1** | User delete: no self/last-admin guards | **Guards**: cannot delete self, cannot delete/demote/deactivate last active superAdmin | Prevents tenant management lock-out. `identity/services.py::update_user`/`delete_user`, `identity/views.py` |
+| **O4-1** | TheHive UI: no self-service tenant admin | **`superAdmin`-only Settings UI** — `/settings/organisations` + `/settings/users` (list/add/edit/delete), rail item, `,` shortcut, `<dialog>` modals (blocked-delete counts + member-choice) | Amalthea extension; non-superAdmin gets `ui/404.html`. `ui/views.py`, `ui/urls.py`, `ui/templates/ui/settings_*.html`. **No TheHive `compat/` parity** (decision Q4). |
+
+
+## Wave 6.3A — Settings UI hardening + security F3/F5–F10 (2026-10-11)
+
+Per `PLAN-2026-10-10-org-management.md` §13A; findings in `SECURITY-2026-10-11-org-user-management.md`.
+
+| ID | Deviating from | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **W63A-1** | §5.4/§13A prose: "create/**edit** as server-side forms in a `<dialog>`" | **Create/delete = `<dialog>`; edit stays a standalone page** | No AC is violated. Edit already worked as a plain CSRF POST page and the wave's goal (CSP + no-JS CRUD + XSS sink removal) is met for it; converting edit to a dialog was out of scope. Verifier deviation **D1** (Low). |
+| **W63A-2** | Literal "externalise the modal `<script>`" | **`_modal.html` became a parameterised markup partial** (`form_id`, `form_method`, `body_template`) with the four bodies as server-rendered partials; behaviour moved to `ui/static/ui/modal.js` | The old design injected HTML from `escapejs` strings via `innerHTML` (F3). Server-rendering the bodies removes the sink entirely and gives the no-JS fallback; a literal JS refactor would not. `ui/templates/ui/_modal.html`, `ui/static/ui/modal.js`, `ui/static/ui/modal.css`. |
+| **W63A-3** | "last-superAdmin TOCTOU" fix implied to be universal | **Serialisation is Postgres-only** — `select_for_update` is a no-op on SQLite (dev/test) | Locks are proven by spy tests on the SQLite inner loop and take effect on the Postgres target; a real concurrency test needs Postgres (the `test_pg` schema currently errors on setup — separate follow-up). `identity/services.py::lock_active_superadmins` + the two decorators. |
+| **W63A-4** | "`is_active` rejects non-boolean strings" | **Real bools + explicit `"true"/"false"` (case-insensitive) accepted; anything else → 400** | Guards the `bool("false") is True` bug (F8) while keeping form round-trips working. `identity/services.py::parse_bool`. |
+| **W63A-5** | Finding F9 "`secret_hash` never displayed" | **`exclude`, not just `readonly_fields`** — and admin add disabled | Removing it from `readonly_fields` alone would have made the Argon2 hash an *editable* widget; the hash is non-null so the add form could never be valid anyway (tokens are minted by `IngestionToken.create_token`). `identity/admin.py`. |
+
+**Residual risk (accepted, Low):** no DB-level ≥1-active-superAdmin invariant (Django admin/management/SQL can still zero admins); the share form does not validate the target against `available_orgs`; UI superAdmin guards run inside the lock. Security sign-off: `docs/reviews/SECURITY-2026-10-11-wave63a.md`; verification: `docs/planning/VERIFY-2026-10-11-wave63a.md`.
+
 
 ## Evidence index
 
