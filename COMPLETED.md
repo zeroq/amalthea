@@ -2,7 +2,7 @@
 
 Finished work, with the evidence that it actually happened. Open items live in
 [`TODO.md`](./TODO.md).
-Last updated: 2026-10-09
+Last updated: 2026-10-11
 
 Items are only listed here once independently verified. Where code exists but an acceptance criterion
 is still unproven, the item says so explicitly and the verification gap is cross-linked in `TODO.md`.
@@ -953,24 +953,80 @@ verification 17/17 ([`VERIFY-2026-10-11-wave63a.md`](docs/planning/VERIFY-2026-1
   no migration.
 - [x] Gate: `make check` **1257 passed / 3 skipped**; ruff + mypy clean.
 
+### §6.15 — Wave 6.3B: repo-wide ADR-003 compliance (inline assets externalised)
+Plan §13B. Closes the inline-`<script>`/`style=` violation left open after §6.14.
+
+- [x] **Server-side JSON pretty-printing** — new `prettyjson` filter (`ui/templatetags/ui_tags.py`) replaced the
+  five client-side pretty-printers *and* their `json_script` blobs in `playbook_detail.html`, `observable_detail.html`,
+  `case_template_form.html`, `case_template_detail.html`, `playbook_form.html`. Two were silently broken before
+  (`<script>` nested inside `<textarea>`; a `#playbook-config` lookup that didn't exist on the page).
+- [x] **Playbook form JS externalised** — `ui/static/ui/playbook_form.js` (loaded `defer`, no `innerHTML`): the
+  action-group toggle, `<template>`-cloned header rows, and one delegated remove listener.
+- [x] **Latent bug fixed** — the playbook header rows had no `{% for %}` loop, so no header was ever submitted
+  without JS; now four indexed server-rendered rows survive the no-JS path.
+- [x] **Inline `style=` removed** from `404.html`, `case_tags.html`, `observable_list.html`, `playbook_form.html`;
+  replaced by component classes in `ui/static/ui/app.css`.
+- [x] **Guard** — `tests/conformance/test_ui_inline_assets.py` (116 cases) fails on any inline `<script>`,
+  `style=`, `on*=` handler, or `json_script` in any `ui/templates/ui/*.html`.
+- [x] Gate: `make check` **1374 passed / 3 skipped**; ruff + format + mypy + css clean.
+
 ### Housekeeping
 - [x] Table-header misalignment fixed: `.grid`→`.data-table`/`.data-table-tight` across 17 templates +
   compiled stylesheet (utility-layer specificity beat the old class); guard
   `tests/conformance/test_ui_table_markup.py`.
 - [x] New conformance modules: `test_tenant_scoping.py`, `test_org_user_management.py`,
-  `test_org_user_hardening.py`, `test_settings_ui.py`, `test_ui_table_markup.py`, `conftest.py`.
-- [x] Docs: `docs/spec/*` refreshed; `docs/spec/deviations.md` gained Wave 6.2 + Wave 6.3A sections;
+  `test_org_user_hardening.py`, `test_settings_ui.py`, `test_ui_table_markup.py`, `test_ui_inline_assets.py`,
+  `conftest.py`.
+- [x] Docs: `docs/spec/*` refreshed; `docs/spec/deviations.md` gained Wave 6.2 + Wave 6.3A + Wave 6.3B sections;
   ADR-004 added.
+- [x] **§6.15 repo-wide ADR-003 — DONE** (above): all inline `<script>`/`style=`/`on*=` in `ui/templates/` are
+  gone and guarded by `test_ui_inline_assets.py`.
 - [ ] **Flagged, not fixed** — S3 (API `POST /api/v1/login` has no per-account lockout and trusts client
   `X-Forwarded-For`) and S5 (attachment aggregate caps + extension-from-content-type) → priority #1;
-  §6.15 repo-wide ADR-003 (inline `<script>`/`style=` on 6 templates + `404.html`); coverage regressed to
-  79% → §2.6.
+  coverage regressed to 79% → §2.6.
+
+## 2026-10-11 — UI completeness wave — **Phase 1** (TODO §6.16)
+
+Per `docs/planning/PLAN-2026-10-11-ui-completeness.md`. P1 wires up built-but-unreachable features and
+gives the rail a complete, discoverable, tenant-aware navigation. Independent verification:
+`docs/verification/VERIFY-2026-10-11-p1-ui-completeness.md` (11 met / 3 partial / 0 not met — all partials
+closed in-wave below).
+
+- [x] **Attachments on case detail (A1)** — upload (multipart, field `attachments`), list with `created_by` /
+  `filesizeformat`, download, and a delete `<dialog>` + POST. `case_detail` passes the `attachments` queryset;
+  upload/delete redirect back to the case.
+- [x] **Merge (A2), Export JSON (A3a), Apply template (A3b)** — merge `<dialog>` POSTs `target_case` to
+  `ui-case-merge`; export is a plain GET; apply-template links to the existing route. All previously unreachable
+  from the UI.
+- [x] **Rail + navigation (B1/B2/B4/D7/D8)** — Observables `o`, Tags `t`, Case templates `m`, Taxonomy `x`
+  added with Font Awesome icons (`aria-hidden`, visible labels); tenant indicator in the rail foot
+  (org name → “All organisations” for a superAdmin with no org → “No organisation”).
+- [x] **Cheat-sheet (D6)** — server-rendered `<dialog>` in `base.html` (no `innerHTML` in `keys.js`), opened
+  by `?` **and** by a visible “Keyboard shortcuts” control (`data-modal-open`, keyboard-reachable per WCAG 2.1.1).
+- [x] **Case-template edit (C4)** and **password change (C7)** — new `ui-case-template-edit` (prefilled GET,
+  updating POST, audited) and Django `PasswordChangeView` at `ui-password-change` with a themed template + rail link.
+- [x] **Error pages (D2)** — `handler404`/`handler500`/`handler403` wired in `amalthea/urls.py`; new themed
+  `403.html`/`500.html`. `500.html` is **standalone** and rendered via `loader.render_to_string` (no context
+  processors) so the 500 path issues zero queries even for an authenticated request.
+- [x] **Q2 — bulk stub removed.** The `ui-case-bulk` view/route (“available via API” stub) is deleted; bulk is its
+  own future item.
+- [x] **Security hardening found by verification** — `case_template_create`/`edit`/`delete` gained the same
+  role gate as playbook authoring (uniform 404 otherwise); the edit view is method-guarded.
+- [x] **Guards added beyond the plan** — `tests/conformance/test_ui_nav.py` (rail ⇄ `keys.js ROUTES` ⇄
+  `CHEATSHEET` ⇄ server table cannot drift; every `ROUTES` path resolves to a `ui-` route) and
+  `tests/conformance/test_ui_icons.py` (every `fa-*` used in a template has a subset rule).
+- [x] **Tech-lead fixes en route** — (a) the mypy gate regressed because `amalthea/urls.py` imported `ui.views`,
+  dragging the untyped UI package into the pinned scope; handlers are now dotted strings. (b) `.btn-err` was
+  referenced by ~15 templates but **defined nowhere** — added as a component class. (c) four rail icons missing
+  from the Font Awesome subset rule set were added; the one unverifiable glyph (`fa-building-lock`) was replaced
+  with the already-subsetted `fa-shield-halved`.
+- [x] Gate: `make check` **1430 passed / 3 skipped**; ruff + format + mypy (104 files) + migrations + css clean.
 
 ## Summary Statistics (as of 2026-10-11)
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | 1257 passed / 3 skipped / 0 failed |
+| **Total tests** | 1430 passed / 3 skipped / 0 failed |
 | **Secret scan** | Clean (317 tracked files) |
 | **Ruff** | Clean |
 | **Mypy (strict)** | Clean (104 source files) |

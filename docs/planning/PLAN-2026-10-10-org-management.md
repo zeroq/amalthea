@@ -206,7 +206,7 @@ stylesheet (which also drops the now-dead `.grid` utility). Guard: `tests/confor
 Split into **two scopes**, each tracked as its own backlog item:
 
 - **§13A (scope A) — Settings-scoped fix** → **TODO §6.14** (scheduled; fixes the org-management AC + F3/F5/F6/F7/F8/F10).
-- **§13B (scope B) — repo-wide ADR-003 compliance** → **TODO §6.15** (backlog; pre-existing shipped surfaces, not scheduled).
+- **§13B (scope B) — repo-wide ADR-003 compliance** → **TODO §6.15** (see §13B outcome below; closed 2026-10-11).
 
 ### 13A — Scope (A): Settings UI hardening (TODO §6.14)
 
@@ -222,6 +222,43 @@ Deferred from the O4 security review. Root cause: **ADR-003 ("zero inline script
 ### 13B — Scope (B): repo-wide ADR-003 compliance (TODO §6.15)
 
 The same inline-script / inline-style violation exists in **pre-existing shipped templates** (case-detail `live.js` bootstrap, playbook forms, the cheatsheet modal, …). Scope (B) audits the whole `ui/templates/` tree and externalises every remaining inline `<script>`/`<style>`/`style="…"` so `script-src 'self'` / `style-src 'self'` hold without `unsafe-inline`. Tracked as **TODO §6.15**; **not scheduled** — do after (A) lands.
+
+### 13B — Outcome (implemented 2026-10-11; TODO §6.15)
+
+Audit found far fewer violations than feared, and no cheating was needed to close them:
+
+- **Inline `<script>` (5 templates):** `playbook_form.html`, `observable_detail.html`, `case_template_form.html`,
+  `case_template_detail.html`, `playbook_detail.html`. All five existed only to pretty-print a `json_script` blob
+  client-side, so the fix was to **format server-side** — a new `prettyjson` filter in `ui/templatetags/ui_tags.py`
+  renders indented JSON into the `<pre>`/`<textarea>` directly. That removed the inline script **and** the
+  `json_script` `<script type="application/json">` (also CSP-blocked) with no replacement JS at all.
+  Two of the five were additionally broken: `case_template_form.html` nested `<script>` inside `<textarea>` (so the
+  edit form contained escaped markup instead of JSON), and `playbook_detail.html`/`observable_detail.html` read a
+  `#playbook-config` element that didn't exist on their own page.
+- **Playbook form JS:** externalised to `ui/static/ui/playbook_form.js` (loaded `defer` from the content block, the
+  same convention as `case_detail.html`'s `live.js`). No `innerHTML`: new header rows are cloned from a
+  `<template id="header-row-template">` whose `{i}` placeholder is substituted into the `name` attributes; the
+  action-group toggle uses `.hidden`; row removal is done by one delegated `click` listener.
+- **Latent bug fixed:** the header rows were emitted from a `{% for i in "1234" %}` loop that was missing entirely
+  (the `{% for %}` was never in the file), so the four inputs shared a literal `{i}`-less name and **no** header was
+  ever submitted without JS. They are now four indexed, server-rendered rows (`header_key_0..3`), so an HTTP playbook
+  is fully savable with JavaScript disabled.
+- **Inline `style="…"`:** `404.html`, `case_tags.html`, `observable_list.html`, `playbook_form.html`. Replaced with
+  component classes appended to `ui/static/ui/app.css` (`.notfound*`, `.chips-scroll`, `.chip-x`, `filter-*`,
+  `.field-row`, `.btn-tight`) and rebuilt with `make css`. (Note: `app.css` is its own Tailwind input, so new styles
+  must be plain component CSS — see TODO §7.4.)
+- **New guard:** `tests/conformance/test_ui_inline_assets.py` — parametrised over every template in
+  `ui/templates/ui/` and fails on any `<script>` without `src`, any `style="`, any `on*=` handler, or any use of
+  `json_script` (comment blocks are stripped first so design prose can't trip it). 116 cases.
+
+**Not a violation (verified, left as-is):** `ui/templates/ui/_modal.html` only *mentions* `<script>`/`<style>` in a
+`{% comment %}` block (stripped, never rendered); `keys.js`/`live.js`/`modal.js` build DOM from static in-repo
+arrays, not server data, and contain no inline `<script>`.
+
+**Residual (Low):** the playbook **edit** form still does not round-trip the stored action config (action select is
+unset on load; `trigger_event` is rendered `disabled`), so editing a playbook resets its action unless it is
+re-supplied — a pre-existing UI gap, logged in the UI gap table rather than fixed here.
+
 
 ### 13A — Outcome (implemented 2026-10-11; verifier 17/17 met)
 

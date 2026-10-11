@@ -156,6 +156,42 @@ Per `PLAN-2026-10-10-org-management.md` §13A; findings in `SECURITY-2026-10-11-
 **Residual risk (accepted, Low):** no DB-level ≥1-active-superAdmin invariant (Django admin/management/SQL can still zero admins); the share form does not validate the target against `available_orgs`; UI superAdmin guards run inside the lock. Security sign-off: `docs/reviews/SECURITY-2026-10-11-wave63a.md`; verification: `docs/planning/VERIFY-2026-10-11-wave63a.md`.
 
 
+## Wave 6.3B — repo-wide ADR-003 compliance (TODO §6.15, 2026-10-11)
+
+Per `PLAN-2026-10-10-org-management.md` §13B. Closes the repo-wide inline-asset violation left open after §13A.
+
+| ID | Deviating from | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **W63B-1** | §13B prose: "externalise every remaining inline `<script>`" (implying a new JS file each) | **Four of the five inline scripts were deleted outright** — a new `prettyjson` server-side filter renders the config blob into the `<pre>`/`<textarea>`, so no client pretty-printer (nor a `json_script` `<script type="application/json">`) is needed at all | Those scripts existed *only* to `JSON.parse` a `json_script` blob and re-stringify it. Deleting them is strictly better under CSP: fewer files and no inline JSON script either. The AC ("no inline script in the rendered page") is met **more** completely than the plan specified. `ui/templatetags/ui_tags.py::prettyjson`. |
+| **W63B-2** | Playbook form JS assumed to be a straight move into a static file | **Rewritten, not copied** — `<template>` clone + one delegated click listener instead of `innerHTML` string building | The original `addHeaderRow()` built markup with `innerHTML` — the same sink class §13A removed from the modal. Lifting it verbatim into the new file would have re-introduced it. `ui/static/ui/playbook_form.js`. |
+| **W63B-2b** | — | **Latent bug fixed alongside:** the header rows had no `{% for %}` at all, so all four inputs shared one literal name and **no** header was ever submitted without JS | The four rows are now indexed and server-rendered (`header_key_0..3`), so an HTTP playbook saves with zero JavaScript. `ui/templates/ui/playbook_form.html`. |
+| **W63B-3** | "externalise the styles too" | **New component classes, not Tailwind utilities** in `app.css` (`.notfound`, `.field-row`, `.filters`, `.chips-scroll`, `.btn-tight`, …) | `app.css` is its own Tailwind input (no template rescan), so a new Tailwind *utility* used only in a template would never be generated; plain component CSS is the only reliable path until §7.4 splits source from artifact. |
+
+**Not a deviation, recorded for clarity:** the guard is a static template scan (`tests/conformance/test_ui_inline_assets.py`), not a render-time assertion — matching §13A's approach but applied to all `ui/templates/ui/*.html` (116 cases). `{% comment %}`/`{# #}` blocks are stripped first, so prose that *mentions* `<script>` (design notes in `_modal.html`) is not a false positive.
+
+**Residual risk (accepted, Low):** the playbook **edit** form still does not restore its stored action config (the `action` select is unselected on load and `trigger_event` is rendered `disabled`), so saving an edit can reset a playbook's action. Pre-existing UI gap, outside §6.15's ADR-003 scope; logged in the UI gap table.
+
+
+## Wave 6.16-P1 — UI completeness, phase 1 (TODO §6.16, 2026-10-11)
+
+Per `PLAN-2026-10-11-ui-completeness.md` §8 P1. Verification: `docs/verification/VERIFY-2026-10-11-p1-ui-completeness.md`.
+
+| ID | Deviating from | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **W616P1-1** | “wire `handler404/403/500` in `amalthea/urls.py`” (import the views, as the first implementation did) | **Dotted-string handlers** (`handler404 = "ui.views.handler404"`); the DEBUG-only `__test_*__` routes the first pass added were removed | `ui` is deliberately **outside** the mypy pinned scope (`pyproject [tool.mypy].files`). Importing `ui.views` from an in-scope module made mypy check the whole untyped package for the first time (74 latent errors) and broke the gate. Django resolves string handlers via `get_callable`, so this is also the idiomatic form. `amalthea/urls.py`; `test_error_handlers_are_dotted_paths_that_resolve`. |
+| **W616P1-2** | Attachments wired by pointing at the existing page | **Contract fixes**: the file input is `name="attachments"` (the API reads `request.FILES.getlist("attachments")`, not `attachment`); the list renders `created_by.login` (the field is `created_by`, not `uploaded_by`); upload/delete redirect to the case, not the standalone attachments page | The first frontend pass guessed the field/variable names; without these the upload would 400 and the “uploaded by” column would always be em-dash. `ui/templates/ui/case_detail.html`, `ui/views.py::case_detail`. |
+| **W616P1-3** | Styles via Tailwind utilities | **Component classes** in `app.css` (`.btn-err`, `.tenant-indicator`, `.attachment-upload`, `.card-narrow`, `.card-spaced`, `.rail-links a i`) | Same constraint as W63B-3: `app.css` is its own Tailwind input (no rescan). `.btn-err` was referenced by ~15 templates but **defined nowhere** — a pre-existing gap fixed here (destructive buttons were indistinguishable from neutral ones). `ui/static/ui/app.css`. |
+| **W616P1-4** | “add icons to the rail” | **Substituted one glyph and extended the subset**: `fa-gauge-high`/`fa-book`/`fa-rss`/`fa-gear` were added as `.fa-X::before` rules to the committed Font Awesome subset; `fa-building-lock` (used by the cross-org badge in three templates) was replaced with the already-subsetted `fa-shield-halved` | The bundled `fa-solid-900.woff2` has **no** `unicode-range` (full FA6 Free font), so a CSS rule suffices for the four known-Free icons; `fa-building-lock` could not be confirmed present in FA6 **Free**, and a missing glyph renders as a blank box. New guard `tests/conformance/test_ui_icons.py` makes any future undefined `fa-*` a test failure. |
+| **W616P1-5** | `500.html` extends `base.html` like `404.html`/`403.html` | **Standalone** `500.html` rendered by `loader.render_to_string` (no `request=`), so no context processor runs | `render()` would run the `auth` + `messages` context processors: the `messages` processor touches session storage and the lazy user can be evaluated, so an authenticated request issued queries (measured: 2) at exactly the moment a 500 is most likely to mean “the DB is down”. `ui/views.py::handler500`; `test_handler500_zero_queries_authenticated_user`. |
+| **W616P1-6** | Q2 recommendation (“delete the bulk stub”) | Done as recommended, **plus a role gate** on `case_template_create/edit/delete` | The security review found template mutations were `@login_required` only, while the analogous playbook authoring is role-gated; the gate now mirrors playbook authoring and answers with the uniform 404. Raised by `docs/reviews` → P1 remediation. |
+| **W616P1-7** | “every primary action reachable without a mouse, shortcuts discoverable” (plan §7.2a) | Cheat-sheet opened by `?` **and** by a visible rail-foot control | A keyboard-only opener is not sufficient for WCAG 2.1.1 (keyboard *and* pointer reachable); reuses the existing `data-modal-open` mechanism, so no new JS. `ui/templates/ui/base.html`. |
+
+**Not a deviation, recorded for clarity:** the plan’s `Q3` (HTMX scope), `Q4` (audit viewer read-only) and `Q5` (search over cases+alerts+observables) affect **later** phases and are unchanged. **`Q1` (a runtime Markdown + sanitiser dependency) remains open and still gates P5/D3** — no runtime markdown/sanitiser package exists in `requirements/base.txt`.
+
+**Residual risk (accepted, Low):** duplicate URL *names* for `ui-case-template-list` and the procedure routes pre-date this wave (present in `HEAD`) and were left untouched; two new guard modules are source-level parsers (they fail on a shape change, which is the intended behaviour but needs a matching edit).
+
+
+
 ## Evidence index
 
 - `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §13 — full P7/P8/P10/P11 records

@@ -131,7 +131,27 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
 - [x] **6.12 — Settings: organisations + users (superAdmin)** Plan `PLAN-2026-10-10-org-management.md` — **DONE 2026-10-11** (O1–O5 shipped; verifier 24/24 ACs `VERIFY-2026-10-11-org-management.md`; security review `SECURITY-2026-10-11-org-user-management.md` clear). `superAdmin`-only **Settings**: **Organisations** (list/create/edit/delete) + **Users** (list/create/edit/delete) API + UI (uniform 404, audit, guarded atomic delete with `members=reassign|delete`, last-superAdmin/self guards; rail item + `,` shortcut, `<dialog>` modals, blocked-delete + member-choice). **Q4: UI + Amalthea API only — no TheHive `compat/` parity.**
 - [ ] **6.13 — Backlog: ingestion-token management + audit-log viewer (superAdmin Settings)** Split out of §6.12 (decision Q1/Q8). Settings → **Ingestion tokens** (per-org webhook tokens: create/revoke, show-once secret) and read-only Settings → **Audit log** (the `AuditLog` already records superAdmin cross-org reads). Not scheduled.
 - [x] **6.14 — Wave 6.3A: Settings UI hardening — scoped fix (CSP / progressive enhancement)** Scope **(A)**: `ui/templates/ui/_modal.html` + the two Settings templates (+ `base.html` asset wiring). From `SECURITY-2026-10-11-org-user-management.md` (F3/F5/F6/F7/F8/F9/F10). **DONE 2026-10-11**: externalised `modal.js`/`modal.css`, server-rendered the four modal bodies as partials (HTMX **and** no-JS create/edit/delete → O4-b met), removed the `innerHTML`/`escapejs` sink and inline `style=`, added `lock_active_superadmins`/decorators for the last-superAdmin TOCTOU (incl. the org-delete path), fixed F6 (uniform 404), F7 (malformed ids/oversize names no-500), F8 (`parse_bool`), F9 (`secret_hash` excluded from admin). Security re-audit **clear** (`SECURITY-2026-10-11-wave63a.md`); verifier 17/17 met (`VERIFY-2026-10-11-wave63a.md`). Plan §13A.
-- [ ] **6.15 — Wave 6.3B: repo-wide ADR-003 compliance (externalise all inline scripts/styles)** Scope **(B)**, follow-up to §6.14: audit the whole `ui/templates/` tree and externalise **every** remaining inline `<script>`/`<style>`/`style="…"` (case detail `live.js` bootstrap, playbook forms, cheatsheet modal, etc.) so `script-src 'self'`/`style-src 'self'` hold without `unsafe-inline`. Pre-existing shipped surfaces, so track separately from the Settings fix. Plan §13B. **Not scheduled.**
+- [ ] **6.16 — UI completeness wave (all 24 gaps)** Plan `PLAN-2026-10-11-ui-completeness.md`. Restores the analyst loop and
+  completes the entity surface: **P1** wire up built-but-unreachable features (attachments, merge, export,
+  apply-template, taxonomy) + rail entries for Observables/Tags/Case-templates/Taxonomy + tenant indicator +
+  case-template edit + password change + 500/403 pages + cheat-sheet as a server-rendered `<dialog>` + Font Awesome
+  + keyboard coverage; **P2** alert triage, case edit, observable edit/delete; **P3** procedures/TTP UI; **P4**
+  Settings→Ingestion tokens + Audit log (pulls §6.13 forward); **P5** playbook action round-trip + sanitized
+  Markdown; **P6** global search; **P7** per-org realtime + presence + scoped HTMX adoption. Open questions Q1
+  (Markdown dependency) gate P5 and Q2 (bulk stub) gates P1. Source: post-§6.15 UI audit (user decision
+  "everything", 2026-10-11).
+  - [x] **P1 — DONE 2026-10-11** (A1/A2/A3a/A3b/B1/B2/B4/C4/C7/D2/D6/D7/D8 + Q2). Verifier: 11 met / 3 partial /
+    0 not met (`docs/verification/VERIFY-2026-10-11-p1-ui-completeness.md`). All partials and the one MEDIUM
+    security finding (case-template mutations had no role gate) were fixed in-wave. New guards:
+    `test_ui_nav.py` (rail ⇄ `keys.js` `ROUTES` ⇄ cheat-sheet ⇄ server table) and `test_ui_icons.py` (every
+    `fa-*` used has a subset rule). Fixed en route: the mypy gate regressed because `amalthea/urls.py` imported
+    `ui.views` (now dotted-string handlers); `.btn-err` was undefined app-wide; `500.html` made standalone so the
+    500 path issues **0** queries even for an authenticated request. Gate: `make check` **1430 passed / 3 skipped**.
+    Details: `docs/spec/deviations.md` “Wave 6.16-P1”.
+  - [ ] **P2–P7** — not started. **Q1 (Markdown runtime dependency) still open** and blocks P5/D3; the other four
+    open questions are decided by the plan's recommendations (Q2 = stub deleted, Q3 = HTMX scope, Q4 = audit viewer
+    read-only, Q5 = search over cases/alerts/observables).
+- [x] **6.15 — Wave 6.3B: repo-wide ADR-003 compliance (externalise all inline scripts/styles)** Scope **(B)**, follow-up to §6.14: audit the whole `ui/templates/` tree and externalise **every** remaining inline `<script>`/`<style>`/`style="…"`/`on*=` so `script-src 'self'`/`style-src 'self'` hold without `unsafe-inline`. Plan §13B. **DONE 2026-10-11**: removed all inline `<script>` from `playbook_form.html`, `playbook_detail.html`, `observable_detail.html`, `case_template_form.html`, `case_template_detail.html`; added `prettyjson` filter (server-side JSON pretty-printing replaces 4 `json_script`-plus-inline-`<script>` pairs, one of which was invalid HTML inside a `<textarea>`); new external `ui/static/ui/playbook_form.js` (no `innerHTML` — clones a `<template>`) replacing inline handlers; removed every `style="…"` from `404.html`, `case_tags.html`, `observable_list.html`, `playbook_form.html`; added component classes to `app.css`. Fixed a latent bug: the playbook header rows were rendered from a broken `{% for i in "1234" %}`-less block so **no** header row was ever submitted without JS — now four indexed, server-rendered rows. New CI guard `tests/conformance/test_ui_inline_assets.py` (116 cases) fails on any future inline asset. Plan §13B.
 
 ---
 
@@ -190,5 +210,6 @@ throttle and returns **200**, not **429**. Wire `check_login_rate_limit`/`record
 `record_successful_login` into `api_login`, return **429** with `Retry-After` on lockout (and 429 for the UI
 too), and derive the client IP from the proxy chain rather than a client-supplied header. Small, well-scoped,
 and closes the last unauthenticated brute-force surface on a platform that is otherwise multi-tenant-hardened.
-Runner-up: **§6.15 / ADR-003 repo-wide** — 6 templates + `404.html` still carry inline scripts/`style=` that
-the shipped `script-src 'self'` CSP silently blocks (same class as the wave just closed).
+Runner-up: **7.4 — Tailwind source/artifact split** — `app.css` is still its own Tailwind input, so the
+committed artifact is no longer re-scanned for template classes and `css-check` cannot detect drift. Low risk
+but it blocks adding any new Tailwind *utility* to a template (new styles must go in a component class).
