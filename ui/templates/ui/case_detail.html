@@ -115,6 +115,56 @@
       {% endif %}
     </section>
 
+    <section class="card" aria-labelledby="h-procs">
+      <h2 id="h-procs">Procedures <span class="count">{{ procedures|length }}</span></h2>
+      <ul class="procedures" id="case-procedures">
+        {% for procedure in procedures %}
+          {% include "ui/_procedure_entry.html" %}
+        {% empty %}
+          <li class="empty">No procedures attached yet.</li>
+        {% endfor %}
+      </ul>
+
+      <form method="post" action="{% url 'ui-case-procedure-create' case.number %}" class="procedure-add">{% csrf_token %}
+        <h3>Attach procedure / TTP</h3>
+        <div class="form-grid">
+          <div>
+            <label for="f-patternId">ATT&CK ID <span class="required" aria-hidden="true">*</span></label>
+            <input id="f-patternId" name="patternId" required maxlength="255" placeholder="T1566.001">
+          </div>
+          <div>
+            <label for="f-patternName">Name</label>
+            <input id="f-patternName" name="patternName" maxlength="255" placeholder="Phishing: Spearphishing Attachment">
+          </div>
+          <div>
+            <label for="f-tactic">Tactic</label>
+            <input id="f-tactic" name="tactic" maxlength="100" placeholder="Initial Access">
+          </div>
+          <div>
+            <label for="f-occurDate">Occur date (optional)</label>
+            <input id="f-occurDate" name="occurDate" type="text" placeholder="ISO 8601 or epoch ms (e.g. 2024-01-15T10:30:00Z or 1705315800000)">
+          </div>
+          <div class="full-width">
+            <label for="f-description">Description</label>
+            <textarea id="f-description" name="description" rows="3" placeholder="What was observed?"></textarea>
+          </div>
+          <div class="full-width">
+            <label for="f-ttpId">Link to TTP vocabulary (optional)</label>
+            <select id="f-ttpId" name="ttpId">
+              <option value="">-- none --</option>
+              {% for ttp in ttps %}
+                <option value="{{ ttp.id }}">{{ ttp.name }} {% if ttp.ttp_code %}({{ ttp.ttp_code }}){% endif %}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary">
+          <i class="fa-solid fa-diagram-project" aria-hidden="true"></i>
+          Attach procedure
+        </button>
+      </form>
+    </section>
+
     <section class="card" aria-labelledby="h-runs">
       <h2 id="h-runs">Automation runs <span class="count">{{ runs|length }}</span></h2>
       {% if runs %}

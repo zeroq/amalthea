@@ -117,18 +117,6 @@ urlpatterns = [
     ),
     # Taxonomy / vocabularies
     path("taxonomy", views.taxonomy, name="ui-taxonomy"),
-    path("case-templates", views.case_template_list, name="ui-case-template-list"),
-    # Procedures/TTP on case
-    path(
-        "cases/<str:case_id>/procedure",
-        views.case_procedure_create,
-        name="ui-case-procedure-create",
-    ),
-    path(
-        "cases/<str:case_id>/procedures",
-        views.case_procedures_create,
-        name="ui-case-procedures-create",
-    ),
     # Automation/Playbooks
     path("automation", views.automation_list, name="ui-automation-list"),
     path("automation/playbooks", views.playbook_list, name="ui-playbook-list"),

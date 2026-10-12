@@ -1,0 +1,28 @@
+{% load ui_tags %}
+{# One procedure/TTP entry. Mirrors the style of _page_entry.html — keep them in step. #}
+<li class="procedure">
+  <div class="procedure-header">
+    <span class="procedure-attack-id">
+      {% if procedure.ttp %}
+        {{ procedure.ttp.ttp_code }}
+      {% else %}
+        {{ procedure.pattern_id }}
+      {% endif %}
+    </span>
+    {% if procedure.pattern_name %}<span class="procedure-name">{{ procedure.pattern_name }}</span>{% endif %}
+    {% if procedure.tactic %}<span class="procedure-tactic dim">{{ procedure.tactic }}</span>{% endif %}
+  </div>
+  {% if procedure.description %}
+  <div class="procedure-description md">{{ procedure.description|markdown }}</div>
+  {% endif %}
+  <p class="procedure-meta">
+    {% if procedure.occur_date %}
+      <span class="mono">{{ procedure.occur_date|date:"Y-m-d H:i:s" }}</span>
+    {% else %}
+      <span class="mono dim">—</span>
+    {% endif %}
+    {% if procedure.ttp %}
+      · <span class="dim">TTP: {{ procedure.ttp.name }}</span>
+    {% endif %}
+  </p>
+</li>

@@ -23,6 +23,7 @@ Three choices worth stating, because each is a deviation from "just render the A
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from django.contrib import messages
@@ -53,12 +54,13 @@ from automation.executor import registered_actions
 from automation.models import AutomationRun, Playbook
 from automation.playbooks import ACTIONS, HTTP_METHODS
 from cases.ledger import append_timeline_event
-from cases.models import Attachment, Case, CaseStatus, CaseTemplate, Comment, Tag, Task
+from cases.models import TTP, Attachment, Case, CaseStatus, CaseTemplate, Comment, Tag, Task
 from cases.update import CaseUpdateError, apply_case_update
 from cases.views import (
     _as_uuid,
     _observable_affected_cases,
     _observable_cross_case_guard,
+    _resolve_ttp_value,
     _set_observable_fields,
 )
 from core.enums import ALERT_STAGES, PAP_CHOICES, SEVERITY_CHOICES, TLP_CHOICES
@@ -81,6 +83,8 @@ from ingest.models import IngestionSource
 from observables.extractor import extract_into_case
 from observables.models import Observable, ObservableType
 
+logger = logging.getLogger(__name__)
+
 SEVERITY_LABELS = dict(SEVERITY_CHOICES)
 #: Severity as a CSS class suffix, so a template says `sev-{{ case.severity }}` and the palette lives
 #: in one stylesheet. Mapping the number to a class name in the template would be a fourth spelling.
@@ -90,6 +94,10 @@ PAGE_SIZE = 200
 #: Upper bound on outbound HTTP headers per playbook. `header_count` is form-controlled and drives a
 #: CPU-bound `range()`, so it must be capped (see `_parse_playbook_config`) — far above real usage.
 MAX_HEADERS = 64
+#: Upper bound on procedures accepted in one bulk POST. The item index set is form-controlled, so it
+#: is capped here rather than trusted to `DATA_UPLOAD_MAX_NUMBER_FIELDS` (1000) — each item costs a
+#: row insert plus a `ttpId` lookup, and no analyst attaches procedures a hundred at a time.
+MAX_BULK_PROCEDURES = 100
 
 
 def _parse_playbook_config(post: Any) -> tuple[dict[str, Any] | None, str | None]:
@@ -433,6 +441,8 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             runs=AutomationRun.objects.filter(case=case)
             .select_related("playbook", "triggered_by_observable")
             .order_by("-created_at"),
+            procedures=case.procedures.select_related("ttp").order_by("occur_date", "id"),
+            ttps=TTP.objects.order_by("name"),
             status_choices=CaseStatus.objects.filter(hidden=False).order_by("order", "value"),
             assignees=User.objects.filter(org_q("org", request.user), is_active=True).order_by(
                 "login"
@@ -2036,27 +2046,182 @@ def case_attachment_detail(request: HttpRequest, case_id: str, attachment_id: st
 
 
 @login_required
-@require_GET
+@require_POST
 def case_procedure_create(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Create a procedure on a case."""
-    from cases.views import case_procedure_create as api_view
+    """Create a procedure on a case from the UI (plain POST fallback).
+
+    The API endpoint is POST-only and returns JSON; the UI performs the creation directly
+    so a browser form gets a proper redirect + messages instead of a JSON blob.
+    """
+    from cases.procedures import create_procedure
+    from compat.procedures import parse_procedure
 
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
         return render(request, "ui/404.html", status=404)
-    return api_view(request, case_id=case_id)
+
+    # Build payload from form fields (matching TheHive wire keys for parse_procedure)
+    pattern_id = (request.POST.get("patternId") or "").strip()
+    if not pattern_id:
+        messages.error(request, "Invalid patternId: ATT&CK ID is required")
+        return redirect("ui-case-detail", case_id=case.number)
+
+    payload = {
+        "occurDate": request.POST.get("occurDate") or None,
+        "patternId": pattern_id,
+        "patternName": request.POST.get("patternName") or "",
+        "tactic": request.POST.get("tactic") or "",
+        "description": request.POST.get("description") or "",
+        "ttpId": request.POST.get("ttpId") or None,
+    }
+
+    kwargs, error = parse_procedure(payload, resolve_ttp=_resolve_ttp_value)
+    if error is not None:
+        field, message = error
+        messages.error(request, f"Invalid {field}: {message}")
+        return redirect("ui-case-detail", case_id=case.number)
+
+    try:
+        with transaction.atomic():
+            create_procedure(case=case, **kwargs)
+    except Exception:  # pragma: no cover - defensive
+        # The exception text can carry schema/SQL detail; keep it in the log, not in the flash.
+        logger.exception("procedure create failed", extra={"case_id": str(case.id)})
+        messages.error(request, "Could not attach the procedure.")
+        return redirect("ui-case-detail", case_id=case.number)
+
+    messages.success(request, "Procedure attached to case.")
+    return redirect("ui-case-detail", case_id=case.number)
 
 
 @login_required
 @require_POST
 def case_procedures_create(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Bulk create procedures on a case."""
-    from cases.views import case_procedures_create as api_view
+    """Bulk create procedures on a case from the UI (plain POST fallback).
+
+    Accepts repeated form fields (e.g. patternId, patternName, tactic, description lists
+    or indexed pattern_id_<i>) and reuses parse_procedure/create_procedure in a transaction.
+    Reports a per-item count via messages; never returns JSON, never 500s on bad input.
+    """
+    from cases.procedures import create_procedure
+    from compat.procedures import parse_procedure
 
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
         return render(request, "ui/404.html", status=404)
-    return api_view(request, case_id=case_id)
+
+    # Collect repeated fields — the simplest correct option: indexed fields like patternId_0, patternId_1...
+    # Also support list-style field names for compatibility.
+    post = request.POST
+
+    # Determine number of items by finding the highest index for patternId
+    item_indices = set()
+    for key in post.keys():
+        if key.startswith("patternId_"):
+            try:
+                idx = int(key.split("_", 1)[1])
+                item_indices.add(idx)
+            except (ValueError, IndexError):
+                pass
+
+    # Fallback: if no indexed fields, check for list-style (multiple values for same key)
+    if not item_indices:
+        # Check how many patternId values were submitted
+        pattern_ids = post.getlist("patternId")
+        if pattern_ids:
+            item_indices = set(range(len(pattern_ids)))
+
+    if not item_indices:
+        messages.error(request, "No procedures provided.")
+        return redirect("ui-case-detail", case_id=case.number)
+
+    if len(item_indices) > MAX_BULK_PROCEDURES:
+        messages.error(request, f"Too many procedures in one request (max {MAX_BULK_PROCEDURES}).")
+        return redirect("ui-case-detail", case_id=case.number)
+
+    # Hoist the repeated-field reads out of the loop: `post.getlist` re-walks the QueryDict on every
+    # call, which made the item loop quadratic in the number of submitted fields.
+    repeated = {
+        field: post.getlist(field)
+        for field in ("occurDate", "patternId", "patternName", "tactic", "description", "ttpId")
+    }
+
+    created_count = 0
+    error_count = 0
+
+    try:
+        with transaction.atomic():
+            for idx in sorted(item_indices):
+                # Support both indexed and list-style; bind idx as default to avoid late-binding closure
+                def get_field(field_name: str, *, _idx: int = idx) -> str:
+                    indexed_key = f"{field_name}_{_idx}"
+                    if indexed_key in post:
+                        return post.get(indexed_key, "")
+                    lst = repeated[field_name]
+                    if _idx < len(lst):
+                        return lst[_idx]
+                    return ""
+
+                payload = {
+                    "occurDate": get_field("occurDate") or None,
+                    "patternId": get_field("patternId"),
+                    "patternName": get_field("patternName"),
+                    "tactic": get_field("tactic"),
+                    "description": get_field("description"),
+                    "ttpId": get_field("ttpId") or None,
+                }
+
+                # Skip empty procedures
+                if (
+                    not payload["patternId"]
+                    and not payload["patternName"]
+                    and not payload["description"]
+                ):
+                    continue
+
+                # patternId is required
+                if not payload["patternId"].strip():
+                    messages.error(
+                        request, f"Procedure {idx + 1}: invalid patternId: ATT&CK ID is required"
+                    )
+                    error_count += 1
+                    continue
+
+                kwargs, error = parse_procedure(payload, resolve_ttp=_resolve_ttp_value)
+                if error is not None:
+                    field, message = error
+                    messages.error(request, f"Procedure {idx + 1}: invalid {field}: {message}")
+                    error_count += 1
+                    continue
+
+                # One savepoint per item: a DB-level failure (a constraint, a race on the parent)
+                # would otherwise poison the surrounding transaction and make every later item fail
+                # with `TransactionManagementError` — one bad row would silently become N.
+                try:
+                    with transaction.atomic():
+                        create_procedure(case=case, **kwargs)
+                except Exception:  # pragma: no cover - defensive
+                    logger.exception(
+                        "procedure create failed",
+                        extra={"case_id": str(case.id), "index": idx},
+                    )
+                    messages.error(request, f"Procedure {idx + 1}: could not be attached.")
+                    error_count += 1
+                    continue
+                created_count += 1
+
+    except Exception:  # pragma: no cover - defensive
+        # Same rule as the single-item path: the exception text stays out of the flash message.
+        logger.exception("bulk procedure create aborted", extra={"case_id": str(case.id)})
+        messages.error(request, "Could not attach the procedures.")
+        return redirect("ui-case-detail", case_id=case.number)
+
+    if created_count:
+        messages.success(request, f"Attached {created_count} procedure(s) to case.")
+    if error_count:
+        messages.warning(request, f"{error_count} procedure(s) had errors and were skipped.")
+
+    return redirect("ui-case-detail", case_id=case.number)
 
 
 # =============================================================================
