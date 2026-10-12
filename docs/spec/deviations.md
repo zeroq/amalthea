@@ -228,6 +228,30 @@ Verified by the appended "Re-audit 2026-10-11" (security) and "Re-verification 2
 two reports above; `tests/conformance/test_ui_p2_wiring.py` grew 24 → 30 cases.
 
 
+## Wave 6.16-P3 — UI completeness, phase 3 (TODO §6.16, 2026-10-12)
+
+Per `PLAN-2026-10-11-ui-completeness.md` §8 P3 (A5 — Procedures/TTP UI).
+New guard: `tests/conformance/test_ui_procedures.py` (22 cases) + `tests/conformance/test_ui_css_tokens.py` (2 cases).
+
+| ID | Deviating from | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **W616P3-1** | Plan says "invalid ATT&CK id → message, not 500" (referring to `ttpId`) | **Also validates `patternId` (required)** and `occurDate` (timestamp format) | The TheHive wire shape treats `patternId` as optional; the UI form marks it required. Missing `patternId` now shows "ATT&CK ID is required" instead of creating a procedure with an empty ATT&CK ID. `ui/views.py::case_procedure_create` (early validation). |
+| **W616P3-2** | Bulk endpoint (`ui-case-procedures-create`) was a JSON API proxy | **Rewritten as a UI POST** with form field parsing (indexed `patternId_0`/`patternId_1`… or list-style `patternId`×N) and per-item messages | The original view delegated to the DRF API which returns JSON; a browser form would receive a JSON blob. The UI version parses form data, reuses `parse_procedure`/`create_procedure` in a transaction, and reports created/skipped counts via `messages`. `ui/views.py::case_procedures_create`. |
+| **W616P3-3** | Duplicate route definitions for procedures in `ui/urls.py` | **Removed the duplicate block** (lines ~121-130), keeping the first definition (lines ~75-83) | The duplicate definitions were present in `HEAD` pre-P3. Removed to avoid confusion and potential conflicts. `ui/urls.py`. |
+| **W616P3-4** | `case_procedure_create` was `@require_GET` delegating to API | **Changed to `@require_POST`** implementing the mutation directly | `@require_GET` on a write route is incorrect by construction (browsers cannot GET a mutation). The view now handles the POST directly, mirroring the P2 mutation pattern (`case_edit`, `alert_status`, etc.). `ui/views.py::case_procedure_create`. |
+| **W616P3-5** | The API's bulk endpoint (`POST /api/v1/case/{id}/procedures`) has no item cap | **UI caps one bulk POST at `MAX_BULK_PROCEDURES = 100`** (over the cap → flash + redirect, nothing created) | The item index set is form-controlled, so it must be bounded explicitly rather than inherited from `DATA_UPLOAD_MAX_NUMBER_FIELDS` (1000) — each item costs a row insert plus a `ttpId` lookup. Far above real usage (nobody attaches 100 procedures by hand). `ui/views.py::MAX_BULK_PROCEDURES` · `test_procedures_bulk_create_rejects_more_than_the_cap`. |
+| **W616P3-5a** | n/a — defect fixed in-wave | **Per-item savepoint in the bulk POST** | Items ran inside one atomic block with no savepoint, so a DB-level failure in one item poisoned the transaction and every *later* item failed with `TransactionManagementError` (one bad row silently became N). Each item now runs in `transaction.atomic()`; the regression test fails without the fix. `ui/views.py::case_procedures_create` · `test_procedures_bulk_create_survives_a_db_level_failure_in_one_item`. |
+| **W616P3-5b** | — | **Flash messages carry a generic string; the exception goes to the logger** | `except Exception as exc: messages.error(f"...{exc}")` leaked schema/SQL text to the analyst. Note that seven *pre-existing* UI flashes still do this (TODO §11.4). `ui/views.py::case_procedure_create`/`::case_procedures_create`. |
+| **W616P3-6** | Plan does not ask for a stylesheet guard | **Added `tests/conformance/test_ui_css_tokens.py`** (undefined `var(--color-*)` → test failure; `outline:none` → test failure) | An undefined custom property makes the whole declaration invalid at computed-value time, so app.css silently dropped every border/badge colour from the new rules (7 invented token names) — the second time this class of bug shipped. The guard also protects the WCAG 2.4.7 focus ring. |
+
+**Not a deviation, recorded for clarity:** the Procedures card renders descriptions through the existing sanitized `markdown` filter (ADR-005, `nh3` allow-list), consistent with P5/D3. No new sanitizer or Markdown dependency introduced. The UI imports the canonical `_resolve_ttp_value` from `cases.views` rather than re-implementing the ttpId resolution (it was duplicated twice during implementation).
+
+**Residual risk (accepted, Low):** the bulk create form is not yet reachable from the UI (only the single create is on the case detail page). The bulk endpoint exists and is tested but has no entry point — consistent with the plan's scope (P3 only requires the single attach form on case detail). The attach form is rendered for read-share viewers too (they get the uniform 404 on POST) — that visibility question is the same role policy as TODO §11.1/§11.4.
+
+**Verification:** `docs/verification/VERIFY-2026-10-12-ui-completeness-p3.md` (5/5 ACs met) · **Security:** `docs/reviews/REVIEW-2026-10-12-ui-completeness-p3.md` (0 Critical / 0 High; follow-ups in TODO §11.4).
+
+**Residual risk (accepted, Low):** the bulk create form is not yet reachable from the UI (only the single create is on the case detail page). The bulk endpoint exists and is tested but has no entry point — consistent with the plan's scope (P3 only requires the single attach form on case detail).
+
 
 ## Evidence index
 

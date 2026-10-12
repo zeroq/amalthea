@@ -1059,7 +1059,25 @@ Per `docs/planning/PLAN-2026-10-11-ui-completeness.md` §8 P2.
   `test_ui_p2_wiring.py` grew 24 → **30** cases. Reports carry "Re-audit" / "Re-verification" sections.
 - [x] Gate: `make check` **1464 passed / 3 skipped**; ruff + format + mypy (105 files) + migrations + css clean.
 
-- [x] Gate: `make check` **1464 passed / 3 skipped**; ruff + format + mypy (105 files) + migrations + css clean.
+## 2026-10-12 — UI-completeness wave **P3** (Procedures/TTP UI, A5)
+
+Plan: `docs/planning/PLAN-2026-10-11-ui-completeness.md` §8 P3.
+
+- [x] **Procedures card on case detail** — new `_procedure_entry.html` partial mirrors `_page_entry.html` style; list shows ATT&CK ID (prefers `ttp.ttp_code` when linked, else `pattern_id`), name, tactic, and description rendered through sanitized `markdown` filter; empty state when no procedures attached.
+- [x] **Attach procedure form** — plain `<form method="post">` with CSRF; fields: `patternId` (required, "ATT&CK ID"), `patternName`, `tactic`, `occurDate` (ISO 8601 or epoch ms), `description` (textarea), optional `ttpId` `<select>` populated from `TTP.objects.all()` with "-- none --" blank option; submit button with `fa-diagram-project` icon supplementing visible label.
+- [x] **Single create (`ui-case-procedure-create`)** — `@require_POST`, resolves case via `resolve_case(..., write=True)`, uniform 404 on miss; builds payload from `request.POST`, validates via `parse_procedure`/`_resolve_ttp_value`, creates via `create_procedure` in `transaction.atomic()`; on success `messages.success` + redirect to case detail; on error `messages.error` + redirect (never 500, never JSON). Invalid `ttpId` → "unknown ttpId" message; bad `occurDate` → "not a valid timestamp" message; missing `patternId` → "ATT&CK ID is required" message.
+- [x] **Bulk create (`ui-case-procedures-create`)** — `@require_POST`, accepts indexed fields (`patternId_0`, `patternId_1`…) or list-style repeated fields; reuses `parse_procedure`/`create_procedure` in a transaction; reports created/skipped counts via `messages`; never 500s on bad input.
+- [x] **No-JS / progressive enhancement** — form is a real POST form; works without HTMX/JS. CSRF-protected.
+- [x] **Authz** — cross-org POST → uniform 404; anonymous → redirect to login; CSRF enforced.
+- [x] **Tenant-scoping conformance** — routes remain POST-only (`_UI_WRITE_ONLY_ROUTES` unchanged); no GET added.
+- [x] **Conformance tests** — `tests/conformance/test_ui_procedures.py` (22 cases): rendering, valid/invalid single create, bulk create, per-item DB-failure isolation, bulk cap, cross-org, anonymous, CSRF, POST-only, no-JS form, markdown rendering, XSS sanitization; plus `tests/conformance/test_ui_css_tokens.py` (2 cases: no undefined `var(--color-*)`, no `outline:none`).
+- [x] Gate: `make check` **1538 passed / 3 skipped**; ruff + format + mypy (105 files) + migrations + css clean + full pytest.
+
+**Independent verification + security review (this wave).**
+
+- [x] Verifier: `docs/verification/VERIFY-2026-10-12-ui-completeness-p3.md` — **5/5 ACs met**. AC "invalid ATT&CK id → message, not 500" is met: no procedure-view failure path 500s (unknown `ttpId`, malformed `occurDate`, missing `patternId` all flash + redirect); a syntactically odd non-empty `patternId` stays accepted because `pattern_id` is free text for TheHive parity (documented as `W616P3-1`).
+- [x] Security: `docs/reviews/REVIEW-2026-10-12-ui-completeness-p3.md` — **0 Critical / 0 High** (1 Medium, 3 Low, 4 Info). The tenants/authz/CSRF/CSP/injection checks all cleared. Follow-ups recorded in `TODO §11.4`.
+- [x] **Fixed during the phase** (all found by review, not shipped): 7 undefined CSS tokens (an undefined `var()` drops the whole declaration, so every new border/badge colour was silently gone — now guarded by a conformance test); `outline:none` on the new focus rule (WCAG 2.4.7); the bulk view had **no per-item savepoint**, so a DB-level failure in one item poisoned the batch and every later item failed with `TransactionManagementError` (regression test confirmed failing without the fix); the `ttpId` resolver was duplicated instead of importing the canonical one; exception text leaked into flash messages; the bulk item loop was unbounded and quadratic (now `MAX_BULK_PROCEDURES = 100` + hoisted `getlist`).
 
 ## 2026-10-12 — UI-completeness wave **P5** (D1 playbook round-trip + D3 sanitized Markdown)
 
@@ -1090,8 +1108,8 @@ Q1 resolved → `markdown-it-py==4.2.0` + `mdurl==0.1.2` + `nh3==0.3.7` pinned i
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | 1509 passed / 3 skipped / 0 failed |
-| **Secret scan** | Clean (371 tracked files at HEAD; new P5 files scanned by the pre-commit hook on commit) |
+| **Total tests** | 1538 passed / 3 skipped / 0 failed |
+| **Secret scan** | Clean (382 tracked files at HEAD; 387 once the P3 batch lands — every new file passes the pre-commit hook, and CI scans full history) |
 | **Ruff** | Clean |
 | **Mypy (strict)** | Clean (105 source files) |
 | **Ruff format** | Clean |
@@ -1124,7 +1142,7 @@ All tests pass on PostgreSQL (verified in CI and manual re-gate 2026-10-06/07).
 
 ---
 
-*Last updated: 2026-10-12 — UI-completeness wave **P5** (D1 playbook round-trip + D3 sanitized Markdown;
+*Last updated: 2026-10-12 — UI-completeness wave **P3 + P5** (Procedures/TTP UI, D1 playbook round-trip + D3 sanitized Markdown;
 verified + security-reviewed, 3 follow-ups in `TODO §11`), on top of P1 + P2, tenant isolation (§6.4, ADR-004),
 superAdmin Settings (§6.12), Settings UI hardening (§6.14).*
 *Next review: after the S3/S5 security follow-ups (`TODO` priority #1).*

@@ -153,8 +153,19 @@ Each phase has its own AC checklist; a phase is "done" when `make check` is gree
 
 ### P3 — Procedures / TTP UI (A5)
 
-- [ ] Case detail can attach a procedure/TTP (new partial + form); list shows attached procedures with ATT&CK ID and description.
-- [ ] Works without JS; invalid ATT&CK id → message, not 500.
+- [x] Case detail can attach a procedure/TTP (new partial + form); list shows attached procedures with ATT&CK ID and description.
+- [x] Works without JS; invalid ATT&CK id → message, not 500.
+
+**P3 status (2026-10-12): DONE — verified + security-reviewed.** Gate `make check` = **1538 passed / 3 skipped** (ruff + format + mypy 105 files + migrations + css clean + full pytest). New conformance test files: `tests/conformance/test_ui_procedures.py` (22 cases: rendering, valid/invalid create, bulk create, per-item DB-failure isolation, bulk cap, authz, CSRF, no-JS, XSS) + `tests/conformance/test_ui_css_tokens.py` (2 cases). Independent verification: `docs/verification/VERIFY-2026-10-12-ui-completeness-p3.md` (**5/5 ACs met**). Security: `docs/reviews/REVIEW-2026-10-12-ui-completeness-p3.md` (**0 Critical / 0 High**; 1 Medium = the systemic `read-only` gap tracked from P5, now at two more surfaces). Follow-ups recorded in `TODO §11.4`.
+
+On the AC "invalid ATT&CK id → message, not 500": the plan meant a bad `ttpId` (which is an FK). Both that and a malformed `occurDate` now produce a flash message and a redirect, never a 500 — and `patternId` is *also* enforced as required by the form (see deviations W616P3-1). A syntactically odd but non-empty `patternId` is still accepted, deliberately: `pattern_id` is a plain string in the model and in `compat.procedures.parse_procedure` (TheHive parity), so the UI does not invent a stricter validation the API does not have.
+
+Defects found and fixed during the phase (details in the verification record once it lands):
+- **CSS token bug** — the new `.procedures`/`.form-grid` rules referenced 7 tokens that do not exist in `app.css` (`--color-border`, `--color-fg`, `--color-primary`, …). An undefined `var()` makes the whole declaration invalid at computed-value time, so every border/badge colour was silently dropped. Now mapped to the real theme tokens, `outline:none` removed from the focus rule (WCAG 2.4.7), and guarded by the new `test_ui_css_tokens.py`.
+- **Bulk-create transaction bug** — items were created inside one atomic block with no per-item savepoint, so a DB-level failure in one item poisoned the batch and every *later* item failed with `TransactionManagementError` (one bad row silently became N). Each item now runs in its own savepoint; regression test added and confirmed to fail without the fix.
+- **Duplicated `_resolve_ttp_value`** — the UI had copied the resolver twice instead of importing the canonical one from `cases.views` (same class of drift as the CSS bug).
+- **Message hygiene** — `except Exception as exc: messages.error(f"...{exc}")` leaked the exception text to the analyst; the detail now goes to the logger and the flash carries a generic message.
+- **Test hardening** — the ttp-code-precedence test was tautological (both values were the same string) and the XSS test asserted nothing meaningful; both rewritten.
 
 ### P4 — Settings expansions (C5, C6) — pulls TODO §6.13 forward
 

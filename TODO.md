@@ -1,8 +1,8 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-12 (**§6.16 P5 shipped — D1 playbook round-trip + D3 sanitized Markdown; verified +
-security-reviewed, 3 follow-ups in §11**;
+Last updated: 2026-10-12 (**§6.16 P3 procedures/TTP UI + P5 D1/D3 shipped — both independently verified +
+security-reviewed; P3 follow-ups in §11.4, P5 follow-ups in §11.1–11.3**;
 README Quickstart webhook flow refreshed for the per-org `IngestionToken` (ADR-004) and **§10.8 token surface** filed;
 **§6.16 UI-completeness wave P1 + P2 shipped + independently verified + security-remediated**;
 §6.12 org/user Settings and §6.14 Wave 6.3A hardening done 2026-10-11; **§10 backlog captured** — case
@@ -25,10 +25,10 @@ be traced, and `Blocks` when it gates other work. Review IDs (`C1`, `H2`, `M5`�
 | **2** | **6.4 — Tenant isolation** | ✅ **SHIPPED 2026-10-10** — strict multi-tenant model (mandatory `owner_org` on Case/Alert/Observable, per-org webhook tokens, roles, superAdmin cross-org audit, org-scoped query API/WebSocket/UI, per-org observable dedupe). Plan `PLAN-2026-10-10-tenant-isolation.md`; ADR-004; `make check` 1110 passed. | **Done.** |
 | **3** | **Test hardening (Phase 12 / T2)** | QA list from `VERIFY-2026-10-10`: delete-with-runs row survival, merge children matrix, attachment boundaries (exact cap/empty/batch partial), timeout cap 30/31, run-now `Success`+`output_log`, `SESSION_COOKIE_HTTPONLY`, UI login-throttle; §8.5 mutation guards for blast-radius/share/TTP/delete-with-runs/attachment. Extend `test_ui_urls_smoke.py` to Python-only `redirect` names (verifier N3). **Also restore coverage ≥ 80%** (§2.6 — dropped to 79% after the tenant-isolation + org-management waves). | **Medium** — regression prevention. |
 | **4** | **7.4 — Tailwind source/artifact split** | `ui/static/ui/app.css` is both the Tailwind input and the committed output; the pipeline is not idempotent so `css-check` cannot detect drift. Split `app.src.css` (source) → `app.css` (artifact). See ADR-003 "Known limitation". | **Low** — build hygiene. |
-| **5** | **7.5 — Orphaned routes / `ui-case-merge`** | **`ui-case-merge` FIXED 2026-10-10** (tenant-isolation P7): correct `cases.merge.merge_cases` import + signature, added `ui/case_merge.html`, removed the dead `@require_GET` block, org-scoped. Remaining: six routes (`ui-case-export/bulk/taxonomy/procedure(s)/attachment-detail`) still have no entry point anywhere. Either build the missing UI or delete the dead routes/views. | **Low** — dead routes. |
+| **5** | **7.5 — Orphaned routes / `ui-case-merge`** | **`ui-case-merge` FIXED 2026-10-10** (tenant-isolation P7): correct `cases.merge.merge_cases` import + signature, added `ui/case_merge.html`, removed the dead `@require_GET` block, org-scoped. **`ui-case-procedure-create` / `ui-case-procedures-create` FIXED 2026-10-12 (P3)**: Procedures card on case detail with attach form + list; `@require_GET` → `@require_POST` with messages/redirects. Remaining: four routes (`ui-case-export/bulk/taxonomy/attachment-detail`) still have no entry point anywhere. Either build the missing UI or delete the dead routes/views. | **Low** — dead routes. |
 | **6** | **6.12 — Settings: organisations + users (superAdmin)** | New `superAdmin`-only **Settings** area with two pages — **Organisations** and **Users** (list / add / edit / delete) + matching Amalthea API. **DONE 2026-10-11** (O1–O5; verifier 24/24 ACs; security review clear; §6.14 hardening landed on top). Plan: `docs/planning/PLAN-2026-10-10-org-management.md`. | **Done.** |
 | **7** | **§10 — Case & identity enhancements** | Requested 2026-10-11, **unscheduled**: role-scoped **user management** (org `admin` manages own-org users), manual **case creation** from the UI, case **scope / type / data-classification / phase** fields, and case-detail **tabs** (General · Alerts / Tasks / Observables / Attachments / Similar / Comments / Audit). See **§10** for items + open design questions Q-D1…Q-D5. | **Backlog** — needs a plan + design decisions. |
-| **8** | **§6.16 — UI-completeness wave P3–P7** | Remaining phases of the plan `PLAN-2026-10-11-ui-completeness.md` after P5 shipped: **P3** procedures/TTP UI, **P4** Settings → ingestion tokens + audit-log viewer (§6.13), **P6** global search (B3), **P7** per-org realtime breadth + HTMX adoption (D4/D5). | **Medium** — completes the survey-grade UI. |
+| **8** | **§6.16 — UI-completeness wave P4–P7** | Remaining phases of the plan `PLAN-2026-10-11-ui-completeness.md` (P1/P2/P3/P5 shipped): **P4** Settings → ingestion tokens + audit-log viewer (§6.13), **P6** global search (B3), **P7** per-org realtime breadth + HTMX adoption (D4/D5). | **Medium** — completes the survey-grade UI. |
 | **9** | **§11 — P5 security follow-ups (M1, M3, L1)** | Decisions first, code second. **M1** — does `read-only` mean read-only? `POST /ui/cases/<id>/edit`, `/ui/alerts/<id>/status`, `/ui/observables/<id>/delete` carry no role predicate (they match the API, so pre-existing) → enforce one shared `requires_role("analyst")` in both UI and compat. **M3** — playbook action secrets have no `owner_org` and render in cleartext to any authenticated user of any org (leaks `Authorization: Bearer …`); pick `owner_org` scoping / secret references / analyst-gate + masking. **L1** — protocol-relative `href` survives the Markdown sanitizer (accept-low or filter). Source: `docs/reviews/REVIEW-2026-10-12-ui-completeness-p5.md`. | **Medium** — M3 leaks usable credentials in multi-tenant deployments. |
 
 ---
@@ -174,7 +174,20 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
     form so it neither gated nor forced; a literal `Response` import was missing; `resolve_alert`/`resolve_observable`
     raised `ValidationError` (500) on a non-UUID id where `resolve_case` already returned 404.
     Details: `docs/spec/deviations.md` "Wave 6.16-P2".
-  - [ ] **P3–P7** — **P5 done** 2026-10-12 (D1 + D3; verified + security-reviewed — follow-ups in §11); P3/P4/P6/P7 not started. (P5 was unblocked 2026-10-12: Q1 decided → Option A, `markdown-it-py` +
+  - [x] **P3 — DONE 2026-10-12** (A5 Procedures/TTP UI: attach form + list on case detail, single + bulk
+    POST views; `@require_GET` routes → `@require_POST` mutations). Gate: `make check` **1539 passed /
+    3 skipped**. New guards: `tests/conformance/test_ui_procedures.py` (22 cases) and
+    `tests/conformance/test_ui_css_tokens.py` (an undefined `var(--color-*)` — the silent
+    invalid-at-computed-value-time failure that shipped 7 broken declarations — is now a test failure).
+    **Independently verified** — `docs/verification/VERIFY-2026-10-12-ui-completeness-p3.md` (5/5 ACs Met)
+    and security-reviewed — `docs/reviews/REVIEW-2026-10-12-ui-completeness-p3.md` (0 Critical / 0 High).
+    Fixed in-wave: 7 undefined CSS tokens + a dropped focus ring (WCAG 2.4.7); the bulk-create per-item
+    **savepoint** bug (a DB-level failure in one item poisoned the batch so every later item died with
+    `TransactionManagementError` — one bad row silently became N; regression test confirmed to fail
+    without the fix); duplicated `_resolve_ttp_value` in the UI layer; exception text leaking into flash
+    messages; an unbounded/quadratic bulk item loop (`MAX_BULK_PROCEDURES = 100` + hoisted `getlist`).
+    Follow-ups: `TODO §11.4`. Details: `docs/spec/deviations.md` "Wave 6.16-P3".
+  - [x] **P3–P7** — **P5 done** 2026-10-12 (D1 + D3; verified + security-reviewed — follow-ups in §11); P4/P6/P7 not started. (P5 was unblocked 2026-10-12: Q1 decided → Option A, `markdown-it-py` +
     `nh3` pinned in `requirements/base.txt` and governed by **ADR-005**). The other open questions are
     decided by the plan's recommendations (Q2 = stub deleted, Q3 = HTMX scope, Q4 = audit viewer
     read-only, Q5 = search over cases/alerts/observables).
@@ -290,7 +303,8 @@ semantics, so they need a policy call before a fix.
   `POST /ui/cases/<id>/edit` (`ui/views.py:1446`), `/ui/alerts/<id>/status`, `/ui/observables/<id>/delete`
   (`ui/views.py:1617`, `:1772`) — they carry `@login_required` + `@require_http_methods` but **no role
   predicate**, unlike `case_edit`'s siblings at `ui/views.py:638/864/898/923`. It **matches the API**
-  (same gap in `compat/views.py`), so it is pre-existing rather than a P2/P5 regression. Decide the policy
+  (same gap in `compat/views.py`), so it is pre-existing rather than a P2/P5 regression. **P3 added two
+  more surfaces**: `ui-case-procedure-create` and `ui-case-procedures-create` (§11.4). Decide the policy
   once, then enforce it in **one** place (e.g. a `requires_role("analyst")` decorator in `identity/`) and
   apply it to both the UI and the compat API; add a `read-only`-cannot-mutate conformance test. Note the
   interaction with §10.1 (role-scoped user management).
@@ -308,6 +322,34 @@ semantics, so they need a policy call before a fix.
   `<a href="//evil.example">` (`ui/markdown.py`; `_ALLOWED_URL_SCHEMES` only sees the inherited scheme).
   Not XSS — a same-scheme link to an arbitrary host (phishing aid). Accept as low, or post-filter `href`
   values whose `urlsplit()` yields an empty scheme **and** a `//` prefix.
+
+### 11.4 — P3 (procedures/TTP UI) review follow-ups (2026-10-12)
+
+From `docs/reviews/REVIEW-2026-10-12-ui-completeness-p3.md` (0 Critical / 0 High; verification
+`docs/verification/VERIFY-2026-10-12-ui-completeness-p3.md` = 5/5 ACs met).
+
+- [ ] **M1 (duplicate of §11.1)** — neither `ui-case-procedure-create` nor `ui-case-procedures-create`
+  has a role gate; a `read-only` member of the owning org can attach procedures. Not a tenant break
+  (org scoping holds), but it is exactly the §11.1 policy gap at two new surfaces.
+- [ ] **L1 — procedure attach is unaudited.** Neither the single nor the bulk view writes an `AuditLog`
+  row or a case-ledger event, so an attached procedure does not show up on the case timeline. §9 of the
+  plan did not name procedures and the compat API behaves the same way (parity), so this is "audit it, or
+  accept it explicitly". Decide together with the ledger-event work.
+- [ ] **L3 — the attach form is visible to read-share viewers.** `case_detail` renders the form for
+  everyone it can see; a read-share viewer can submit it and gets a 404. Fixing it needs a *write-share*
+  predicate, and `identity/scoping.py` has no cheap one (`resolve_case(write=True)` costs a share query),
+  so this is the same "who may mutate from the UI" decision as §11.1 — decide both together, then gate the
+  form on the same predicate the view uses (never on `is_owner`, which would hide it from legitimate
+  write-share orgs).
+- [ ] **I1 — pre-existing leaky flash messages.** Seven `except Exception as exc: messages.error(...{exc})`
+  sites reflect internal exception text to the analyst (`ui/views.py:367,985,1167,1228,1579,1959,1990`).
+  P3 introduced no new ones (it logs the detail and flashes a generic string); this is a small mechanical
+  cleanup, best done as one sweep.
+- **Fixed in P3 (no action):** the unbounded/quadratic bulk item loop (now `MAX_BULK_PROCEDURES = 100` +
+  hoisted `getlist`, Low L2); the undefined CSS tokens (Low→fixed, now guarded by
+  `tests/conformance/test_ui_css_tokens.py`); the per-item savepoint bug in bulk create.
+- **Accepted (Info):** `ttps=TTP.objects.order_by("name")` is global — `TTP` is shared reference data with
+  no `owner_org` (intended); no rate limiting on the new mutations (P2 parity, tracked with §S-items).
 
 ---
 
