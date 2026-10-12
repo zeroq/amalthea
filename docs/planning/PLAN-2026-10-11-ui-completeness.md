@@ -44,7 +44,7 @@ The stack is fixed by ADR-001/003 and is deliberately *not* revisited here: Djan
 - **Scoping.** Every new view resolves its target through `identity/scoping.py` (`resolve_case` / `resolve_alert` / `resolve_observable` / `resolve_organisation`) and renders the **uniform 404** on miss — never 403. This is the single mechanism; no view may hand-roll an org filter.
 - **Modals.** Destructive/confirm actions use the existing `<dialog>` pattern (`_modal.html` + `modal.js` + `modal.css`), which is already the prescribed pattern in `AGENTS.md` §6. The `?` cheat-sheet is converted to that same pattern (D6) rather than its own `innerHTML` construction.
 - **HTMX.** Mutations that can swap a partial should; the non-HTMX path is the same URL as a full POST. `HX-Request` decides partial vs full render (existing precedent: `case_comment`).
-- **ADRs:** no new ADR is required. ADR-003 gains a note that the cheat-sheet is server-rendered (§4 note) if D6 lands as designed. If Markdown rendering (D3) adds a runtime dependency, that **does** warrant an ADR — see Open Question **Q1**.
+- **ADRs:** **ADR-005** (`markdown-it-py` + `nh3`, server-side sanitized CommonMark) is required by the Q1 decision and covers D3. ADR-003 gains a note that the cheat-sheet is server-rendered (§4 note) if D6 lands as designed.
 
 ## 5. Data model / schema
 
@@ -164,8 +164,10 @@ Each phase has its own AC checklist; a phase is "done" when `make check` is gree
 
 ### P5 — Playbook round-trip + Markdown (D1, D3)
 
-- [ ] **D1** Editing a playbook pre-selects the stored action and round-trips url/method/timeout/body/action_path/headers; saving without changes is a no-op; a test asserts the action config survives a GET→POST cycle.
-- [ ] **D3** Case description and comment/ledger bodies render as **sanitized CommonMark** (decision 3.3), server-side, with a strict allow-list (no raw HTML, no `javascript:`); plain-text fallback preserved; escaping test with `<script>`/`<img onerror>` payloads. Runtime dependency decision = **Q1**.
+- [x] **D1** Editing a playbook pre-selects the stored action and round-trips url/method/timeout/body/action_path/headers; saving without changes is a no-op; a test asserts the action config survives a GET→POST cycle.
+- [x] **D3** Case description and comment/ledger bodies render as **sanitized CommonMark** (decision 3.3), server-side, with a strict allow-list (no raw HTML, no `javascript:`); plain-text fallback preserved; escaping test with `<script>`/`<img onerror>` payloads. Runtime dependency decision = **Q1**.
+
+**P5 status (2026-10-12): DONE — verified + security-reviewed.** Independent verification: `docs/verification/VERIFY-2026-10-12-ui-completeness-p5.md` (18/18 ACs met). Security: `docs/reviews/REVIEW-2026-10-12-ui-completeness-p5.md` (0 Critical, 0 High). Fixed during the batch: textarea stored-XSS in `playbook_form.html` (`|safe` → autoescape, + regression test), unbounded `header_count` → `MAX_HEADERS = 64` reject (M2), missing `@require_http_methods` (L2), undefined CSS var + `.md` `white-space` (D3). **Open, deferred to decisions below:** M1 (does `read-only` mutate? — role policy, pre-existing, matches API), M3 (playbook headers are global + rendered in cleartext → secret exposure), L1 (protocol-relative `href` survives the sanitizer). See `TODO` §10.9.
 
 ### P6 — Global search (B3)
 
@@ -203,7 +205,7 @@ Each phase has its own AC checklist; a phase is "done" when `make check` is gree
 | # | Risk | Likelihood | Mitigation |
 |---|---|---|---|
 | R1 | **Scope**: 24 items is a multi-day wave; P6/P7 (search, realtime/HTMX) are each as large as P1–P5 combined | High | Phase-by-phase ship + verify; P6/P7 can land separately without blocking the rest |
-| R2 | **Markdown dependency** (D3) requires new hashed runtime deps in a public repo | Med | Q1 decides the library; if adding deps is undesirable, ship a minimal safe subset or defer D3 behind a flag |
+| R2 | **Markdown dependency** (D3) requires new hashed runtime deps in a public repo | Med | **Resolved (Q1 → A, 2026-10-12):** `markdown-it-py` + `nh3` added to hashed `base.txt` via `scripts/lock.sh`; sanitizer allow-list + XSS conformance test (ADR-005) |
 | R3 | **C3 observable delete** touches cross-case sharing | Med | Reuse the §6.5 blast-radius guard; refuse with an explicit message; test the multi-case case |
 | R4 | **C1 alert triage** duplicates API logic in the UI | Med | Call the existing `_set_alert_fields`/`_update_alert` service, never re-implement |
 | R5 | **D5 HTMX adoption** regresses the no-JS fallback | Med | Every conversion ships with a plain-POST test; HX-Request branch in the view |
@@ -213,7 +215,7 @@ Each phase has its own AC checklist; a phase is "done" when `make check` is gree
 
 ## 12. Open Questions
 
-- **Q1 (blocks P5/D3).** Which Markdown stack? Recommendation: `markdown-it-py` (CommonMark) **+** a strict allow-list sanitizer (`nh3`, bindings to Ammonia) — but both must be added to the hashed runtime requirements, and `make lock`-style regeneration must be re-run. Alternatives: (a) reuse an already-locked transitive dep, (b) render a minimal safe subset ourselves (not recommended), (c) defer D3. **Decision needed before P5.**
+- **Q1 (blocks P5/D3) — DECIDED 2026-10-12 → Option A.** Markdown stack = **`markdown-it-py`** (CommonMark parser) **+ `nh3`** (Ammonia bindings, strict allow-list sanitizer), added to the **hashed runtime requirements** (`requirements/base.txt`), regenerated with `scripts/lock.sh`, and governed by **ADR-005**. Rendering is **server-side** in a template filter (`ui_tags.markdown`); case descriptions and comment/ledger bodies lose raw HTML, `javascript:` URLs and event-handler attributes. Rejected alternatives: (b) hand-rolled subset — its own XSS surface, larger review burden; (c) defer D3 — drops the wave's core "rich ledger" requirement.
 - **Q2 (blocks P1/A3c).** Bulk operations: implement (multi-select → status/assignee/tag) or delete the stub route? Recommendation: **delete the stub now** and file bulk as its own item — it is a UI+API+authz design in its own right and would otherwise hold up P1.
 - **Q3 (blocks P7/D5).** How far does HTMX go? Recommendation: **list filters + case-detail mutations only**; a full-app conversion is a separate architectural wave.
 - **Q4 (blocks P4/C6).** Audit-log retention/export policy — the viewer is read-only in this wave; if retention is required it is a separate concern.
@@ -279,6 +281,36 @@ Any deviation from this plan is recorded in `docs/spec/deviations.md` under "UI 
 | D8 keyboard coverage | ✅ locked by `test_ui_nav.py` (rail ⇄ `ROUTES` ⇄ `CHEATSHEET` ⇄ table) |
 
 **Still open:** **Q1** (runtime Markdown + sanitiser) — gates P5/D3; unchanged. **Q3/Q4/Q5** — later phases, unchanged.
+
+## 13c. Outcome — P2 (2026-10-11)
+
+**Status: DONE (code) — independent verification passed, security remediation applied.** Gate `make check` = **1464 passed / 3 skipped** (ruff + format + mypy 105 files + migrations + css clean). New guard `tests/conformance/test_ui_p2_wiring.py` (**30 cases**). Reports: verifier `docs/verification/VERIFY-2026-10-11-p2-ui-completeness.md` (C1/C2/C3 **Met**, re-verification Pass); security `docs/reviews/REVIEW-2026-10-11-p2-ui-mutations.md`. Deviations: `docs/spec/deviations.md` “Wave 6.16-P2” (`W616P2-1…5`).
+
+| Plan item | Outcome |
+|---|---|
+| C1 alert triage | ✅ `ui-alert-status` POST; applies an **existing** `AlertStatus.value` only (no mint), audit + case-ledger entry; triage `<select>` fixed to post the value, not the pk |
+| C2 case edit | ✅ `ui-case-edit` GET/POST over the new **shared** `cases/update.py` applier (API `_update_case`/bulk + UI are one definition); bounded status; assignee/tags/flag; audit |
+| C3 observable edit | ✅ `ui-observable-edit`; applier wire shape (`dataType`, `ignoreSimilarity`) + validated `enrichment_data`; **`data` immutable** (per-org dedupe key) |
+| C3 observable delete | ✅ `ui-observable-delete`; cross-case guard honoured; pk captured before `delete()` (audit no longer logs `"None"`) |
+| Cross-case force (both) | ✅ in-form acknowledgement checkbox (`name="force"`) for edit **and** delete — matches the API's `?force=true` |
+| Robustness (found) | ✅ `resolve_alert`/`resolve_observable` no longer 500 on a non-UUID id (uniform 404); missing `Response` import; TLP/PAP/severity select preselection |
+
+### Security remediation (post-verification, same day)
+
+`REVIEW-2026-10-11-p2-ui-mutations.md` found one MEDIUM + two LOW; all are fixed and independently re-audited (**M1/L1/L2/N1 → FIXED**, no regression):
+
+| ID | Fix |
+|---|---|
+| **M1** (MEDIUM) | Cross-tenant assignee injection: `_resolve_login(value, *, org=None)` is now org-scoped (login **and** UUID); the applier threads `case.owner_org` and the task path `task.case.owner_org`, so the API PATCH, bulk and UI cannot bind a principal from another org. The UI additionally rejects a non-member with a clear error. |
+| **L1** | Out-of-range `severity`/`tlp`/`pap` were an unhandled `IntegrityError` (500); `_set_case_fields` now range-checks against `core.enums` and raises `CaseUpdateError` → 400/form error on both surfaces. |
+| **L2** | The `AuditLog` row now shares the mutation's transaction (a failed audit rolls the change back) — in `case_edit`, `observable_edit` and `alert_status`. |
+| **NEW-1** | The case-edit assignee select prefilled the **UUID** while its options are **logins**, so an untouched save silently unassigned the case; now prefills the login. |
+| **NEW-2** | `alert_status` audited outside the mutation transaction (same class as L2); now wrapped in one `atomic()`. |
+| N1 | Re-render helpers read `QueryDict` scalars via `.get()` (no `['x']` echoes); `case_edit` now passes `is_cross_org`. |
+
+Tests: `test_ui_p2_wiring.py` grew from 24 → **30** (cross-org assignee refused, applier login-scoping, out-of-range enum rerender, applier range error, assignee-login prefill, audit-failure rollback). Reports: `docs/reviews/REVIEW-2026-10-11-p2-ui-mutations.md` (incl. "Re-audit 2026-10-11"), `docs/verification/VERIFY-2026-10-11-p2-ui-completeness.md` (incl. "Re-verification 2026-10-11").
+
+**Notes:** the seeded alert vocabulary (`New/Triaged/Dismissed` + `Imported`) matches the plan — no deviation. The observable form offers TLP `0..3` because the shared applier rejects `4/Unknown` (W616P2-5). **Q1** unchanged and still gates P5/D3.
 
 ## 14. References
 

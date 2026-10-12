@@ -37,7 +37,8 @@ generated from code, not hand-written here (plan `PLAN-2026-10-07-docs-spec.md` 
 
 - Master plan: `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` (§7 wire, §12/§13 deviations)
 - ADRs: `docs/decisions/ADR-001-backend-framework.md`, `docs/decisions/ADR-002-thehive-api-compatibility.md`,
-  `docs/decisions/ADR-004-tenant-isolation.md` (strict multi-tenant — supersedes the tenant deferral / F2)
+  `docs/decisions/ADR-004-tenant-isolation.md` (strict multi-tenant — supersedes the tenant deferral / F2),
+  `docs/decisions/ADR-005-markdown-rendering.md` (server-side sanitized CommonMark — markdown-it-py + nh3)
 - Reviews/verifies: `docs/reviews/REVIEW-2026-10-0{3,4,5}-*.md`, `docs/planning/VERIFY-2026-10-07-phase{10,11}.md`,
   `docs/reviews/SECURITY-2026-10-10-tenant-isolation-final.md` (verdict: CLEAR TO BUILD ON)
 - Implementation plan for this directory: `docs/planning/PLAN-2026-10-07-docs-spec.md`

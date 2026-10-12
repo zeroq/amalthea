@@ -6,8 +6,9 @@ and heavy automation workflows (like Tines) by treating **Alerts, Cases, Observa
 Playbook Triggers as deeply interconnected, first-class objects**.
 
 - **Schema-agnostic ingestion** — receive raw JSON from any security tool (SIEM, EDR, CloudTrail,
-  phishing boxes) at `POST /api/v1/alerts/webhook/{source_id}`, with a JSON-path mapping layer that
-  normalises telemetry into a standard `Alert` without losing the raw context.
+  phishing boxes) at `POST /api/v1/alerts/webhook/{source_id}`, authenticated with a per-org ingestion
+  token (`X-Webhook-Secret`) and normalised into a standard `Alert` by a JSON-path mapping layer that
+  keeps the raw context.
 - **Incident lifecycle** — triage alerts, escalate or merge them into `Case`s, correlate on
   `correlation_key`, collaborate on a live Markdown ledger with tasks and status transitions.
 - **Forensic observables** — every artifact (IP, domain, hash, mail, user) is a standalone, globally
@@ -38,19 +39,27 @@ python manage.py migrate    # defaults to amalthea.settings.dev
 python manage.py runserver  # http://127.0.0.1:8000/
 ```
 
-Create an analyst account and a webhook source:
+Create an analyst account, a webhook source, and its **per-org ingestion token**:
 
 ```bash
 python manage.py shell -c "
-from identity.models import Organisation, User
+from identity.models import IngestionToken, Organisation, User
 from ingest.models import IngestionSource
 org = Organisation.objects.create(name='Acme')
 User.objects.create_user(username='analyst', password='change-me', org=org)
-IngestionSource.objects.create(slug='o365', name='M365',
+source = IngestionSource.objects.create(slug='o365', name='M365',
     mapping_config={'title': '\$.title', 'severity': '\$.severity',
                     'correlation_key': '\$.sourceRef'})
+token, secret = IngestionToken.create_token(source=source, organisation=org, name='M365 webhook')
+print('X-Webhook-Secret:', secret)
 "
 ```
+
+> The secret is printed **once** and stored only as an Argon2 hash — copy it now. Under tenant
+> isolation (ADR-004) a token binds the `o365` source to **one** organisation, and that org is what
+> stamps the ingested alert's `owner_org`. The same source can fan out to several tenants by issuing
+> one token each. There is no Settings UI for tokens yet (TODO §6.13, §6.16 P4) — mint them from the
+> shell until P4 lands.
 
 For tenant administration, also create a `superAdmin` (only a `superAdmin` can open **Settings**):
 
@@ -62,14 +71,22 @@ User.objects.create_user(username='admin', password='change-me', org=org, role='
 "
 ```
 
-Log in at <http://127.0.0.1:8000/> and fire a mock alert:
+Log in at <http://127.0.0.1:8000/> and fire a mock alert (pass the token printed above):
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/alerts/webhook/o365/ \
   -H "Content-Type: application/json" \
+  -H "X-Webhook-Secret: $TOKEN" \
   -d '{"title":"Suspicious inbox rule","severity":3,"sourceRef":"demo-1",
        "event":"mailbox.rule.created","actor":{"email":"attacker@example.net"}}'
 ```
+
+`X-Webhook-Secret` is the canonical header; `X-Api-Key: <token>` and `Authorization: Bearer <token>`
+are accepted as aliases. Ingestion is **tenant-scoped and strict**: a missing, unknown, or revoked
+token is rejected with **401** and an unknown source slug with **404** — no valid token means no alert
+(this closed the pre-ADR-004 open-ingest hole). Tokens are stored as Argon2 hashes and looked up by a
+12-char prefix; the legacy plaintext `IngestionSource.webhook_secret_hash` is still accepted so an
+existing deployment can migrate without a flag day.
 
 Escalate the alert from the UI — Amalthea extracts the `attacker@example.net` observable, fires any
 playbook bound to `observable.created`, and appends the result to the case timeline.

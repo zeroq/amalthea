@@ -190,6 +190,43 @@ Per `PLAN-2026-10-11-ui-completeness.md` §8 P1. Verification: `docs/verificatio
 
 **Residual risk (accepted, Low):** duplicate URL *names* for `ui-case-template-list` and the procedure routes pre-date this wave (present in `HEAD`) and were left untouched; two new guard modules are source-level parsers (they fail on a shape change, which is the intended behaviour but needs a matching edit).
 
+## Wave 6.16-P2 — UI completeness, phase 2 (TODO §6.16, 2026-10-11)
+
+Per `PLAN-2026-10-11-ui-completeness.md` §8 P2 (C1 alert triage, C2 case edit, C3 observable edit/delete).
+New guard: `tests/conformance/test_ui_p2_wiring.py` (24 cases).
+
+| ID | Deviating from | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **W616P2-1** | The UI triage form was to submit an `AlertStatus` **id** | The control submits `AlertStatus.value` (New/Triaged/Dismissed) and the view validates against the **existing** vocabulary only (never `resolve_alert_status`) | The first backend pass posted the pk while the form contract was a value; worse, feeding the tolerant resolver a form field would let a crafted POST **mint** a new `AlertStatus` row (ADR-002 §D11 is deliberately tolerant for the API). The API's PATCH keeps the tolerant resolver, so this is a UI/API *restriction*, not a behaviour change. `ui/views.py::alert_status`, `ui/templates/ui/alert_detail.html`. |
+| **W616P2-2** | Case edit was to re-implement the field set | Extracted `cases/update.py` (`CASE_SCALAR_FIELDS`, `CaseUpdateError`, `_set_case_fields`, `_apply_case_tags`, `apply_case_update`) and pointed **both** the API `_update_case`/`_bulk` and `ui-case-edit` at it | One definition for the field set, tag replacement/deltas, status/tag timeline kinds and the error shape, so the two surfaces cannot drift. The UI additionally **validates the posted status against the existing `CaseStatus` vocabulary** before calling (same reason as W616P2-1). `cases/update.py`, `cases/views.py`, `ui/views.py::case_edit`. |
+| **W616P2-3** | Plan C3 says "observable edit" (implying the value is editable) | `data` is **immutable** on both the API and the UI; the editable set is `dataType`, `message`, `tlp`/`pap`, `ioc`, `sighted`, `ignoreSimilarity`, `enrichment_data` | `data` is the per-org dedupe key (`uniq_obs_org_dtype_hash`); the API's `_set_observable_fields` never accepted it, so "editing the value" would be a new, constraint-breaking semantic. The form shows it read-only with an explanatory hint. `ui/views.py::observable_edit`, `ui/templates/ui/observable_detail.html`. |
+| **W616P2-4** | Observable edit was to apply fields directly | Edit **and** delete both pass through `_observable_cross_case_guard`; the UI renders a required acknowledgement checkbox **inside** the form (`name="force"`) for a multi-case observable | The API PATCH requires `?force=true` for a shared artifact; an edit path without it would be a weaker second door. The checkbox must live inside the `<form>` — the first frontend pass put it in the modal body and sent a hidden `force=1`, which (a) let the browser submit without acknowledgement and (b) never matched the view's `== "on"` test, so **every** shared delete was silently refused. `ui/views.py::observable_edit/observable_delete`. |
+| **W616P2-5** | The observable form was to offer `TLP_CHOICES` | The observable form lists TLP `0..3` only | `cases.views._set_observable_fields` bounds observable TLP to `0..3`, while `TLP_CHOICES` also carries `4/Unknown` (valid on `Case`/`Alert`). Offering `4` would only produce a validation error. The API bound is unchanged (a candidate for a future `TLP_MAX` reconciliation). `ui/views.py::observable_edit`. |
+| **W616P2-6** | (defect found in-wave, no plan text) | `resolve_alert`/`resolve_observable` now catch `ValidationError`/`ValueError`/`TypeError` and return `None` (uniform 404) | A non-UUID id raised Django's `ValidationError` out of the pk lookup → **500**, an existence oracle and the exact F7-class trap `link_case_from_identifier` already guards. Found by the tenant-scoping route enumeration once the new `<str:…>` routes were discovered. `identity/scoping.py`; `test_tenant_scoping.py::TestUIRouteEnumerationConformance`. |
+| **W616P2-6 bug-fix detail** | — | `observable_delete` captures `str(observable.id)` and the target org **before** `delete()` | Django nulls the pk on the deleted instance, so the audit row recorded `target_id="None"`. `ui/views.py::observable_delete`; asserted by `test_observable_delete_single_case`. |
+
+**Not a deviation, recorded for clarity:** the seeded alert vocabulary is exactly `New / Triaged / Dismissed`(`+Imported`) with stages `New/InProgress/Closed/Imported`, so the plan's vocabulary and the DB agree. The case-edit `TLP/PAP/severity` "no preselection" defect is a template bug (`form_values.tlp` is a `str`, choices are `int`), not a plan deviation, and is fixed.
+
+**Residual risk (accepted, Low):** a re-typed observable that collides with an existing `(owner_org, data_type, data_hash)` raises `IntegrityError` (500) on **both** the API and the UI — pre-existing, parity-preserving, and out of P2 scope. `resolve_alert`/`resolve_observable` now swallow `ValidationError`, so an unparseable id is a 404 rather than a 500.
+
+### Post-verification security remediation (2026-10-11)
+
+`docs/reviews/REVIEW-2026-10-11-p2-ui-mutations.md` returned one MEDIUM and two LOW; all are fixed, and the
+detail is in the plan `§13c` and `COMPLETED.md`. Summary (not new plan deviations — corrections of review
+findings):
+
+| ID | Was | Now |
+|---|---|---|
+| **M1** (MEDIUM) | `_resolve_login` was org-blind, so a crafted `assignee` bound a case/task to another org's user (and acted as a cross-tenant login oracle) | `_resolve_login(value, *, org=None)` scopes login **and** UUID; the case applier and the task path pass the owner org; the UI rejects a non-member with a clear error (API PATCH, bulk and UI all fixed) |
+| **L1** | Out-of-range `severity`/`tlp`/`pap` hit the DB `CheckConstraint` as an unhandled `IntegrityError` (500) | `_set_case_fields` range-checks against `core/enums` → `CaseUpdateError` (400 / form error) on both surfaces |
+| **L2** | The `AuditLog` row was created outside the mutation transaction — a failed audit left an unlogged change | Audit shares the mutation's `atomic()` in `case_edit`, `observable_edit` **and** `alert_status` |
+| **NEW-1** | The case-edit assignee `<select>` was prefilled with the assignee **UUID** while its option values are **logins**, so the browser submitted the first option and an untouched save unassigned the case | Prefills `case.assignee.login`; guard test asserts the login is `selected` |
+| **NEW-2** | `alert_status` saved the alert then audited outside a transaction (same class as L2) | Save + audit + case-ledger entry share one `atomic()` |
+| N1 | Re-render helpers used `dict(QueryDict)` (list values, `['x']` echoes) | Read scalars via `.get()`; `case_edit` also passes `is_cross_org` |
+
+Verified by the appended "Re-audit 2026-10-11" (security) and "Re-verification 2026-10-11" (verifier) sections in the
+two reports above; `tests/conformance/test_ui_p2_wiring.py` grew 24 → 30 cases.
+
 
 
 ## Evidence index

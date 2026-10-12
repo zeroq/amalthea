@@ -1022,14 +1022,78 @@ closed in-wave below).
   with the already-subsetted `fa-shield-halved`.
 - [x] Gate: `make check` **1430 passed / 3 skipped**; ruff + format + mypy (104 files) + migrations + css clean.
 
-## Summary Statistics (as of 2026-10-11)
+## 2026-10-11 — UI completeness wave — **Phase 2** (TODO §6.16)
+
+Per `docs/planning/PLAN-2026-10-11-ui-completeness.md` §8 P2.
+
+- [x] **Alert triage (C1)** — `ui-alert-status` (POST, `alerts/<uuid>/status`). Applies only an **existing**
+  `AlertStatus` value (a crafted POST cannot mint one); audit `alert.status_changed`; appends a `status-changed`
+  entry to the case ledger when the alert is attached. The triage `<select>` submits the **value**, not the pk
+  (a first-pass bug that made every submission invalid).
+- [x] **Case edit (C2)** — `ui-case-edit` (`GET`/`POST`, `cases/<idOrNumber>/edit`) over the new shared applier
+  `cases/update.py` (`CASE_SCALAR_FIELDS`, `CaseUpdateError`, `_set_case_fields`, `_apply_case_tags`,
+  `apply_case_update`) — the same field set, tag handling, timeline kinds and error shape as the API PATCH and
+  bulk. Bounded status vocabulary; assignee login select; comma tags; flag clear; CSRF; audit `case.updated`.
+- [x] **Observable edit/delete (C3)** — `ui-observable-edit` / `ui-observable-delete`. `data` is immutable on
+  both surfaces (per-org dedupe key); the form uses the applier's camelCase wire shape and a validated
+  `enrichment_data` textarea. Delete captures the pk **before** `delete()` (was logging `target_id="None"`).
+- [x] **Cross-case blast radius (C3)** — edit **and** delete of a multi-case observable require the in-form
+  acknowledgement checkbox (`name="force"`), matching the API's `?force=true`; the checkbox lives inside the
+  `<form>` so it both gates submission and carries the flag.
+- [x] **Security/robustness fixed on verification** — `resolve_alert`/`resolve_observable` returned 500
+  (`ValidationError`) on a non-UUID id where `resolve_case` already returned 404; both now swallow
+  `ValidationError`/`ValueError`/`TypeError`. Also fixed: a missing `Response` import, and the case-edit
+  `TLP`/`PAP`/`severity` selects never preselected (`form_values` is a `str`, the choices are `int`).
+- [x] **Guard added** — `tests/conformance/test_ui_p2_wiring.py` (24 cases): rendered form contract, bounded
+  vocabulary, CSRF, uniform 404, cross-case force on edit+delete, audit pk integrity.
+- [x] **Independently verified** — `docs/verification/VERIFY-2026-10-11-p2-ui-completeness.md`: C1/C2/C3 all
+  **Met** (24/24 wiring, 92/92 tenant-scoping), no new deviation. `docs/reviews/REVIEW-2026-10-11-p2-ui-mutations.md`:
+  clear for sign-off, one MEDIUM + two LOW.
+- [x] **Security remediation (same day)** — all review findings fixed and re-audited (FIXED, no regression):
+  **M1** cross-tenant assignee injection (`_resolve_login(..., org=...)` scopes login + UUID; applier/task path
+  thread the owner org; UI rejects non-members); **L1** out-of-range `severity`/`tlp`/`pap` now a 400/form error
+  (was an unhandled `IntegrityError` 500); **L2** the audit row shares the mutation transaction in `case_edit`,
+  `observable_edit` **and** `alert_status`; **NEW-1** case-edit assignee select prefilled a UUID while its options
+  are logins (an untouched save silently unassigned the case) — now prefills the login; **NEW-2** `alert_status`
+  audit moved inside the transaction; **N1** re-render helpers read `QueryDict` scalars via `.get()`.
+  `test_ui_p2_wiring.py` grew 24 → **30** cases. Reports carry "Re-audit" / "Re-verification" sections.
+- [x] Gate: `make check` **1464 passed / 3 skipped**; ruff + format + mypy (105 files) + migrations + css clean.
+
+- [x] Gate: `make check` **1464 passed / 3 skipped**; ruff + format + mypy (105 files) + migrations + css clean.
+
+## 2026-10-12 — UI-completeness wave **P5** (D1 playbook round-trip + D3 sanitized Markdown)
+
+Plan: `docs/planning/PLAN-2026-10-11-ui-completeness.md` §8 P5. Decisions: **ADR-005** (Markdown rendering);
+Q1 resolved → `markdown-it-py==4.2.0` + `mdurl==0.1.2` + `nh3==0.3.7` pinned in `requirements/base.txt`.
+
+- [x] **D1 — Playbook round-trip.** `_parse_playbook_config` shared helper (refactored out of `playbook_create`)
+  drives a new `playbook_edit` view (`/ui/automation/playbooks/<id-or-name>/edit`, `ui-playbook-edit`, analyst+
+  for POST, uniform 404) and a prepopulated form that round-trips url/method/timeout/body/action_path/headers
+  **in order**; saving unchanged is a no-op. `test_playbook_roundtrip.py` (16 cases).
+- [x] **D3 — Sanitized CommonMark.** `ui/markdown.py::render_markdown` = markdown-it-py (`html=False`) + `nh3`
+  allow-list, exposed as the `markdown` filter; case description (`case_detail.html`) and comment/ledger bodies
+  (`_timeline_entry.html`, comment events only — plain-text fallback preserved) render server-side. `.md` block
+  added to `app.css`. `test_ui_markdown.py` (27 cases incl. `<script>` / `<img onerror>` escaping).
+- [x] Defects found + fixed during the batch: **stored XSS** in `playbook_form.html` (`{{ config.body|safe }}`
+  inside `<textarea>` → autoescape + regression test); **M2** unbounded `header_count` loop → `MAX_HEADERS = 64`
+  reject; **L2** missing `@require_http_methods` on the playbook form views; undefined CSS var
+  (`--color-surface-elevated` → `--color-bg-inset`) and `.md{white-space:normal}`; `ui-playbook-edit` added to
+  `_UI_GLOBAL_READ_ROUTES` (playbooks are global).
+- [x] Independent verification: `docs/verification/VERIFY-2026-10-12-ui-completeness-p5.md` — **18/18 ACs met**.
+- [x] Security review: `docs/reviews/REVIEW-2026-10-12-ui-completeness-p5.md` — **0 Critical / 0 High**; sanitizer
+  cleared against ~50 adversarial payloads; 3 Medium surfaced → **M1** (`read-only` can mutate; pre-existing,
+  matches API) and **M3** (global playbook secrets rendered in cleartext) deferred to a policy decision, **L1**
+  (protocol-relative `href`) accepted-low. All three tracked in `TODO §11`.
+- [x] Gate: `make check` **1509 passed / 3 skipped**; ruff + format + mypy (105 files) + migrations + css clean.
+
+## Summary Statistics (as of 2026-10-12)
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | 1430 passed / 3 skipped / 0 failed |
-| **Secret scan** | Clean (317 tracked files) |
+| **Total tests** | 1509 passed / 3 skipped / 0 failed |
+| **Secret scan** | Clean (371 tracked files at HEAD; new P5 files scanned by the pre-commit hook on commit) |
 | **Ruff** | Clean |
-| **Mypy (strict)** | Clean (104 source files) |
+| **Mypy (strict)** | Clean (105 source files) |
 | **Ruff format** | Clean |
 | **Migrations** | All in sync (`makemigrations --check --dry-run` clean) |
 | **Coverage** | 79% — **below the `fail_under = 80` gate** after the tenant-isolation + org-management waves (non-blocking by decision; reopened as `TODO §2.6`) |
@@ -1060,7 +1124,9 @@ All tests pass on PostgreSQL (verified in CI and manual re-gate 2026-10-06/07).
 
 ---
 
-*Last updated: 2026-10-11 — tenant isolation (§6.4, ADR-004), superAdmin Settings (§6.12), Settings UI hardening (§6.14).*
+*Last updated: 2026-10-12 — UI-completeness wave **P5** (D1 playbook round-trip + D3 sanitized Markdown;
+verified + security-reviewed, 3 follow-ups in `TODO §11`), on top of P1 + P2, tenant isolation (§6.4, ADR-004),
+superAdmin Settings (§6.12), Settings UI hardening (§6.14).*
 *Next review: after the S3/S5 security follow-ups (`TODO` priority #1).*
 
 
