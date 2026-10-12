@@ -5,6 +5,7 @@
 
 {% block actions %}
 <a class="btn" href="{% url 'ui-playbook-list' %}">Back</a>
+<a class="btn" href="{% url 'ui-playbook-edit' playbook.id %}">Edit</a>
 <a class="btn" href="{% url 'ui-playbook-run' playbook.id %}">Run now</a>
 <a class="btn" href="{% url 'ui-playbook-create' %}">New playbook</a>
 {% endblock %}

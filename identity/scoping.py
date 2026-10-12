@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from django.core.exceptions import ValidationError
 from django.db.models import Q
 
 if TYPE_CHECKING:
@@ -141,13 +142,18 @@ def resolve_case(user: User | None, identifier: str, *, write: bool = False) -> 
 
 
 def resolve_alert(user: User | None, alert_id: str) -> Alert | None:
-    """Resolve an alert the caller may reach (direct org ownership)."""
+    """Resolve an alert the caller may reach (direct org ownership).
+
+    A tampered/non-UUID id is a uniform 404, not a 500: the pk lookup raises Django's own
+    `ValidationError` for a non-UUID string, which is neither `DoesNotExist` nor `ValueError`
+    (the same F7-class trap `link_case_from_identifier` guards against).
+    """
     from alerts.models import Alert
 
     if _is_superadmin(user):
         try:
             return Alert.objects.get(pk=alert_id)
-        except Alert.DoesNotExist:
+        except (Alert.DoesNotExist, ValidationError, ValueError, TypeError):
             return None
 
     org_id = _user_org_id(user)
@@ -156,18 +162,18 @@ def resolve_alert(user: User | None, alert_id: str) -> Alert | None:
 
     try:
         return Alert.objects.get(pk=alert_id, owner_org_id=org_id)
-    except Alert.DoesNotExist:
+    except (Alert.DoesNotExist, ValidationError, ValueError, TypeError):
         return None
 
 
 def resolve_observable(user: User | None, observable_id: str) -> Observable | None:
-    """Resolve an observable the caller may reach (direct org ownership)."""
+    """Resolve an observable the caller may reach. A non-UUID id is a uniform 404, not a 500."""
     from observables.models import Observable
 
     if _is_superadmin(user):
         try:
             return Observable.objects.get(pk=observable_id)
-        except Observable.DoesNotExist:
+        except (Observable.DoesNotExist, ValidationError, ValueError, TypeError):
             return None
 
     org_id = _user_org_id(user)
@@ -176,7 +182,7 @@ def resolve_observable(user: User | None, observable_id: str) -> Observable | No
 
     try:
         return Observable.objects.get(pk=observable_id, owner_org_id=org_id)
-    except Observable.DoesNotExist:
+    except (Observable.DoesNotExist, ValidationError, ValueError, TypeError):
         return None
 
 

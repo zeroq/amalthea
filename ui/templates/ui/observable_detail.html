@@ -12,10 +12,116 @@
 {% endblock %}
 
 {% block actions %}
-<a class="btn" href="{% url 'ui-observable-list' %}">Back</a>
+  <a class="btn" href="{% url 'ui-observable-list' %}">Back</a>
+  {% if not edit_mode %}
+  <a class="btn" href="{% url 'ui-observable-edit' observable.id %}">
+    <i class="fa-solid fa-pen" aria-hidden="true"></i>
+    Edit
+  </a>
+  {% if is_owner %}
+  <button type="button" class="btn btn-err" data-modal-open="observable-delete-{{ observable.id }}">
+    <i class="fa-solid fa-trash" aria-hidden="true"></i>
+    Delete
+  </button>
+  {% endif %}
+  {% endif %}
 {% endblock %}
 
 {% block content %}
+{% if edit_mode %}
+<div class="cols">
+  <div class="stack">
+    <div class="card">
+      <h3>Edit observable</h3>
+      <form method="post" action="{% url 'ui-observable-edit' observable.id %}" class="form">
+        {% csrf_token %}
+
+        <div class="field-row">
+          <label for="f-observable-data">Value (read-only)</label>
+          <input type="text" id="f-observable-data" class="mono" value="{{ observable.data }}" readonly disabled>
+          <p class="hint">The value is the organisation-wide dedupe key and cannot be changed.</p>
+        </div>
+
+        <div class="field-row">
+          <label for="f-type">Type</label>
+          <select id="f-type" name="dataType">
+            {% for t in data_type_options %}
+              <option value="{{ t.name }}" {% if form_values.dataType|default:observable.data_type.name == t.name %}selected{% endif %}>{{ t.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field-row">
+          <label for="f-message">Message</label>
+          <input type="text" id="f-message" name="message" maxlength="500" value="{{ form_values.message|default:observable.message }}">
+        </div>
+
+        <div class="field-row">
+          <label for="f-tlp">TLP</label>
+          <select id="f-tlp" name="tlp">
+            {% for val, label in tlp_choices %}
+              <option value="{{ val }}" {% if form_values.tlp|default:observable.tlp|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field-row">
+          <label for="f-pap">PAP</label>
+          <select id="f-pap" name="pap">
+            {% for val, label in pap_choices %}
+              <option value="{{ val }}" {% if form_values.pap|default:observable.pap|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field-row">
+          <label class="check">
+            <input type="checkbox" name="ioc" {% if form_values.ioc|default:observable.ioc %}checked{% endif %}>
+            IOC
+          </label>
+        </div>
+
+        <div class="field-row">
+          <label class="check">
+            <input type="checkbox" name="sighted" {% if form_values.sighted|default:observable.sighted %}checked{% endif %}>
+            Sighted
+          </label>
+        </div>
+
+        <div class="field-row">
+          <label class="check">
+            <input type="checkbox" name="ignoreSimilarity" {% if form_values.ignoreSimilarity|default:observable.ignore_similarity %}checked{% endif %}>
+            Ignore similarity
+          </label>
+        </div>
+
+        <div class="field-row">
+          <label for="f-enrichment">Enrichment (JSON)</label>
+          <textarea id="f-enrichment" name="enrichment_data" rows="8" class="mono">{{ form_values.enrichment_data|default:"{}" }}</textarea>
+        </div>
+
+        {% if affected_cases|length > 1 %}
+        <div class="field-row">
+          <p class="hint">This observable is linked to {{ affected_cases|length }} cases; saving affects all of them.</p>
+          <label class="check">
+            <input type="checkbox" name="force" value="on" required>
+            I understand this affects all listed cases
+          </label>
+        </div>
+        {% endif %}
+
+        <div class="actions">
+          <button type="submit" class="btn btn-primary">
+            <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+            Save
+          </button>
+          <a class="btn" href="{% url 'ui-observable-detail' observable.id %}">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% else %}
 <div class="cols">
   <div class="stack">
     <div class="card">
@@ -104,4 +210,43 @@
     </div>
   </div>
 </div>
+{% endif %}
+
+{% if not edit_mode %}
+{# Observable delete modal (C3) — the acknowledgement lives *inside* the form so it both gates
+   and sets `force`; a hidden input would let the shared-observable guard be bypassed. #}
+<dialog id="observable-delete-{{ observable.id }}" class="modal modal--md" aria-labelledby="observable-delete-{{ observable.id }}-title">
+  <div class="modal-backdrop" tabindex="-1"></div>
+  <div class="modal-content">
+    <header class="modal-header">
+      <h2 id="observable-delete-{{ observable.id }}-title" class="modal-title">Delete observable?</h2>
+      <button type="button" class="modal-close" aria-label="Close" data-modal-close="observable-delete-{{ observable.id }}">&times;</button>
+    </header>
+    <div class="modal-body">
+      {% if affected_cases|length > 1 %}
+        <p>This observable is <strong>shared across {{ affected_cases|length }} cases</strong>. Deleting it will remove it from all of them.</p>
+        <ul class="warns">
+          {% for c in affected_cases %}
+            <li>#{{ c.case_number }} — {{ c.case_title }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>Delete <strong>{{ observable.data }}</strong>? This cannot be undone.</p>
+      {% endif %}
+    </div>
+    <footer class="modal-footer">
+      <button type="button" class="btn modal-cancel" data-modal-close="observable-delete-{{ observable.id }}">Cancel</button>
+      <form method="post" action="{% url 'ui-observable-delete' observable.id %}">{% csrf_token %}
+        {% if affected_cases|length > 1 %}
+          <label class="check">
+            <input type="checkbox" name="force" value="on" required>
+            I understand this affects all listed cases
+          </label>
+        {% endif %}
+        <button type="submit" class="btn btn-err">Delete</button>
+      </form>
+    </footer>
+  </div>
+</dialog>
+{% endif %}
 {% endblock %}

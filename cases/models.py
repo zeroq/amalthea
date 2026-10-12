@@ -142,6 +142,11 @@ class Case(UUIDModel, TimeStampedModel):
     def __str__(self) -> str:
         return f"Case({self.number}): {self.title}"
 
+    @property
+    def tags_csv(self) -> str:
+        """Comma-separated tag names for form prefilling (used by ui/case_edit.html)."""
+        return ", ".join(self.tags.values_list("name", flat=True))
+
     def save(self, *args: Any, **kwargs: Any) -> None:
         # `number` is NOT NULL in the database but is `None` on the Python object until
         # it is allocated: `IntegerField.empty_strings_allowed` is False, so there is no

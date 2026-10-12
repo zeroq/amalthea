@@ -20,6 +20,10 @@
   {% if is_owner %}
   <a class="btn" href="{% url 'ui-case-share-list' case.number %}" data-modal-open="case-share-modal">Manage shares</a>
   <button type="button" class="btn" data-modal-open="case-merge-modal">Merge into case…</button>
+  <a class="btn" href="{% url 'ui-case-edit' case.number %}">
+    <i class="fa-solid fa-pen" aria-hidden="true"></i>
+    Edit case
+  </a>
   {% endif %}
 {% endblock %}
 
@@ -52,7 +56,7 @@
     </div>
   </div>
 
-  {% if case.description %}<pre class="body">{{ case.description }}</pre>{% endif %}
+  {% if case.description %}<div class="body md">{{ case.description|markdown }}</div>{% endif %}
 
   {% if case.ingestion_warnings.warnings %}
     <h3>Ingestion warnings</h3>

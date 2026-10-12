@@ -51,6 +51,21 @@
   </section>
 
   <div class="stack">
+    <section class="card" aria-labelledby="h-triage">
+      <h2 id="h-triage">Triage</h2>
+      <p class="hint">
+        Status vocabulary mirrors <code>core.enums.ALERT_STAGES</code> (New / Triaged / Dismissed).
+      </p>
+      <form method="post" action="{% url 'ui-alert-status' alert.id %}" class="inline-form">{% csrf_token %}
+        <label for="f-status">Alert status</label>
+        <select id="f-status" name="status">
+          {% for opt in alert_status_options %}
+            <option value="{{ opt.value }}" {% if alert.status.pk == opt.pk %}selected{% endif %}>{{ opt.value }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="btn">Set status</button>
+      </form>
+    </section>
     {% if not alert.case %}
       <section class="card" aria-labelledby="h-escalate">
         <h2 id="h-escalate">Escalate</h2>

@@ -1,0 +1,107 @@
+{% extends "ui/base.html" %}
+{% load ui_tags %}
+{% block title %}Edit case #{{ case.number }} · Amalthea{% endblock %}
+{% block heading %}
+  <span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span>
+  #{{ case.number }} {{ case.title }}
+  {% if is_cross_org %}
+  <span class="badge badge-cross-org" title="This case belongs to another organisation">
+    <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+    Cross-org ({{ case.owner_org.name }})
+  </span>
+  {% endif %}
+{% endblock %}
+
+{% block actions %}
+  <a class="btn" href="{% url 'ui-case-detail' case.number %}">Cancel</a>
+{% endblock %}
+
+{% block content %}
+<div class="cols">
+  <section class="card card-narrow" aria-labelledby="h-edit">
+    <h2 id="h-edit">Edit case</h2>
+
+    <form method="post" action="{% url 'ui-case-edit' case.number %}">{% csrf_token %}
+
+      <div class="field-row">
+        <label for="f-title">Title</label>
+        <input type="text" id="f-title" name="title" maxlength="500" value="{{ form_values.title|default:case.title }}" required>
+      </div>
+
+      <div class="field-row">
+        <label for="f-description">Description</label>
+        <textarea id="f-description" name="description" rows="5" placeholder="Full case description (Markdown)">{{ form_values.description|default:case.description }}</textarea>
+      </div>
+
+      <div class="field-row">
+        <label for="f-summary">Summary</label>
+        <textarea id="f-summary" name="summary" rows="3" placeholder="Short summary for lists">{{ form_values.summary|default:case.summary }}</textarea>
+      </div>
+
+      <div class="field-row">
+        <label for="f-severity">Severity</label>
+        <select id="f-severity" name="severity">
+          {% for val, label in severity_choices %}
+            <option value="{{ val }}" {% if form_values.severity|default:case.severity|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field-row">
+        <label for="f-tlp">TLP</label>
+        <select id="f-tlp" name="tlp">
+          {% for val, label in tlp_choices %}
+            <option value="{{ val }}" {% if form_values.tlp|default:case.tlp|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field-row">
+        <label for="f-pap">PAP</label>
+        <select id="f-pap" name="pap">
+          {% for val, label in pap_choices %}
+            <option value="{{ val }}" {% if form_values.pap|default:case.pap|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field-row">
+        <label for="f-status">Status</label>
+        <select id="f-status" name="status">
+          {% for opt in case_status_options %}
+            <option value="{{ opt.value }}" {% if form_values.status|default:case.status.value == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field-row">
+        <label for="f-assignee">Assignee</label>
+        <select id="f-assignee" name="assignee">
+          <option value="" {% if not form_values.assignee and not case.assignee %}selected{% endif %}>Unassigned</option>
+          {% for person in assignees %}
+            <option value="{{ person.login }}" {% if form_values.assignee|default:case.assignee.login == person.login %}selected{% endif %}>{{ person.login }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field-row">
+        <label class="check">
+          <input type="checkbox" name="flag" {% if form_values.flag|default:case.flag %}checked{% endif %}>
+          Flag as important
+        </label>
+      </div>
+
+      <div class="field-row">
+        <label for="f-tags">Tags (comma-separated)</label>
+        <input type="text" id="f-tags" name="tags" value="{{ form_values.tags|default:case.tags_csv }}" placeholder="phishing, credential-theft, apt29">
+      </div>
+
+      <div class="field-row">
+        <button type="submit" class="btn btn-primary">Save changes</button>
+        <a class="btn" href="{% url 'ui-case-detail' case.number %}">Cancel</a>
+      </div>
+
+    </form>
+  </section>
+</div>
+{% endblock %}

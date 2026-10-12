@@ -108,6 +108,21 @@ BOOTSTRAP_ALLOW="$(printf '%s\n' \
     'build==1.6.1' 'pyproject-hooks==1.3.3' 'pip-tools==7.6.2' 'wheel==0.48.0' \
     'pip==26.2.1' 'setuptools==84.0.0')"
 
+# ------------------------------------------------- deliberate runtime additions (ADR-005)
+# A line here authorises the closure comparison to observe this exact name==version *appearing*
+# in base.txt. A version *change* to an already-pinned package still aborts, because the
+# diffed line ("name==newversion") no longer matches the entry. Once the addition is committed,
+# HEAD's snapshot already contains the pin and the entries become inert (harmless to keep).
+# Additions here are reviewed supply-chain changes — see docs/decisions/ADR-005-markdown-rendering.md.
+BASE_ALLOW="$(printf '%s\n' \
+    'markdown-it-py==4.2.0' 'mdurl==0.1.2' 'nh3==0.3.7')"
+
+# dev.txt intentionally *loses* packages that moved from dev into the runtime closure (the dev
+# writer filters base-overlapping entries), so their disappearance must be allowed. dev.txt also
+# `-r`-includes base.txt, so BASE_ALLOW additions surface in the dev closure too — compose all three.
+DEV_MOVED_TO_BASE="$(printf '%s\n' 'markdown-it-py==4.2.0' 'mdurl==0.1.2')"
+DEV_ALLOW="$(printf '%s\n%s\n%s' "$BOOTSTRAP_ALLOW" "$BASE_ALLOW" "$DEV_MOVED_TO_BASE")"
+
 if [ "${1:-}" = "--check" ]; then
     echo "lock: verifying committed requirements are current…"
     "$0" >/dev/null  # regenerate into place (deterministic)
@@ -202,9 +217,9 @@ PYEOF
 # Closure invariant after the pass.
 NEW_BASE="$(parse_closure "$BASE")"
 NEW_DEV="$(parse_closure "$DEV")"
-check_closure "$OLD_BASE" "$NEW_BASE" "base.txt" "" \
+check_closure "$OLD_BASE" "$NEW_BASE" "base.txt" "$BASE_ALLOW" \
     || { echo "lock: ABORTED — base.txt closure changed unexpectedly"; exit 1; }
-check_closure "$OLD_DEV" "$NEW_DEV" "dev.txt" "$BOOTSTRAP_ALLOW" \
+check_closure "$OLD_DEV" "$NEW_DEV" "dev.txt" "$DEV_ALLOW" \
     || { echo "lock: ABORTED — dev.txt closure changed unexpectedly"; exit 1; }
 
 echo "lock: requirements regenerated (all-platform hashes; $(printf '%s\n' "$NEW_BASE" | wc -l | tr -d ' ') runtime + $(printf '%s\n' "$NEW_DEV" | wc -l | tr -d ' ') dev pkgs)"

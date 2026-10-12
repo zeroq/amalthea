@@ -40,18 +40,29 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy  # noqa: F401 (re-exported for ui/urls.py)
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
+from rest_framework.response import Response
 
 from alerts.escalation import (
     import_alert_to_case,
     merge_alert_into_case,
     resolve_case_status,
 )
-from alerts.models import Alert
+from alerts.models import Alert, AlertStatus
+from automation.dispatcher import TRIGGER_EVENTS
+from automation.executor import registered_actions
 from automation.models import AutomationRun, Playbook
+from automation.playbooks import ACTIONS, HTTP_METHODS
 from cases.ledger import append_timeline_event
 from cases.models import Attachment, Case, CaseStatus, CaseTemplate, Comment, Tag, Task
-from core.enums import SEVERITY_CHOICES
-from identity.models import Organisation, User
+from cases.update import CaseUpdateError, apply_case_update
+from cases.views import (
+    _as_uuid,
+    _observable_affected_cases,
+    _observable_cross_case_guard,
+    _set_observable_fields,
+)
+from core.enums import ALERT_STAGES, PAP_CHOICES, SEVERITY_CHOICES, TLP_CHOICES
+from identity.models import AuditLog, Organisation, User
 from identity.ratelimit import check_login_rate_limit, record_failed_login, record_successful_login
 from identity.scoping import (
     case_visible_q,
@@ -76,6 +87,82 @@ SEVERITY_LABELS = dict(SEVERITY_CHOICES)
 SEVERITY_NAMES = {1: "low", 2: "medium", 3: "high", 4: "critical"}
 CASE_STAGE_VALUES = ("New", "InProgress", "Closed")
 PAGE_SIZE = 200
+#: Upper bound on outbound HTTP headers per playbook. `header_count` is form-controlled and drives a
+#: CPU-bound `range()`, so it must be capped (see `_parse_playbook_config`) — far above real usage.
+MAX_HEADERS = 64
+
+
+def _parse_playbook_config(post: Any) -> tuple[dict[str, Any] | None, str | None]:
+    """Parse and validate playbook action config from POST data.
+
+    Returns (config_dict, error_message). If error_message is not None, config_dict is None.
+    Mirrors the validation logic from playbook_create/playbook_detail so a GET→POST round-trip
+    produces an identical config (including header order).
+    """
+    from automation.playbooks import MAX_TIMEOUT_SECONDS
+
+    action = (post.get("action") or "").lower()
+    if action not in ("http", "python"):
+        return None, "Action must be 'http' or 'python'."
+
+    config: dict[str, Any] = {"action": action}
+
+    if action == "http":
+        url = (post.get("url") or "").strip()
+        if not url:
+            return None, "URL is required for HTTP actions."
+        config["url"] = url
+
+        method = (post.get("http_method") or "GET").upper()
+        if method not in HTTP_METHODS:
+            return None, "Invalid HTTP method."
+        config["method"] = method
+
+        timeout = post.get("timeout_seconds")
+        if timeout:
+            try:
+                timeout_val = float(timeout)
+                if timeout_val <= 0 or timeout_val > MAX_TIMEOUT_SECONDS:
+                    raise ValueError
+                config["timeoutSeconds"] = timeout_val
+            except ValueError:
+                return None, f"Timeout must be a positive number <= {MAX_TIMEOUT_SECONDS}."
+
+        # Headers: preserve order by iterating header_key_<i> in index order
+        headers = {}
+        header_count = post.get("header_count")
+        try:
+            max_idx = int(header_count) if header_count else 4
+        except (TypeError, ValueError):
+            max_idx = 4
+        # Bound the loop: header_count is attacker-controlled and drives a CPU-bound range(),
+        # so an unbounded value is an authenticated DoS. Reject rather than silently clamp.
+        if not 0 <= max_idx <= MAX_HEADERS:
+            return None, f"Too many headers (max {MAX_HEADERS})."
+        for i in range(max_idx):
+            key_field = f"header_key_{i}"
+            val_field = f"header_val_{i}"
+            if post.get(key_field):
+                headers[post[key_field]] = post.get(val_field, "")
+        if headers:
+            config["headers"] = headers
+
+        body = post.get("http_body")
+        if body:
+            config["body"] = body
+
+    else:  # python
+        action_path = (post.get("action_path") or "").strip()
+        if not action_path:
+            return None, "Action path is required for Python actions."
+        if action_path not in registered_actions():
+            return (
+                None,
+                f"Unknown action path. Registered: {', '.join(sorted(registered_actions().keys()))}",
+            )
+        config["action_path"] = action_path
+
+    return config, None
 
 
 def _base_context(request: HttpRequest, **extra: Any) -> dict[str, Any]:
@@ -230,6 +317,12 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
         return render(request, "ui/404.html", status=404)
     user_org_id = getattr(request.user, "org_id", None)
     is_cross_org = alert.owner_org_id != user_org_id
+    # P2/C1: status options for the triage control — exclude "Imported" (system-assigned)
+    alert_status_options = (
+        AlertStatus.objects.filter(stage__in=ALERT_STAGES)
+        .exclude(stage="Imported")
+        .order_by("order", "value")
+    )
     return render(
         request,
         "ui/alert_detail.html",
@@ -240,6 +333,7 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
             .filter(closed_date__isnull=True)
             .order_by("-start_date")[:PAGE_SIZE],
             is_cross_org=is_cross_org,
+            alert_status_options=alert_status_options,
         ),
     )
 
@@ -544,6 +638,7 @@ def playbook_list(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@require_http_methods(["GET", "POST"])
 def playbook_create(request: HttpRequest) -> HttpResponse:
     """Create a new playbook. GET shows the form, POST creates it."""
     # GET: any authenticated org member; POST: requires analyst or above
@@ -585,64 +680,11 @@ def playbook_create(request: HttpRequest) -> HttpResponse:
         )
         return redirect("ui-playbook-create")
 
-    action = (request.POST.get("action") or "").lower()
-    if action not in ("http", "python"):
-        messages.error(request, "Action must be 'http' or 'python'.")
+    # Parse and validate config using shared helper
+    config, error = _parse_playbook_config(request.POST)
+    if error:
+        messages.error(request, error)
         return redirect("ui-playbook-create")
-
-    config: dict[str, Any] = {"action": action}
-    if action == "http":
-        url = (request.POST.get("url") or "").strip()
-        if not url:
-            messages.error(request, "URL is required for HTTP actions.")
-            return redirect("ui-playbook-create")
-        config["url"] = url
-
-        method = (request.POST.get("http_method") or "GET").upper()
-        if method not in ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"):
-            messages.error(request, "Invalid HTTP method.")
-            return redirect("ui-playbook-create")
-        config["method"] = method
-
-        timeout = request.POST.get("timeout_seconds")
-        if timeout:
-            try:
-                timeout_val = float(timeout)
-                if timeout_val <= 0 or timeout_val > 30:
-                    raise ValueError
-                config["timeoutSeconds"] = timeout_val
-            except ValueError:
-                messages.error(request, "Timeout must be a positive number <= 30.")
-                return redirect("ui-playbook-create")
-
-        headers = {}
-        for key in request.POST:
-            if key.startswith("header_key_") and key[11:]:
-                idx = key[11:]
-                val_key = f"header_val_{idx}"
-                if val_key in request.POST:
-                    headers[request.POST[key]] = request.POST[val_key]
-        if headers:
-            config["headers"] = headers
-
-        body = request.POST.get("http_body")
-        if body:
-            config["body"] = body
-
-    else:  # python
-        action_path = (request.POST.get("action_path") or "").strip()
-        if not action_path:
-            messages.error(request, "Action path is required for Python actions.")
-            return redirect("ui-playbook-create")
-        from automation.executor import registered_actions
-
-        if action_path not in registered_actions():
-            messages.error(
-                request,
-                f"Unknown action path. Registered: {', '.join(sorted(registered_actions().keys()))}",
-            )
-            return redirect("ui-playbook-create")
-        config["action_path"] = action_path
 
     description = (request.POST.get("description") or "").strip()
     is_active = request.POST.get("is_active") == "on"
@@ -778,6 +820,72 @@ def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
                 messages.error(request, "Unknown action path.")
                 return redirect("ui-playbook-detail", playbook_id=playbook_id)
             config["action_path"] = action_path
+
+    playbook.description = description
+    if trigger_event:
+        playbook.trigger_event = trigger_event
+    playbook.is_active = is_active
+    playbook.config = config
+    playbook.save(
+        update_fields=["description", "trigger_event", "is_active", "config", "updated_at"]
+    )
+
+    messages.success(request, f"Playbook '{playbook.name}' updated.")
+    return redirect("ui-playbook-detail", playbook_id=playbook_id)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def playbook_edit(request: HttpRequest, playbook_id: str) -> HttpResponse:
+    """Edit a playbook.
+
+    GET: any authenticated org member.
+    POST: requires analyst role or above.
+    """
+    # Resolve by UUID or name
+    playbook = None
+    try:
+        import uuid
+
+        uuid.UUID(playbook_id)
+        playbook = get_object_or_404(Playbook, pk=playbook_id)
+    except ValueError:
+        playbook = get_object_or_404(Playbook, name=playbook_id)
+
+    if request.method == "GET":
+        # GET: any authenticated org member
+        config = playbook.config or {}
+        return render(
+            request,
+            "ui/playbook_form.html",
+            _base_context(
+                request,
+                playbook=playbook,
+                config=config,
+                trigger_events=sorted(TRIGGER_EVENTS),
+                actions=ACTIONS,
+                http_methods=HTTP_METHODS,
+                registered_paths=sorted(registered_actions().keys()),
+            ),
+        )
+
+    # POST - update the playbook: requires analyst or above
+    if request.user.role not in ("analyst", "admin", "superAdmin"):
+        return render(request, "ui/404.html", status=404)
+
+    # Parse and validate config using shared helper
+    config, error = _parse_playbook_config(request.POST)
+    if error:
+        messages.error(request, error)
+        return redirect("ui-playbook-edit", playbook_id=playbook_id)
+
+    description = (request.POST.get("description") or "").strip()
+    trigger_event = (request.POST.get("trigger_event") or "").strip()
+    if trigger_event and trigger_event not in TRIGGER_EVENTS:
+        messages.error(request, "Invalid trigger event.")
+        return redirect("ui-playbook-edit", playbook_id=playbook_id)
+
+    is_active = request.POST.get("is_active") == "on"
 
     playbook.description = description
     if trigger_event:
@@ -1259,6 +1367,8 @@ def observable_detail(request: HttpRequest, observable_id: str) -> HttpResponse:
         return render(request, "ui/404.html", status=404)
     user_org_id = getattr(request.user, "org_id", None)
     is_cross_org = observable.owner_org_id != user_org_id
+    # P2/C3: blast-radius for delete dialog
+    affected_cases = _observable_affected_cases(observable)
     return render(
         request,
         "ui/observable_detail.html",
@@ -1268,10 +1378,441 @@ def observable_detail(request: HttpRequest, observable_id: str) -> HttpResponse:
             cases=observable.case_observables.select_related("case__owner_org").order_by(
                 "-case__start_date"
             ),
+            affected_cases=affected_cases,
             is_owner=is_cross_org is False,  # owner org can manage
             is_cross_org=is_cross_org,
         ),
     )
+
+
+# =============================================================================
+# P2 — Triage and edit flows (C1, C2, C3)
+# =============================================================================
+
+
+@login_required
+@require_POST
+def alert_status(request: HttpRequest, alert_id: str) -> HttpResponse:
+    """P2/C1 — Change an alert's status from the UI.
+
+    Form field: `status` = an `AlertStatus.value`.
+    Validates against the existing stage vocabulary (excludes "Imported", which is
+    system-assigned by escalation) so a garbage value cannot auto-create a junk
+    status (ADR-002 §D11 tolerance in the API path).
+    """
+    alert = resolve_alert(request.user, alert_id)
+    if alert is None:
+        return render(request, "ui/404.html", status=404)
+
+    value = (request.POST.get("status") or "").strip()
+    # Validate against existing vocabulary — never auto-create from form input
+    valid_status = (
+        AlertStatus.objects.filter(stage__in=ALERT_STAGES)
+        .exclude(stage="Imported")
+        .filter(value=value)
+        .first()
+    )
+    if not valid_status:
+        messages.error(request, f"Invalid status: {value}")
+        return redirect("ui-alert-detail", alert_id=alert.id)
+
+    # The mutation, its audit row and the case timeline event share one transaction
+    # (SEC-2026-10-11 NEW-2): a failed audit must roll the status change back rather than
+    # leave the change persisted but unlogged.
+    with transaction.atomic():
+        alert.status = valid_status
+        alert.save(update_fields=["status", "updated_at"])
+
+        AuditLog.objects.create(
+            actor=request.user,
+            actor_org=getattr(request.user, "org", None),
+            target_org=alert.owner_org,
+            action="alert.status_changed",
+            target_type="Alert",
+            target_id=str(alert.id),
+            ip=request.META.get("REMOTE_ADDR"),
+        )
+
+        # Timeline event on the case if alert is attached
+        if alert.case_id:
+            append_timeline_event(
+                alert.case,
+                title=f"Alert status changed to {value}",
+                kind="status-changed",
+                actor=request.user,
+                metadata={"alert": str(alert.id), "to": value},
+            )
+
+    messages.success(request, f"Alert status changed to {value}.")
+    return redirect("ui-alert-detail", alert_id=alert.id)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def case_edit(request: HttpRequest, case_id: str) -> HttpResponse:
+    """P2/C2 — Edit a case (title, description, severity, TLP/PAP, flag, summary, status, assignee, tags).
+
+    GET: renders the edit form.
+    POST: applies the update via `apply_case_update` (shared with API).
+    Write share required (resolve_case with write=True); uniform 404 otherwise.
+    """
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
+
+    # Context values for the form (shared by GET and error re-render)
+    status_options = CaseStatus.objects.all().order_by("order", "value")
+    assignees = (
+        User.objects.filter(org=case.owner_org, is_active=True)
+        .select_related("org")
+        .order_by("login")[:PAGE_SIZE]
+    )
+
+    if request.method == "GET":
+        # Derive form_values from the case for initial render
+        form_values = {
+            "title": case.title,
+            "description": case.description,
+            "summary": case.summary,
+            "severity": str(case.severity),
+            "tlp": str(case.tlp),
+            "pap": str(case.pap),
+            "flag": "on" if case.flag else "",
+            "status": case.status.value if case.status_id else "",
+            # The select's option values are logins, so prefill the *login* — a prefilled UUID
+            # never matches and the browser would submit the first option ("Unassigned"),
+            # silently unassigning the case on a save that did not touch the field (SEC-2026-10-11
+            # NEW-1).
+            "assignee": case.assignee.login if case.assignee_id else "",
+            "tags": ", ".join(case.tags.values_list("name", flat=True)),
+        }
+        return render(
+            request,
+            "ui/case_edit.html",
+            _base_context(
+                request,
+                case=case,
+                form_values=form_values,
+                is_cross_org=case.owner_org_id != getattr(request.user, "org_id", None),
+                severity_choices=SEVERITY_CHOICES,
+                tlp_choices=TLP_CHOICES,
+                pap_choices=PAP_CHOICES,
+                case_status_options=status_options,
+                assignees=assignees,
+            ),
+        )
+
+    # POST — build payload from form
+    payload: dict[str, Any] = {
+        "title": (request.POST.get("title") or "").strip()[:500],
+        "description": (request.POST.get("description") or "").strip(),
+        "summary": (request.POST.get("summary") or "").strip(),
+    }
+
+    # Integer fields
+    for key in ("severity", "tlp", "pap"):
+        raw = request.POST.get(key)
+        if raw is not None and raw != "":
+            try:
+                payload[key] = int(raw)
+            except ValueError:
+                messages.error(request, f"Invalid value for {key}")
+                return _render_case_edit_form(
+                    request, case, status_options, assignees, request.POST
+                )
+
+    # The form always renders the flag checkbox, so an absent key means "unchecked".
+    payload["flag"] = request.POST.get("flag") == "on"
+
+    # Status (CaseStatus.value) — bounded to the existing vocabulary so a crafted POST cannot
+    # mint a new status (the shared applier is tolerant by design; ADR-002 §D11).
+    status_val = (request.POST.get("status") or "").strip()
+    if status_val:
+        if not CaseStatus.objects.filter(value=status_val).exists():
+            messages.error(request, f"Unknown case status: {status_val}")
+            return _render_case_edit_form(request, case, status_options, assignees, request.POST)
+        payload["status"] = status_val
+
+    # Assignee (User UUID or login, or "" to unassign). Resolved against the case's owner org
+    # (SEC-2026-10-11 M1): a cross-org login/UUID is rejected here with a clear message rather
+    # than reaching the applier, which would silently unassign it. Defence in depth — the shared
+    # applier is itself org-scoped, so the API cannot be used as a cross-tenant oracle either.
+    assignee_val = (request.POST.get("assignee") or "").strip()
+    if assignee_val:
+        person = User.objects.filter(org=case.owner_org, login=assignee_val).first()
+        if person is None:
+            pk = _as_uuid(assignee_val)
+            person = User.objects.filter(org=case.owner_org, pk=pk).first() if pk else None
+        if person is None:
+            messages.error(request, "Assignee is not a member of this case's organisation.")
+            return _render_case_edit_form(request, case, status_options, assignees, request.POST)
+        payload["assignee"] = str(person.pk)
+    elif "assignee" in request.POST:
+        payload["assignee"] = None
+
+    # Tags (comma-separated string)
+    tags_val = (request.POST.get("tags") or "").strip()
+    if tags_val:
+        payload["tags"] = [t.strip() for t in tags_val.split(",") if t.strip()]
+
+    try:
+        # The audit row shares the mutation's transaction (SEC-2026-10-11 L2): a failed audit
+        # insert must roll the change back rather than leave an unlogged mutation.
+        with transaction.atomic():
+            apply_case_update(case, payload, actor=request.user)
+            AuditLog.objects.create(
+                actor=request.user,
+                actor_org=getattr(request.user, "org", None),
+                target_org=case.owner_org,
+                action="case.updated",
+                target_type="Case",
+                target_id=str(case.id),
+                ip=request.META.get("REMOTE_ADDR"),
+            )
+    except CaseUpdateError as exc:
+        messages.error(request, exc.message)
+        return _render_case_edit_form(request, case, status_options, assignees, request.POST)
+
+    messages.success(request, f"Case {case.number} updated.")
+    return redirect("ui-case-detail", case_id=case.number)
+
+
+def _render_case_edit_form(
+    request: HttpRequest,
+    case: Case,
+    status_options,
+    assignees,
+    post_data,
+) -> HttpResponse:
+    """Re-render the case edit form with submitted values and error message."""
+    # `post_data` is a QueryDict; `dict(...)` yields lists (`{"title": ["x"]}`), which render as
+    # `['x']`. Read scalars with `.get()` so the form echoes what was typed (SEC-2026-10-11 N1).
+    fields = (
+        "title",
+        "description",
+        "summary",
+        "severity",
+        "tlp",
+        "pap",
+        "status",
+        "assignee",
+        "tags",
+    )
+    form_values = {key: post_data.get(key, "") for key in fields}
+    # Ensure checkbox renders correctly
+    form_values["flag"] = "on" if post_data.get("flag") == "on" else ""
+    return render(
+        request,
+        "ui/case_edit.html",
+        _base_context(
+            request,
+            case=case,
+            form_values=form_values,
+            is_cross_org=case.owner_org_id != getattr(request.user, "org_id", None),
+            severity_choices=SEVERITY_CHOICES,
+            tlp_choices=TLP_CHOICES,
+            pap_choices=PAP_CHOICES,
+            case_status_options=status_options,
+            assignees=assignees,
+        ),
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def observable_edit(request: HttpRequest, observable_id: str) -> HttpResponse:
+    """P2/C3 — Edit an observable's editable fields (type, message, TLP/PAP, flags, enrichment).
+
+    The value (`data`) is the per-org dedupe key and stays immutable on both surfaces; the
+    editable set is applied through `_set_observable_fields` so normalisation, validation and
+    the wire shape match the API exactly (P2 C3).
+    """
+    observable = resolve_observable(request.user, observable_id)
+    if observable is None:
+        return render(request, "ui/404.html", status=404)
+
+    common = {
+        "observable": observable,
+        "cases": observable.case_observables.select_related("case__owner_org").order_by(
+            "-case__start_date"
+        ),
+        "affected_cases": _observable_affected_cases(observable),
+        "is_owner": observable.owner_org_id == getattr(request.user, "org_id", None),
+        "is_cross_org": observable.owner_org_id != getattr(request.user, "org_id", None),
+        "data_type_options": ObservableType.objects.order_by("name"),
+        # `cases.views._set_observable_fields` bounds observable TLP to 0..3 while
+        # `TLP_CHOICES` also carries 4/Unknown (valid on Case/Alert) — offering it here would
+        # only produce a validation error, so the observable form lists the accepted range.
+        "tlp_choices": [choice for choice in TLP_CHOICES if choice[0] <= 3],
+        "pap_choices": PAP_CHOICES,
+        "edit_mode": True,
+    }
+
+    if request.method == "GET":
+        import json
+
+        form_values = {
+            "data": observable.data,
+            "dataType": observable.data_type.name,
+            "message": observable.message,
+            "tlp": str(observable.tlp),
+            "pap": str(observable.pap),
+            "ioc": "on" if observable.ioc else "",
+            "sighted": "on" if observable.sighted else "",
+            "ignoreSimilarity": "on" if observable.ignore_similarity else "",
+            "enrichment_data": json.dumps(observable.enrichment_data or {}, indent=2),
+        }
+        return render(
+            request,
+            "ui/observable_detail.html",
+            _base_context(request, form_values=form_values, **common),
+        )
+
+    # POST — build the update payload in the applier's wire shape (`_set_observable_fields`
+    # accepts camelCase keys and deliberately excludes `data`: the value is the per-org
+    # dedupe key, so it is immutable from both surfaces — see P2/C3 in the wave plan).
+    # A shared observable needs the same acknowledgement the API's `?force=true` demands.
+    force = (request.POST.get("force") or "").lower() in ("on", "1", "true", "yes")
+    guard = _observable_cross_case_guard(observable, force)
+    if guard is not None:
+        messages.error(request, guard.data.get("message", "This observable is shared."))
+        return _render_observable_edit_form(request, observable, request.POST)
+
+    payload: dict[str, Any] = {}
+    if "message" in request.POST:
+        payload["message"] = (request.POST.get("message") or "").strip()
+    if "dataType" in request.POST and (request.POST.get("dataType") or "").strip():
+        payload["dataType"] = request.POST["dataType"].strip()
+
+    for key in ("tlp", "pap"):
+        raw = request.POST.get(key)
+        if raw is not None and raw != "":
+            try:
+                payload[key] = int(raw)
+            except ValueError:
+                messages.error(request, f"Invalid value for {key}")
+                return _render_observable_edit_form(request, observable, request.POST)
+
+    for key in ("ioc", "sighted", "ignoreSimilarity"):
+        if key in request.POST:
+            payload[key] = request.POST.get(key) == "on"
+
+    # `enrichment_data` is a plain JSON column (not part of the dedupe key), so the UI applies
+    # it directly rather than widening the shared applier's contract.
+    enrichment_touched = "enrichment_data" in request.POST
+    if enrichment_touched:
+        raw_json = (request.POST.get("enrichment_data") or "").strip()
+        if raw_json:
+            import json
+
+            try:
+                parsed_enrichment = json.loads(raw_json)
+            except json.JSONDecodeError:
+                messages.error(request, "Enrichment data is not valid JSON.")
+                return _render_observable_edit_form(request, observable, request.POST)
+        else:
+            parsed_enrichment = {}
+        if not isinstance(parsed_enrichment, dict):
+            messages.error(request, "Enrichment data must be a JSON object.")
+            return _render_observable_edit_form(request, observable, request.POST)
+
+    fields = _set_observable_fields(observable, payload)
+    if isinstance(fields, Response):
+        messages.error(request, fields.data.get("message", "Validation failed"))
+        return _render_observable_edit_form(request, observable, request.POST)
+    if enrichment_touched:
+        observable.enrichment_data = parsed_enrichment
+        fields = [*fields, "enrichment_data"]
+    if not fields:
+        messages.error(request, "No updatable field supplied.")
+        return _render_observable_edit_form(request, observable, request.POST)
+
+    # The audit row shares the mutation's transaction (SEC-2026-10-11 L2): a failed audit
+    # insert rolls the change back rather than leaving an unlogged mutation.
+    with transaction.atomic():
+        observable.save(update_fields=[*fields, "updated_at"])
+        AuditLog.objects.create(
+            actor=request.user,
+            actor_org=getattr(request.user, "org", None),
+            target_org=observable.owner_org,
+            action="observable.updated",
+            target_type="Observable",
+            target_id=str(observable.id),
+            ip=request.META.get("REMOTE_ADDR"),
+        )
+
+    messages.success(request, "Observable updated.")
+    return redirect("ui-observable-detail", observable_id=observable.id)
+
+
+def _render_observable_edit_form(
+    request: HttpRequest, observable: Observable, post_data: Any
+) -> HttpResponse:
+    """Re-render the observable edit form with the submitted values and a message."""
+    # `post_data` is a QueryDict; `dict(...)` yields lists — read scalars with `.get()` so the
+    # form echoes what was typed (SEC-2026-10-11 N1).
+    fields = ("data", "dataType", "message", "tlp", "pap", "enrichment_data")
+    form_values = {key: post_data.get(key, "") for key in fields}
+    for key in ("ioc", "sighted", "ignoreSimilarity"):
+        form_values[key] = "on" if post_data.get(key) == "on" else ""
+    return render(
+        request,
+        "ui/observable_detail.html",
+        _base_context(
+            request,
+            observable=observable,
+            cases=observable.case_observables.select_related("case__owner_org").order_by(
+                "-case__start_date"
+            ),
+            affected_cases=_observable_affected_cases(observable),
+            is_owner=observable.owner_org_id == getattr(request.user, "org_id", None),
+            is_cross_org=observable.owner_org_id != getattr(request.user, "org_id", None),
+            data_type_options=ObservableType.objects.order_by("name"),
+            form_values=form_values,
+            tlp_choices=[choice for choice in TLP_CHOICES if choice[0] <= 3],
+            pap_choices=PAP_CHOICES,
+            edit_mode=True,
+        ),
+    )
+
+
+@login_required
+@require_POST
+def observable_delete(request: HttpRequest, observable_id: str) -> HttpResponse:
+    """P2/C3 — Delete an observable, honouring the cross-case blast-radius guard.
+
+    Reads `force` from POST data. If the observable is linked to multiple cases
+    and `force` is not set, refuses with a message and redirects back.
+    """
+    observable = resolve_observable(request.user, observable_id)
+    if observable is None:
+        return render(request, "ui/404.html", status=404)
+
+    force = (request.POST.get("force") or "").lower() in ("on", "1", "true", "yes")
+    guard = _observable_cross_case_guard(observable, force, action="deletion")
+    if guard is not None:
+        # Translate the API 409 into a UI message + redirect
+        messages.error(request, guard.data.get("message", "This observable is shared."))
+        return redirect("ui-observable-detail", observable_id=observable.id)
+
+    # Capture before delete(): Django nulls the pk on the instance, which would otherwise
+    # log target_id="None" and re-query a detached FK.
+    observable_pk = str(observable.id)
+    target_org = observable.owner_org
+    with transaction.atomic():
+        observable.delete()
+        AuditLog.objects.create(
+            actor=request.user,
+            actor_org=getattr(request.user, "org", None),
+            target_org=target_org,
+            action="observable.deleted",
+            target_type="Observable",
+            target_id=observable_pk,
+            ip=request.META.get("REMOTE_ADDR"),
+        )
+
+    messages.success(request, "Observable deleted.")
+    return redirect("ui-observable-list")
 
 
 # --- Case share management (P7) ---

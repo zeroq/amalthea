@@ -61,6 +61,12 @@ from cases.models import (
 )
 from cases.procedures import create_procedure
 from cases.tagging import tag_names_from_payload
+from cases.update import (
+    CaseUpdateError,
+    _apply_case_tags,
+    _set_case_fields,
+    apply_case_update,
+)
 from compat.bulk import bulk_patch
 from compat.procedures import parse_procedure
 from compat.time import parse_timestamp, to_epoch_ms
@@ -330,100 +336,18 @@ def _create_case(request: Request) -> Response:
     return Response(case_json(case, detail=True), status=status.HTTP_201_CREATED)
 
 
-#: `InputUpdateCase`'s scalar/enum fields, in one place so the single PATCH and the `_bulk`
-#: PATCH can never drift into accepting different sets.
-_CASE_SCALAR_FIELDS = ("title", "description", "summary", "severity", "tlp", "pap", "flag")
-
-
-def _set_case_fields(case: Case, payload: Mapping[str, Any]) -> Response | list[str]:
-    """Apply the scalar/enum FK fields of `InputUpdateCase` to `case`.
-
-    Returns the touched column names, or a 400 `Response` on a bad value. Shared by the
-    single-case PATCH (`_update_case`) and the bulk PATCH (`_bulk_update_cases`), so a field the
-    one accepts can never be silently missing from the other.
-    """
-    fields: list[str] = []
-    for key in _CASE_SCALAR_FIELDS:
-        if key in payload:
-            setattr(case, key, payload[key])
-            fields.append(key)
-    if "status" in payload:
-        warnings: list[str] = []
-        case.status = resolve_case_status(str(payload["status"]), warnings=warnings)
-        fields.append("status")
-    if "assignee" in payload:
-        case.assignee = _resolve_login(payload["assignee"])
-        fields.append("assignee")
-    return fields
-
-
-def _apply_case_tags(case: Case, payload: Mapping[str, Any]) -> None:
-    """`tags` (replace), `addTags`/`removeTags` (delta) — the recorded `InputUpdateCase` shapes.
-
-    Applied on the case's M2M link table, matching `case_tag_link`. A tag that does not exist is
-    created on attach, exactly as the tag-link endpoint does.
-    """
-    names = tag_names_from_payload(dict(payload))
-    if names is not None:
-        CaseTagLink.objects.filter(case=case).exclude(tag__name__in=names).delete()
-        for name in names:
-            tag, _created = Tag.objects.get_or_create(name=name)
-            CaseTagLink.objects.get_or_create(case=case, tag=tag)
-    for key, attach in (("addTags", True), ("removeTags", False)):
-        raw = payload.get(key)
-        if not isinstance(raw, list):
-            continue
-        for name in raw:
-            if not isinstance(name, str) or not name.strip():
-                continue
-            if attach:
-                tag, _created = Tag.objects.get_or_create(name=name.strip()[:100])
-                CaseTagLink.objects.get_or_create(case=case, tag=tag)
-            else:
-                CaseTagLink.objects.filter(case=case, tag__name=name.strip()).delete()
-
-
 @transaction.atomic
 def _update_case(request: Request, case: Case) -> Response:
-    payload = request.data if isinstance(request.data, dict) else {}
-    previous_status = case.status.value if case.status_id else None
-    # Captured before the field loop mutates `case`, so the assignment event below can tell an
-    # assignee that actually changed from a PATCH that merely restated the same one.
-    previous_assignee_id = case.assignee_id
-    fields = _set_case_fields(case, payload)
-    if isinstance(fields, Response):
-        return fields
-    tags_touched = any(key in payload for key in ("tags", "addTags", "removeTags"))
-    if tags_touched:
-        _apply_case_tags(case, payload)
-    if not fields and not tags_touched:
-        return Response(
-            {"type": "BadRequest", "message": "No updatable field supplied", "fields": {}},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    if fields:
-        case.save(update_fields=[*fields, "updated_at"])
-    case.refresh_from_db()
+    """Thin wrapper delegating to the shared `apply_case_update` (P2 C2).
 
-    new_status = case.status.value if case.status_id else None
-    if new_status != previous_status:
-        append_timeline_event(
-            case,
-            title=f"Status changed: {previous_status} → {new_status}",
-            description=str(payload.get("comment") or ""),
-            kind="status-changed",
-            actor=_actor(request),
-            metadata={"from": previous_status, "to": new_status},
-        )
-    if case.assignee_id != previous_assignee_id:
-        login = case.assignee.login if case.assignee else None
-        append_timeline_event(
-            case,
-            title=f"Assigned to {login}" if login else "Unassigned",
-            kind="assigned",
-            actor=_actor(request),
-            metadata={"assignee": login},
-        )
+    API behaviour must not change; this preserves the exact 200/400 shapes and
+    timeline kinds emitted by the original implementation.
+    """
+    payload = request.data if isinstance(request.data, dict) else {}
+    try:
+        apply_case_update(case, payload, actor=_actor(request))
+    except CaseUpdateError as exc:
+        return Response(exc.to_response_payload(), status=status.HTTP_400_BAD_REQUEST)
     return Response(case_json(case, detail=True))
 
 
@@ -595,7 +519,7 @@ def _set_task_fields(task: Task, payload: Mapping[str, Any]) -> Response | list[
         setattr(task, attr, moment)
         fields.append(attr)
     if "assignee" in payload:
-        task.assignee = _resolve_login(payload["assignee"])
+        task.assignee = _resolve_login(payload["assignee"], org=task.case.owner_org)
         fields.append("assignee")
     return fields
 
@@ -612,23 +536,31 @@ def _update_task(request: Request, task: Task) -> Response:
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-def _resolve_login(value: Any) -> Any:
+def _resolve_login(value: Any, *, org: Organisation | None = None) -> Any:
     """Login string → user (parity with `_update_case`); empty/`null` unassigns.
 
     An unknown login unassigns rather than raising: ADR D11 refuses to auto-create a user
     per unrecognised wire value, so the only safe readings of "not a user" are "nobody". The
     UUID fallback is parsed first because `filter(pk="not-a-uuid")` raises `ValidationError`
     out of the query compiler — an unassigned task must not become a 500.
+
+    Tenant isolation (SEC-2026-10-11 M1): when `org` is given, both lookups are scoped to it,
+    so a crafted payload cannot bind a task/case to a principal in another organisation (nor
+    use the response as a cross-tenant login-existence oracle). Callers pass the owning
+    resource's org; a cross-org value simply resolves to "nobody" (unassign).
     """
     if not value:
         return None
     from identity.models import User
 
-    candidate = User.objects.filter(login=str(value)).first()
+    users = User.objects.all()
+    if org is not None:
+        users = users.filter(org=org)
+    candidate = users.filter(login=str(value)).first()
     if candidate is not None:
         return candidate
     pk = _as_uuid(value)
-    return User.objects.filter(pk=pk).first() if pk is not None else None
+    return users.filter(pk=pk).first() if pk is not None else None
 
 
 def case_observable_add(request: Request, case_id: str) -> Response:
@@ -1934,8 +1866,6 @@ def case_bulk_update(request: Request) -> Response:
 
     def apply_one(case: Case, body: Mapping[str, Any]) -> Response | list[str] | None:
         fields = _set_case_fields(case, body)
-        if isinstance(fields, Response):
-            return fields
         tags_touched = any(key in body for key in ("tags", "addTags", "removeTags"))
         if not fields and not tags_touched:
             return None

@@ -15,6 +15,8 @@ urlpatterns = [
     path("alerts/<uuid:alert_id>", views.alert_detail, name="ui-alert-detail"),
     path("alerts/<uuid:alert_id>/escalate", views.alert_escalate, name="ui-alert-escalate"),
     path("alerts/<uuid:alert_id>/merge", views.alert_merge, name="ui-alert-merge"),
+    # P2/C1 — Alert status change
+    path("alerts/<uuid:alert_id>/status", views.alert_status, name="ui-alert-status"),
     path("cases", views.case_list, name="ui-case-list"),
     path("cases/<str:case_id>", views.case_detail, name="ui-case-detail"),
     path("cases/<str:case_id>/status", views.case_set_status, name="ui-case-status"),
@@ -26,6 +28,8 @@ urlpatterns = [
         views.case_task_toggle,
         name="ui-case-task-toggle",
     ),
+    # P2/C2 — Case edit
+    path("cases/<str:case_id>/edit", views.case_edit, name="ui-case-edit"),
     # Case sub-resources (P2-P5 UI)
     path("cases/<str:case_id>/export", views.case_export, name="ui-case-export"),
     path("cases/<str:case_id>/tags", views.case_tags, name="ui-case-tags"),
@@ -104,6 +108,13 @@ urlpatterns = [
     # Observables
     path("observables", views.observable_list, name="ui-observable-list"),
     path("observables/<str:observable_id>", views.observable_detail, name="ui-observable-detail"),
+    # P2/C3 — Observable edit/delete
+    path("observables/<str:observable_id>/edit", views.observable_edit, name="ui-observable-edit"),
+    path(
+        "observables/<str:observable_id>/delete",
+        views.observable_delete,
+        name="ui-observable-delete",
+    ),
     # Taxonomy / vocabularies
     path("taxonomy", views.taxonomy, name="ui-taxonomy"),
     path("case-templates", views.case_template_list, name="ui-case-template-list"),
@@ -122,6 +133,9 @@ urlpatterns = [
     path("automation", views.automation_list, name="ui-automation-list"),
     path("automation/playbooks", views.playbook_list, name="ui-playbook-list"),
     path("automation/playbooks/new", views.playbook_create, name="ui-playbook-create"),
+    path(
+        "automation/playbooks/<str:playbook_id>/edit", views.playbook_edit, name="ui-playbook-edit"
+    ),
     path(
         "automation/playbooks/<str:playbook_id>", views.playbook_detail, name="ui-playbook-detail"
     ),

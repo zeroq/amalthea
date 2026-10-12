@@ -778,6 +778,7 @@ _UI_GLOBAL_READ_ROUTES: set[str] = {
     "ui-playbook-list",
     "ui-playbook-create",
     "ui-playbook-detail",
+    "ui-playbook-edit",
     "ui-playbook-delete",
     # Settings (superAdmin only - global management views)
     "ui-settings-organisations",
@@ -834,6 +835,7 @@ _WRITE_ONLY_ROUTES: set[str] = {
 _UI_WRITE_ONLY_ROUTES: set[str] = {
     "ui-alert-escalate",
     "ui-alert-merge",
+    "ui-alert-status",
     "ui-case-status",
     "ui-case-comment",
     "ui-case-extract",
@@ -851,6 +853,7 @@ _UI_WRITE_ONLY_ROUTES: set[str] = {
     "ui-case-template-create",
     "ui-case-template-delete",
     "ui-case-template-edit",
+    "ui-observable-delete",
     "ui-tag-create",
     "ui-tag-delete",
     "ui-tag-toggle",
@@ -1633,8 +1636,10 @@ class TestUIRouteEnumerationConformance:
             },
             "ui-case-share-list": {"case_id": str(self.shared_case.number)},
             "ui-case-export": {"case_id": str(self.case1.number)},
+            "ui-case-edit": {"case_id": str(self.case1.number)},
             "ui-observable-list": {},
             "ui-observable-detail": {"observable_id": str(self.obs1.id)},
+            "ui-observable-edit": {"observable_id": str(self.obs1.id)},
             "ui-automation-list": {},
             "ui-sources-list": {},
         }

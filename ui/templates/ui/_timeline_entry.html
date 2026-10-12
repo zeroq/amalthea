@@ -1,6 +1,13 @@
+{% load ui_tags %}
 <li class="tl tl-{{ event.kind|slugify }}" data-event-id="{{ event.id }}">
   <p class="tl-title">{{ event.title }}</p>
-  {% if event.description %}<pre class="tl-body">{{ event.description }}</pre>{% endif %}
+  {% if event.description %}
+    {% if event.kind == "comment" %}
+      <div class="tl-body md">{{ event.description|markdown }}</div>
+    {% else %}
+      <pre class="tl-body">{{ event.description }}</pre>
+    {% endif %}
+  {% endif %}
   <p class="tl-meta">
     <span class="mono">{{ event.date|date:"Y-m-d H:i:s" }}</span>
     {% if event.actor %} · {{ event.actor.login }}{% endif %}

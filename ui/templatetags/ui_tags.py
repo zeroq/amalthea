@@ -15,8 +15,10 @@ import json
 from typing import Any
 
 from django import template
+from django.utils.safestring import mark_safe
 
 from core.enums import SEVERITY_CHOICES
+from ui.markdown import render_markdown
 
 register = template.Library()
 
@@ -71,3 +73,22 @@ def prettyjson(value: Any) -> str:
         return json.dumps(value, indent=2, ensure_ascii=False)
     except (TypeError, ValueError):
         return str(value)
+
+
+@register.filter
+def markdown(value: Any) -> str:
+    """Render analyst-authored Markdown as sanitized HTML (ADR-005).
+
+    The filter delegates to `ui.markdown.render_markdown`, which parses CommonMark
+    (raw HTML in source is escaped) and then sanitizes the result with `nh3` against
+    a strict allow-list. `nh3` is the single trusted XSS boundary — parser output is
+    never returned unsanitized. On failure, the input is escaped as plain text.
+
+    Returns a `SafeString` so the template engine does not double-escape the sanitized
+    HTML. Templates use `{{ value|markdown }}` for `Case.description` and comment
+    bodies (`TimelineEvent.kind == "comment"`).
+    """
+    html = render_markdown(str(value or ""))
+    # Already sanitized by nh3 (ADR-005); marking safe is precisely the filter's job. S308 is a
+    # blanket heuristics warning and the allow-list in ui.markdown is the control that answers it.
+    return mark_safe(html)  # noqa: S308

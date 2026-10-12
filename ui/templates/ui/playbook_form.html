@@ -49,7 +49,7 @@
       <select id="id_action" name="action" required>
         <option value="">— select —</option>
         {% for a in actions %}
-        <option value="{{ a }}">{{ a|upper }}</option>
+        <option value="{{ a }}" {% if config.action == a %}selected{% endif %}>{{ a|upper }}</option>
         {% endfor %}
       </select>
     </div>
@@ -57,41 +57,54 @@
     <div id="http-fields" class="hidden">
       <div class="meta-inline">
         <label for="id_url">URL <span class="dim">(templated; use {observable}, {case}, {case_id}, etc.)</span></label>
-        <input type="url" id="id_url" name="url" placeholder="https://api.example.com/lookup/{observable}">
+        <input type="url" id="id_url" name="url" placeholder="https://api.example.com/lookup/{observable}" value="{{ config.url|default:'' }}">
       </div>
 
       <div class="meta-inline">
         <label for="id_http_method">Method</label>
         <select id="id_http_method" name="http_method">
           {% for m in http_methods %}
-          <option value="{{ m }}">{{ m }}</option>
+          <option value="{{ m }}" {% if config.method == m %}selected{% endif %}>{{ m }}</option>
           {% endfor %}
         </select>
       </div>
 
       <div class="meta-inline">
         <label for="id_timeout_seconds">Timeout (seconds, max 30)</label>
-        <input type="number" id="id_timeout_seconds" name="timeout_seconds" min="0.1" max="30" step="0.1" value="10">
+        <input type="number" id="id_timeout_seconds" name="timeout_seconds" min="0.1" max="30" step="0.1" value="{{ config.timeoutSeconds|default:10 }}">
       </div>
 
       <div class="meta-inline">
         <label>Headers (name → value)</label>
         <div id="headers">
+          {% comment %}Render existing headers in order{% endcomment %}
+          {% with header_items=config.headers.items %}
+            {% for key, val in header_items %}
+            <div class="field-row">
+              <input type="text" name="header_key_{{ forloop.counter0 }}" value="{{ key }}" placeholder="Header name">
+              <input type="text" class="field-wide" name="header_val_{{ forloop.counter0 }}" value="{{ val }}" placeholder="Header value">
+              <button type="button" class="btn remove-header">Remove</button>
+            </div>
+            {% endfor %}
+          {% endwith %}
+          {% comment %}Pad to at least 4 rows total{% endcomment %}
           {% for i in "0123" %}
+          {% if forloop.counter0 >= config.headers|length %}
           <div class="field-row">
-            <input type="text" name="header_key_{{ i }}" placeholder="Header name">
-            <input type="text" class="field-wide" name="header_val_{{ i }}" placeholder="Header value">
+            <input type="text" name="header_key_{{ forloop.counter0 }}" placeholder="Header name">
+            <input type="text" class="field-wide" name="header_val_{{ forloop.counter0 }}" placeholder="Header value">
             <button type="button" class="btn remove-header">Remove</button>
           </div>
+          {% endif %}
           {% endfor %}
         </div>
         <button type="button" class="btn btn-tight" id="add-header">Add header</button>
-        <input type="hidden" name="header_count" value="4" id="header_count">
+        <input type="hidden" name="header_count" value="{{ config.headers|length|default:0 }}" id="header_count">
       </div>
 
       <div class="meta-inline">
         <label for="id_http_body">Request body (templated)</label>
-        <textarea id="id_http_body" name="http_body" rows="4" placeholder='{"key": "{observable}"}'></textarea>
+        <textarea id="id_http_body" name="http_body" rows="4" placeholder='{"key": "{observable}"}'>{% if config.body %}{{ config.body }}{% endif %}</textarea>
       </div>
     </div>
 
@@ -101,7 +114,7 @@
         <select id="id_action_path" name="action_path">
           <option value="">— select —</option>
           {% for path in registered_paths %}
-          <option value="{{ path }}">{{ path }}</option>
+          <option value="{{ path }}" {% if config.action_path == path %}selected{% endif %}>{{ path }}</option>
           {% endfor %}
         </select>
         <p class="hint">Registered in <code>automation/executor.py</code> via <code>register_action()</code>.</p>
