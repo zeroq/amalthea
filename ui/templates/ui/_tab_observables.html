@@ -1,0 +1,88 @@
+{% load ui_tags %}
+{% comment %}
+  Observables tab: list + create/edit/remove affordances.
+  Mirrors the Pages idiom (_tab_general.html + _page_entry.html): a header-row "New artifact"
+  button and per-row Edit/Remove buttons that open `_modal.html` dialogs.
+
+  The per-row edit/remove urls are resolved INSIDE the modal loop below. A `{% url … as x %}`
+  assignment is only in scope from the line it runs onward, so computing them in an earlier loop
+  would leave `x` holding the *last* row's URL and every modal would post to that one row.
+{% endcomment %}
+{% url 'ui-case-observable-create' case.number as observable_create_url %}
+
+<section class="card" aria-labelledby="h-obs">
+  <div class="page-row">
+    <h2 id="h-obs">Artifacts <span class="count">{{ observables|length }}</span></h2>
+    {% if can_mutate %}
+    <button type="button" class="btn btn-sm" data-modal-open="observable-create-modal">
+      <i class="fa-solid fa-plus" aria-hidden="true"></i> New artifact
+    </button>
+    {% endif %}
+  </div>
+
+  {% if observables %}
+    <div class="table-wrap">
+      <table class="data-table data-table-tight">
+        <caption class="sr-only">Artifacts linked to this case</caption>
+        <thead>
+          <tr>
+            <th scope="col">Type</th>
+            <th scope="col">Value</th>
+            <th scope="col">Seen in</th>
+            {% if can_mutate %}<th scope="col">Actions</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for link in observables %}
+          <tr>
+            <td>{{ link.observable.data_type.name }}</td>
+            <td class="mono break">
+              <a href="{% url 'ui-observable-detail' link.observable.id %}">{{ link.observable.data }}</a>
+            </td>
+            <td class="mono dim">{{ link.observable.case_observables.count }} case(s)</td>
+            {% if can_mutate %}
+            <td class="actions">
+              {% comment %}
+                Edit is owner-org only (Q5). `is_owner` is `is_case_owner` from the view, so a
+                superAdmin qualifies too — the same predicate the update view enforces.
+              {% endcomment %}
+              {% if is_owner %}
+              <button type="button" class="btn btn-sm" data-modal-open="observable-edit-{{ link.observable.id }}" aria-label="Edit artifact {{ link.observable.data }}">
+                <i class="fa-solid fa-pen" aria-hidden="true"></i> Edit
+              </button>
+              {% endif %}
+              <button type="button" class="btn btn-sm btn-err" data-modal-open="observable-remove-{{ link.observable.id }}" aria-label="Remove artifact {{ link.observable.data }} from case">
+                <i class="fa-solid fa-trash" aria-hidden="true"></i> Remove from case
+              </button>
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">
+      No artifacts extracted yet.{% if can_mutate %} Add one above, or use <em>Re-extract artifacts</em> on the General tab.{% endif %}
+    </p>
+  {% endif %}
+</section>
+
+{% if can_mutate %}
+{% include "ui/_modal.html" with modal_id="observable-create-modal" form_id="observable-create-form" body_template="ui/_observable_form_modal_body.html" title="New artifact" confirm_text="Add artifact" form_action=observable_create_url size="lg" %}
+
+{% comment %}
+  Per-row edit + remove modals. The `{% url … as %}` pair is INSIDE the loop so each row's modal
+  posts to that row's own route — hoisting it above the loop would freeze every modal on the last id.
+{% endcomment %}
+{% for link in observables %}
+  {% url 'ui-case-observable-edit' case.number link.observable.id as obs_edit_url %}
+  {% url 'ui-case-observable-remove' case.number link.observable.id as obs_remove_url %}
+  {% with oid=link.observable.id|stringformat:"s" obs=link.observable %}
+  {% if is_owner %}
+  {% include "ui/_modal.html" with modal_id="observable-edit-"|add:oid form_id="observable-edit-form-"|add:oid body_template="ui/_observable_form_modal_body.html" title="Edit artifact" confirm_text="Save changes" form_action=obs_edit_url size="lg" observable=obs is_edit=True %}
+  {% endif %}
+  {% include "ui/_modal.html" with modal_id="observable-remove-"|add:oid form_id="observable-remove-form-"|add:oid body_template="ui/_observable_remove_modal.html" title="Remove artifact from case?" confirm_text="Remove" confirm_class="btn-err" form_action=obs_remove_url size="md" observable=obs %}
+  {% endwith %}
+{% endfor %}
+{% endif %}

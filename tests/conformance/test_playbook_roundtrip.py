@@ -12,6 +12,7 @@ from django.test import Client
 from django.urls import reverse
 
 from automation.models import Playbook
+from core.enums import VIEWER_ROLE
 from identity.models import Organisation, User
 
 pytestmark = pytest.mark.django_db
@@ -42,7 +43,7 @@ def read_only_user(org: Organisation) -> User:
         email="readonly@example.net",
         org=org,
         is_active=True,
-        role="read-only",
+        role=VIEWER_ROLE,
     )
 
 
@@ -457,10 +458,14 @@ class TestPlaybookRoundTripPython:
 class TestPlaybookEditAuthz:
     """Authorization tests for playbook edit."""
 
-    def test_readonly_user_get_edit_allowed(
+    def test_readonly_user_get_edit_denied(
         self, client_readonly: Client, org: Organisation
     ) -> None:
-        """Read-only user can GET the edit page (same as create)."""
+        """Read-only (viewer) user cannot open the edit form at all (ADR-006).
+
+        The edit screen exists only to perform a write, so it is a write surface:
+        a viewer gets the uniform 404 on GET as well as on POST.
+        """
         playbook = Playbook.objects.create(
             name="authz-test",
             trigger_event="observable.created",
@@ -469,13 +474,12 @@ class TestPlaybookEditAuthz:
 
         url = reverse("ui-playbook-edit", kwargs={"playbook_id": str(playbook.id)})
         resp = _get_form(client_readonly, url)
-        # GET should be allowed for any authenticated org member
-        assert resp.status_code == 200
+        assert resp.status_code == 404
 
     def test_readonly_user_post_edit_denied(
         self, client_readonly: Client, org: Organisation
     ) -> None:
-        """Read-only user POST to edit is rejected (uniform 404)."""
+        """Read-only (viewer) user POST to edit is rejected (uniform 404)."""
         playbook = Playbook.objects.create(
             name="authz-test-post",
             trigger_event="observable.created",
@@ -483,22 +487,21 @@ class TestPlaybookEditAuthz:
         )
 
         url = reverse("ui-playbook-edit", kwargs={"playbook_id": str(playbook.id)})
-        resp = _get_form(client_readonly, url)
-        assert resp.status_code == 200
-
-        form_values = _parse_form_values(resp)
-        form_values["csrfmiddlewaretoken"] = _extract_csrf(resp)
-        form_values.setdefault("name", "authz-test-post")
-        form_values.setdefault("description", "")
-        form_values.setdefault("trigger_event", "observable.created")
-        form_values.setdefault("action", "http")
-        form_values.setdefault("http_method", "GET")
-        form_values.setdefault("timeout_seconds", "10")
-        form_values.setdefault("url", "https://example.com")
-        form_values.setdefault("http_body", "")
-        form_values.setdefault("is_active", "on")
-
-        resp = _post_form(client_readonly, url, form_values)
+        resp = _post_form(
+            client_readonly,
+            url,
+            {
+                "name": "authz-test-post",
+                "description": "",
+                "trigger_event": "observable.created",
+                "action": "http",
+                "http_method": "GET",
+                "timeout_seconds": "10",
+                "url": "https://example.com",
+                "http_body": "",
+                "is_active": "on",
+            },
+        )
         # POST requires analyst/admin/superAdmin → uniform 404
         assert resp.status_code == 404
 
@@ -610,19 +613,20 @@ class TestPlaybookCreateStillWorks:
         assert pb.config["action_path"] == "amalthea.automation.executor.enrichment_probe"
 
     def test_create_readonly_user_denied(self, client_readonly: Client, org: Organisation) -> None:
-        """Read-only user cannot create playbook (POST → 404)."""
+        """Read-only (viewer) user cannot create a playbook (GET/POST → 404)."""
         url = reverse("ui-playbook-create")
-        resp = _get_form(client_readonly, url)
-        assert resp.status_code == 200  # GET allowed
+        assert _get_form(client_readonly, url).status_code == 404  # GET denied too (ADR-006)
 
-        form_values = _parse_form_values(resp)
-        form_values["csrfmiddlewaretoken"] = _extract_csrf(resp)
-        form_values["name"] = "readonly-create"
-        form_values["description"] = ""
-        form_values["trigger_event"] = "observable.created"
-        form_values["action"] = "python"
-        form_values["action_path"] = "amalthea.automation.executor.enrichment_probe"
-        form_values["is_active"] = "on"
-
-        resp = _post_form(client_readonly, url, form_values)
+        resp = _post_form(
+            client_readonly,
+            url,
+            {
+                "name": "readonly-create",
+                "description": "",
+                "trigger_event": "observable.created",
+                "action": "python",
+                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "is_active": "on",
+            },
+        )
         assert resp.status_code == 404

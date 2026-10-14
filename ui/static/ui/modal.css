@@ -4,6 +4,21 @@
  * styles — ADR-003).
  */
 
+/* Centering — restore what Tailwind's Preflight takes away.
+ *
+ * A native <dialog> is only ever centred by the UA stylesheet's `margin: auto` (together with
+ * `inset: 0`, which is how `dialog:modal` pins it to the viewport). Tailwind's Preflight resets
+ * `margin`/`padding` on `*` inside `@layer base`, and author declarations beat the UA stylesheet,
+ * so that margin collapses to 0 and every dialog is painted in the top-left corner. These rules
+ * are unlayered, so they outrank the layer — declaring the geometry explicitly keeps centering
+ * working for every dialog we ship, including the cheat sheet.
+ */
+.modal,
+dialog.cheatsheet-modal {
+  inset: 0;
+  margin: auto;
+}
+
 .modal {
   border: none;
   border-radius: var(--radius);
@@ -18,27 +33,45 @@
   background: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(2px);
 }
+/* Sizes. These set a real `width`, not just a `max-width`: a <dialog> is shrink-to-fit, so a
+ * max-width alone leaves the box to the intrinsic size of its widest control — an `input`/`textarea`
+ * with no `size`/`cols` is ~177px, which made a `size="lg"` form (new case, new user, page body)
+ * render as a ~270px-wide box with a 177px-wide Markdown textarea. `max-width: 100%` keeps every
+ * size inside a narrow viewport instead of overflowing it. */
 .modal--sm {
-  max-width: 320px;
+  width: 320px;
+  max-width: 100%;
 }
 .modal--md {
-  max-width: 400px;
+  width: 400px;
+  max-width: 100%;
 }
 .modal--lg {
-  max-width: 560px;
+  width: 560px;
+  max-width: 100%;
 }
 .modal--xl {
-  max-width: 720px;
+  width: 720px;
+  max-width: 100%;
 }
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-}
+/* No backdrop element: the native `::backdrop` (above / `dialog.cheatsheet-modal::backdrop`
+ * in app.css) is the only dimming layer, and outside clicks land on the <dialog> itself.
+ * A `<div class="modal-backdrop">` overlay used to sit here and — being `position: fixed`
+ * inside the dialog — painted above the static `.modal-content`, so every click inside the
+ * dialog hit the overlay and closed the modal without submitting its form. */
 .modal-content {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* A modal taller than the viewport cannot be centred and cannot be scrolled into reach: with
+   * `inset: 0` + `margin: auto`, an over-tall box loses its auto margins on that axis and is pinned
+   * to the top, so the footer — and with it the confirm control — ends up below the fold with
+   * nothing to scroll. Capping the content box here, and letting only `.modal-body` scroll below,
+   * keeps the title, the fields and the buttons all on screen (measured, not assumed: a `size="lg"`
+   * page form with an 8-row textarea overflows a 716px-tall viewport). `dvh` follows mobile
+   * browser chrome where it is supported, `vh` is the fallback. */
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
 }
 .modal-header {
   display: flex;
@@ -66,6 +99,10 @@
 }
 .modal-body {
   padding: 16px 20px;
+  /* The only scrollable region of a tall modal; `min-height: 0` lets this flex item shrink below
+   * its content height, which is what makes the header and footer stay put. */
+  min-height: 0;
+  overflow-y: auto;
 }
 .modal-body-text {
   margin: 0;

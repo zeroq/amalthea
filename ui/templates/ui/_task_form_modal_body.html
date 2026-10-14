@@ -1,0 +1,138 @@
+{% load ui_tags %}
+{% comment %}
+  Body of the task create/edit modal (`_modal.html` `body_template`).
+
+  One template serves both paths:
+  - Create: `task` is not in context (or is None), `is_edit=False`; fields empty or defaults.
+  - Edit: `task` is in context, `is_edit=True`; the form is prefilled from `task`.
+  - Error re-render: `form_values` present with submitted values and `errors` dict.
+
+  Prefill priority per field:
+    1. `form_values` (error path or submitted values)
+    2. `task` (edit path, no error)
+    3. Empty/default (create path)
+
+  The modal footer owns the submit, so each control MUST carry `form="{{ form_id }}"`
+  (`form_id` is set by `_modal.html`). The hidden `tab=tasks` rides in that same form.
+{% endcomment %}
+
+<input type="hidden" name="tab" value="tasks" form="{{ form_id }}">
+
+{% comment %} Title {% endcomment %}
+<div class="field-row">
+  <label for="{{ modal_id }}-title">Title <span class="required" aria-hidden="true">*</span></label>
+  {% if form_values %}
+    <input type="text" id="{{ modal_id }}-title" name="title" maxlength="500"
+           value="{{ form_values.title }}" required autofocus form="{{ form_id }}"
+           {% if errors.title %}aria-invalid="true" aria-describedby="{{ modal_id }}-title-error"{% endif %}>
+    {% if errors.title %}
+    <p id="{{ modal_id }}-title-error" class="field-error">{{ errors.title }}</p>
+    {% endif %}
+  {% else %}
+    <input type="text" id="{{ modal_id }}-title" name="title" maxlength="500"
+           value="{{ task.title|default:'' }}" required autofocus form="{{ form_id }}">
+  {% endif %}
+</div>
+
+{% comment %} Description {% endcomment %}
+<div class="field-row">
+  <label for="{{ modal_id }}-description">Description</label>
+  {% if form_values %}
+    <textarea id="{{ modal_id }}-description" name="description" rows="4"
+              placeholder="Markdown — rendered with the same pipeline as the case description"
+              form="{{ form_id }}">{{ form_values.description }}</textarea>
+  {% else %}
+    <textarea id="{{ modal_id }}-description" name="description" rows="4"
+              placeholder="Markdown — rendered with the same pipeline as the case description"
+              form="{{ form_id }}">{{ task.description|default:'' }}</textarea>
+  {% endif %}
+</div>
+
+{% comment %} Assignee (person picker) {% endcomment %}
+<div class="field-row">
+  <label for="{{ modal_id }}-assignee">Assignee</label>
+  {% if form_values %}
+    <select id="{{ modal_id }}-assignee" name="assignee" form="{{ form_id }}"
+            {% if errors.assignee %}aria-invalid="true" aria-describedby="{{ modal_id }}-assignee-error"{% endif %}>
+      <option value="">Unassigned</option>
+      {% for person in task_assignees %}
+      <option value="{{ person.login }}"
+        {% if form_values.assignee == person.login %}selected{% endif %}>
+        {{ person.login }}
+      </option>
+      {% endfor %}
+    </select>
+    {% if errors.assignee %}
+    <p id="{{ modal_id }}-assignee-error" class="field-error">{{ errors.assignee }}</p>
+    {% endif %}
+  {% else %}
+    <select id="{{ modal_id }}-assignee" name="assignee" form="{{ form_id }}">
+      <option value="">Unassigned</option>
+      {% for person in task_assignees %}
+      <option value="{{ person.login }}"
+        {% if task.assignee and task.assignee.login == person.login %}selected{% endif %}>
+        {{ person.login }}
+      </option>
+      {% endfor %}
+    </select>
+  {% endif %}
+</div>
+
+{% comment %} Due date {% endcomment %}
+<div class="field-row">
+  <label for="{{ modal_id }}-due_date">Due date</label>
+  {% if form_values %}
+    <input type="date" id="{{ modal_id }}-due_date" name="due_date"
+           value="{{ form_values.due_date }}" form="{{ form_id }}"
+           {% if errors.due_date %}aria-invalid="true" aria-describedby="{{ modal_id }}-due_date-error"{% endif %}>
+    {% if errors.due_date %}
+    <p id="{{ modal_id }}-due_date-error" class="field-error">{{ errors.due_date }}</p>
+    {% endif %}
+  {% else %}
+    <input type="date" id="{{ modal_id }}-due_date" name="due_date"
+           value="{{ task.due_date|date:'Y-m-d'|default:'' }}" form="{{ form_id }}">
+  {% endif %}
+  <p class="hint">Day granularity; stored at end-of-day so a task due today is not overdue at midnight.</p>
+</div>
+
+{% comment %} Status {% endcomment %}
+<div class="field-row">
+  <label for="{{ modal_id }}-status">Status</label>
+  {% if form_values %}
+    <select id="{{ modal_id }}-status" name="status" form="{{ form_id }}"
+            {% if errors.status %}aria-invalid="true" aria-describedby="{{ modal_id }}-status-error"{% endif %}>
+      {% for val, label in task_status_options %}
+      <option value="{{ val }}" {% if form_values.status == val %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    {% if errors.status %}
+    <p id="{{ modal_id }}-status-error" class="field-error">{{ errors.status }}</p>
+    {% endif %}
+  {% else %}
+    <select id="{{ modal_id }}-status" name="status" form="{{ form_id }}">
+      {% for val, label in task_status_options %}
+      <option value="{{ val }}" {% if task.status == val %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  {% endif %}
+</div>
+
+{% comment %} Flag (Important) {% endcomment %}
+<div class="field-row">
+  <label class="check">
+    {% if form_values %}
+      <input type="checkbox" name="flag" value="on"
+             {% if form_values.flag == "on" %}checked{% endif %}
+             form="{{ form_id }}"
+             {% if errors.flag %}aria-invalid="true" aria-describedby="{{ modal_id }}-flag-error"{% endif %}>
+      {% if errors.flag %}
+      <p id="{{ modal_id }}-flag-error" class="field-error">{{ errors.flag }}</p>
+      {% endif %}
+    {% else %}
+      <input type="checkbox" name="flag" value="on"
+             {% if task.flag %}checked{% endif %}
+             form="{{ form_id }}">
+    {% endif %}
+    Important
+  </label>
+</div>

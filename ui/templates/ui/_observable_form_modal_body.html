@@ -1,0 +1,120 @@
+{% load ui_tags %}
+{% comment %}
+  Body of the observable create/edit modal (`_modal.html` `body_template`).
+
+  One template serves both paths:
+  - Create: `observable` is not in context (or is None), fields are empty.
+  - Edit: `observable` is in context, `is_edit=True` is passed; the form is prefilled.
+
+  The modal footer owns the submit, so each control MUST carry `form="{{ form_id }}"`
+  (`form_id` is set by `_modal.html`; see `_page_form.html` and the TTP fix in
+  `_procedure_form_modal_body.html`). Without it the POST arrives with empty fields.
+
+  IDs are prefixed with `modal_id` rather than hard-coded: create and every edit modal
+  coexist in one document, so a shared id would give every label the wrong control.
+{% endcomment %}
+<input type="hidden" name="tab" value="observables" form="{{ form_id }}">
+
+<div class="field-row">
+  <label for="{{ modal_id }}-dataType">Type <span class="required" aria-hidden="true">*</span></label>
+  {% comment %}
+    The placeholder is deliberately NOT pre-empted on create: `required` + an empty value forces a
+    conscious choice. A mislabelled artifact is worse than a missing one (resolve_observable), so
+    defaulting the select to the first vocabulary entry would invite a wrong type.
+  {% endcomment %}
+  <select id="{{ modal_id }}-dataType" name="dataType" required form="{{ form_id }}">
+    <option value="">-- select type --</option>
+    {% for t in data_type_options %}
+    <option value="{{ t.name }}" {% if is_edit and observable.data_type.name == t.name %}selected{% endif %}>
+      {{ t.name }}
+    </option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="field-row">
+  <label for="{{ modal_id }}-data">Value <span class="required" aria-hidden="true">*</span></label>
+  {% if is_edit %}
+  <input type="text" id="{{ modal_id }}-data" name="data" class="mono"
+    value="{{ observable.data }}" readonly disabled form="{{ form_id }}">
+  <p class="hint">The value is the organisation-wide dedupe key and cannot be changed.</p>
+  {% else %}
+  <input type="text" id="{{ modal_id }}-data" name="data" class="mono"
+    required autofocus placeholder="e.g. 192.0.2.1, example.com, user@domain.tld" form="{{ form_id }}">
+  {% endif %}
+</div>
+
+<div class="field-row">
+  <label for="{{ modal_id }}-message">Message</label>
+  <input type="text" id="{{ modal_id }}-message" name="message" maxlength="500"
+    value="{{ observable.message|default:'' }}" placeholder="Optional context or note" form="{{ form_id }}">
+</div>
+
+<div class="field-row">
+  <label for="{{ modal_id }}-tlp">TLP</label>
+  <select id="{{ modal_id }}-tlp" name="tlp" form="{{ form_id }}">
+    {% for val, label in observable_tlp_choices %}
+    <option value="{{ val }}"
+      {% if is_edit and observable.tlp|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}
+      {% if not is_edit and val == 2 %}selected{% endif %}>
+      {{ label }}
+    </option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="field-row">
+  <label for="{{ modal_id }}-pap">PAP</label>
+  <select id="{{ modal_id }}-pap" name="pap" form="{{ form_id }}">
+    {% for val, label in pap_choices %}
+    <option value="{{ val }}"
+      {% if is_edit and observable.pap|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}
+      {% if not is_edit and val == 2 %}selected{% endif %}>
+      {{ label }}
+    </option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="field-row">
+  <label class="check">
+    <input type="checkbox" name="ioc" {% if is_edit and observable.ioc %}checked{% endif %} form="{{ form_id }}">
+    IOC
+  </label>
+</div>
+
+<div class="field-row">
+  <label class="check">
+    <input type="checkbox" name="sighted" {% if is_edit and observable.sighted %}checked{% endif %} form="{{ form_id }}">
+    Sighted
+  </label>
+</div>
+
+<div class="field-row">
+  <label class="check">
+    <input type="checkbox" name="ignoreSimilarity" {% if is_edit and observable.ignore_similarity %}checked{% endif %} form="{{ form_id }}">
+    Ignore similarity
+  </label>
+</div>
+
+<div class="field-row">
+  <label for="{{ modal_id }}-enrichment">Enrichment (JSON)</label>
+  {% if is_edit %}
+  <textarea id="{{ modal_id }}-enrichment" name="enrichment_data" rows="8" class="mono" form="{{ form_id }}">{{ observable.enrichment_data|prettyjson }}</textarea>
+  {% else %}
+  <textarea id="{{ modal_id }}-enrichment" name="enrichment_data" rows="8" class="mono" form="{{ form_id }}"></textarea>
+  {% endif %}
+  <p class="hint">Raw enrichment payload; not part of the dedupe key.</p>
+</div>
+
+{% if is_edit %}
+<div class="field-row">
+  <p class="hint">Editing this artifact affects all {{ observable.case_observables.count }} linked case(s).</p>
+  {% if observable.case_observables.count > 1 %}
+  <label class="check">
+    <input type="checkbox" name="force" value="on" required form="{{ form_id }}">
+    I understand this affects all linked cases
+  </label>
+  {% endif %}
+</div>
+{% endif %}

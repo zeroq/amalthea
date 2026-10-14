@@ -63,12 +63,18 @@ def _resolve_assignee(value: Any, org: Any) -> Any:
     return _resolve_login(value, org=org)
 
 
-def _set_case_fields(case: Case, payload: Mapping[str, Any]) -> list[str]:
+def _set_case_fields(
+    case: Case, payload: Mapping[str, Any], *, warnings: list[str] | None = None
+) -> list[str]:
     """Apply the scalar/enum FK fields of `payload` to `case`; return the touched columns.
 
     `status` goes through the ADR-002 §D11 tolerant resolver (an unknown value is
     auto-created at its own stage) — the UI validates the posted value against the existing
     vocabulary *before* calling, so a form field can never mint a new status.
+
+    `warnings` is an out-parameter for a caller that must not swallow the resolver's record of an
+    auto-created status: `cases.create.create_case` stores it on `ingestion_warnings`. The update
+    path passes nothing and keeps discarding it (the recorded behaviour of a PATCH).
     """
     fields: list[str] = []
     for key in CASE_SCALAR_FIELDS:
@@ -88,8 +94,9 @@ def _set_case_fields(case: Case, payload: Mapping[str, Any]) -> list[str]:
         setattr(case, key, value)
         fields.append(key)
     if "status" in payload:
-        warnings: list[str] = []
-        case.status = resolve_case_status(str(payload["status"]), warnings=warnings)
+        case.status = resolve_case_status(
+            str(payload["status"]), warnings=warnings if warnings is not None else []
+        )
         fields.append("status")
     if "assignee" in payload:
         case.assignee = _resolve_assignee(payload["assignee"], case.owner_org)

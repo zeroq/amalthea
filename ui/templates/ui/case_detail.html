@@ -16,287 +16,86 @@
 {% block actions %}
   <a class="btn" href="{% url 'ui-case-list' %}">All cases</a>
   <a class="btn" href="{% url 'ui-case-export' case.number %}">Export JSON</a>
+  {% if can_mutate %}
   <a class="btn" href="{% url 'ui-case-apply-template' case.number %}">Apply template…</a>
   {% if is_owner %}
   <a class="btn" href="{% url 'ui-case-share-list' case.number %}" data-modal-open="case-share-modal">Manage shares</a>
   <button type="button" class="btn" data-modal-open="case-merge-modal">Merge into case…</button>
-  <a class="btn" href="{% url 'ui-case-edit' case.number %}">
+  <button type="button" class="btn" data-modal-open="case-edit-modal">
     <i class="fa-solid fa-pen" aria-hidden="true"></i>
     Edit case
-  </a>
+  </button>
+  {% endif %}
   {% endif %}
 {% endblock %}
 
 {% block content %}
-<section class="card" aria-labelledby="h-meta">
-  <div class="case-meta">
-    <dl class="meta meta-inline">
-      <dt>Status</dt><dd>{{ case.status.value }}</dd>
-      <dt>Assignee</dt><dd>{{ case.assignee.login|default:"Unassigned" }}</dd>
-      <dt>Owner org</dt><dd>{{ case.owner_org.name }}</dd>
-      <dt>Started</dt><dd class="mono">{{ case.start_date|date:"Y-m-d H:i" }}</dd>
-      <dt>TLP / PAP</dt><dd>{{ case.tlp }} / {{ case.pap }}</dd>
-      {% if case.closed_date %}<dt>Closed</dt><dd class="mono">{{ case.closed_date|date:"Y-m-d H:i" }}</dd>{% endif %}
-    </dl>
-
-    <div class="case-actions">
-      <form method="post" action="{% url 'ui-case-status' case.number %}" class="inline-form">{% csrf_token %}
-        <label class="sr-only" for="f-stage">Case status</label>
-        <select id="f-stage" name="stage">
-          {% for stage in case_stages %}<option value="{{ stage }}" {% if case.status.stage == stage %}selected{% endif %}>{{ stage }}</option>{% endfor %}
-        </select>
-        <button type="submit" class="btn">Set status</button>
-      </form>
-
-      <form method="post" action="{% url 'ui-case-extract' case.number %}">{% csrf_token %}
-        <button type="submit" class="btn" title="Re-run extraction and dispatch automation for anything new">
-          Re-extract artifacts
-        </button>
-      </form>
-    </div>
-  </div>
-
-  {% if case.description %}<div class="body md">{{ case.description|markdown }}</div>{% endif %}
-
-  {% if case.ingestion_warnings.warnings %}
-    <h3>Ingestion warnings</h3>
-    <ul class="warns">
-      {% for warning in case.ingestion_warnings.warnings %}<li>{{ warning }}</li>{% endfor %}
-    </ul>
-  {% endif %}
-</section>
-
-<div class="cols">
-  <section class="card" aria-labelledby="h-timeline">
-    <h2 id="h-timeline">Timeline</h2>
-    <ol class="timeline" id="timeline-events"
-        data-ws-url="{% if request.is_secure %}wss{% else %}ws{% endif %}://{{ request.get_host }}/ws/case/{{ case.id }}/">
-      {% for event in timeline %}
-        {% include "ui/_timeline_entry.html" %}
-      {% empty %}
-        <li class="empty">No timeline entries yet.</li>
-      {% endfor %}
-    </ol>
-
-    {# hx-* attributes are inert until an htmx is on the page; without it the form is the plain #}
-    {# POST it has always been, which is the fallback the design relies on (brief 6). #}
-    <form method="post" action="{% url 'ui-case-comment' case.number %}" class="comment"
-          hx-post="{% url 'ui-case-comment' case.number %}"
-          hx-target="#timeline-events"
-          hx-swap="beforeend"
-          hx-disabled-elt="this">{% csrf_token %}
-      <label for="f-comment">Add a note</label>
-      <textarea id="f-comment" name="body" rows="3" required placeholder="What did you find?"></textarea>
-      <button type="submit" class="btn btn-primary">Append note</button>
-    </form>
-  </section>
-
-  <div class="stack">
-    <section class="card" aria-labelledby="h-obs">
-      <h2 id="h-obs">Artifacts <span class="count">{{ observables|length }}</span></h2>
-      {% if observables %}
-        <div class="table-wrap">
-        <table class="data-table data-table-tight">
-          <caption class="sr-only">Artifacts linked to this case</caption>
-          <thead><tr><th scope="col">Type</th><th scope="col">Value</th><th scope="col">Seen in</th></tr></thead>
-          <tbody>
-            {% for link in observables %}
-              <tr>
-                <td>{{ link.observable.data_type.name }}</td>
-                <td class="mono break">{{ link.observable.data }}</td>
-                <td class="mono dim">{{ link.observable.case_observables.count }} case(s)</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-        </div>
-      {% else %}
-        <p class="empty">No artifacts extracted yet. Use <em>Re-extract artifacts</em> above.</p>
-      {% endif %}
-    </section>
-
-    <section class="card" aria-labelledby="h-procs">
-      <h2 id="h-procs">Procedures <span class="count">{{ procedures|length }}</span></h2>
-      <ul class="procedures" id="case-procedures">
-        {% for procedure in procedures %}
-          {% include "ui/_procedure_entry.html" %}
-        {% empty %}
-          <li class="empty">No procedures attached yet.</li>
-        {% endfor %}
-      </ul>
-
-      <form method="post" action="{% url 'ui-case-procedure-create' case.number %}" class="procedure-add">{% csrf_token %}
-        <h3>Attach procedure / TTP</h3>
-        <div class="form-grid">
-          <div>
-            <label for="f-patternId">ATT&CK ID <span class="required" aria-hidden="true">*</span></label>
-            <input id="f-patternId" name="patternId" required maxlength="255" placeholder="T1566.001">
-          </div>
-          <div>
-            <label for="f-patternName">Name</label>
-            <input id="f-patternName" name="patternName" maxlength="255" placeholder="Phishing: Spearphishing Attachment">
-          </div>
-          <div>
-            <label for="f-tactic">Tactic</label>
-            <input id="f-tactic" name="tactic" maxlength="100" placeholder="Initial Access">
-          </div>
-          <div>
-            <label for="f-occurDate">Occur date (optional)</label>
-            <input id="f-occurDate" name="occurDate" type="text" placeholder="ISO 8601 or epoch ms (e.g. 2024-01-15T10:30:00Z or 1705315800000)">
-          </div>
-          <div class="full-width">
-            <label for="f-description">Description</label>
-            <textarea id="f-description" name="description" rows="3" placeholder="What was observed?"></textarea>
-          </div>
-          <div class="full-width">
-            <label for="f-ttpId">Link to TTP vocabulary (optional)</label>
-            <select id="f-ttpId" name="ttpId">
-              <option value="">-- none --</option>
-              {% for ttp in ttps %}
-                <option value="{{ ttp.id }}">{{ ttp.name }} {% if ttp.ttp_code %}({{ ttp.ttp_code }}){% endif %}</option>
-              {% endfor %}
-            </select>
-          </div>
-        </div>
-        <button type="submit" class="btn btn-primary">
-          <i class="fa-solid fa-diagram-project" aria-hidden="true"></i>
-          Attach procedure
-        </button>
-      </form>
-    </section>
-
-    <section class="card" aria-labelledby="h-runs">
-      <h2 id="h-runs">Automation runs <span class="count">{{ runs|length }}</span></h2>
-      {% if runs %}
-        <div class="table-wrap">
-        <table class="data-table data-table-tight">
-          <caption class="sr-only">Automation runs for this case</caption>
-          <thead><tr><th scope="col">Playbook</th><th scope="col">Status</th><th scope="col">Output</th></tr></thead>
-          <tbody>
-            {% for run in runs %}
-              <tr>
-                <td class="mono">{{ run.playbook_name }}</td>
-                <td><span class="pill pill-{{ run.status|lower }}">{{ run.status }}</span></td>
-                <td>
-                  {% if run.output_log %}<pre class="tl-body">{{ run.output_log }}</pre>
-                  {% elif run.error %}<pre class="tl-body error">{{ run.error }}</pre>
-                  {% else %}<span class="dim">—</span>{% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-        </div>
-      {% else %}
-        <p class="empty">No playbook has run for this case.</p>
-      {% endif %}
-    </section>
-
-    <section class="card" aria-labelledby="h-tasks">
-      <h2 id="h-tasks">Tasks <span class="count">{{ tasks|length }}</span></h2>
-      {% if tasks %}
-        <ul class="tasks">
-          {% for task in tasks %}
-            <li class="task {% if task.status == 'Completed' %}task-done{% endif %}">
-              <form method="post" action="{% url 'ui-case-task-toggle' case.number task.id %}">{% csrf_token %}
-                {# `==` is a tag-only operator in Django templates; `{{ }}` cannot compare. #}
-                <button type="submit" class="tick"
-                        aria-pressed="{% if task.status == 'Completed' %}true{% else %}false{% endif %}"
-                        aria-label="{% if task.status == 'Completed' %}Reopen{% else %}Complete{% endif %} {{ task.title }}">
-                  {% if task.status == 'Completed' %}✓{% else %}○{% endif %}
-                </button>
-              </form>
-              <span class="task-title">{{ task.title }}</span>
-              <span class="dim mono">{{ task.status }}</span>
-              {% if task.assignee %}<span class="dim">{{ task.assignee.login }}</span>{% endif %}
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="empty">No tasks.</p>
-      {% endif %}
-
-      <form method="post" action="{% url 'ui-case-task-create' case.number %}" class="task-add">{% csrf_token %}
-        <label for="f-task">New task</label>
-        <input id="f-task" name="title" required maxlength="500" placeholder="Isolate the mailbox">
-        <label class="sr-only" for="f-assignee">Assignee</label>
-        <select id="f-assignee" name="assignee">
-          <option value="">Unassigned</option>
-          {% for person in assignees %}<option value="{{ person.login }}">{{ person.login }}</option>{% endfor %}
-        </select>
-        <button type="submit" class="btn">Add task</button>
-      </form>
-    </section>
-
-    <section class="card" aria-labelledby="h-pages">
-      <h2 id="h-pages">Pages <span class="count">{{ pages|length }}</span></h2>
-      {# Pages are created through the API (POST /case/{id}/page); the UI renders them and appends
-         new ones live from the `page` WebSocket event, which is why this list carries an id. #}
-      <ul class="pages" id="case-pages">
-        {% for page in pages %}
-          {% include "ui/_page_entry.html" %}
-        {% empty %}
-          <li class="empty">No pages yet.</li>
-        {% endfor %}
-      </ul>
-    </section>
-
-    <section class="card" aria-labelledby="h-attachments">
-      <h2 id="h-attachments">Attachments</h2>
-      <form method="post" action="{% url 'ui-case-attachment-upload' case.number %}" enctype="multipart/form-data" class="attachment-upload">{% csrf_token %}
-        <label for="f-attachment">Upload file</label>
-        <input type="file" id="f-attachment" name="attachments" required>
-        <button type="submit" class="btn">Upload</button>
-      </form>
-      {% if attachments %}
-        <div class="table-wrap">
-        <table class="data-table data-table-tight">
-          <caption class="sr-only">Attachments for this case</caption>
-          <thead><tr><th scope="col">Name</th><th scope="col">Size</th><th scope="col">Uploaded by</th><th scope="col">Actions</th></tr></thead>
-          <tbody>
-            {% for attachment in attachments %}
-              <tr>
-                <td class="mono break">{{ attachment.name }}</td>
-                <td class="mono dim">{{ attachment.size|filesizeformat }}</td>
-                <td class="dim">{{ attachment.created_by.login|default:"—" }}</td>
-                <td>
-                  <a class="btn btn-sm" href="{% url 'ui-case-attachment-download' case.number attachment.id %}">Download</a>
-                  <button type="button" class="btn btn-sm btn-err" data-modal-open="attachment-delete-{{ attachment.id }}">Delete</button>
-                  <dialog id="attachment-delete-{{ attachment.id }}" class="modal modal--sm" role="dialog" aria-modal="true" aria-labelledby="attachment-delete-{{ attachment.id }}-title">
-                    <div class="modal-backdrop" tabindex="-1"></div>
-                    <div class="modal-content">
-                      <header class="modal-header">
-                        <h2 id="attachment-delete-{{ attachment.id }}-title" class="modal-title">Delete attachment?</h2>
-                        <button type="button" class="modal-close" aria-label="Close" data-modal-close="attachment-delete-{{ attachment.id }}">&times;</button>
-                      </header>
-                      <div class="modal-body">
-                        <p>Delete <strong>{{ attachment.name }}</strong>? This cannot be undone.</p>
-                      </div>
-                      <footer class="modal-footer">
-                        <button type="button" class="btn modal-cancel" data-modal-close="attachment-delete-{{ attachment.id }}">Cancel</button>
-                        <form id="attachment-delete-{{ attachment.id }}-form" method="post" action="{% url 'ui-case-attachment-delete' case.number attachment.id %}">
-                          {% csrf_token %}
-                          <button type="submit" class="btn btn-err">Delete</button>
-                        </form>
-                      </footer>
-                    </div>
-                  </dialog>
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-        </div>
-      {% else %}
-        <p class="empty">No attachments yet.</p>
-      {% endif %}
-    </section>
-  </div>
+<div class="tabs" role="tablist" aria-label="Case sections">
+  {% for tab in tabs %}
+    <a class="tab {% if tab.slug == active_tab %}tab-on{% endif %}"
+       role="tab"
+       id="tab-{{ tab.slug }}"
+       href="?tab={{ tab.slug }}"
+       aria-controls="panel-{{ tab.slug }}"
+       aria-selected="{% if tab.slug == active_tab %}true{% else %}false{% endif %}"
+       tabindex="{% if tab.slug == active_tab %}0{% else %}-1{% endif %}"
+       aria-keyshortcuts="{{ forloop.counter }}">
+      {% if tab.slug == "general" %}<i class="fa-solid fa-circle-info" aria-hidden="true"></i> {% endif %}
+      {% if tab.slug == "alerts" %}<i class="fa-solid fa-bell" aria-hidden="true"></i> {% endif %}
+      {% if tab.slug == "tasks" %}<i class="fa-solid fa-list-check" aria-hidden="true"></i> {% endif %}
+      {% if tab.slug == "observables" %}<i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> {% endif %}
+      {% if tab.slug == "ttp" %}<i class="fa-solid fa-sitemap" aria-hidden="true"></i> {% endif %}
+      {% if tab.slug == "attachments" %}<i class="fa-solid fa-paperclip" aria-hidden="true"></i> {% endif %}
+      {% if tab.slug == "similar" %}<i class="fa-solid fa-diagram-project" aria-hidden="true"></i> {% endif %}
+      {% if tab.slug == "comments" %}<i class="fa-solid fa-comments" aria-hidden="true"></i> {% endif %}
+      {% if tab.slug == "audit" %}<i class="fa-solid fa-clipboard-list" aria-hidden="true"></i> {% endif %}
+      {{ tab.label }}
+      {% if tab.count is not None %}<span class="count">{{ tab.count }}</span>{% endif %}
+    </a>
+  {% endfor %}
 </div>
 
-{# Merge case modal (A2) #}
+<div class="tabpanels">
+  <section class="tabpanel" role="tabpanel" id="panel-general" aria-labelledby="tab-general" tabindex="0" {% if active_tab != "general" %}hidden{% endif %}>
+    {% include "ui/_tab_general.html" %}
+  </section>
+
+  <section class="tabpanel" role="tabpanel" id="panel-alerts" aria-labelledby="tab-alerts" tabindex="0" {% if active_tab != "alerts" %}hidden{% endif %}>
+    {% include "ui/_tab_alerts.html" %}
+  </section>
+
+  <section class="tabpanel" role="tabpanel" id="panel-tasks" aria-labelledby="tab-tasks" tabindex="0" {% if active_tab != "tasks" %}hidden{% endif %}>
+    {% include "ui/_tab_tasks.html" %}
+  </section>
+
+  <section class="tabpanel" role="tabpanel" id="panel-observables" aria-labelledby="tab-observables" tabindex="0" {% if active_tab != "observables" %}hidden{% endif %}>
+    {% include "ui/_tab_observables.html" %}
+  </section>
+
+  <section class="tabpanel" role="tabpanel" id="panel-ttp" aria-labelledby="tab-ttp" tabindex="0" {% if active_tab != "ttp" %}hidden{% endif %}>
+    {% include "ui/_tab_ttp.html" %}
+  </section>
+
+  <section class="tabpanel" role="tabpanel" id="panel-attachments" aria-labelledby="tab-attachments" tabindex="0" {% if active_tab != "attachments" %}hidden{% endif %}>
+    {% include "ui/_tab_attachments.html" %}
+  </section>
+
+  <section class="tabpanel" role="tabpanel" id="panel-similar" aria-labelledby="tab-similar" tabindex="0" {% if active_tab != "similar" %}hidden{% endif %}>
+    {% include "ui/_tab_similar.html" %}
+  </section>
+
+  <section class="tabpanel" role="tabpanel" id="panel-comments" aria-labelledby="tab-comments" tabindex="0" {% if active_tab != "comments" %}hidden{% endif %}>
+    {% include "ui/_tab_comments.html" %}
+  </section>
+
+  <section class="tabpanel" role="tabpanel" id="panel-audit" aria-labelledby="tab-audit" tabindex="0" {% if active_tab != "audit" %}hidden{% endif %}>
+    {% include "ui/_tab_audit.html" %}
+  </section>
+</div>
+
+{# Merge case modal (A2) — omitted for a viewer: its opener is gated too. #}
+{% if can_mutate %}
 <dialog id="case-merge-modal" class="modal modal--md" role="dialog" aria-modal="true" aria-labelledby="case-merge-modal-title">
-  <div class="modal-backdrop" tabindex="-1"></div>
   <div class="modal-content">
     <header class="modal-header">
       <h2 id="case-merge-modal-title" class="modal-title">Merge into case…</h2>
@@ -314,8 +113,17 @@
     </footer>
   </div>
 </dialog>
+{% endif %}
 
-{# Page-scoped, and deferred: the client only reads `#timeline-events`, so there is nothing to do
-   before the DOM exists. base.html carries the site-wide keys.js and no per-page script block. #}
+{# Edit-case modal — omitted for a viewer: its opener is gated too (viewer_affordances). #}
+{% if can_mutate %}
+  {% url "ui-case-edit" case.number as case_edit_url %}
+  {% include "ui/_modal.html" with modal_id="case-edit-modal" title="Edit case" body_template="ui/_case_edit_fields.html" form_id="case-edit-form" form_action=case_edit_url confirm_text="Save changes" cancel_text="Cancel" size="lg" extra_fields=case_edit_extra_fields %}
+{% endif %}
+{% comment %}
+  Page-scoped, and deferred: the client only reads `#audit-timeline`, so there is nothing to do
+  before the DOM exists. base.html carries the site-wide keys.js and no per-page script block.
+{% endcomment %}
 <script src="{% static 'ui/live.js' %}" defer></script>
+<script src="{% static 'ui/tabs.js' %}" defer></script>
 {% endblock %}

@@ -39,11 +39,23 @@
     }
   }
 
+  document.addEventListener("DOMContentLoaded", function () {
+    var autoOpenModals = document.querySelectorAll("[data-autoopen]");
+    for (var i = 0; i < autoOpenModals.length; i++) {
+      open(autoOpenModals[i]);
+    }
+  });
+
   document.addEventListener("click", function (event) {
     var opener = event.target.closest("[data-modal-open]");
     if (opener) {
-      event.preventDefault();
-      open(document.getElementById(opener.getAttribute("data-modal-open")));
+      var modalId = opener.getAttribute("data-modal-open");
+      var modal = document.getElementById(modalId);
+      if (modal) {
+        event.preventDefault();
+        open(modal);
+      }
+      // If modal not found, fall through and let the browser follow the href
       return;
     }
     var closer = event.target.closest("[data-modal-close]");
@@ -55,12 +67,22 @@
     }
   });
 
+  // Click-outside-to-close. A native modal <dialog> has **no** separate backdrop element in
+  // the DOM: clicks on `::backdrop` are dispatched *to the <dialog>* itself, so the dialog is
+  // its own outside-click target. (A `<div>` overlay cannot be used instead — positioned
+  // siblings paint above the dialog's static content and swallow every click inside it.)
+  // Dialogs that must survive a stray click — destructive confirmations — opt out with
+  // `data-modal-static` (Flowbite's `data-modal-backdrop="static"`).
   document.addEventListener("click", function (event) {
-    if (event.target.classList && event.target.classList.contains("modal-backdrop")) {
-      var modal = event.target.closest("dialog");
-      if (modal) {
-        modal.close();
-      }
+    var modal =
+      event.target.closest &&
+      event.target.closest("dialog.modal, dialog.cheatsheet-modal");
+    if (
+      modal &&
+      event.target === modal &&
+      !modal.hasAttribute("data-modal-static")
+    ) {
+      modal.close();
     }
   });
 

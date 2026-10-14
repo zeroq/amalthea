@@ -19,8 +19,10 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 
 ### User (`identity_user`; `AbstractUser` + `UUIDModel`)
 - `login` — CharField(150), **unique**; populated from `username` in `save()` when empty.
-- `role` — CharField(20), `choices = USER_ROLE_CHOICES` (`superAdmin/admin/analyst/read-only`),
-  default `analyst`; Constraint `identity_user_role_valid`.
+- `role` — CharField(20), `choices = USER_ROLE_CHOICES` (`superAdmin/admin/analyst/viewer`),
+  default `analyst`; Constraint `identity_user_role_valid`. **Renamed 2026-10-12** (ADR-006
+  decision 1): the read-only role is `viewer`, not `read-only` — `identity/migrations/0008_role_viewer_rename.py`.
+  The unrelated *share* vocabulary keeps its own spelling (`share.permissions.profileName = "read-only"`).
 - `org` — FK → `Organisation`, `on_delete=SET_NULL`, `null=True`, `related_name="users"`. Kept
   DB-nullable for `createsuperuser`, but **deny-by-default** in the app layer: an org-less user has
   no tenant access (ADR-004).
@@ -262,7 +264,7 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 (`Waiting/InProgress/Completed/Cancel`) · `AUTOMATION_RUN_STATUS_CHOICES`
 (`Pending/Running/Success/Failed`) · `CASE_STAGES` (`New/InProgress/Closed`) · `ALERT_STAGES`
 (`New/InProgress/Closed/Imported`) · `CUSTOM_FIELD_TYPES` · `API_KEY_SCOPES` (`read/readwrite`) ·
-`USER_ROLE_CHOICES` (`superAdmin/admin/analyst/read-only`).
+`USER_ROLE_CHOICES` (`superAdmin/admin/analyst/viewer`).
 Builders `in_range(...)`/`in_values(...)` emit the CheckConstraints quoted above.
 
 ## Tenant isolation (ADR-004)

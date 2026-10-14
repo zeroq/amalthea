@@ -12,6 +12,7 @@ import pytest
 
 from automation.models import AutomationRun
 from cases.models import Task, TimelineEvent
+from core.enums import VIEWER_ROLE
 from identity.models import Organisation, User
 from tests.conformance._t1_seed import _api_key_client, _call, _case, _observable
 
@@ -28,7 +29,7 @@ def readonly_user(db: None) -> User:
         email="readonly@example.net",
         org=org,
         is_active=True,
-        role="read-only",
+        role=VIEWER_ROLE,
     )
 
 
@@ -467,7 +468,13 @@ def test_delete_playbook_with_runs_refused_400(analyst: User) -> None:
 
 
 def test_readonly_user_cannot_create_playbook(readonly_client) -> None:
-    """read-only user is denied creating a playbook (403)."""
+    """read-only (viewer) user is denied creating a playbook (403).
+
+    The denial now comes from the global `ViewerReadOnly` permission (ADR-006) rather
+    than the view's inline `IsAnalystOrAbove` check, and `compat.errors` normalizes
+    every permission-layer 403 to its fixed envelope — hence the generic message. The
+    status and the envelope type are the contract.
+    """
     code, body = _post(
         readonly_client,
         "/api/v1/playbook",
@@ -482,7 +489,6 @@ def test_readonly_user_cannot_create_playbook(readonly_client) -> None:
     )
     assert code == 403, body
     assert body["type"] == "AuthorizationError"
-    assert "Analyst role or above required" in body["message"]
 
 
 def test_readonly_user_cannot_update_playbook(readonly_client, analyst: User) -> None:

@@ -56,6 +56,7 @@
       <p class="hint">
         Status vocabulary mirrors <code>core.enums.ALERT_STAGES</code> (New / Triaged / Dismissed).
       </p>
+      {% if can_mutate %}
       <form method="post" action="{% url 'ui-alert-status' alert.id %}" class="inline-form">{% csrf_token %}
         <label for="f-status">Alert status</label>
         <select id="f-status" name="status">
@@ -65,8 +66,11 @@
         </select>
         <button type="submit" class="btn">Set status</button>
       </form>
+      {% else %}
+      <p class="empty">Read-only access — triage actions are unavailable.</p>
+      {% endif %}
     </section>
-    {% if not alert.case %}
+    {% if can_mutate and not alert.case %}
       <section class="card" aria-labelledby="h-escalate">
         <h2 id="h-escalate">Escalate</h2>
         <p class="hint">

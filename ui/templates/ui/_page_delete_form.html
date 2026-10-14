@@ -1,0 +1,7 @@
+{% comment %}
+  Body of the "Delete page?" confirmation modal (AGENTS.md §6: destructive actions use a styled
+  modal, never a native `confirm()`). A body template rather than `_modal.html`'s `body` argument
+  because the page title is markup (`<strong>`), and `{{ body }}` is escaped.
+{% endcomment %}
+<p class="modal-body-text">Delete <strong>{{ page.title }}</strong>? This cannot be undone.</p>
+<input type="hidden" name="tab" value="general" form="{{ form_id }}">

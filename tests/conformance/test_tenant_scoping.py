@@ -44,6 +44,18 @@ def _mk_user(login: str, org: Organisation, role: str = "analyst") -> User:
     return user
 
 
+def _mk_orgless_actor(role: str = "analyst") -> User:
+    """An unsaved stub actor with no organisation.
+
+    `User.org` is NOT NULL (ADR-007), so an org-less user is unreachable in the database.
+    The fail-closed tenancy guards that must still reject it are exercised here with an
+    in-memory stub: no row is persisted, and `identity/scoping.py` reads the actor only
+    through `getattr`, so an unsaved instance is sufficient. This keeps the
+    "org-less ⇒ deny" truth-table rows non-vacuous without recreating the deleted state.
+    """
+    return User(id=uuid4(), org_id=None, role=role)
+
+
 def _mk_client(user: User, scope: str = "readwrite") -> tuple[APIClient, str]:
     token = "k" + uuid4().hex
     from identity.models import ApiKey
@@ -157,13 +169,7 @@ class TestCaseVisibleQ:
         from identity.scoping import case_visible_q
 
         org1 = _mk_org("Org1")
-        user = User.objects.create(
-            login="orgless",
-            username="orgless",
-            email="orgless@example.net",
-            org=None,
-            is_active=True,
-        )
+        user = _mk_orgless_actor()
         _mk_case("Case", org1)
 
         q = case_visible_q(user)
@@ -242,13 +248,7 @@ class TestResolveCase:
         from identity.scoping import resolve_case
 
         org1 = _mk_org("Org1")
-        user = User.objects.create(
-            login="orgless",
-            username="orgless",
-            email="orgless@example.net",
-            org=None,
-            is_active=True,
-        )
+        user = _mk_orgless_actor()
         case1 = _mk_case("Case", org1)
 
         assert resolve_case(user, str(case1.id)) is None
@@ -296,13 +296,7 @@ class TestOrgFiltered:
         from identity.scoping import org_filtered
 
         org1 = _mk_org("Org1")
-        user = User.objects.create(
-            login="orgless",
-            username="orgless",
-            email="orgless@example.net",
-            org=None,
-            is_active=True,
-        )
+        user = _mk_orgless_actor()
         _mk_alert("Alert", org1, "ref1")
 
         qs = org_filtered(Alert.objects.all(), user, path="owner_org")
@@ -850,6 +844,9 @@ _UI_WRITE_ONLY_ROUTES: set[str] = {
     "ui-case-attachment-detail",
     "ui-case-procedure-create",
     "ui-case-procedures-create",
+    "ui-case-page-create",
+    "ui-case-page-edit",
+    "ui-case-page-delete",
     "ui-case-template-create",
     "ui-case-template-delete",
     "ui-case-template-edit",
@@ -864,6 +861,36 @@ _UI_WRITE_ONLY_ROUTES: set[str] = {
     "ui-settings-organisations-delete",
     "ui-settings-users-delete",
 }
+
+
+_HTTP_METHOD_NAMES = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
+
+
+def _view_http_methods(view: object) -> list[str] | None:
+    """The methods a plain function view allows, or ``None`` if it declares none.
+
+    Class-based and DRF views expose their methods as attributes, but a function view
+    decorated with ``@require_GET`` / ``@require_POST`` / ``@require_http_methods`` stores
+    the allowed list only inside the decorator wrapper's closure — Django exposes no public
+    attribute. ``functools.wraps`` sets ``__wrapped__``, so walking that chain finds the cell.
+    Without this, every decorated function view fell back to ``["GET"]`` and POST-only UI
+    routes were enumerated as read routes, then failed the GET conformance check with 405.
+    """
+    current: object | None = view
+    while current is not None:
+        for cell in getattr(current, "__closure__", None) or ():
+            try:
+                value = cell.cell_contents
+            except ValueError:  # pragma: no cover - empty cell
+                continue
+            if (
+                isinstance(value, (list, tuple))
+                and value
+                and all(isinstance(m, str) and m.upper() in _HTTP_METHOD_NAMES for m in value)
+            ):
+                return [m.upper() for m in value]
+        current = getattr(current, "__wrapped__", None)
+    return None
 
 
 def _discover_tenant_write_routes() -> list[tuple[str, str, list[str]]]:
@@ -983,7 +1010,12 @@ def _discover_tenant_read_routes() -> list[tuple[str, str, list[str]]]:
                     ]
                 else:
                     # Function-based @api_view — inspect the wrapper
-                    methods = getattr(view, "_allowed_methods", ["GET"])
+                    methods = getattr(view, "_allowed_methods", None)
+                    if methods is None:
+                        # Plain function view: read `@require_*` restrictions from the decorator
+                        # chain instead of assuming GET (the previous default made every
+                        # POST-only UI route look like a read route).
+                        methods = _view_http_methods(view) or ["GET"]
                 methods = [m.upper() for m in methods]
                 if "GET" in methods:
                     routes.append((name, full_pattern, methods))
@@ -1516,6 +1548,7 @@ class TestUIRouteEnumerationConformance:
             "ui-alert-list",
             "ui-alert-detail",
             "ui-case-list",
+            "ui-case-create",
             "ui-case-detail",
             "ui-case-tags",
             "ui-case-attachment-list",
@@ -1547,6 +1580,7 @@ class TestUIRouteEnumerationConformance:
             "ui-dashboard",
             "ui-alert-list",
             "ui-case-list",
+            "ui-case-create",
             "ui-observable-list",
             "ui-automation-list",
             "ui-sources-list",
@@ -1623,6 +1657,7 @@ class TestUIRouteEnumerationConformance:
             "ui-alert-list": {},
             "ui-alert-detail": {"alert_id": str(self.alert1.id)},
             "ui-case-list": {},
+            "ui-case-create": {},
             "ui-case-detail": {"case_id": str(self.case1.number)},
             "ui-case-tags": {"case_id": str(self.case1.number)},
             "ui-case-attachment-list": {"case_id": str(self.case1.number)},
@@ -1635,6 +1670,9 @@ class TestUIRouteEnumerationConformance:
                 "attachment_id": str(self.attachment1.id),
             },
             "ui-case-share-list": {"case_id": str(self.shared_case.number)},
+            # The task routes use a `<uuid:task_id>` converter; a non-UUID placeholder never
+            # resolves, so own-org would 404 before the view runs. Point it at the org1 fixture.
+            "ui-task-detail": {"task_id": str(self.task1.id)},
             "ui-case-export": {"case_id": str(self.case1.number)},
             "ui-case-edit": {"case_id": str(self.case1.number)},
             "ui-observable-list": {},
@@ -2085,10 +2123,11 @@ TENANT_ROUTES = [
 
 def test_tenant_routes_require_org_context(db: None) -> None:
     """All tenant routes should reject org-less users (not 500, not 200 with data)."""
-    user = User.objects.create(
-        login="orgless", username="orgless", email="orgless@example.net", org=None, is_active=True
-    )
-    client, _ = _mk_client(user)
+    # `User.org` is NOT NULL (ADR-007), so an org-less user cannot be persisted; this
+    # exercises the global `IsAuthenticatedAndOrgMember` guard with an unsaved stub.
+    user = _mk_orgless_actor()
+    client = APIClient()
+    client.force_authenticate(user=user)
 
     for route in TENANT_ROUTES:
         # LIST - should return empty list (no access) or 401/403/404

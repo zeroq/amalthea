@@ -23,6 +23,9 @@ from identity.models import Organisation, User
 if TYPE_CHECKING:
     pass
 
+# Sentinel to distinguish "field not provided" from "field explicitly set to None"
+_UNSET: Any = object()
+
 
 def as_uuid(value: object) -> UUID | None:
     """Parse `value` as a UUID without letting a malformed one reach the ORM.
@@ -333,7 +336,7 @@ def update_user(
     *,
     email: str | None = None,
     role: str | None = None,
-    org: Organisation | None = None,
+    org: Organisation | None = _UNSET,
     is_active: bool | None = None,
     password: str | None = None,
     actor: User,
@@ -343,6 +346,11 @@ def update_user(
     Update a user with validation, guards, and audit.
 
     Returns the list of changed fields. Raises ValidationError on validation failure.
+
+    Note: `_UNSET` sentinel distinguishes "field absent → leave unchanged" from
+    "field explicitly provided as null → validation error" **for `org` only**.
+    An explicit attempt to null an org must produce a validation error (not be silently ignored).
+    Other parameters use `None` as default and are checked with `is not None`.
     """
     from core.enums import USER_ROLE_VALUES
 
@@ -371,8 +379,11 @@ def update_user(
                 user.role = role
                 changed.append("role")
 
-    if org is not None:
-        if user.org_id != org.id:
+    # Org - distinguish "not provided" from "explicitly null"
+    if org is not _UNSET:
+        if org is None:
+            errors.setdefault("org", []).append("cannot be null")
+        elif user.org_id != org.id:
             user.org = org
             changed.append("org")
 

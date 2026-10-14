@@ -518,9 +518,13 @@ def test_the_case_page_wires_the_live_client_and_the_htmx_append(
     assert 'hx-post="' in html and 'hx-target="#timeline-events"' in html
     assert 'hx-swap="beforeend"' in html and 'hx-disabled-elt="this"' in html
     # Without htmx the form is still a plain POST to the same action — the fallback is the design,
-    # not an accident, so the two URLs must agree.
-    action = re.search(r'<form method="post" action="([^"]+)" class="comment"', html)
-    hx_post = re.search(r'hx-post="([^"]+)"', html)
+    # not an accident, so the two URLs must agree. Both attributes must be read from the *same*
+    # tag: a page-wide `hx-post` search finds the first one anywhere, which is now the tasks-tab
+    # modal form that precedes the comment form, and would compare two unrelated endpoints.
+    comment_form = re.search(r'<form [^>]*class="comment"[^>]*>', html)
+    assert comment_form is not None, "the comment form is missing from the case page"
+    action = re.search(r'action="([^"]+)"', comment_form.group(0))
+    hx_post = re.search(r'hx-post="([^"]+)"', comment_form.group(0))
     assert action is not None and hx_post is not None
     assert action.group(1) == hx_post.group(1)
 

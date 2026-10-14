@@ -10,6 +10,9 @@
     <a class="tab {% if show_closed %}tab-on{% endif %}" href="{% url 'ui-case-list' %}?closed=1"
        {% if show_closed %}aria-current="page"{% endif %}>All</a>
   </nav>
+  {% if can_mutate %}
+  <a class="btn btn-primary" href="{% url 'ui-case-create' %}" data-modal-open="new-case-modal">New case</a>
+  {% endif %}
 {% endblock %}
 
 {% block content %}
@@ -38,6 +41,11 @@
   </table>
   </div>
 {% else %}
-  <p class="empty">No cases {% if not show_closed %}open{% endif %}.</p>
+  <p class="empty">No cases {% if not show_closed %}open{% endif %}.{% if can_mutate %} <a href="{% url 'ui-case-create' %}">Open one</a>.{% endif %}</p>
+{% endif %}
+
+{% if can_mutate %}
+  {% url 'ui-case-create' as case_create_url %}
+  {% include "ui/_modal.html" with modal_id="new-case-modal" title="New case" body_template="ui/_case_create_fields.html" form_id="new-case-form" form_action=case_create_url confirm_text="Create case" cancel_text="Cancel" size="lg" autoopen=open_new_case origin="cases" %}
 {% endif %}
 {% endblock %}

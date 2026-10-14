@@ -258,8 +258,12 @@ def _alert(analyst: User) -> Alert:
 def _apikey(analyst: User) -> Any:
     from identity.models import ApiKey, User
 
+    # `User.org` is NOT NULL (ADR-007): the API-key owner must belong to an org, so
+    # reuse the probe analyst's org rather than constructing an org-less user.
     return ApiKey.objects.create(
-        user=User.objects.create(username="enum-probe"), prefix="enumprobe", key_hash="x"
+        user=User.objects.create(username="enum-probe", org=analyst.org),
+        prefix="enumprobe",
+        key_hash="x",
     )
 
 

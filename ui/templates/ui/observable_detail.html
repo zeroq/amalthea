@@ -13,7 +13,7 @@
 
 {% block actions %}
   <a class="btn" href="{% url 'ui-observable-list' %}">Back</a>
-  {% if not edit_mode %}
+  {% if can_mutate and not edit_mode %}
   <a class="btn" href="{% url 'ui-observable-edit' observable.id %}">
     <i class="fa-solid fa-pen" aria-hidden="true"></i>
     Edit
@@ -213,10 +213,12 @@
 {% endif %}
 
 {% if not edit_mode %}
-{# Observable delete modal (C3) — the acknowledgement lives *inside* the form so it both gates
-   and sets `force`; a hidden input would let the shared-observable guard be bypassed. #}
+{% comment %}
+  Observable delete modal (C3) — the acknowledgement lives *inside* the form so it both gates
+  and sets `force`; a hidden input would let the shared-observable guard be bypassed.
+{% endcomment %}
+{% if can_mutate %}
 <dialog id="observable-delete-{{ observable.id }}" class="modal modal--md" aria-labelledby="observable-delete-{{ observable.id }}-title">
-  <div class="modal-backdrop" tabindex="-1"></div>
   <div class="modal-content">
     <header class="modal-header">
       <h2 id="observable-delete-{{ observable.id }}-title" class="modal-title">Delete observable?</h2>
@@ -248,5 +250,6 @@
     </footer>
   </div>
 </dialog>
+{% endif %}
 {% endif %}
 {% endblock %}

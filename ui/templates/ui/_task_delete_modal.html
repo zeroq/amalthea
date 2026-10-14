@@ -1,0 +1,11 @@
+{% comment %}
+  Body of the "Remove task?" confirmation modal (AGENTS.md §6: destructive actions
+  use a styled modal, never a native `confirm()`).
+{% endcomment %}
+<p class="modal-body-text">
+  Remove <strong>{{ task.title }}</strong>?
+</p>
+<p class="hint">
+  This cannot be undone.
+</p>
+<input type="hidden" name="tab" value="tasks" form="{{ form_id }}">

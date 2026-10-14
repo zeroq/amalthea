@@ -13,7 +13,9 @@
 - `User` — `AUTH_USER_MODEL = "identity.User"` (`AbstractUser` + UUIDModel); `login` unique and
   populated from `username` on empty; unknown assignee logins are **not** auto-created
   (ADR-002 §D3/D11, REVIEW D11) — an assignee must exist before a task/alert/case can reference it.
-  `role` ∈ `superAdmin / admin / analyst / read-only` (default `analyst`; CHECK `identity_user_role_valid`).
+  `role` ∈ `superAdmin / admin / analyst / viewer` (default `analyst`; CHECK `identity_user_role_valid`).
+  The `viewer` role is enforced read-only on **every** endpoint and under the UI (ADR-006) — see
+  [`../decisions/ADR-006-role-semantics.md`](../decisions/ADR-006-role-semantics.md).
   **Since 2026-10-11** a superAdmin-only user management API (`GET|POST /api/v1/user`,
   `GET|PATCH|DELETE /api/v1/user/{idOrLogin}`) provides full CRUD with password validation,
   last-superAdmin guards, and audit logging.

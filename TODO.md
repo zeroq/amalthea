@@ -1,12 +1,27 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-12 (**§6.16 P3 procedures/TTP UI + P5 D1/D3 shipped — both independently verified +
-security-reviewed; P3 follow-ups in §11.4, P5 follow-ups in §11.1–11.3**;
-README Quickstart webhook flow refreshed for the per-org `IngestionToken` (ADR-004) and **§10.8 token surface** filed;
-**§6.16 UI-completeness wave P1 + P2 shipped + independently verified + security-remediated**;
-§6.12 org/user Settings and §6.14 Wave 6.3A hardening done 2026-10-11; **§10 backlog captured** — case
-model + role-scoped user management)
+Last updated: 2026-10-14 (**case pages are authorable in the UI** — §12.5 code shipped
+(`PLAN-2026-10-14-case-pages-ui.md`): `ui-case-page-create/-edit/-delete`, a `can_mutate`-gated Pages card,
+modal create/edit/delete, Markdown-rendered content, `live.js` re-fetch; **verification pending**, and five
+shared-layer defects found and fixed on the way through the modal-contract + tab stylesheet — see the plan
+§11 and `docs/spec/deviations.md` W10.4). Earlier: **cases view fixes** — `GET /cases/` no longer 404s (new trailing-slash
+middleware, 301/308) and **New case moved off the left rail into a modal** on the cases list
+(`PLAN-2026-10-13-cases-view-fixes.md`; independently verified **Pass** 16/16 ACs + security-reviewed
+0 Critical / 0 High / 0 Medium; `make check` 1689 passed / 3 skipped). Earlier: **§10.2 manual case
+creation shipped** — `PLAN-2026-10-13-ui-case-create.md`; new `GET|POST /cases/new` + the `n` shortcut on
+the shared applier with a `case.created` audit row; independently verified (**Partial**) +
+security-reviewed, which found and closed a Medium regression (**M1** — `/api/v1/case` `status`
+`""`/`null` 500) and an accepted Low (**L1** — viewer rail gating); `make check` 1662 passed / 3 skipped.
+Earlier: **viewer role enforcement shipped** (ADR-006 +
+`PLAN-2026-10-12-viewer-role-enforcement.md`, independently verified + security-reviewed over 3 rounds;
+closes §11.1 and the P3-review M1/L3; follow-ups in §11.4/§11.5; `make check` 1617 passed / 3 skipped).
+**NEW — §12 records the analyst-impact gaps found in the post-wave UI audit** (no cross-case/correlation
+surface, no search, every list silently capped at 200 with no pager, a decorative observables filter,
+API-only case pages). Earlier: §6.16 P3 procedures/TTP UI + P5 D1/D3 shipped (P3 follow-ups §11.4, P5
+follow-ups §11.1–11.3); README Quickstart webhook flow refreshed for the per-org `IngestionToken`
+(ADR-004) and §10.8 filed; §6.16 UI wave P1 + P2 shipped + verified + security-remediated; §6.12
+org/user Settings and §6.14 Wave 6.3A hardening done 2026-10-11; §10 backlog captured.
 
 **Conventions** — every item carries a `Source` (plan AC, review finding ID, or decision ID) so it can
 be traced, and `Blocks` when it gates other work. Review IDs (`C1`, `H2`, `M5`…) refer to
@@ -19,17 +34,27 @@ be traced, and `Blocks` when it gates other work. Review IDs (`C1`, `H2`, `M5`�
 
 ## 🎯 NEXT HIGHEST-IMPACT ITEMS (Priority Order)
 
-| Priority | Item | Description | Impact |
-|----------|------|-------------|--------|
-| **1** | **Security remediation (Wave B)** | From `VERIFY-2026-10-10-t2-and-phase12.md` / SEC-AUDIT. **DONE 2026-10-10 via the tenant-isolation wave (ADR-004):** F2/S1/S2 scope guards (incl. the WebSocket consumer) and the Wave-A UI delete route, S4 object-level authz on `run_now`, S6 SSRF DNS-rebinding TOCTOU + timeout clamp, S7 merge share-copy widening, F2 org-blind case/alert/observable resolution + global observable mutation. **Remaining:** S3 per-account lockout on the **API** login + stop trusting client `XFF`; S5 attachment aggregate caps + extension-from-content-type. | **High** — remaining S3/S5 for a hardened multi-user deployment. |
-| **2** | **6.4 — Tenant isolation** | ✅ **SHIPPED 2026-10-10** — strict multi-tenant model (mandatory `owner_org` on Case/Alert/Observable, per-org webhook tokens, roles, superAdmin cross-org audit, org-scoped query API/WebSocket/UI, per-org observable dedupe). Plan `PLAN-2026-10-10-tenant-isolation.md`; ADR-004; `make check` 1110 passed. | **Done.** |
-| **3** | **Test hardening (Phase 12 / T2)** | QA list from `VERIFY-2026-10-10`: delete-with-runs row survival, merge children matrix, attachment boundaries (exact cap/empty/batch partial), timeout cap 30/31, run-now `Success`+`output_log`, `SESSION_COOKIE_HTTPONLY`, UI login-throttle; §8.5 mutation guards for blast-radius/share/TTP/delete-with-runs/attachment. Extend `test_ui_urls_smoke.py` to Python-only `redirect` names (verifier N3). **Also restore coverage ≥ 80%** (§2.6 — dropped to 79% after the tenant-isolation + org-management waves). | **Medium** — regression prevention. |
-| **4** | **7.4 — Tailwind source/artifact split** | `ui/static/ui/app.css` is both the Tailwind input and the committed output; the pipeline is not idempotent so `css-check` cannot detect drift. Split `app.src.css` (source) → `app.css` (artifact). See ADR-003 "Known limitation". | **Low** — build hygiene. |
-| **5** | **7.5 — Orphaned routes / `ui-case-merge`** | **`ui-case-merge` FIXED 2026-10-10** (tenant-isolation P7): correct `cases.merge.merge_cases` import + signature, added `ui/case_merge.html`, removed the dead `@require_GET` block, org-scoped. **`ui-case-procedure-create` / `ui-case-procedures-create` FIXED 2026-10-12 (P3)**: Procedures card on case detail with attach form + list; `@require_GET` → `@require_POST` with messages/redirects. Remaining: four routes (`ui-case-export/bulk/taxonomy/attachment-detail`) still have no entry point anywhere. Either build the missing UI or delete the dead routes/views. | **Low** — dead routes. |
-| **6** | **6.12 — Settings: organisations + users (superAdmin)** | New `superAdmin`-only **Settings** area with two pages — **Organisations** and **Users** (list / add / edit / delete) + matching Amalthea API. **DONE 2026-10-11** (O1–O5; verifier 24/24 ACs; security review clear; §6.14 hardening landed on top). Plan: `docs/planning/PLAN-2026-10-10-org-management.md`. | **Done.** |
-| **7** | **§10 — Case & identity enhancements** | Requested 2026-10-11, **unscheduled**: role-scoped **user management** (org `admin` manages own-org users), manual **case creation** from the UI, case **scope / type / data-classification / phase** fields, and case-detail **tabs** (General · Alerts / Tasks / Observables / Attachments / Similar / Comments / Audit). See **§10** for items + open design questions Q-D1…Q-D5. | **Backlog** — needs a plan + design decisions. |
-| **8** | **§6.16 — UI-completeness wave P4–P7** | Remaining phases of the plan `PLAN-2026-10-11-ui-completeness.md` (P1/P2/P3/P5 shipped): **P4** Settings → ingestion tokens + audit-log viewer (§6.13), **P6** global search (B3), **P7** per-org realtime breadth + HTMX adoption (D4/D5). | **Medium** — completes the survey-grade UI. |
-| **9** | **§11 — P5 security follow-ups (M1, M3, L1)** | Decisions first, code second. **M1** — does `read-only` mean read-only? `POST /ui/cases/<id>/edit`, `/ui/alerts/<id>/status`, `/ui/observables/<id>/delete` carry no role predicate (they match the API, so pre-existing) → enforce one shared `requires_role("analyst")` in both UI and compat. **M3** — playbook action secrets have no `owner_org` and render in cleartext to any authenticated user of any org (leaks `Authorization: Bearer …`); pick `owner_org` scoping / secret references / analyst-gate + masking. **L1** — protocol-relative `href` survives the Markdown sanitizer (accept-low or filter). Source: `docs/reviews/REVIEW-2026-10-12-ui-completeness-p5.md`. | **Medium** — M3 leaks usable credentials in multi-tenant deployments. |
+Ordered by **impact on the analyst** — the daily IR loop first, then deployment security, then engineering
+hygiene. Every row cites its source; the new audit findings live in **§12**. Shipped work is not listed here
+(see [`COMPLETED.md`](./COMPLETED.md)): §6.4 tenant isolation, §6.12 org/user Settings, §6.14/§6.15 CSP
+hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the viewer role wave (ADR-006).
+
+| Priority | Item | Description | Impact on the analyst |
+|----------|------|-------------|-----------------------|
+| **1** | **§12.3 — No cross-case / correlation surface (Modules B + C)** | `correlation_key` is derived, indexed and queryable but **nothing consumes it**: no auto-bundling of correlated alerts into a Case, and no "cases sharing this observable" view. The observable page lists its linked cases, but nothing links *from* a case. Also settles §10.7 "Similar" + Q-D4. | **Highest** — the marquee differentiator ("instantly highlight an advanced persistent pattern") is invisible in the UI. |
+| **2** | **§6.16 P6 — Global search (B3)** | No search surface anywhere in the UI; the only affordance is browsing lists, which §12.1/12.2 make lossy. Plan: `PLAN-2026-10-11-ui-completeness.md` B3/Q5 (cases + alerts + observables). | **Highest** — "have we seen this hash / IP / user before?" is the most asked triage question and has no answer. |
+| **3** | **§12.1 — Lists are silently truncated at 200, with no pager** | Every list view slices `[:PAGE_SIZE]` (200); no `Paginator`/`?page=` exists in `ui/`. | **High** — on any real instance the analyst cannot reach last month's cases, and is not told rows were cut. |
+| **4** | **§12.2 — The observables-list filter does nothing** | The `Filter by value…` + type form in `observable_list.html` has no backend (never read `request.GET`) and its dropdown renders empty. | **High** — a control that lies: the analyst filters, sees everything, and trusts a search that never ran. |
+| **5** | **§12.4 — No bulk actions in the UI** | `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk` (PATCH) exist in the API with per-item isolation; the UI stub was deleted (Q2) and not replaced. | **Medium-High** — a 200-alert morning is single-item work. |
+| **6** | **§10.3–10.6 — Case scope / type / data-classification / phase** | Model + migration + API + `case_json` + UI fields; Q-D1…Q-D5 open (Q-D2 reconciles `phase` with `CaseStatus`/`stage`). Needs a plan first. | **Medium-High** — how incidents are classified and reported; TheHive parity. |
+| **7** | **§12.5 — Case pages: renderable, not authorable** | **Code shipped 2026-10-14, verification pending** (create/edit/delete modal on the General tab). | **Medium** — a documentation surface the analyst can see but never contribute to. |
+| **8** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; the ledger already syncs on the case page. |
+| **9** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — an ops/onboarding concern, not triage. |
+| **10** | **§6.13 / §6.16 P4 — Settings: ingestion tokens + audit-log viewer** | Per-org webhook tokens (create/revoke, show-once) + read-only `AuditLog` viewer; also retires the stale webhook copy (§10.8). | **Medium** — self-serve ingestion; the audit viewer is the accountability half. |
+| **11** | **Security: §11.2 (M3) + S3 + S5** | **M3** playbook secrets are global + cleartext to any authenticated user of any org. **S3** per-account lockout on the **API** login; stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. | **Medium (security)** — M3 blocks multi-tenant trust; S5's caps are the analyst-facing half (upload robustness). |
+| **12** | **§2.6 + §2.7 (test hardening) + §7.1–7.4 + §8.5/§8.7 + §11.3/§11.4-L1/§11.5** | Coverage back ≥ 80% (79% since the tenant wave) + the Phase-12/T2 QA list; Tailwind source/artifact split; mutation coverage; timestamp wording; protocol-relative `href`; unaudited procedure attaches; Django admin outside the role model; `django.request` log forging. | **None** — engineering hygiene + accepted Low/Info follow-ups. |
+| **13** | **Orphaned routes** | `ui-case-attachment-list` (+ its now-dead `ui/case_attachments.html`) and `ui-case-attachment-detail` (405) are reachable by URL only — the case page renders its own attachment table. `ui-case-export` / `ui-taxonomy` are now wired (P1), so this row supersedes the old claim. | **Low** — dead surface; delete or build an entry point. |
+
 
 ---
 
@@ -80,6 +105,12 @@ discipline, no code change is safe on SQLite).
   `fail_under = 80` (informational until now). Add conformance tests for the new identity/scoping/UI
   surfaces (guards, cross-tenant 404s, `members=reassign|delete` matrix, the no-JS Settings CRUD).
   Source: `make coverage` 2026-10-11.
+- [ ] **2.7 — Phase 12 / T2 test hardening (the still-open QA list).** From `VERIFY-2026-10-10-t2-and-phase12.md`
+  (3 MET / 3 DEVIATED / 10 NOT MET): delete-with-runs row survival, the merge children matrix, attachment
+  boundaries (exact cap / empty / batch-partial), the timeout cap (30 vs 31), run-now `Success` + `output_log`,
+  `SESSION_COOKIE_HTTPONLY`, the UI login throttle; **§8.5** mutation guards for blast-radius / share / TTP /
+  delete-with-runs / attachment; and extend `test_ui_urls_smoke.py` to Python-only `redirect` names
+  (verifier N3). Independent of §2.6 (coverage % vs specific assertions).
 
 ---
 
@@ -232,7 +263,11 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
 Source: user request 2026-10-11 ("add for now so we don't forget"). **Unscheduled** — needs a plan
 (`docs/planning/PLAN-…-case-model-and-admin.md`) + design decisions before implementation. Each item
 below spans **model → migration → API/`case_json` → compat parity → UI → conformance tests**, so most are
-non-trivial; the open design questions are collected at the end of this section.
+non-trivial; the open design questions are collected at the end of this section. **10.2 (manual case
+creation) shipped 2026-10-13** — see [`COMPLETED.md`](./COMPLETED.md); the remaining 10.3–10.8 are still
+unscheduled. **See also §12** (analyst-impact gaps found 2026-10-12) — **10.7** (the "Similar" tab) is now
+tracked as **12.3** together with the missing auto-bundle consumer, which is the more urgent half of the
+backlog once the analyst-visible classification fields (10.3–10.6) are designed.
 
 - [ ] **10.1 — Role-scoped user management.** §6.12 shipped Settings → Users but **superAdmin-only**
   (`ui/views.py::_require_superadmin_ui`). Extend it so an **`admin` manages every user of their own
@@ -240,11 +275,17 @@ non-trivial; the open design questions are collected at the end of this section.
   `superAdmin` keeps cross-org reach. All the §6.12 guards must hold per-scope: uniform 404 for
   out-of-scope ids (never a 403 existence oracle), can't escalate to `superAdmin` or edit outside the org,
   last-superAdmin guard, audit every mutation. UI: same Settings pages, filtered by `request.user.org`.
-- [ ] **10.2 — Create a case manually from the UI.** Today a `Case` only exists via alert→case promotion
-  (`ui/views.py::alert_escalate`); there is **no** `ui-case-create` route. Add a "New case" affordance +
-  form (title, description, severity, TLP/PAP, status, assignee, tags, and the new 10.3–10.6 fields),
-  POST → shared applier path, audit `case.created`, redirect to the case. Needs the write-share/org rules
-  and `Case.number` allocation (already handled by `Case.save()`).
+- [x] **10.2 — Create a case manually from the UI.** **DONE 2026-10-13** — `PLAN-2026-10-13-ui-case-create.md`,
+  implemented and independently verified (`VERIFY-2026-10-13-ui-case-create.md`, verdict **Partial**) +
+  security-reviewed (`REVIEW-2026-10-13-ui-case-create.md`). `GET|POST /cases/new` (`ui-case-create`, above
+  the `cases/<str:case_id>` route) renders a `can_mutate`-gated form (title, description, severity, TLP/PAP,
+  status, assignee, tags), POSTs through the shared `cases/create.py::create_case` applier, writes a
+  transaction-shared `AuditLog(action="case.created")` and redirects to the case; a new `n` shortcut + rail
+  link. The review found (and closed) a Medium regression — `/api/v1/case` `status` `""`/`null` returned 500
+  instead of the `InProgress` default — plus an accepted Low (viewer rail/cheat-sheet gating). `10.3–10.6`
+  fields were **not** included (that row still needs its own plan); extracted observables come from the
+  shared applier's title/description extraction (no extraction checkbox — deviation W102-2). See
+  [`COMPLETED.md`](./COMPLETED.md).
 - [ ] **10.3 — Case `scope`.** New enum field: *Single Asset/User*, *Multiple Assets/Users*, *Single
   Department*, *Multiple Departments*, *Complete Enterprise*, *Third Party/Supplier*. (Values TBC.)
 - [ ] **10.4 — Case `type`.** New enum/taxonomy: *Malware*, *Phishing*, *Password Leak*, *Ransomware*,
@@ -263,8 +304,9 @@ non-trivial; the open design questions are collected at the end of this section.
   Attachments, Similar, Comments, Audit.** Server-rendered (§6/ADR-003: no inline JS; CSP `'self'`),
   keyboard-navigable, degradable to separate pages/sections without JS. Feeds: General = 10.3–10.6 +
   summary; Alerts = `case`↔`Alert` links; Tasks/Observables/Attachments/Comments = existing relations;
-  **Similar** = the §2-Module-C cross-case observable linking (candidate: reuse/extend the observable
-  correlation view); **Audit** = the read-only `AuditLog` viewer (pull forward §6.13/P4).
+  **Similar** = the §2-Module-C cross-case observable linking — **now tracked as §12.3** (with the missing
+  auto-bundle consumer; decide Q-D4 there, not here); **Audit** = the read-only `AuditLog` viewer
+  (pull forward §6.13/P4).
 - [ ] **10.8 — Ingestion-token surface + stale webhook copy (mostly absorbed by §6.16 P4).** The README
   Quickstart now documents the per-org token, but the rest of the surface is still thin: (a)
   `ui/templates/ui/sources_list.html` says *"POST `/api/v1/alerts/webhook/<slug>/` … become alerts"* with
@@ -299,25 +341,26 @@ Source: `docs/reviews/REVIEW-2026-10-12-ui-completeness-p5.md` (0 Critical / 0 H
 the batch was cleared). These three are **decisions first, code second** — M1 and M3 change authorization
 semantics, so they need a policy call before a fix.
 
-- [ ] **11.1 — M1: does `read-only` mean read-only?** A `role="read-only"` member can currently mutate:
-  `POST /ui/cases/<id>/edit` (`ui/views.py:1446`), `/ui/alerts/<id>/status`, `/ui/observables/<id>/delete`
-  (`ui/views.py:1617`, `:1772`) — they carry `@login_required` + `@require_http_methods` but **no role
-  predicate**, unlike `case_edit`'s siblings at `ui/views.py:638/864/898/923`. It **matches the API**
-  (same gap in `compat/views.py`), so it is pre-existing rather than a P2/P5 regression. **P3 added two
-  more surfaces**: `ui-case-procedure-create` and `ui-case-procedures-create` (§11.4). Decide the policy
-  once, then enforce it in **one** place (e.g. a `requires_role("analyst")` decorator in `identity/`) and
-  apply it to both the UI and the compat API; add a `read-only`-cannot-mutate conformance test. Note the
-  interaction with §10.1 (role-scoped user management).
+- [x] **11.1 — M1: does `read-only` mean read-only?** — **RESOLVED 2026-10-12** (ADR-006 +
+  `PLAN-2026-10-12-viewer-role-enforcement.md`; role renamed **`viewer`**). The policy call was made
+  and enforced in one place per layer rather than per view: `ViewerReadOnly` in
+  `DEFAULT_PERMISSION_CLASSES` (every endpoint, present and future),
+  `resolve_case/alert/observable(write=True)` (the resource path), and `not_viewer` on all 38
+  mutating UI views. Route-enumeration sweeps (`tests/conformance/test_viewer_readonly_ui.py`,
+  `test_viewer_readonly_api.py`) fail when a new mutating route is added without a gate. Every surface
+  named below is now denied; the exemption list is exactly `{login, logout, ui-password-change}`.
+  Verification: `docs/verification/VERIFY-2026-10-12-viewer-role-enforcement.md`.
 - [ ] **11.2 — M3: playbook action secrets are global and rendered in cleartext.** `Playbook` has **no
   `owner_org`** (`automation/models.py:13`) and HTTP playbooks keep credentials in `config["headers"]`
   (`Authorization: Bearer …`); `playbook_edit`/`playbook_detail` render the full map to **any authenticated
-  user of any org**, including `read-only`. This leaks usable third-party credentials in any multi-tenant
-  deployment. Options (see the review for detail): (1) scope `Playbook` with `owner_org` + `org_q`
+  user of any org**. *Partial mitigation from 11.1:* a `viewer` can no longer reach `playbook_detail`'s
+  GET (ADR-006 decision 7) — but a cross-org **analyst** still can, so the leak stands. Options (see the
+  review): (1) scope `Playbook` with `owner_org` + `org_q`
   (matches ADR-004 — also removes the four `ui-playbook-*` entries from `_UI_GLOBAL_READ_ROUTES`);
   (2) keep global but stop storing plaintext secrets — store a secret reference and render a masked
   placeholder; (3) minimum: gate the GET views to `analyst`+ **and** mask header values. Note (3)
   conflicts with the D1 AC "round-trips headers", so the D1 test must change with it. Add a test asserting
-  a `read-only` (and cross-tenant) GET never returns raw header values.
+  a viewer (and cross-tenant) GET never returns raw header values.
 - [ ] **11.3 — L1: protocol-relative `href` survives the sanitizer.** `[x](//evil.example)` renders as
   `<a href="//evil.example">` (`ui/markdown.py`; `_ALLOWED_URL_SCHEMES` only sees the inherited scheme).
   Not XSS — a same-scheme link to an arbitrary host (phishing aid). Accept as low, or post-filter `href`
@@ -328,19 +371,20 @@ semantics, so they need a policy call before a fix.
 From `docs/reviews/REVIEW-2026-10-12-ui-completeness-p3.md` (0 Critical / 0 High; verification
 `docs/verification/VERIFY-2026-10-12-ui-completeness-p3.md` = 5/5 ACs met).
 
-- [ ] **M1 (duplicate of §11.1)** — neither `ui-case-procedure-create` nor `ui-case-procedures-create`
-  has a role gate; a `read-only` member of the owning org can attach procedures. Not a tenant break
-  (org scoping holds), but it is exactly the §11.1 policy gap at two new surfaces.
+- [x] **M1 (duplicate of §11.1)** — **RESOLVED 2026-10-12.** Both views carry `@not_viewer`
+  (`ui/views.py`), and both are asserted by the route-enumeration sweep in
+  `tests/conformance/test_viewer_readonly_ui.py`. The `.btn` affordances are hidden for a viewer
+  (`can_mutate`), so an analyst-only surface no longer looks available.
 - [ ] **L1 — procedure attach is unaudited.** Neither the single nor the bulk view writes an `AuditLog`
   row or a case-ledger event, so an attached procedure does not show up on the case timeline. §9 of the
   plan did not name procedures and the compat API behaves the same way (parity), so this is "audit it, or
   accept it explicitly". Decide together with the ledger-event work.
-- [ ] **L3 — the attach form is visible to read-share viewers.** `case_detail` renders the form for
-  everyone it can see; a read-share viewer can submit it and gets a 404. Fixing it needs a *write-share*
-  predicate, and `identity/scoping.py` has no cheap one (`resolve_case(write=True)` costs a share query),
-  so this is the same "who may mutate from the UI" decision as §11.1 — decide both together, then gate the
-  form on the same predicate the view uses (never on `is_owner`, which would hide it from legitimate
-  write-share orgs).
+- [x] **L3 — the attach form is visible to read-share viewers.** — **RESOLVED 2026-10-12** by the
+  viewer policy (ADR-006). The form (and every other write affordance) is now rendered under `can_mutate`,
+  which is `not is_viewer(request.user)` — the predicate the views themselves enforce, so the form and the
+  gate cannot disagree. A viewer holding a write share is still denied (role beats share) and the form is
+  hidden from them. The residual case — a *non-viewer* org with only a read share, who sees the form and
+  gets a 404 on submit — is unchanged from P3 and is tracked below.
 - [ ] **I1 — pre-existing leaky flash messages.** Seven `except Exception as exc: messages.error(...{exc})`
   sites reflect internal exception text to the analyst (`ui/views.py:367,985,1167,1228,1579,1959,1990`).
   P3 introduced no new ones (it logs the detail and flashes a generic string); this is a small mechanical
@@ -353,33 +397,105 @@ From `docs/reviews/REVIEW-2026-10-12-ui-completeness-p3.md` (0 Critical / 0 High
 
 ---
 
+### 11.5 — Viewer-role review follow-ups (2026-10-12)
+
+From `docs/reviews/REVIEW-2026-10-12-viewer-role-enforcement.md` (0 Critical / 0 High; round 1 L1
+fixed in the same batch). These two are **accepted, Low/Info** — recorded here so they are tracked
+rather than only described in `docs/spec/deviations.md`.
+
+- [ ] **L2 — Django admin sits outside the role model.** `role` is orthogonal to `is_staff` /
+  `is_superuser`, and `/admin/` (`amalthea/urls.py`) is reached by none of the three enforcement
+  layers (global DRF permission, `not_viewer`, or the resolvers). A `viewer` who is also `is_staff`
+  keeps whatever the admin site grants them, so the ADR-006 guarantee must not be read as covering
+  `/admin/`. Deployment mitigation today: never grant `is_staff` to a viewer. Preferred fix (cheap,
+  structural): refuse or warn on the `role=viewer` + `is_staff` combination in
+  `identity/services.py` (the same place the other role/privilege invariants live), plus an admin
+  `has_permission` guard. Add a test asserting the combination is rejected at the service layer.
+- [ ] **I1 — `django.request` logs `request.path` verbatim.** The round-1 CWE-117 fix removed the
+  sink in `ui/views.py::not_viewer`, but Django's own 404 logger still writes the percent-decoded
+  path, so an authenticated caller can forge log lines there regardless of role. Fix with a logging
+  filter that escapes CR/LF (or log `request.resolver_match`), applied in `amalthea/settings/`.
+  Pre-existing and role-independent.
+
+---
+
+## 12. Analyst-impact gaps (found 2026-10-12, post-viewer-wave UI audit)
+
+Found while closing out the viewer wave. The **write** side is now well covered — every mutation is gated,
+audited and enumerated by tests — but several **read/discovery** surfaces an analyst needs are missing,
+truncated or decorative. None of these is a regression (they shipped that way) and none is in a plan yet.
+
+Recommended: one small plan (`PLAN-…-analyst-ergonomics`) covering **§12.1 + §12.2 + §12.4** together, since
+they share the list-view plumbing and are cheap; **§12.3** needs a decision first (§10.7/Q-D4). §6.16 P6
+(search) and P7 (realtime) stay in their own plan and should land after
+§12.1/12.2 — searching a truncated list is a half-answer.
+
+- [ ] **12.1 — Every UI list is silently truncated at `PAGE_SIZE = 200`, with no pager.** `alert_list`
+  (`ui/views.py:353`), the alert-detail rail (`:382`), `case_list` (`:455`), the case-detail rail (`:491`),
+  `automation_list` (`:650`), `observable_list` (`:1423`) and the Settings user list (`:1541`) all slice
+  `[:PAGE_SIZE]`; there is **no** `Paginator` / `page_obj` / `?page=` anywhere in `ui/`. On a real instance
+  an analyst cannot reach anything older than the newest 200 rows, and nothing on the page says rows were
+  cut. Fix: server-rendered pagination (degrade to `?page=` links; HTMX optional), a visible
+  "showing N of M" count, and an honest empty state that distinguishes *no rows* from *filtered to none* —
+  note the API is *not* a workaround for the analyst: `GET /case` defaults to the same cap
+  (`timelineLimit` default 50 / max 200 in `cases/views.py`). Source: audit 2026-10-12.
+- [ ] **12.2 — The observables-list filter is decorative.** `ui/templates/ui/observable_list.html` renders
+  `Filter by value…` + a type `<select name="type">`, but `observable_list` never reads `request.GET` and
+  never passes `query` / `observable_types` / `type_filter` → the form submits and nothing filters, and the
+  dropdown renders **empty** (the only `observable_types=…` context is the detail/edit view, `:1989`).
+  Shipped that way in §6.9 (commit `2382d15`); never wired. A control that lies is a trust problem, not a
+  cosmetic one — the analyst believes a search ran over the whole dataset. Fix with §12.1, or delete the bar.
+  Source: audit 2026-10-12.
+- [ ] **12.3 — No cross-case / correlation surface (AGENTS.md §2 Modules B + C).** `Alert.correlation_key`
+  is derived at ingest (`ingest/mapping.py::extract_correlation_key`), indexed (`(correlation_key, date)`)
+  and exposed to the query engine — but **no code consumes it**: there is no automatic bundling of
+  correlated alerts into a `Case` (Module B: "automatically bundled … identical destination IP within a
+  10-minute window") and no "cases sharing this observable" view. The observable detail page *does* list its
+  linked cases (`observable_detail.html:178`, "Linked Cases (N)"), so the pivot exists one hop away — but
+  nothing links *from* a case to it and nothing ranks or heuristically scores the overlap. Decision first
+  (§10.7 "Similar" tab semantics, **Q-D4**); then: an automated-bundle service that is **explicit and
+  auditable** (silent auto-merges are unacceptable — every bundle must write a ledger entry + `AuditLog` row,
+  per §9 of the plan and ADR-002), plus a case-side "related cases" panel reusing
+  `case_observables__observable` (no new model). Source: audit 2026-10-12; AGENTS.md §2.
+- [ ] **12.4 — No bulk actions in the UI.** `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk`
+  (PATCH) exist in the API with per-item isolation + status reporting (`compat/bulk.py`,
+  `test_t2_p4_surface.py`), but the UI stub was deleted under Q2 (P1) and nothing replaced it — triaging a
+  200-alert morning is single-item work. Fix: selection-based bulk triage (status / assignee / dismiss) that
+  calls the same service, keyboard-reachable, `<dialog>` confirmation (ADR-003: no native `confirm()`), and a
+  per-item result summary so partial failures are visible. Source: audit 2026-10-12.
+- [~] **12.5 — Case pages are renderable but not authorable in the UI.** **Code shipped 2026-10-14**
+  (`PLAN-2026-10-14-case-pages-ui.md`): `ui-case-page-create/-edit/-delete` (all `@not_viewer`
+  `@require_POST`), a `can_mutate`-gated Pages card with modal create/edit/delete, Markdown rendering, and
+  `live.js` re-fetching `#case-pages` on a `page` frame. **Awaiting independent verification** — until that
+  lands this stays open and `COMPLETED.md` must not list it. Two gaps recorded in the plan (§11 `W104-5`,
+  `W104-8`): a page edit/delete writes **no `AuditLog`** row (invisible in the case Audit tab, like
+  tags/tasks), and a **delete publishes no WebSocket frame** (API parity — another analyst sees it only on
+  their next load). Source: audit 2026-10-12; plan 2026-10-14.
+
+---
+
 ## 🎯 Next Recommended Items
 
-See the canonical **NEXT HIGHEST-IMPACT ITEMS** table at the top of this file (it is the single source of
-truth and is kept current). As of **2026-10-11** the open items are: **§10** — the case-model + role-scoped
-user-management backlog requested 2026-10-11 (**unscheduled**, needs a plan; §10 Q-D1…Q-D5 open);
-**§6.16 P3–P7** — the rest of the UI
-completeness wave (procedures/TTP, Settings tokens + audit log, playbook round-trip + sanitized Markdown,
-global search, per-org realtime; **P5 SHIPPED 2026-10-12 — D1 + D3 done, verified + security-reviewed; follow-ups in §11**); **S3** — per-account
-login lockout on the API (`POST /api/v1/login`) + stop trusting the client `X-Forwarded-For`, and **S5** —
-attachment aggregate caps + extension-from-content-type (§ priority #1); **Phase 12 / T2 test hardening**
-(priority #3) and the two low follow-ups (#4–#5). **§6.4 tenant isolation** (strict multi-tenant, ADR-004),
-**§6.12 org/user Settings**, **§6.14 Wave 6.3A hardening**, and **§6.16 UI wave P1 + P2** all shipped 2026-10-11.
+The canonical **NEXT HIGHEST-IMPACT ITEMS** table at the top of this file is the single source of truth.
+As of **2026-10-13** (**§10.2 manual case creation shipped**) the best next move **for the analyst** is
+**§12.1 + §12.2** — a truncated list that never says it truncated, and a filter that never filters, are the
+two cheapest fixes with the largest trust payoff; §12.3 (cross-case/correlation) and §6.16 P6 (global
+search) are the two biggest *feature* gaps and both want a decision first. Ranked:
 
-Phase 12 code landed (P1–P3, P5–P6), but it is **not** fully shipped: independent verification on
-2026-10-10 found 3 ACs MET / 3 DEVIATED / 10 NOT MET (see `VERIFY-2026-10-10-t2-and-phase12.md`). Wave A
-closed the three unambiguous bugs (B1/B2/B3) + a mypy gate regression; the tenant-isolation wave closed
-the scope-guard/`run_now`/SSRF/merge-widening security items (ADR-004). The remaining AC gaps and the S3/S5
-security items are tracked as priorities #1 and #3 above. Nothing is now genuinely *deferred* — the last
-such item (**6.4 — Tenant isolation**) shipped on 2026-10-10.
+1. **§12.1 + §12.2** — pagination + a truthful observables filter (small, shared list-view work).
+2. **§12.3** — decide the "Similar"/Q-D4 semantics, then an auditable auto-bundle consumer + a case-side
+   related-cases panel (the Module B/C differentiator, currently business-card-only).
+3. **§6.16 P6** — global search over cases/alerts/observables (after §12.1/12.2 so it does not search a
+   truncated corpus).
+4. **§12.4 / §6.16 P7** — bulk triage, realtime breadth (§12.5 shipped 2026-10-14, verification pending).
+5. **Security, unchanged** — **§11.2 (M3)** playbook secrets, then **S3** (per-account lockout on the API
+   login; wire `identity/ratelimit.py` into `compat/views.py::api_login`, return **429** + `Retry-After`,
+   derive the client IP from the proxy chain instead of the client-supplied `X-Forwarded-For`) and **S5**
+   (attachment aggregate caps + extension-from-content-type). These are deployment-hardening, not analyst
+   ergonomics.
 
-**Recommended next (big impact): S3 — close the API login brute-force gap.** `identity/ratelimit.py`
-(5 attempts / 15 min, 5 min lockout) is wired **only** into the UI login (`ui/views.py`); the TheHive-compat
-`POST /api/v1/login` (`compat/views.py::api_login`) is protected only by the generic DRF per-IP 100/min
-throttle and returns **200**, not **429**. Wire `check_login_rate_limit`/`record_failed_login`/
-`record_successful_login` into `api_login`, return **429** with `Retry-After` on lockout (and 429 for the UI
-too), and derive the client IP from the proxy chain rather than a client-supplied header. Small, well-scoped,
-and closes the last unauthenticated brute-force surface on a platform that is otherwise multi-tenant-hardened.
-Runner-up: **7.4 — Tailwind source/artifact split** — `app.css` is still its own Tailwind input, so the
-committed artifact is no longer re-scanned for template classes and `css-check` cannot detect drift. Low risk
-but it blocks adding any new Tailwind *utility* to a template (new styles must go in a component class).
+**Phase 12 / T2 is not fully shipped**: independent verification (2026-10-10) found 3 ACs MET / 3 DEVIATED /
+10 NOT MET (`VERIFY-2026-10-10-t2-and-phase12.md`). Wave A closed the three unambiguous bugs; the
+tenant-isolation wave closed the scope-guard / `run_now` / SSRF / merge-widening security items (ADR-004).
+The remaining AC gaps are **§2.7**, and S3/S5 are security row 12. Nothing is now genuinely *deferred* —
+the last such item (**§6.4 — Tenant isolation**) shipped 2026-10-10.

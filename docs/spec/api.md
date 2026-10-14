@@ -151,8 +151,16 @@ inline themselves.
   UUID-shaped string that is not a real UUID is caught by `_as_uuid` (`cases/views.py:75`), never a
   500.
 - `case_collection` GET: `?status=`, `?severity=`; `[:200]`, `-start_date`. POST: `title` required
-  (400 `{"title":["required"]}`); default status `InProgress`; optional `extract`/`observables`
-  text → `extract_into_case`; ledger `kind="case-created"`; 201 `case_json(detail=True)`.
+  (400 `{"title":["required"]}`); default status `InProgress`; accepted payload keys:
+  `title` (required), `description`, `summary`, `severity` (1-4), `tlp` (0-4), `pap` (0-3),
+  `status` (tolerant, existing vocabulary; **absent/empty/`null` keeps the default `InProgress**),
+  `flag` (bool), `tags` (array of strings), `assignee` (login or UUID, org-scoped),
+  `extract` (bool, defaults false), `observables` (array of strings added to extraction corpus).
+  Extraction is **unconditional** — `extract_into_case` always runs over title and description;
+  `extract`/`observables` only add explicit strings. Stricter enum validation: non-integer or
+  out-of-range `severity`/`tlp`/`pap` → 400; empty/null enum keeps the model default
+  (ADR-002 §D11 tolerance). Actor with `org=None` → 403 `AuthorizationError` (two-key body).
+  201 `case_json(detail=True)` with ledger `kind="case-created"`.
 - `case_detail` GET: `case_json(detail=True)` (adds `observables[]`, `timeline[]`,
   `automationRuns[]`, `tasks[]`). DELETE ⇒ **204** — hard delete, children cascade, alerts `SET_NULL`
   (P10-3). PATCH: writes `status-changed` and `assigned` ledger events in the same transaction.
@@ -382,6 +390,32 @@ includes `_createdAt`/`_updatedAt` from `TimeStampedModel`; `organisation_admin_
 `counts` block (members, cases, alerts, observables). The entity renderers emit the audit pair as
 `null` where the model has no creator column (status renderers), and `tag_json` renders
 `namespace="_freetags_"` / `predicate=name` / `value=""` around our single `Tag.name`.
+
+## Analyst UI (server-rendered)
+
+The Django template UI lives at `/` (no `/api/` prefix) and is session-authenticated (CSRF-protected).
+Routes are named `ui-*` in `ui/urls.py`.
+
+| Path | Methods | View | Name |
+|---|---|---|---|
+| `cases/new` | GET, POST | `case_create` | `ui-case-create` |
+| `cases/<case_id>` | GET | `case_detail` | `ui-case-detail` |
+
+### `GET|POST /cases/new` (`ui-case-create`)
+
+- **GET** → 200: Renders the case creation form with fields:
+  `title` (required, maxlength=500), `description` (Markdown), `summary`,
+  `severity`/`tlp`/`pap` (selects, defaults 2/2/2), `status` (select over `CaseStatus` vocabulary, default `InProgress`),
+  `assignee` (select, users in actor's org), `flag` (checkbox), `tags` (comma-separated).
+  The extraction hint is shown; extraction runs unconditionally on create.
+  Viewer (`role=viewer`) → 404 (uniform, `@not_viewer` gate). Actor with no organisation → 200
+  explanatory state, no form.
+- **POST** → 302 to `ui-case-detail` on success; 200 re-render with error on validation failure.
+  On success: `Case` created with `owner_org = actor.org`, `Case.number` allocated, timeline event
+  `kind="case-created"` ("Case created"), `AuditLog` row `action="case.created"` with
+  `target_type="Case"`, `target_id=str(case.id)`, `target_org=actor.org`, all in the same
+  transaction. Extraction runs unconditionally over title + description.
+  CSRF protected: `Client(enforce_csrf_checks=True)` POST without token → 403.
 
 ## Evidence
 

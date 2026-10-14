@@ -1,0 +1,87 @@
+{% load ui_tags %}
+{% url 'ui-case-page-create' case.number as page_create_url %}
+<section class="card" aria-labelledby="h-meta">
+  <div class="case-meta">
+    <dl class="meta meta-inline">
+      <dt>Status</dt><dd>{{ case.status.value }}</dd>
+      <dt>Assignee</dt><dd>{{ case.assignee.login|default:"Unassigned" }}</dd>
+      <dt>Owner org</dt><dd>{{ case.owner_org.name }}</dd>
+      <dt>Started</dt><dd class="mono">{{ case.start_date|date:"Y-m-d H:i" }}</dd>
+      <dt>TLP / PAP</dt><dd>{{ case.tlp }} / {{ case.pap }}</dd>
+      {% if case.closed_date %}<dt>Closed</dt><dd class="mono">{{ case.closed_date|date:"Y-m-d H:i" }}</dd>{% endif %}
+    </dl>
+
+    {% if can_mutate %}
+    <div class="case-actions">
+      <form method="post" action="{% url 'ui-case-status' case.number %}" class="inline-form">{% csrf_token %}
+        <input type="hidden" name="tab" value="general">
+        <label class="sr-only" for="f-stage">Case status</label>
+        <select id="f-stage" name="stage">
+          {% for stage in case_stages %}<option value="{{ stage }}" {% if case.status.stage == stage %}selected{% endif %}>{{ stage }}</option>{% endfor %}
+        </select>
+        <button type="submit" class="btn">Set status</button>
+      </form>
+
+      <form method="post" action="{% url 'ui-case-extract' case.number %}">{% csrf_token %}
+        <input type="hidden" name="tab" value="general">
+        <button type="submit" class="btn" title="Re-run extraction and dispatch automation for anything new">
+          Re-extract artifacts
+        </button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if case.description %}<div class="body md">{{ case.description|markdown }}</div>{% endif %}
+
+  {% if case.ingestion_warnings.warnings %}
+    <h3>Ingestion warnings</h3>
+    <ul class="warns">
+      {% for warning in case.ingestion_warnings.warnings %}<li>{{ warning }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+</section>
+
+{% comment %}
+  Pages — provisional placement per §7.4, but its *own* card since PLAN-2026-10-14: a page is a
+  document the analysts maintain, not part of the case narrative above, so it no longer renders as a
+  card nested inside the description's card. Same for Tags (below).
+{% endcomment %}
+<section class="card" aria-labelledby="h-pages">
+  <div class="page-row">
+    <h2 id="h-pages">Pages <span class="count">{{ pages|length }}</span></h2>
+    {% if can_mutate %}
+    <button type="button" class="btn btn-sm" data-modal-open="page-create-modal">
+      <i class="fa-solid fa-plus" aria-hidden="true"></i> New page
+    </button>
+    {% endif %}
+  </div>
+  {% comment %}
+    Pages are created here (POST ui-case-page-create) and through the API (POST /case/{id}/page);
+    either way this list is what renders them. A `page` WebSocket frame makes live.js re-fetch the
+    list rather than build an entry in JavaScript, so the Markdown pipeline below stays server-side.
+    `#case-pages` and `data-page-id` are contracted (test_ui_loop asserts both) — keep them.
+  {% endcomment %}
+  <ul class="pages" id="case-pages">
+    {% for page in pages %}
+      {% include "ui/_page_entry.html" %}
+    {% empty %}
+      <li class="empty">No pages yet.</li>
+    {% endfor %}
+  </ul>
+  {% if can_mutate %}
+    {% include "ui/_modal.html" with modal_id="page-create-modal" form_id="page-create-form" body_template="ui/_page_form.html" title="New page" confirm_text="Create page" form_action=page_create_url size="lg" %}
+  {% endif %}
+</section>
+
+{# Tags + Custom fields — provisional placement per §7.4 (custom fields have no current UI) #}
+{% if case.tags.all %}
+<section class="card" aria-labelledby="h-tags">
+  <h2 id="h-tags">Tags</h2>
+  <ul class="tag-list">
+    {% for tag in case.tags.all %}
+      <li><span class="pill">{{ tag.name }}</span></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}

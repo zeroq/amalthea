@@ -1,0 +1,95 @@
+{% load ui_tags %}
+{% comment %}
+  Tasks tab: list + create/edit/remove affordances.
+  Mirrors the Observables idiom (_tab_observables.html): a header-row "New task" button
+  and per-row Edit/Remove buttons that open `_modal.html` dialogs.
+
+  The per-row edit/remove urls are resolved INSIDE the modal loop below. A `{% url … as x %}`
+  assignment is only in scope from the line it runs onward, so computing them in an earlier loop
+  would leave `x` holding the *last* row's URL and every modal would post to that one row.
+{% endcomment %}
+{% now "U" as now_u %}
+{% url 'ui-case-task-create' case.number as task_create_url %}
+
+<section class="card" aria-labelledby="h-tasks" id="case-tasks">
+  <div class="card-header">
+    <h2 id="h-tasks">Tasks <span class="count">{{ tasks|length }}</span></h2>
+    {% if can_mutate %}
+    <button type="button" class="btn" data-modal-open="task-create-modal">
+      <i class="fa-solid fa-plus" aria-hidden="true"></i>
+      New task
+    </button>
+    {% endif %}
+  </div>
+
+  {% if tasks %}
+  <ul class="tasks">
+    {% for task in tasks %}
+    <li class="task {% if task.status == 'Completed' %}task-done{% endif %}">
+      {% if can_mutate %}
+      <form method="post" action="{% url 'ui-case-task-toggle' case.number task.id %}">{% csrf_token %}
+        <input type="hidden" name="tab" value="tasks">
+        <button type="submit" class="tick"
+                aria-pressed="{% if task.status == 'Completed' %}true{% else %}false{% endif %}"
+                aria-label="{% if task.status == 'Completed' %}Reopen{% else %}Complete{% endif %} {{ task.title }}">
+          {% if task.status == 'Completed' %}✓{% else %}○{% endif %}
+        </button>
+      </form>
+      {% else %}
+      <span class="tick" aria-hidden="true">{% if task.status == 'Completed' %}✓{% else %}○{% endif %}</span>
+      {% endif %}
+
+      <a href="{% url 'ui-task-detail' task.id %}" class="task-title">{{ task.title }}</a>
+
+      <span class="pill pill-{{ task.status|lower }}">{{ task.status }}</span>
+
+      {% if task.assignee %}
+      <span class="task-assignee">{{ task.assignee.login }}</span>
+      {% else %}
+      <span class="dim task-assignee">Unassigned</span>
+      {% endif %}
+
+      {% if task.due_date %}
+      <time class="task-due{% if task.due_date|date:"U" < now_u %} is-overdue{% endif %}"
+            datetime="{{ task.due_date|date:"c" }}">
+        {{ task.due_date|date:"Y-m-d" }}
+        {% if task.due_date|date:"U" < now_u %} <span class="overdue-label">Overdue</span>{% endif %}
+      </time>
+      {% else %}
+      <span class="dim task-due">No due date</span>
+      {% endif %}
+
+      {% if can_mutate %}
+      <div class="task-actions">
+        <button type="button" class="btn btn-ghost btn-sm" data-modal-open="task-edit-{{ task.id }}">
+          <i class="fa-solid fa-pen" aria-hidden="true"></i>
+          Edit
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm btn-err" data-modal-open="task-del-{{ task.id }}">
+          <i class="fa-solid fa-trash" aria-hidden="true"></i>
+          Remove
+        </button>
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">No tasks.</p>
+  {% endif %}
+
+  {% if can_mutate %}
+  {% include "ui/_modal.html" with modal_id="task-create-modal" form_id="task-create-form" body_template="ui/_task_form_modal_body.html" title="New task" confirm_text="Create task" confirm_class="btn-primary" form_action=task_create_url form_hx_post=task_create_url form_hx_target="#task-create-modal-body" extra_fields=task_create_extra_fields size="md" %}
+  {% endif %}
+
+  {% if can_mutate %}
+  {% for task in tasks %}
+    {% url 'ui-case-task-edit' task.id as task_edit_url %}
+    {% url 'ui-case-task-delete' task.id as task_delete_url %}
+    {% with tid=task.id|stringformat:"s" %}
+    {% include "ui/_modal.html" with modal_id="task-edit-"|add:tid form_id="task-edit-form-"|add:tid body_template="ui/_task_form_modal_body.html" title="Edit task: "|add:task.title confirm_text="Save" confirm_class="btn-primary" form_action=task_edit_url form_hx_post=task_edit_url form_hx_target="#task-edit-"|add:tid|add:"-body" extra_fields=task_edit_extra_fields size="md" task=task is_edit=True %}
+    {% include "ui/_modal.html" with modal_id="task-del-"|add:tid form_id="task-del-form-"|add:tid body_template="ui/_task_delete_modal.html" title="Remove task?" confirm_text="Remove" confirm_class="btn-err" form_action=task_delete_url extra_fields=task_delete_extra_fields size="sm" task=task %}
+    {% endwith %}
+  {% endfor %}
+  {% endif %}
+</section>

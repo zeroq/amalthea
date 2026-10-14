@@ -18,6 +18,7 @@ from django.test import Client, RequestFactory, override_settings
 from django.urls import NoReverseMatch, reverse
 
 from cases.models import Attachment, Case, CaseStatus, CaseTemplate
+from core.enums import VIEWER_ROLE
 from identity.models import Organisation, User
 
 # --------------------------------------------------------------------------
@@ -544,7 +545,7 @@ def read_only_user(db: None, org: Organisation) -> User:
         email="readonly@example.net",
         org=org,
         is_active=True,
-        role="read-only",
+        role=VIEWER_ROLE,
     )
 
 
@@ -661,31 +662,6 @@ def test_dashboard_shows_org_name_for_user_with_org(
     assert response.status_code == 200
     content = response.content.decode()
     assert org.name in content
-
-
-def test_dashboard_shows_all_organisations_for_superadmin_no_org(db: None) -> None:
-    """F4b: Dashboard shows 'All organisations' link for superAdmin with no org."""
-    # Create superAdmin with no org
-    _ = User.objects.create_user(
-        username="supernoorg",
-        login="supernoorg",
-        password="hunter2-correct",
-        email="supernoorg@example.net",
-        org=None,
-        is_active=True,
-        role="superAdmin",
-    )
-    client = Client()
-    assert client.login(username="supernoorg", password="hunter2-correct")
-
-    url = reverse("ui-dashboard")
-    response = client.get(url)
-    assert response.status_code == 200
-    content = response.content.decode()
-    assert "All organisations" in content
-    # Should link to ui-settings-organisations
-    settings_url = reverse("ui-settings-organisations")
-    assert settings_url in content
 
 
 def test_dashboard_shows_org_name_for_superadmin_with_org(db: None, org: Organisation) -> None:

@@ -108,14 +108,24 @@ CUSTOM_FIELD_TYPES: Final[tuple[tuple[str, str], ...]] = (
 #: `identity.ApiKey.scope` (plan §6.2).
 API_KEY_SCOPES: Final[tuple[str, ...]] = ("read", "readwrite")
 
-#: `identity.User.role` (ADR-004 Q3).
+#: `identity.User.role` (plan §6.2, ADR-002 §D4).
+#:
+#: `viewer` is the read-only role. It was spelled `read-only` until ADR-006 renamed it (the value
+#: is what API clients and the admin see; "viewer" is the noun for the person, and it stops the
+#: role from being confused with the unrelated *share* vocabulary — see `core/serializers.py`,
+#: where a TheHive share still reports `profileName: "read-only"`).
 USER_ROLE_CHOICES: Final[tuple[tuple[str, str], ...]] = (
     ("superAdmin", "Super Administrator"),
     ("admin", "Organisation Administrator"),
     ("analyst", "Analyst"),
-    ("read-only", "Read-Only"),
+    ("viewer", "Viewer"),
 )
-USER_ROLE_VALUES: Final[tuple[str, ...]] = tuple(v for v, _ in USER_ROLE_CHOICES)
+
+#: Every valid `User.role` value, in choice order.
+USER_ROLE_VALUES: Final[tuple[str, ...]] = tuple(value for value, _ in USER_ROLE_CHOICES)
+
+#: The read-only role value. Never hardcode the literal: import this (ADR-006 decision 1).
+VIEWER_ROLE: Final[str] = "viewer"
 
 
 # --- Constraint builders ------------------------------------------------------

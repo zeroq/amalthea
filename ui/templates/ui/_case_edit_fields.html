@@ -1,0 +1,94 @@
+{% comment %}
+Shared case-edit field set, used by TWO hosts:
+
+1. ui/case_create.html  (standalone page)
+   - Included inside its own <form method="post" action="...">.
+   - `form_id` is UNDEFINED here → controls emit NO form= attribute.
+   - An orphan form= would break submission, so we condition on `form_id`.
+
+2. ui/_modal.html        (modal footer form owns the submit)
+   - _modal.html wraps this partial in `{% with form_id=form_id|default:modal_id %}`.
+   - `form_id` IS defined → every control MUST carry `form="{{ form_id }}"` so it submits
+     through the modal's footer <form id="case-edit-form">.
+
+Rule: each control gets `{% if form_id %} form="{{ form_id }}"{% endif %}`.
+The title input also gets `{% if form_id %}autofocus{% endif %}` (modal.js focuses [autofocus]).
+{% endcomment %}
+
+{% if origin %}
+<input type="hidden" name="origin" value="{{ origin }}"{% if form_id %} form="{{ form_id }}"{% endif %}>
+{% endif %}
+
+<div class="field-row">
+  <label for="f-title">Title</label>
+  <input type="text" id="f-title" name="title" maxlength="500" value="{{ form_values.title }}" required{% if form_id %} form="{{ form_id }}"{% endif %}{% if form_id %} autofocus{% endif %}>
+</div>
+
+<div class="field-row">
+  <label for="f-description">Description</label>
+  <textarea id="f-description" name="description" rows="5" placeholder="Full case description (Markdown)"{% if form_id %} form="{{ form_id }}"{% endif %}>{{ form_values.description }}</textarea>
+</div>
+
+<div class="field-row">
+  <label for="f-summary">Summary</label>
+  <textarea id="f-summary" name="summary" rows="3" placeholder="Short summary for lists"{% if form_id %} form="{{ form_id }}"{% endif %}>{{ form_values.summary }}</textarea>
+</div>
+
+<div class="field-row">
+  <label for="f-severity">Severity</label>
+  <select id="f-severity" name="severity"{% if form_id %} form="{{ form_id }}"{% endif %}>
+    {% for val, label in severity_choices %}
+      <option value="{{ val }}" {% if form_values.severity|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="field-row">
+  <label for="f-tlp">TLP</label>
+  <select id="f-tlp" name="tlp"{% if form_id %} form="{{ form_id }}"{% endif %}>
+    {% for val, label in tlp_choices %}
+      <option value="{{ val }}" {% if form_values.tlp|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="field-row">
+  <label for="f-pap">PAP</label>
+  <select id="f-pap" name="pap"{% if form_id %} form="{{ form_id }}"{% endif %}>
+    {% for val, label in pap_choices %}
+      <option value="{{ val }}" {% if form_values.pap|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="field-row">
+  <label for="f-status">Status</label>
+  <select id="f-status" name="status"{% if form_id %} form="{{ form_id }}"{% endif %}>
+    {% for opt in case_status_options %}
+      <option value="{{ opt.value }}" {% if form_values.status == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="field-row">
+  <label for="f-assignee">Assignee</label>
+  <select id="f-assignee" name="assignee"{% if form_id %} form="{{ form_id }}"{% endif %}>
+    <option value="">Unassigned</option>
+    {% for person in assignees %}
+      <option value="{{ person.login }}" {% if form_values.assignee == person.login %}selected{% endif %}>{{ person.login }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="field-row">
+  <label class="check">
+    <input type="checkbox" name="flag" {% if form_values.flag %}checked{% endif %}{% if form_id %} form="{{ form_id }}"{% endif %}>
+    Flag as important
+  </label>
+</div>
+
+<div class="field-row">
+  <label for="f-tags">Tags (comma-separated)</label>
+  <input type="text" id="f-tags" name="tags" value="{{ form_values.tags }}" placeholder="phishing, credential-theft, apt29"{% if form_id %} form="{{ form_id }}"{% endif %}>
+</div>
+<input type="hidden" name="tab" value="{{ active_tab|default:"general" }}"{% if form_id %} form="{{ form_id }}"{% endif %}>

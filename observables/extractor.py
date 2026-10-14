@@ -388,6 +388,24 @@ def add_observable(case: Case, type_name: str, value: str) -> Observable | None:
 
     The observable is created with the case's `owner_org`. Auto-linking stays within one org.
     """
+    resolved = add_observable_with_status(case, type_name, value)
+    return None if resolved is None else resolved[0]
+
+
+@transaction.atomic
+def add_observable_with_status(
+    case: Case, type_name: str, value: str
+) -> tuple[Observable, bool] | None:
+    """`add_observable` that also reports whether the `Observable` row was newly created.
+
+    Same behaviour as `add_observable` (and the reason it exists): a caller that means to *add* is
+    not the same as a caller that means to *edit*, and `created` is what lets them tell the
+    difference. The UI create form applies its optional fields (message, TLP/PAP, enrichment) only
+    when `created` — an artifact that already exists is shared across cases (`resolve_observable`
+    dedupes per org), so re-adding a known value to a second case must link it, never reset the
+    metadata the first case already relies on. Returns `None` for an unknown type, like
+    `add_observable`.
+    """
     from cases.models import CaseObservable
 
     resolved = resolve_observable(type_name, value, owner_org=case.owner_org)
@@ -401,4 +419,4 @@ def add_observable(case: Case, type_name: str, value: str) -> Observable | None:
         from automation.registry import dispatch_observable_linked
 
         dispatch_observable_linked(observable, case.pk)
-    return observable
+    return observable, created

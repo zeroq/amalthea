@@ -18,6 +18,8 @@ urlpatterns = [
     # P2/C1 — Alert status change
     path("alerts/<uuid:alert_id>/status", views.alert_status, name="ui-alert-status"),
     path("cases", views.case_list, name="ui-case-list"),
+    # §10.2 — must precede `cases/<str:case_id>` (a literal is otherwise swallowed as a case id).
+    path("cases/new", views.case_create, name="ui-case-create"),
     path("cases/<str:case_id>", views.case_detail, name="ui-case-detail"),
     path("cases/<str:case_id>/status", views.case_set_status, name="ui-case-status"),
     path("cases/<str:case_id>/comment", views.case_comment, name="ui-case-comment"),
@@ -28,6 +30,11 @@ urlpatterns = [
         views.case_task_toggle,
         name="ui-case-task-toggle",
     ),
+    # Task-scoped routes (CRUD + detail + notes)
+    path("tasks/<uuid:task_id>", views.task_detail, name="ui-task-detail"),
+    path("tasks/<uuid:task_id>/edit", views.case_task_edit, name="ui-case-task-edit"),
+    path("tasks/<uuid:task_id>/delete", views.case_task_delete, name="ui-case-task-delete"),
+    path("tasks/<uuid:task_id>/note", views.task_note, name="ui-task-note"),
     # P2/C2 — Case edit
     path("cases/<str:case_id>/edit", views.case_edit, name="ui-case-edit"),
     # Case sub-resources (P2-P5 UI)
@@ -81,6 +88,36 @@ urlpatterns = [
         "cases/<str:case_id>/procedures",
         views.case_procedures_create,
         name="ui-case-procedures-create",
+    ),
+    # Case pages. The API (`POST /case/{id}/page`, `PATCH|DELETE …/{pageId}`) is JSON-only, so the
+    # three analyst actions live here. `page_id` is a UUID converter like every other sub-resource id
+    # in this file, so a malformed id never reaches a queryset.
+    path("cases/<str:case_id>/page", views.case_page_create, name="ui-case-page-create"),
+    path(
+        "cases/<str:case_id>/page/<uuid:page_id>/edit",
+        views.case_page_update,
+        name="ui-case-page-edit",
+    ),
+    path(
+        "cases/<str:case_id>/page/<uuid:page_id>/delete",
+        views.case_page_delete,
+        name="ui-case-page-delete",
+    ),
+    # Case-scoped observable CRUD (tab affordances). UUID converter so a malformed id 404s early.
+    path(
+        "cases/<str:case_id>/observable",
+        views.case_observable_create,
+        name="ui-case-observable-create",
+    ),
+    path(
+        "cases/<str:case_id>/observable/<uuid:observable_id>/edit",
+        views.case_observable_update,
+        name="ui-case-observable-edit",
+    ),
+    path(
+        "cases/<str:case_id>/observable/<uuid:observable_id>/remove",
+        views.case_observable_remove,
+        name="ui-case-observable-remove",
     ),
     # Case templates
     path("case-templates", views.case_template_list, name="ui-case-template-list"),

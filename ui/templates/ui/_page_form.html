@@ -1,0 +1,32 @@
+{% comment %}
+  Body of the page create/edit modal, hosted by `ui/_modal.html` (`body_template`).
+
+  One template serves both paths, which is why the fields read `{{ page.… }}`: on the edit path
+  `_page_entry.html` renders the modal inside its `{% for page in pages %}` loop, so `page` is in
+  context and the form is prefilled; on the create path the modal is rendered by `_tab_general.html`
+  where `page` does not exist and every value resolves to the empty string.
+
+  The modal footer owns the submit, so each control is associated with it via `form="{{ form_id }}"`
+  (`form_id` is set by `_modal.html`; see the two-host rule in `_case_create_fields.html`). The hidden
+  `tab` rides in that same form, which is what returns the analyst to the General tab —
+  `_case_detail_redirect` only appends `?tab=` for a value that is in `CASE_TAB_SLUGS`.
+
+  IDs are prefixed with `modal_id` rather than hard-coded: create and every edit modal coexist in one
+  document, so a shared id would give every label the wrong control.
+{% endcomment %}
+<input type="hidden" name="tab" value="general" form="{{ form_id }}">
+
+<div class="field-row">
+  <label for="{{ modal_id }}-title">Title</label>
+  <input type="text" id="{{ modal_id }}-title" name="title" maxlength="500" value="{{ page.title }}" required autofocus form="{{ form_id }}">
+</div>
+
+<div class="field-row">
+  <label for="{{ modal_id }}-category">Category</label>
+  <input type="text" id="{{ modal_id }}-category" name="category" maxlength="100" value="{{ page.category }}" placeholder="runbook (optional)" form="{{ form_id }}">
+</div>
+
+<div class="field-row">
+  <label for="{{ modal_id }}-content">Content</label>
+  <textarea id="{{ modal_id }}-content" name="content" rows="8" placeholder="Markdown — rendered with the same pipeline as the case description" form="{{ form_id }}">{{ page.content }}</textarea>
+</div>

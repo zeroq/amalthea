@@ -1,0 +1,126 @@
+{% extends "ui/base.html" %}
+{% load static ui_tags %}
+
+{% block heading %}
+{{ task.title }}
+<span class="pill pill-{{ task.status|lower }}">{{ task.status }}</span>
+{% if task.flag %}
+<span class="pill pill-important" title="Important">
+  <i class="fa-solid fa-flag" aria-hidden="true"></i> Important
+</span>
+{% endif %}
+{% endblock %}
+
+{% block actions %}
+<a class="btn" href="{% url 'ui-case-detail' case.number %}?tab=tasks">
+  <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+  Back to case
+</a>
+{% if can_mutate %}
+<button type="button" class="btn" data-modal-open="task-edit-{{ task.id }}">
+  <i class="fa-solid fa-pen" aria-hidden="true"></i>
+  Edit
+</button>
+<button type="button" class="btn btn-err" data-modal-open="task-del-{{ task.id }}">
+  <i class="fa-solid fa-trash" aria-hidden="true"></i>
+  Delete
+</button>
+<form method="post" action="{% url 'ui-case-task-toggle' case.number task.id %}" class="btn-form">{% csrf_token %}
+  <input type="hidden" name="tab" value="tasks">
+  <button type="submit" class="btn {% if task.status == 'Completed' %}btn-ghost{% endif %}">
+    {% if task.status == 'Completed' %}
+    <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reopen
+    {% else %}
+    <i class="fa-solid fa-check" aria-hidden="true"></i> Complete
+    {% endif %}
+  </button>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+{% comment %}
+  `{% now ... as %}` must sit INSIDE the block: a top-level `{% now %}` in a template that
+  `{% extends %}` is not in scope when the block renders, so `now_u` would resolve to "" and
+  the overdue cue would silently never fire (verified against Django's template engine).
+{% endcomment %}
+{% now "U" as now_u %}
+<div class="cols">
+  <div class="stack">
+    <div class="card">
+      <h3>Details</h3>
+      <dl class="meta">
+        <dt>Assignee</dt>
+        <dd>{% if task.assignee %}{{ task.assignee.login }}{% else %}<span class="dim">Unassigned</span>{% endif %}</dd>
+
+        <dt>Due date</dt>
+        <dd>
+          {% if task.due_date %}
+          <time datetime="{{ task.due_date|date:"c" }}"
+                {% if task.due_date|date:"U" < now_u %}class="is-overdue"{% endif %}>
+            {{ task.due_date|date:"Y-m-d" }}
+            {% if task.due_date|date:"U" < now_u %} <span class="overdue-label">Overdue</span>{% endif %}
+          </time>
+          {% else %}<span class="dim">No due date</span>{% endif %}
+        </dd>
+
+        <dt>Created</dt>
+        <dd>{{ task.created_at|date:"Y-m-d H:i" }}</dd>
+
+        <dt>Flag</dt>
+        <dd>{{ task.flag|yesno:"Important,—" }}</dd>
+
+        <dt>Case</dt>
+        <dd><a href="{% url 'ui-case-detail' case.number %}">{{ case.number }}</a> — {{ case.title }}</dd>
+      </dl>
+    </div>
+
+    <div class="card">
+      <h3>Description</h3>
+      {% if task.description %}
+      <div class="body md">{{ task.description|markdown }}</div>
+      {% else %}
+      <p class="empty">No description.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h3>Notes</h3>
+      <ol class="timeline" id="task-notes">
+        {% for note in notes %}
+        <li class="tl tl-task-note" data-note-id="{{ note.id }}">
+          <div class="tl-body md">{{ note.message|markdown }}</div>
+          <p class="tl-meta">
+            <span class="mono">{{ note.created_at|date:"Y-m-d H:i:s" }}</span>
+            {% if note.created_by %} · {{ note.created_by.login }}{% else %} · <span class="dim">—</span>{% endif %}
+            · <span class="dim">task-note</span>
+          </p>
+        </li>
+        {% empty %}
+        <li class="empty">No notes yet.</li>
+        {% endfor %}
+      </ol>
+
+      {% if can_mutate %}
+      <form method="post" action="{% url 'ui-task-note' task.id %}" class="comment">{% csrf_token %}
+        <label for="f-task-note">Add a note</label>
+        <textarea id="f-task-note" name="body" rows="3" required placeholder="What did you do or observe?"></textarea>
+        <button type="submit" class="btn btn-primary">Append note</button>
+      </form>
+      {% else %}
+      <p class="empty">Read-only access — notes cannot be added.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% comment %} Edit modal {% endcomment %}
+{% if can_mutate %}
+  {% url 'ui-case-task-edit' task.id as task_edit_url %}
+  {% url 'ui-case-task-delete' task.id as task_delete_url %}
+  {% with tid=task.id|stringformat:"s" %}
+  {% include "ui/_modal.html" with modal_id="task-edit-"|add:tid form_id="task-edit-form-"|add:tid body_template="ui/_task_form_modal_body.html" title="Edit task: "|add:task.title confirm_text="Save" confirm_class="btn-primary" form_action=task_edit_url form_hx_post=task_edit_url form_hx_target="#task-edit-"|add:tid|add:"-body" extra_fields=task_edit_extra_fields size="md" task=task is_edit=True %}
+  {% include "ui/_modal.html" with modal_id="task-del-"|add:tid form_id="task-del-form-"|add:tid body_template="ui/_task_delete_modal.html" title="Remove task?" confirm_text="Remove" confirm_class="btn-err" form_action=task_delete_url extra_fields=task_delete_extra_fields size="sm" task=task %}
+  {% endwith %}
+{% endif %}
+{% endblock %}

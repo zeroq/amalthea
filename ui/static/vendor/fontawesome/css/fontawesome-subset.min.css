@@ -61,6 +61,7 @@
 .fa-chevron-right::before { content: "\f054"; }
 .fa-chevron-left::before { content: "\f053"; }
 .fa-circle-exclamation::before { content: "\f06a"; }
+.fa-check::before { content: "\f00c"; }
 .fa-circle-check::before { content: "\f058"; }
 .fa-circle-xmark::before { content: "\f057"; }
 .fa-triangle-exclamation::before { content: "\f071"; }
@@ -163,4 +164,4 @@
 .fa-calendar-day::before { content: "\f783"; }
 .fa-calendar-week::before { content: "\f784"; }
 .fa-calendar-month::before { content: "\f678"; }
-.fa-calendar-year::before { content: "\f679"; }
+.fa-calendar-year::before { content: "\f679"; .fa-comments::before{content:"\f086"}.fa-list-check::before{content:"\f0ae"}.fa-paperclip::before{content:"\f0c6"}}

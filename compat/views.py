@@ -123,9 +123,8 @@ def api_login(request: Request) -> Response:
     requested_org = payload.get("organisation") or payload.get("org")
     if requested_org is not None and str(requested_org).strip():
         supplied = str(requested_org).strip()
-        org = user.org  # no query when `org_id` is NULL (nullable FK short-circuit)
-        org_name = org.name if org else None
-        org_id = str(user.org_id) if user.org_id else None
+        org_name = user.org.name
+        org_id = str(user.org_id)
         if supplied not in {org_name, org_id}:
             return _bad(
                 "Organisation does not match",

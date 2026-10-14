@@ -108,6 +108,11 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     # A task with a NULL case is not a lower-cardinality relationship, it is an orphan.
     ("cases", "Task", "case"): models.CASCADE,
     ("cases", "Task", "assignee"): models.SET_NULL,
+    # TaskNote: an append-only log owned by its task, so it dies with the task (CASCADE).
+    # `created_by` is audit like every other author column: the note outlives a departing
+    # analyst, it just loses the attribution (SET_NULL).
+    ("cases", "TaskNote", "task"): models.CASCADE,
+    ("cases", "TaskNote", "created_by"): models.SET_NULL,
     # ---- Timeline: the collaborative ledger (AGENTS.md Module B) ------------------------
     ("cases", "TimelineEvent", "case"): models.CASCADE,
     ("cases", "TimelineEvent", "actor"): models.SET_NULL,
@@ -174,7 +179,10 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     ("automation", "AutomationRun", "alert"): models.SET_NULL,
     ("automation", "AutomationRun", "triggered_by_observable"): models.SET_NULL,
     # ---- Identity ---------------------------------------------------------------------
-    ("identity", "User", "org"): models.SET_NULL,
+    # PROTECT: every user belongs to exactly one organisation (ADR-007). An org that still
+    # has members cannot be deleted out from under them; the UI forces an explicit
+    # reassign/delete-members choice (`ui/views.py` settings_organisations_delete).
+    ("identity", "User", "org"): models.PROTECT,
     # CASCADE, deliberately not SET_NULL: a bearer token whose owner no longer exists is a
     # credential nobody can revoke.
     ("identity", "ApiKey", "user"): models.CASCADE,
@@ -238,11 +246,11 @@ def test_fk_audit_covers_the_whole_model_inventory() -> None:
         f"undeclared={sorted(set(actual) - set(EXPECTED_ON_DELETE))}, "
         f"stale={sorted(set(EXPECTED_ON_DELETE) - set(actual))}"
     )
-    # 57 = 51 previous + 6 new (IngestionToken x2, AuditLog x3, Observable.owner_org).
-    # Kept as a literal on purpose: it is a tripwire for a model silently
-    # dropping out of `OWN_APPS`, and `EXPECTED_ON_DELETE` already pins the exact set, so a bump
-    # here is always a real change.
-    assert len(actual) == 57, f"expected the full FK set, found only {len(actual)}"
+    # 57 = 51 previous + 6 new (IngestionToken x2, AuditLog x3, Observable.owner_org);
+    # 59 = 57 + TaskNote x2 (task, created_by). Kept as a literal on purpose: it is a tripwire
+    # for a model silently dropping out of `OWN_APPS`, and `EXPECTED_ON_DELETE` already pins the
+    # exact set, so a bump here is always a real change.
+    assert len(actual) == 59, f"expected the full FK set, found only {len(actual)}"
 
 
 @pytest.mark.django_db
@@ -293,6 +301,9 @@ def test_no_cascade_is_reachable_from_a_longer_lived_row() -> None:
     cascades = {key for key, value in EXPECTED_ON_DELETE.items() if value is models.CASCADE}
     assert cascades == {
         ("cases", "Task", "case"),
+        # A task note is owned by its task: deleting the task must delete its log, or the note
+        # becomes an orphan no view can reach.
+        ("cases", "TaskNote", "task"),
         ("cases", "TimelineEvent", "case"),
         ("cases", "CaseCustomFieldValue", "case"),
         ("cases", "CaseCustomFieldValue", "custom_field"),
