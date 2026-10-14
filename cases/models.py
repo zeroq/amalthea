@@ -583,6 +583,33 @@ class CaseTemplate(UUIDModel, TimeStampedModel):
         return self.name
 
 
+class TaskNote(UUIDModel, TimeStampedModel):
+    """A log entry on a Task (TheHive "task log" shape, plan §6). Its own row rather than a
+    `TimelineEvent` projection so a task's notes are addressable independently of the case ledger.
+
+    Notes are **append-only** (no `updated_by`, no edit endpoint) — a task log, not a document.
+    Each note is also mirrored into the case ledger (`TimelineEvent(kind="task-note",
+    metadata={"task_id": …, "note_id": …})`) in the same transaction, so Module B's "every note
+    emits an event via WebSockets" holds and the note appears in the case **Audit** timeline.
+    """
+
+    # db_index=False: `task` is the left prefix of `task_note_task_created_idx`.
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="notes", db_index=False)
+    message = models.TextField()
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="task_notes"
+    )
+
+    class Meta:
+        db_table = "task_note"
+        indexes = [
+            models.Index(fields=["task", "-created_at", "-id"], name="task_note_task_created_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"TaskNote({self.task_id})"
+
+
 class Attachment(UUIDModel, TimeStampedModel):
     """A file attached to a case (T2 P3; TheHive `OutputAttachment`).
 

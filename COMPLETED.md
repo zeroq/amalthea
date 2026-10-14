@@ -2,7 +2,7 @@
 
 Finished work, with the evidence that it actually happened. Open items live in
 [`TODO.md`](./TODO.md).
-Last updated: 2026-10-11
+Last updated: 2026-10-13
 
 Items are only listed here once independently verified. Where code exists but an acceptance criterion
 is still unproven, the item says so explicitly and the verification gap is cross-linked in `TODO.md`.
@@ -1104,14 +1104,152 @@ Q1 resolved → `markdown-it-py==4.2.0` + `mdurl==0.1.2` + `nh3==0.3.7` pinned i
   (protocol-relative `href`) accepted-low. All three tracked in `TODO §11`.
 - [x] Gate: `make check` **1509 passed / 3 skipped**; ruff + format + mypy (105 files) + migrations + css clean.
 
-## Summary Statistics (as of 2026-10-12)
+## 2026-10-12 — **Viewer role enforcement** (ADR-006; TODO §11.1 M1 resolved)
+
+Plan: `docs/planning/PLAN-2026-10-12-viewer-role-enforcement.md`. Decision: **ADR-006 — role semantics**
+(now *Accepted*). Resolves the P5 review's **M1** and the P3 review's **M1**/**L3**: the role formerly
+named `read-only` was enforced nowhere; it is now a hard, fail-closed read-only role named **`viewer`**.
+
+- [x] **P1 — one predicate.** `VIEWER_ROLE` in `core/enums.py`; `is_viewer()` in `identity/scoping.py`
+  (deny-only: anonymous / `None` / token / non-`User` identities are never viewers, so the webhook and
+  `AllowAny` login/logout are untouched). Truth table: `tests/test_roles.py` (16).
+- [x] **P2 — Layer 1 (resource path).** `resolve_case(user, id, write=True)` returns `None` for a viewer;
+  `resolve_alert`/`resolve_observable` gained the same `write` flag; the 5 UI mutation sites pass
+  `write=True`. The check sits **before** the share branch, so **role beats share**.
+- [x] **P3 — Layer 2 (the guarantee).** `identity/permissions.py::ViewerReadOnly` registered in
+  `DEFAULT_PERMISSION_CLASSES`: every DRF endpoint, present and future, refuses unsafe verbs to a viewer
+  (403, normalised by the compat error handler; anonymous stays 401). `ui/views.py::not_viewer` decorates
+  all **38** mutating UI views (404, same shape as the tenant-scoping rule).
+- [x] **P4 — Layer 3 (affordances).** `can_mutate` in `_base_context`; 7 templates guard their write
+  controls; reads survive (Export JSON, Download, "Read-only access" note).
+- [x] **P5 — rename.** `read-only` → `viewer` (value and label) via
+  `identity/migrations/0008_role_viewer_rename.py` (drop CHECK → `RunPython` → `AlterField` → re-add
+  CHECK), reversible and drift-free. The TheHive *share* vocabulary (`profileName`) is deliberately
+  unchanged.
+- [x] **Conformance suites (73 new tests across 7 files).** Route-enumeration sweeps
+  (`test_viewer_readonly_ui.py` 6, `test_viewer_readonly_api.py` 10 — 126 API routes) fail when a new
+  mutating route is added without a gate; `test_viewer_affordances.py` (8) pins the UX half;
+  `test_viewer_reads.py` (22) pins the read inventory (every read page, case export, attachment
+  download, API GETs, and the case WebSocket subscribe + `sync` replay); `test_viewer_precedence.py` (7)
+  pins role-beats-share in both directions plus the non-viewer control; `test_viewer_role_rename.py` (3)
+  executes the migration forward and back and proves the CHECK rejects the old value.
+- [x] **Defects found and fixed by this work** (both pre-existing): `ui-case-attachment-download` answered
+  **500 for every user** — the UI route's `<uuid:attachment_id>` converter handed a `UUID` to the API's
+  `_as_uuid` helper, which called `UUID(value)` on it (`AttributeError`); and `not_viewer` logged
+  `request.path`, which `PATH_INFO` percent-decodes, letting an authenticated viewer forge log lines
+  (CWE-117). `resolve_alert`/`resolve_observable` were also made role-strict (the superAdmin exception is
+  gone), so the invariant is stated identically in all three resolvers.
+- [x] Independent verification: `docs/verification/VERIFY-2026-10-12-viewer-role-enforcement.md`
+  (adversarial checks: every POST-capable `ui-*` route gated; the API sweep enumerates 126 routes
+  including the compat catch-all; only login/logout override `permission_classes`; no `"read-only"` role
+  literal remains).
+- [x] Security review: `docs/reviews/REVIEW-2026-10-12-viewer-role-enforcement.md` — **0 Critical / 0 High**
+  (3 Low, 4 Info). Cleared: no viewer mutation path through the API, the UI, the webhook, channels
+  consumers, admin-triggered tasks or API keys; role-beats-share; share grant/revoke both closed;
+  migration ordering safe and reversible; 401-not-403 for anonymous. Residual Low items (Django admin is
+  outside the role model; template guards are UX not a boundary) are recorded in `docs/spec/deviations.md`.
+- [x] Gate: `make check` **1617 passed / 3 skipped**; ruff + ruff format + mypy (105 files) + migrations
+  + css + full pytest clean.
+
+## 2026-10-13 — **§10.2 Create a case from the UI** (shared applier; `case.created` audit)
+
+Plan: `docs/planning/PLAN-2026-10-13-ui-case-create.md`. Closes `TODO §10.2` — an incident that arrives
+by phone/email/ticket can now be documented, not only escalated from an alert.
+
+- [x] **P1 — one applier.** `cases/create.py::create_case(payload, *, actor, org)` is now the single
+  transactional create path (title/description; the bounded `severity`/`tlp`/`pap`/`status`/`assignee`
+  fields via `cases/update.py::_set_case_fields`; tags; `extract_into_case`; the `case-created` timeline
+  event; `Case.save()` numbering). `cases/views.py::_create_case` is a thin wrapper; the 400/403 envelopes
+  are unchanged.
+- [x] **P2 — the route + form.** `ui/views.py::case_create` + `_render_case_create_form`; `GET|POST
+  /cases/new` (`ui-case-create`, ordered **above** `cases/<str:case_id>`), `@not_viewer @login_required`.
+  `create_case` and the `case.created` `AuditLog` row share one `transaction.atomic()`; an org-less user
+  gets a message + redirect. Template `ui/templates/ui/case_create.html`.
+- [x] **P3 — keyboard/rail.** The `n` shortcut (`ui/static/ui/keys.js` `CHEATSHEET`/`ROUTES`), its
+  cheat-sheet row and the rail link, all pinned by `test_ui_nav.py`; the rail link and cheat-sheet row are
+  `can_mutate`-gated (L1, below).
+- [x] **P4 — conformance.** `tests/conformance/test_ui_case_create.py` (41) — form GET, POST→302 with the
+  defaults + timeline + audit, extraction, distinct `Case.number`s, an over-long title, tags, the
+  cross-org/unknown-assignee/unknown-status/out-of-range re-render paths, viewer 404, org-less, CSRF, and
+  the API-parity cases. The route was added to `test_tenant_scoping.py` (3 sites) + `test_viewer_readonly_ui.py`.
+- [x] **P5 — docs.** `docs/spec/api.md` (the `case_collection` POST payload + a new Analyst UI section) and
+  `docs/spec/deviations.md` "Wave 10.2" (**W102-1…W102-5**).
+- [x] **Deviations (all recorded).** W102-1 (one shared service, both callers), W102-2 (**extraction is
+  unconditional** and the UI checkbox was dropped — a hint line replaces it), W102-3 (stricter enum bounds:
+  non-integer / out-of-range → 400, empty keeps the model default), W102-4 (no `case.created` automation
+  trigger), W102-5 (`CaseUpdateError` name retained).
+- [x] **Defect found and fixed by this work** — security review **M1**: `POST /api/v1/case` with
+  `status: ""`/`null` answered **500** — a regression from the pre-refactor
+  `str(payload.get("status") or "InProgress")`: the empty value reached `resolve_case_status`, which
+  `get_or_create`d a `CaseStatus` with `stage=""`, rejected by the `case_status_stage_valid` CHECK.
+  `_create_scalars` no longer forwards a falsy `status`; 3 regression tests added.
+- [x] **L1 (Low, fixed).** The `New case` rail link and its cheat-sheet row were shown to viewers (they
+  404); both are now `can_mutate`-gated. The raw `n` keyboard shortcut stays — a static, CSP-allowed JS file
+  cannot role-gate it (same accepted limitation as the `,` shortcut, deviation V7).
+- [x] Independent verification: `docs/verification/VERIFY-2026-10-13-ui-case-create.md` — verdict
+  **Partial** (31 ACs met, 4 met-by-inspection, 6 partial/untested, 4 not met). The not-met items were the
+  security review + TODO/COMPLETED bookkeeping (both closed by this entry) and the remaining unasserted
+  edge ACs; W102-1…W102-5 were confirmed as recorded deviations, not failures.
+- [x] Security review: `docs/reviews/REVIEW-2026-10-13-ui-case-create.md` — **0 Critical / 0 High**
+  (1 Medium M1 — fixed; 1 Low L1 — fixed; 4 Info). Cleared: viewer 404 before parsing, `owner_org` never
+  caller-controlled, no mass assignment, org-scoped assignee with no existence oracle, no `CaseStatus`
+  minting from the UI, enum bounds with no fail-open, CSRF, the audit row shares the create transaction,
+  org-scoped extraction, route ordering, XSS/ADR-005 sanitizer/CSP, and `manage.py check --deploy` clean.
+- [x] Gate: `make check` **1662 passed / 3 skipped**; ruff + ruff format + mypy (106 files) + migrations
+  + css + full pytest clean.
+
+## 2026-10-13 — **Cases view: trailing-slash tolerance + the New-case modal** (follow-up to §10.2)
+
+Plan: `docs/planning/PLAN-2026-10-13-cases-view-fixes.md`. Reported symptom: `GET /cases/` 404'd as an
+`admin`. That was a **URL** bug, not a view or authorisation bug.
+
+- [x] **A — the 404.** Every UI route in `ui/urls.py` is registered slash-less and Django's `APPEND_SLASH`
+  only ever *appends*, so `/cases/` (and `/alerts/`, `/observables/`, `/tags/`, …) fell straight through to
+  the 404 handler. New `core/middleware.py::StripTrailingSlashMiddleware`, registered immediately after
+  `CommonMiddleware`, redirects a slash-terminated path to its slash-less form — **301** for GET/HEAD and
+  **308** for unsafe methods (a 301 on a POST drops the body, the same reason the API registers explicit
+  `-slash` routes) — but only when the slash-less form `resolve()`s, so an unknown path still 404s, and
+  never for `/api/`, `/admin/`, `/static/`, `/media/` or `/ws/`. Query string preserved.
+- [x] **B — New case is no longer a rail item.** The rail `<li>` was deleted; the cases list now carries a
+  `can_mutate`-gated button that is simultaneously a real link to `/cases/new` (no-JS fallback) and a
+  `data-modal-open="new-case-modal"` opener. The modal is the existing server-rendered `<dialog>`
+  (`_modal.html`) wrapping a new shared partial `ui/_case_create_fields.html` — the *same* field set the
+  standalone page renders (the controls carry `form="{{ form_id }}"` only inside a modal), so the two
+  surfaces cannot drift. A validation error whose POST carries `origin=cases` re-renders the **cases list**
+  with the modal auto-open (`data-autoopen`) and the submitted values echoed, rather than dumping the
+  analyst on another page.
+- [x] **Keyboard.** `n` stays documented in the cheat-sheet but is no longer a navigation route: it opens
+  the modal when the cases list is on screen, else navigates to `/cases?new=1` (which renders the list with
+  the modal auto-open). Rail/`ROUTES`/`CHEATSHEET`/cheat-sheet parity is still pinned by `test_ui_nav.py`.
+- [x] **Conformance.** `tests/conformance/test_ui_trailing_slash.py` (15) — 301/308, query-string
+  preservation, the `/api/`+`/admin/` exclusions, unknown-path-404; `tests/conformance/test_ui_case_create.py`
+  **+8** modal tests (49 total) — rail-link absence, the button + full dialog control set, modal POST
+  success (302 + row created), the `origin=cases` error re-render, `?new=1` auto-open, the standalone page
+  emitting no orphan `form=`, and the viewer (no affordance + 404).
+- [x] **Deviations (recorded).** W103-1 (rail → modal; `n` is now a non-nav key), W103-2 (UI-wide middleware
+  rather than per-route `-slash` aliases), W103-3 (`rstrip("/")` collapses repeated slashes — accepted).
+- [x] Independent verification: `docs/verification/VERIFY-2026-10-13-cases-view-fixes.md` — **Pass**
+  (16/16 acceptance criteria met, 0 not met, 0 deviated).
+- [x] Security review: `docs/reviews/REVIEW-2026-10-13-cases-view-fixes.md` — **0 Critical / 0 High /
+  0 Medium** (2 Low, 3 Info). Cleared: the `resolve()` guard + prefix exclusions prevent an open redirect,
+  308 preserves CSRF (the token is re-sent and `CsrfViewMiddleware` runs on the redirected target), the
+  middleware sits after CSP/Security so headers apply to redirects, `origin=cases` is a server-controlled
+  literal never reflected into HTML or logs, no XSS/`innerHTML`/inline script in the new template or JS,
+  progressive enhancement intact, and log hygiene maintained. LOW-01 (CRLF in the preserved query string)
+  is **not exploitable** — `iri_to_uri` percent-encodes CR/LF (`'/cases?a=1%0D%0AX-Injected:%20yes'`) and
+  Django's `BadHeaderError` is the backstop; LOW-02 (repeated slashes collapse) is the accepted W103-3
+  behaviour. `manage.py check --deploy` clean.
+- [x] Gate: `make check` **1689 passed / 3 skipped**; ruff + ruff format + mypy (107 files) + migrations
+  + css + full pytest clean.
+
+## Summary Statistics (as of 2026-10-13)
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | 1538 passed / 3 skipped / 0 failed |
-| **Secret scan** | Clean (382 tracked files at HEAD; 387 once the P3 batch lands — every new file passes the pre-commit hook, and CI scans full history) |
+| **Total tests** | 1689 passed / 3 skipped / 0 failed (1692 collected) |
+| **Secret scan** | Clean (387 tracked files at HEAD; every new file passes the pre-commit hook, and CI scans full history) |
 | **Ruff** | Clean |
-| **Mypy (strict)** | Clean (105 source files) |
+| **Mypy (strict)** | Clean (107 source files) |
 | **Ruff format** | Clean |
 | **Migrations** | All in sync (`makemigrations --check --dry-run` clean) |
 | **Coverage** | 79% — **below the `fail_under = 80` gate** after the tenant-isolation + org-management waves (non-blocking by decision; reopened as `TODO §2.6`) |
@@ -1142,10 +1280,14 @@ All tests pass on PostgreSQL (verified in CI and manual re-gate 2026-10-06/07).
 
 ---
 
-*Last updated: 2026-10-12 — UI-completeness wave **P3 + P5** (Procedures/TTP UI, D1 playbook round-trip + D3 sanitized Markdown;
-verified + security-reviewed, 3 follow-ups in `TODO §11`), on top of P1 + P2, tenant isolation (§6.4, ADR-004),
-superAdmin Settings (§6.12), Settings UI hardening (§6.14).*
-*Next review: after the S3/S5 security follow-ups (`TODO` priority #1).*
+*Last updated: 2026-10-13 — **cases view: `/cases/` trailing-slash fix + the New-case modal** (rail item
+removed; verified + security-reviewed), on top of **§10.2 manual case creation from the UI** (shared
+applier, `case.created` audit; security review M1/L1 fixed), **viewer role enforcement** (ADR-006; resolves
+`TODO §11.1` M1 + §11.4 M1/L3), the UI-completeness wave **P1–P3 + P5** (Procedures/TTP UI, D1 playbook
+round-trip + D3 sanitized Markdown), tenant isolation (§6.4, ADR-004), superAdmin Settings (§6.12),
+Settings UI hardening (§6.14).*
+*Next review: after §12.1/§12.2 (pagination + a truthful observables filter) or the S3/S5 security
+follow-ups — see the top of [`TODO.md`](./TODO.md).*
 
 
 

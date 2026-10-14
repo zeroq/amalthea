@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from argon2 import PasswordHasher
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import UserManager as DjangoUserManager
 from django.db import models
 
 from core.enums import API_KEY_SCOPES, USER_ROLE_CHOICES, USER_ROLE_VALUES, in_values
@@ -13,6 +15,46 @@ if TYPE_CHECKING:
     import ingest.models
 
 DEFAULT_USER_ROLE = "analyst"
+
+
+class UserManager(DjangoUserManager["User"]):
+    """Custom manager that ensures every created user has an organisation.
+
+    When `org` is omitted or explicitly None, the user is assigned to the
+    organisation named by `settings.AMALTHEA_DEFAULT_ORG_NAME` (default "Default").
+    This keeps `createsuperuser` and `createsuperuser --noinput` working with
+    zero new required flags. `org` is NOT added to REQUIRED_FIELDS.
+    """
+
+    def _get_default_org(self) -> Organisation:
+        # Import here to avoid circular imports at module load time
+        from identity.models import Organisation
+
+        default_org_name = getattr(settings, "AMALTHEA_DEFAULT_ORG_NAME", "Default")
+        org, _ = Organisation.objects.get_or_create(name=default_org_name)
+        return org
+
+    def create_user(
+        self,
+        username: str,
+        email: str | None = None,
+        password: str | None = None,
+        **extra_fields: Any,
+    ) -> User:
+        if "org" not in extra_fields or extra_fields["org"] is None:
+            extra_fields["org"] = self._get_default_org()
+        return super().create_user(username, email, password, **extra_fields)
+
+    def create_superuser(
+        self,
+        username: str,
+        email: str | None = None,
+        password: str | None = None,
+        **extra_fields: Any,
+    ) -> User:
+        if "org" not in extra_fields or extra_fields["org"] is None:
+            extra_fields["org"] = self._get_default_org()
+        return super().create_superuser(username, email, password, **extra_fields)
 
 
 class Organisation(UUIDModel, TimeStampedModel):
@@ -38,6 +80,10 @@ class User(AbstractUser, UUIDModel):
     says "accept, leave unassigned, record the attempted login"; auto-creating a user
     account per unrecognised wire value would be a privilege-escalation footgun. The
     review's suggestion to auto-create is rejected on those grounds.
+
+    Every user belongs to exactly one organisation (ADR-007). The FK is non-null with
+    PROTECT so an organisation with members cannot be deleted; the UI already forces
+    an explicit reassign-or-delete choice.
     """
 
     login = models.CharField(max_length=150, unique=True)
@@ -47,9 +93,9 @@ class User(AbstractUser, UUIDModel):
         default=DEFAULT_USER_ROLE,
         blank=False,
     )
-    org = models.ForeignKey(
-        Organisation, on_delete=models.SET_NULL, null=True, blank=True, related_name="users"
-    )
+    org = models.ForeignKey(Organisation, on_delete=models.PROTECT, related_name="users")
+
+    objects: ClassVar[UserManager] = UserManager()
 
     class Meta:
         # Declared explicitly so the concrete model matches the option set recorded in

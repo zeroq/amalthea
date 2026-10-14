@@ -1,0 +1,68 @@
+{% load ui_tags %}
+{% comment %}
+  The complete case ledger, moved here from the Comments tab: every `kind`, comments included, so
+  this tab is the whole record. It is also the list `live.js` owns the socket for, so it must keep
+  `id="audit-timeline"` and the `data-ws-url` attribute (see ui/static/ui/live.js).
+{% endcomment %}
+<section class="card" aria-labelledby="h-audit-timeline">
+  <h2 id="h-audit-timeline">Case timeline</h2>
+  <ol class="timeline" id="audit-timeline"
+      data-ws-url="{% if request.is_secure %}wss{% else %}ws{% endif %}://{{ request.get_host }}/ws/case/{{ case.id }}/">
+    {% for event in timeline %}
+      {% include "ui/_timeline_entry.html" %}
+    {% empty %}
+      <li class="empty">No timeline entries yet.</li>
+    {% endfor %}
+  </ol>
+</section>
+
+<section class="card" aria-labelledby="h-audit">
+  <h2 id="h-audit">Audit log</h2>
+  {% if audit_logs %}
+    <div class="table-wrap">
+      <table class="data-table data-table-tight">
+        <caption class="sr-only">Audit log for this case</caption>
+        <thead><tr><th scope="col">Action</th><th scope="col">Actor</th><th scope="col">Timestamp</th></tr></thead>
+        <tbody>
+          {% for log in audit_logs %}
+            <tr>
+              <td><span class="pill">{{ log.action }}</span></td>
+              <td>{{ log.actor.login|default:"—" }}</td>
+              <td class="mono dim">{{ log.created_at|date:"Y-m-d H:i:s" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No audit entries for this case.</p>
+  {% endif %}
+</section>
+
+{# Automation runs — provisional placement per §7.4 #}
+  <section class="card card-spaced" aria-labelledby="h-runs">
+  <h2 id="h-runs">Automation runs <span class="count">{{ runs|length }}</span></h2>
+  {% if runs %}
+    <div class="table-wrap">
+      <table class="data-table data-table-tight">
+        <caption class="sr-only">Automation runs for this case</caption>
+        <thead><tr><th scope="col">Playbook</th><th scope="col">Status</th><th scope="col">Output</th></tr></thead>
+        <tbody>
+          {% for run in runs %}
+            <tr>
+              <td class="mono">{{ run.playbook_name }}</td>
+              <td><span class="pill pill-{{ run.status|lower }}">{{ run.status }}</span></td>
+              <td>
+                {% if run.output_log %}<pre class="tl-body">{{ run.output_log }}</pre>
+                {% elif run.error %}<pre class="tl-body error">{{ run.error }}</pre>
+                {% else %}<span class="dim">—</span>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No playbook has run for this case.</p>
+  {% endif %}
+</section>

@@ -9,6 +9,7 @@
 
 {% block content %}
 <div class="card">
+  {% if can_mutate %}
   <form method="post" action="{% url 'ui-case-tags' case.number %}" class="tag-form">
     {% csrf_token %}
     <h3>Add/Remove Tags</h3>
@@ -22,6 +23,9 @@
     </div>
     <button class="btn btn-primary" type="submit">Save</button>
   </form>
+  {% else %}
+  <p class="empty">Read-only access — tags cannot be changed.</p>
+  {% endif %}
 </div>
 
 <div class="card">
@@ -31,10 +35,12 @@
     {% for tag in case.tags.all %}
     <li class="chip">
       {{ tag.name }}
+      {% if can_mutate %}
       <form method="post" action="{% url 'ui-case-tag-toggle' case.number tag.id %}" class="inline-form">
         {% csrf_token %}
         <button type="submit" class="linkish chip-x" aria-label="Remove tag {{ tag.name }}">✕</button>
       </form>
+      {% endif %}
     </li>
     {% endfor %}
   </ul>

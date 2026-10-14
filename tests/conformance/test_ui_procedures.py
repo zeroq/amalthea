@@ -615,7 +615,12 @@ def test_case_detail_procedure_form_is_real_form_with_csrf(
     body = response.content.decode()
 
     form_action = reverse("ui-case-procedure-create", kwargs={"case_id": case.number})
-    assert f'<form method="post" action="{form_action}"' in body
+    # The attach form is now a modal (`ui/_modal.html`), whose `<form>` tag carries `id` before
+    # `method`/`action` and may wrap across lines. Match the attributes in any order and require
+    # both, so the invariant (a real no-JS POST form to the procedure-create URL) still holds.
+    form_tag = re.search(rf'<form [^>]*action="{re.escape(form_action)}"[^>]*>', body)
+    assert form_tag is not None, "the procedure attach form is not a real <form action=…>"
+    assert 'method="post"' in form_tag.group(0)
     assert 'name="csrfmiddlewaretoken"' in body
     # Submit button has visible label (icon supplements, never replaces)
     assert "Attach procedure" in body

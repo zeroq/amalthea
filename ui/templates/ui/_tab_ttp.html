@@ -1,0 +1,22 @@
+{% load ui_tags %}
+<section class="card card-spaced" aria-labelledby="h-procs">
+  <h2 id="h-procs">Procedures <span class="count">{{ procedures|length }}</span></h2>
+  <ul class="procedures" id="case-procedures">
+    {% for procedure in procedures %}
+      {% include "ui/_procedure_entry.html" %}
+    {% empty %}
+      <li class="empty">No procedures attached yet.</li>
+    {% endfor %}
+  </ul>
+
+  {% if can_mutate %}
+  <button type="button" class="btn btn-primary" data-modal-open="procedure-create-modal">
+    <i class="fa-solid fa-sitemap" aria-hidden="true"></i>
+    New procedure
+  </button>
+  {% endif %}
+</section>
+
+{% if can_mutate %}
+{% include "ui/_modal.html" with modal_id="procedure-create-modal" title="Attach procedure / TTP" body_template="ui/_procedure_form_modal_body.html" form_id="procedure-create-form" form_action=case_procedure_create_url confirm_text="Attach procedure" confirm_class="btn-primary" cancel_text="Cancel" size="lg" extra_fields=procedure_create_extra_fields %}
+{% endif %}

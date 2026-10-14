@@ -47,8 +47,8 @@ _JS_CHEAT_RE = re.compile(r'\{\s*key:\s*"([^"]+)",\s*label:\s*"([^"]+)"\s*\}')
 # g: "/",   or   ",": "/settings/organisations",
 _JS_ROUTE_RE = re.compile(r'(?:"([^"]+)"|([A-Za-z]+)):\s*"([^"]+)"')
 
-# Documented keys that have no route (they act on the current page).
-_NON_NAV_KEYS = {"/", "?"}
+# Documented keys that have no route (they act on the current page / open a modal).
+_NON_NAV_KEYS = {"/", "?", "n"}
 
 
 def _rail() -> dict[str, str]:

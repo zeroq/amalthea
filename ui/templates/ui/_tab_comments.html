@@ -1,0 +1,32 @@
+{% load ui_tags %}
+{% comment %}
+  The analyst view. Notes only, rendered once at load: this list deliberately owns no WebSocket.
+  The live ledger lives in the Audit tab's `#audit-timeline` (see `ui/static/ui/live.js`).
+{% endcomment %}
+<section class="card" aria-labelledby="h-comments">
+  <h2 id="h-comments">Comments</h2>
+  <ol class="timeline" id="timeline-events">
+    {% for event in comments %}
+      {% include "ui/_timeline_entry.html" %}
+    {% empty %}
+      <li class="empty">No notes yet.</li>
+    {% endfor %}
+  </ol>
+
+  {# hx-* attributes are inert until an htmx is on the page; without it the form is the plain #}
+  {# POST it has always been, which is the fallback the design relies on (brief 6). #}
+  {% if can_mutate %}
+  <form method="post" action="{% url 'ui-case-comment' case.number %}" class="comment"
+        hx-post="{% url 'ui-case-comment' case.number %}"
+        hx-target="#timeline-events"
+        hx-swap="beforeend"
+        hx-disabled-elt="this">{% csrf_token %}
+    <input type="hidden" name="tab" value="comments">
+    <label for="f-comment">Add a note</label>
+    <textarea id="f-comment" name="body" rows="3" required placeholder="What did you find?"></textarea>
+    <button type="submit" class="btn btn-primary">Append note</button>
+  </form>
+  {% else %}
+  <p class="empty">Read-only access — notes cannot be added.</p>
+  {% endif %}
+</section>

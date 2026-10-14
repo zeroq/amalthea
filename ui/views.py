@@ -23,7 +23,11 @@ Three choices worth stating, because each is a deviation from "just render the A
 
 from __future__ import annotations
 
+import datetime
 import logging
+import uuid
+from collections.abc import Callable
+from functools import partial, wraps
 from typing import Any
 
 from django.contrib import messages
@@ -35,8 +39,8 @@ from django.contrib.auth.views import (  # noqa: F401 (re-exported for ui/urls.p
 )
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Count
-from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.db.models import Count, Max
+from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy  # noqa: F401 (re-exported for ui/urls.py)
 from django.utils import timezone
@@ -53,35 +57,53 @@ from automation.dispatcher import TRIGGER_EVENTS
 from automation.executor import registered_actions
 from automation.models import AutomationRun, Playbook
 from automation.playbooks import ACTIONS, HTTP_METHODS
+from cases.create import DEFAULT_CASE_STATUS, create_case
 from cases.ledger import append_timeline_event
-from cases.models import TTP, Attachment, Case, CaseStatus, CaseTemplate, Comment, Tag, Task
+from cases.models import (
+    TTP,
+    Attachment,
+    Case,
+    CaseObservable,
+    CaseStatus,
+    CaseTemplate,
+    Comment,
+    Page,
+    Tag,
+    Task,
+    TaskNote,
+)
 from cases.update import CaseUpdateError, apply_case_update
 from cases.views import (
     _as_uuid,
     _observable_affected_cases,
     _observable_cross_case_guard,
+    _resolve_login,
     _resolve_ttp_value,
     _set_observable_fields,
 )
-from core.enums import ALERT_STAGES, PAP_CHOICES, SEVERITY_CHOICES, TLP_CHOICES
+from core.enums import ALERT_STAGES, PAP_CHOICES, SEVERITY_CHOICES, TASK_STATUS_CHOICES, TLP_CHOICES
+from core.serializers import page_json, task_json
 from identity.models import AuditLog, Organisation, User
 from identity.ratelimit import check_login_rate_limit, record_failed_login, record_successful_login
 from identity.scoping import (
     case_visible_q,
     is_case_owner,
+    is_viewer,
     org_filtered,
     org_q,
     resolve_alert,
     resolve_case,
     resolve_observable,
+    resolve_task,
 )
 from identity.services import (
     resolve_organisation,
     serializes_superadmin_changes,
 )
 from ingest.models import IngestionSource
-from observables.extractor import extract_into_case
+from observables.extractor import add_observable_with_status, extract_into_case
 from observables.models import Observable, ObservableType
+from realtime.publisher import publish_case_event
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +120,63 @@ MAX_HEADERS = 64
 #: is capped here rather than trusted to `DATA_UPLOAD_MAX_NUMBER_FIELDS` (1000) — each item costs a
 #: row insert plus a `ttpId` lookup, and no analyst attaches procedures a hundred at a time.
 MAX_BULK_PROCEDURES = 100
+
+
+def _parse_due_date(raw: str | None) -> datetime.datetime | None:
+    """Parse a `YYYY-MM-DD` date string into an aware datetime at 23:59:59 in `settings.TIME_ZONE`.
+
+    The HTML `<input type="date">` submits a day-granularity value. Storing it at end-of-day
+    ensures a task due *today* is not considered "overdue" at 00:00 UTC. Returns `None` for
+    empty/invalid input; callers should treat a parse failure as a field error.
+    """
+    if not raw:
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        naive = datetime.datetime.strptime(raw, "%Y-%m-%d")
+    except ValueError:
+        return None
+    # Make it end-of-day in the project's timezone, then convert to aware UTC for storage.
+    # `timezone.make_aware` uses `settings.TIME_ZONE` when `is_dst` is not provided.
+    end_of_day = timezone.make_aware(
+        datetime.datetime(naive.year, naive.month, naive.day, 23, 59, 59)
+    )
+    return end_of_day
+
+
+def not_viewer(view: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
+    """Deny the viewer (read-only) role every mutating UI view (ADR-006).
+
+    A viewer may read; they may not write anything. The denial is a uniform 404 —
+    the same shape as the case-scoping rule and the playbook gate — so a viewer
+    cannot use the response to learn whether an object exists.
+
+    Applied as the **outermost** decorator, so it runs before method checks and
+    before any parsing: a viewer can never reach validation, a form, or a write
+    path. Declared per view (rather than as middleware) so the gate sits next to
+    the surface it protects; `tests/conformance/test_viewer_readonly_ui.py`
+    enumerates the URLconf and fails if any mutating route is missing it.
+    """
+
+    @wraps(view)
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        if is_viewer(request.user):
+            # Log the *route name*, never `request.path`: `<str:case_id>` accepts `%0A`, which
+            # PATH_INFO decodes, so a viewer could forge extra log lines with a crafted URL
+            # (CWE-117; REVIEW-2026-10-12 L1). Both fields below are server-controlled.
+            match = getattr(request, "resolver_match", None)
+            logger.warning(
+                "viewer denied: %s %s",
+                request.method,
+                match.url_name if match is not None else "?",
+                extra={"user_id": str(request.user.pk)},
+            )
+            return render(request, "ui/404.html", status=404)
+        return view(request, *args, **kwargs)
+
+    return wrapper
 
 
 def _parse_playbook_config(post: Any) -> tuple[dict[str, Any] | None, str | None]:
@@ -192,6 +271,10 @@ def _base_context(request: HttpRequest, **extra: Any) -> dict[str, Any]:
         "severity_labels": SEVERITY_LABELS,
         "severity_names": SEVERITY_NAMES,
         "case_stages": CASE_STAGE_VALUES,
+        # Layer 3 (ADR-006 §4.4): the shift from "a viewer's writes fail" to "a viewer is never
+        # offered one". Nothing is gated on this — the server answers 404 first (Layer 1/2); a
+        # template that forgets it shows a button that 404s, never a hole.
+        "can_mutate": not is_viewer(request.user),
         **extra,
     }
 
@@ -346,6 +429,7 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
     )
 
 
+@not_viewer
 @login_required
 @require_POST
 def alert_escalate(request: HttpRequest, alert_id: str) -> HttpResponse:
@@ -355,7 +439,7 @@ def alert_escalate(request: HttpRequest, alert_id: str) -> HttpResponse:
     observables and appends a timeline entry; a rollback halfway through would leave the alert marked
     `Imported` with no case, which is the one state the caller cannot recover from.
     """
-    alert = resolve_alert(request.user, alert_id)
+    alert = resolve_alert(request.user, alert_id, write=True)
     if alert is None:
         return render(request, "ui/404.html", status=404)
     try:
@@ -374,30 +458,101 @@ def alert_escalate(request: HttpRequest, alert_id: str) -> HttpResponse:
         messages.warning(request, "Escalated, with warnings: " + "; ".join(warnings))
     else:
         messages.success(request, f"Alert escalated into case {case.number}.")
-    return redirect("ui-case-detail", case_id=case.number)
+    return _case_detail_redirect(request, case.number)
 
 
+@not_viewer
 @login_required
 @require_POST
 def alert_merge(request: HttpRequest, alert_id: str) -> HttpResponse:
     """Fold this alert into an existing case."""
-    alert = resolve_alert(request.user, alert_id)
+    alert = resolve_alert(request.user, alert_id, write=True)
     if alert is None:
         return render(request, "ui/404.html", status=404)
     case = resolve_case(request.user, request.POST.get("case_id") or "", write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     with transaction.atomic():
         merge_alert_into_case(alert, case, actor=request.user)
     messages.success(request, f"Alert merged into case {case.number}.")
-    return redirect("ui-case-detail", case_id=case.number)
+    return _case_detail_redirect(request, case.number)
 
 
-@login_required
-@require_GET
-def case_list(request: HttpRequest) -> HttpResponse:
-    """Open cases by default; closed ones on request."""
-    from identity.scoping import case_visible_q
+def _case_create_form_context(
+    post_data: Any,
+    status_options: Any,
+    assignees: Any,
+) -> dict[str, Any]:
+    """Build the context extras for the case create form (page or modal).
+
+    `post_data` is a `QueryDict` (`None` on a GET): `dict(...)` would yield lists and render as
+    `['x']`, so scalars are read with `.get()` (SEC-2026-10-11 N1). The numeric selects fall back
+    to the model defaults, which is what the service applies when the wire omits them.
+    """
+    form_values = {
+        "title": "",
+        "description": "",
+        "summary": "",
+        "severity": "2",
+        "tlp": "2",
+        "pap": "2",
+        "status": DEFAULT_CASE_STATUS,
+        "assignee": "",
+        "tags": "",
+        "flag": "",
+    }
+    if post_data is not None:
+        for key in (
+            "title",
+            "description",
+            "summary",
+            "severity",
+            "tlp",
+            "pap",
+            "status",
+            "assignee",
+            "tags",
+        ):
+            form_values[key] = post_data.get(key, "")
+        form_values["flag"] = "on" if post_data.get("flag") == "on" else ""
+    return {
+        "form_values": form_values,
+        "case_status_options": status_options,
+        "assignees": assignees,
+        "severity_choices": SEVERITY_CHOICES,
+        "tlp_choices": TLP_CHOICES,
+        "pap_choices": PAP_CHOICES,
+    }
+
+
+def _render_case_create_form(
+    request: HttpRequest,
+    post_data: Any,
+    status_options: Any,
+    assignees: Any,
+) -> HttpResponse:
+    """Render the standalone create form page, pre-filled from the submission on an error re-render."""
+    return render(
+        request,
+        "ui/case_create.html",
+        _base_context(request, **_case_create_form_context(post_data, status_options, assignees)),
+    )
+
+
+def _render_case_list(
+    request: HttpRequest,
+    *,
+    open_new_case: bool = False,
+    post_data: Any = None,
+    status_options: Any = None,
+    assignees: Any = None,
+) -> HttpResponse:
+    """Render the case list, optionally with the New-case modal open and pre-filled.
+
+    Only when the user can mutate (not a viewer) do we include the form context;
+    viewers must not trigger those user/status queries at all.
+    """
+    from identity.scoping import case_visible_q, is_viewer
 
     show_closed = request.GET.get("closed") == "1"
     queryset = Case.objects.select_related("status", "assignee", "owner_org").filter(
@@ -405,15 +560,192 @@ def case_list(request: HttpRequest) -> HttpResponse:
     )
     if not show_closed:
         queryset = queryset.filter(closed_date__isnull=True)
-    return render(
-        request,
-        "ui/case_list.html",
-        _base_context(
-            request,
-            cases=queryset.order_by("-severity", "-start_date")[:PAGE_SIZE],
-            show_closed=show_closed,
-        ),
+
+    context = {
+        "cases": queryset.order_by("-severity", "-start_date")[:PAGE_SIZE],
+        "show_closed": show_closed,
+        "open_new_case": open_new_case,
+    }
+
+    # Only include form context for users who can actually create cases.
+    if not is_viewer(request.user):
+        if status_options is None:
+            status_options = CaseStatus.objects.all().order_by("order", "value")
+        if assignees is None:
+            assignees = (
+                User.objects.filter(org=request.user.org, is_active=True)
+                .select_related("org")
+                .order_by("login")[:PAGE_SIZE]
+            )
+        context.update(_case_create_form_context(post_data, status_options, assignees))
+
+    return render(request, "ui/case_list.html", _base_context(request, **context))
+
+
+@login_required
+@require_GET
+def case_list(request: HttpRequest) -> HttpResponse:
+    """Open cases by default; closed ones on request.
+
+    The `new=1` query parameter opens the New-case modal (for the `n` shortcut
+    and for deep-linking into the modal state).
+    """
+    return _render_case_list(request, open_new_case=request.GET.get("new") == "1")
+
+
+@not_viewer
+@login_required
+@require_http_methods(["GET", "POST"])
+def case_create(request: HttpRequest) -> HttpResponse:
+    """§10.2 — Open a case from the UI with no alert behind it.
+
+    The analyst's "phoned in by the helpdesk" path. GET renders the form; POST delegates to
+    `cases.create.create_case`, the same service `POST /api/v1/case` uses, so both surfaces share
+    the field set, the enum bounds, the org-scoped assignee lookup, extraction and the
+    "Case created" ledger entry.
+
+    Uniform 404 for a viewer via `@not_viewer` (ADR-006), before any parsing.
+    """
+    org = request.user.org
+
+    status_options = CaseStatus.objects.all().order_by("order", "value")
+    assignees = (
+        User.objects.filter(org=org, is_active=True)
+        .select_related("org")
+        .order_by("login")[:PAGE_SIZE]
     )
+
+    if request.method == "GET":
+        return _render_case_create_form(request, None, status_options, assignees)
+
+    payload: dict[str, Any] = {
+        "title": (request.POST.get("title") or "").strip()[:500],
+        "description": (request.POST.get("description") or "").strip(),
+        "summary": (request.POST.get("summary") or "").strip(),
+    }
+    for key in ("severity", "tlp", "pap"):
+        raw = request.POST.get(key)
+        if raw not in (None, ""):
+            payload[key] = raw
+    # The form always renders the checkbox, so an absent key means "unchecked".
+    payload["flag"] = request.POST.get("flag") == "on"
+
+    # Origin-aware error re-render: if the POST came from the cases list modal
+    # (origin=cases), re-render the list with the modal open and values kept.
+    # Otherwise (standalone page), re-render the standalone form page.
+    # SEC/UX: a modal error must not dump the user onto a different page,
+    # or silently close and lose their input.
+    def _reject() -> HttpResponse:
+        if request.POST.get("origin") == "cases":
+            return _render_case_list(
+                request,
+                open_new_case=True,
+                post_data=request.POST,
+                status_options=status_options,
+                assignees=assignees,
+            )
+        return _render_case_create_form(request, request.POST, status_options, assignees)
+
+    # Status is bounded to the existing vocabulary so a crafted POST cannot mint one (ADR-002
+    # §D11 keeps the shared service tolerant; the form must not be the thing that mints).
+    status_val = (request.POST.get("status") or "").strip()
+    if status_val:
+        if not CaseStatus.objects.filter(value=status_val).exists():
+            messages.error(request, f"Unknown case status: {status_val}")
+            return _reject()
+        payload["status"] = status_val
+
+    assignee_val = (request.POST.get("assignee") or "").strip()
+    if assignee_val:
+        person = _resolve_login(assignee_val, org=org)
+        if person is None:
+            messages.error(request, "That assignee is not an active user in your organisation.")
+            return _reject()
+        payload["assignee"] = str(person.pk)
+
+    tags_val = (request.POST.get("tags") or "").strip()
+    if tags_val:
+        payload["tags"] = [t.strip() for t in tags_val.split(",") if t.strip()]
+
+    try:
+        # The audit row shares the mutation's transaction (SEC-2026-10-11 L2): a failed audit
+        # insert must roll the create back rather than leave an unlogged case behind.
+        with transaction.atomic():
+            case, warnings = create_case(payload, actor=request.user, org=org)
+            AuditLog.objects.create(
+                actor=request.user,
+                actor_org=org,
+                target_org=case.owner_org,
+                action="case.created",
+                target_type="Case",
+                target_id=str(case.id),
+                ip=request.META.get("REMOTE_ADDR"),
+            )
+    except CaseUpdateError as exc:
+        messages.error(request, exc.message)
+        return _reject()
+
+    if warnings:
+        messages.warning(request, "Created, with warnings: " + "; ".join(warnings))
+    else:
+        messages.success(request, f"Case {case.number} created.")
+    return _case_detail_redirect(request, case.number)
+
+
+# Tab allowlist for case_detail — binding is server-side; never interpolated into a template path.
+CASE_TABS: tuple[tuple[str, str], ...] = (
+    ("general", "General"),
+    ("alerts", "Alerts"),
+    ("tasks", "Tasks"),
+    ("observables", "Observables"),
+    ("ttp", "TTPs"),
+    ("attachments", "Attachments"),
+    ("similar", "Similar"),
+    ("comments", "Comments"),
+    ("audit", "Audit"),
+)
+CASE_TAB_SLUGS: frozenset[str] = frozenset(slug for slug, _ in CASE_TABS)
+
+
+def _case_detail_redirect(request: HttpRequest, case_id: str) -> HttpResponseRedirect:
+    """Redirect back to the case page, staying on the tab the form was submitted from.
+
+    Each panel form carries a hidden `tab` input. It is validated against `CASE_TAB_SLUGS` and
+    dropped when absent or unknown, so the redirect target is always one of the eight known
+    panels — a hostile value can never reach the URL or a template path.
+    """
+    url = reverse("ui-case-detail", kwargs={"case_id": case_id})
+    tab = request.POST.get("tab")
+    if tab in CASE_TAB_SLUGS:
+        url = f"{url}?tab={tab}"
+    return HttpResponseRedirect(url)
+
+
+def _htmx_redirect(url: str) -> HttpResponse:
+    """A `204` that tells HTMX to navigate instead of swapping.
+
+    Used when a modal's POST succeeds: HTMX treats `HX-Redirect` as a full navigation, so the
+    dialog closes, the target page reloads with its flash, and no swap target is needed. A bare
+    `204` would leave the modal open and the list stale — the trap this avoids.
+    """
+    response = HttpResponse(status=204)
+    response["HX-Redirect"] = url
+    return response
+
+
+def _api_error_detail(response: HttpResponse) -> str:
+    """A short human-readable reason from a DRF view invoked as a plain function.
+
+    A DRF `Response` handed straight back from a view function has not been rendered, so reading
+    `.content` raises `ContentNotRenderedError` — turning a rejected upload into a 500 instead of
+    an error message. `.data` is already populated, so prefer the API's own `message` field.
+    """
+    data = getattr(response, "data", None)
+    if isinstance(data, dict):
+        message = data.get("message")
+        if isinstance(message, str) and message:
+            return message[:200]
+    return f"HTTP {response.status_code}"
 
 
 @login_required
@@ -422,38 +754,125 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     """The ledger: timeline, observables, tasks and automation runs for one case."""
     case = resolve_case(request.user, case_id, write=False)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     is_owner = is_case_owner(request.user, case)
     user_org_id = getattr(request.user, "org_id", None)
     is_cross_org = case.owner_org_id != user_org_id
+
+    # Resolve active tab from query string against the allowlist (unknown/missing -> "general").
+    active_tab = request.GET.get("tab")
+    if active_tab not in CASE_TAB_SLUGS:
+        active_tab = "general"
+
+    # Build tab list with counts where applicable
+    alerts_qs = case.alerts.select_related("status", "ingestion_source").order_by("-date")
+    tasks_qs = case.tasks.select_related("assignee").order_by("order", "created_at")
+    observables_qs = case.case_observables.select_related("observable__data_type").order_by(
+        "-created_at"
+    )
+    attachments_qs = case.attachments.select_related("created_by").order_by("-created_at")
+    # Comments tab = the analyst view: notes only, rendered once and not streamed.
+    # Audit tab = the full ledger, and the list `live.js` owns the socket for.
+    comments_qs = (
+        case.timeline_events.filter(kind="comment").select_related("actor").order_by("date", "id")
+    )
+    timeline_qs = case.timeline_events.select_related("actor").order_by("date", "id")
+    audit_logs_qs = AuditLog.objects.filter(target_type="Case", target_id=str(case.id)).order_by(
+        "-created_at"
+    )
+    procedures_count = case.procedures.count()
+
+    tabs = [{"slug": slug, "label": label, "count": None} for slug, label in CASE_TABS]
+    # Inject counts for tabs that have them
+    counts = {
+        "alerts": alerts_qs.count(),
+        "tasks": tasks_qs.count(),
+        "observables": observables_qs.count(),
+        "attachments": attachments_qs.count(),
+        "ttp": procedures_count,
+        # Counts exactly what the Comments panel lists: analyst notes.
+        "comments": comments_qs.count(),
+    }
+    for tab in tabs:
+        if tab["slug"] in counts:
+            tab["count"] = counts[tab["slug"]]
+
+    # The edit-case modal (_case_edit_fields.html) renders the same control set as the
+    # standalone edit page, so it needs the same context. Derived here from `case` because
+    # this is a read view: there is no submission to re-render.
+    case_edit_form_values = {
+        "title": case.title,
+        "description": case.description,
+        "summary": case.summary,
+        "severity": str(case.severity),
+        "tlp": str(case.tlp),
+        "pap": str(case.pap),
+        "flag": "on" if case.flag else "",
+        "status": case.status.value if case.status_id else "",
+        "assignee": case.assignee.login if case.assignee_id else "",
+        "tags": ", ".join(case.tags.values_list("name", flat=True)),
+    }
+
+    case_status_options = list(CaseStatus.objects.filter(hidden=False).order_by("order", "value"))
+
+    # Task tab context: uncapped assignee list for the person picker, and status vocabulary
+    task_assignees = User.objects.filter(org_q("org", request.user), is_active=True).order_by(
+        "login"
+    )
+    task_status_options = TASK_STATUS_CHOICES
+
     return render(
         request,
         "ui/case_detail.html",
         _base_context(
             request,
             case=case,
-            timeline=case.timeline_events.select_related("actor").order_by("date", "id"),
-            observables=case.case_observables.select_related("observable__data_type").order_by(
-                "-created_at"
+            timeline=timeline_qs,
+            comments=comments_qs,
+            observables=observables_qs,
+            tasks=tasks_qs,
+            pages=case.pages.select_related("created_by", "updated_by").order_by(
+                "order", "created_at"
             ),
-            tasks=case.tasks.select_related("assignee").order_by("order", "created_at"),
-            pages=case.pages.select_related("created_by").order_by("order", "-created_at"),
             runs=AutomationRun.objects.filter(case=case)
             .select_related("playbook", "triggered_by_observable")
             .order_by("-created_at"),
             procedures=case.procedures.select_related("ttp").order_by("occur_date", "id"),
             ttps=TTP.objects.order_by("name"),
-            status_choices=CaseStatus.objects.filter(hidden=False).order_by("order", "value"),
+            status_choices=case_status_options,
             assignees=User.objects.filter(org_q("org", request.user), is_active=True).order_by(
                 "login"
             )[:PAGE_SIZE],
             is_owner=is_owner,
             is_cross_org=is_cross_org,
-            attachments=case.attachments.select_related("created_by").order_by("-created_at"),
+            attachments=attachments_qs,
+            alerts=alerts_qs,
+            active_tab=active_tab,
+            tabs=tabs,
+            audit_logs=audit_logs_qs,
+            case_procedure_create_url=reverse(
+                "ui-case-procedure-create", kwargs={"case_id": case.number}
+            ),
+            procedure_create_extra_fields={"tab": "ttp"},
+            # Edit-case modal (case_detail.html §"Edit case"): mirror the edit page's context.
+            form_values=case_edit_form_values,
+            severity_choices=SEVERITY_CHOICES,
+            tlp_choices=TLP_CHOICES,
+            pap_choices=PAP_CHOICES,
+            case_status_options=case_status_options,
+            case_edit_extra_fields={"tab": active_tab},
+            # Observables tab create/edit modals. The per-row Edit gate uses `is_owner` above
+            # (`is_case_owner`, so a superAdmin qualifies), matching this view's owner-org check.
+            data_type_options=ObservableType.objects.order_by("name"),
+            observable_tlp_choices=[c for c in TLP_CHOICES if c[0] <= 3],
+            # Task tab create/edit modal
+            task_assignees=task_assignees,
+            task_status_options=task_status_options,
         ),
     )
 
 
+@not_viewer
 @login_required
 @require_POST
 def case_set_status(request: HttpRequest, case_id: str) -> HttpResponse:
@@ -465,7 +884,7 @@ def case_set_status(request: HttpRequest, case_id: str) -> HttpResponse:
     """
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     warnings: list[str] = []
     stage = resolve_case_status(request.POST.get("stage") or "InProgress", warnings=warnings)
     case.status = stage
@@ -484,9 +903,10 @@ def case_set_status(request: HttpRequest, case_id: str) -> HttpResponse:
         metadata={"stage": stage.stage},
     )
     messages.success(request, f"Case {case.number} is now {stage.value}.")
-    return redirect("ui-case-detail", case_id=case.number)
+    return _case_detail_redirect(request, case.number)
 
 
+@not_viewer
 @login_required
 @require_POST
 def case_comment(request: HttpRequest, case_id: str) -> HttpResponse:
@@ -505,7 +925,7 @@ def case_comment(request: HttpRequest, case_id: str) -> HttpResponse:
     """
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     body = (request.POST.get("body") or "").strip()
     if not body:
         # A 400, not a redirect: HTMX only swaps 2xx, so the flash error below would have nowhere
@@ -513,7 +933,7 @@ def case_comment(request: HttpRequest, case_id: str) -> HttpResponse:
         if request.headers.get("HX-Request"):
             return HttpResponse("A note needs a body.", status=400)
         messages.error(request, "A note needs a body.")
-        return redirect("ui-case-detail", case_id=case.number)
+        return _case_detail_redirect(request, case.number)
     with transaction.atomic():
         Comment.objects.create(case=case, message=body, created_by=request.user)
         event = append_timeline_event(
@@ -524,47 +944,436 @@ def case_comment(request: HttpRequest, case_id: str) -> HttpResponse:
         # that is already on screen.
         return render(request, "ui/_timeline_entry.html", {"event": event})
     messages.success(request, "Note added to the case timeline.")
-    return redirect("ui-case-detail", case_id=case.number)
+    return _case_detail_redirect(request, case.number)
 
 
+@not_viewer
 @login_required
 @require_POST
 def case_task_create(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Add a task. An unrecognised assignee is left unassigned rather than auto-created (ADR-002 §D11)."""
+    """Add a task. An unrecognised assignee is left unassigned rather than auto-created (ADR-002 §D11).
+
+    Extended to accept `description`, `due_date`, `flag`, and a validated `status` (D-1 fix:
+    reject any status not in `TASK_STATUS_CHOICES`). On HTMX error, re-renders the modal body
+    with inline errors; otherwise flashes and redirects.
+    """
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
+
     title = (request.POST.get("title") or "").strip()
     if not title:
-        messages.error(request, "A task needs a title.")
-        return redirect("ui-case-detail", case_id=case.number)
+        errors = {"title": "A task needs a title."}
+        return _render_task_form_error(request, case, errors, request.POST)
+
+    # Validate status against the enum (D-1 fix)
+    status_val = (request.POST.get("status") or "Waiting").strip()
+    valid_statuses = {s for s, _ in TASK_STATUS_CHOICES}
+    if status_val not in valid_statuses:
+        errors = {"status": f"Invalid status: {status_val}"}
+        return _render_task_form_error(request, case, errors, request.POST)
+
+    # Parse due_date (YYYY-MM-DD -> end-of-day aware datetime)
+    due_date_raw = (request.POST.get("due_date") or "").strip()
+    due_date = _parse_due_date(due_date_raw) if due_date_raw else None
+    if due_date_raw and due_date is None:
+        errors = {"due_date": "Invalid date format. Use YYYY-MM-DD."}
+        return _render_task_form_error(request, case, errors, request.POST)
+
+    # Resolve assignee by login (org-scoped; unknown -> unassigned)
     login = (request.POST.get("assignee") or "").strip()
-    Task.objects.create(
+    assignee = (
+        User.objects.filter(org_q("org", request.user), login=login).first() if login else None
+    )
+
+    # Flag checkbox: "on" when checked, absent when unchecked
+    flag = request.POST.get("flag") == "on"
+
+    description = (request.POST.get("description") or "").strip()
+
+    task = Task.objects.create(
         case=case,
         title=title[:500],
-        status=request.POST.get("status") or "Waiting",
-        assignee=User.objects.filter(org_q("org", request.user), login=login).first()
-        if login
-        else None,
-        description=(request.POST.get("description") or "").strip(),
+        description=description,
+        status=status_val,
+        assignee=assignee,
+        due_date=due_date,
+        flag=flag,
     )
+
+    # Publish `task` frame for live list refresh (mirrors `case_page_create`)
+    transaction.on_commit(
+        partial(publish_case_event, str(case.id), "task", {"event": task_json(task)})
+    )
+
+    if request.headers.get("HX-Request"):
+        # A successful modal POST: navigate back to the case (tab preserved) so the dialog closes
+        # and the flash shows. A bare `204` would strand the open modal on screen.
+        return _htmx_redirect(_case_detail_redirect(request, case.number).url)
+
     messages.success(request, "Task added.")
-    return redirect("ui-case-detail", case_id=case.number)
+    return _case_detail_redirect(request, case.number)
 
 
+def _render_task_form_error(
+    request: HttpRequest,
+    case: Case,
+    errors: dict[str, str],
+    post_data: Any,
+    *,
+    task: Task | None = None,
+) -> HttpResponse:
+    """Re-render the task form modal body with errors and submitted values (for HTMX).
+
+    On non-HTMX POST, falls back to flash + redirect (preserves legacy behaviour).
+    If `task` is provided, the template is in edit mode and receives the task for prefill.
+    """
+    if request.headers.get("HX-Request"):
+        # Build form_values dict mirroring what the template expects
+        form_values = {
+            "title": post_data.get("title", ""),
+            "description": post_data.get("description", ""),
+            "due_date": post_data.get("due_date", ""),
+            "assignee": post_data.get("assignee", ""),
+            "status": post_data.get("status", "Waiting"),
+            "flag": "on" if post_data.get("flag") == "on" else "",
+        }
+        # The error body replaces the *existing* modal body (`hx-target="#<modal_id>-body"`), so it
+        # must reproduce the ids the full-page render used: every control references the footer form
+        # via `form="{{ form_id }}"`, and the labels key off `modal_id`. Both are derived from the
+        # path (create vs. edit) and never from the request, so a hostile POST cannot inject an id.
+        if task is not None:
+            modal_id = f"task-edit-{task.id}"
+            form_id = f"task-edit-form-{task.id}"
+        else:
+            modal_id = "task-create-modal"
+            form_id = "task-create-form"
+        return render(
+            request,
+            "ui/_task_form_modal_body.html",
+            {
+                "errors": errors,
+                "form_values": form_values,
+                "task_status_options": TASK_STATUS_CHOICES,
+                # Same uncapped, org-scoped list the tab and detail page pass; without it the
+                # re-rendered assignee <select> would drop every option but "Unassigned".
+                "task_assignees": User.objects.filter(
+                    org_q("org", request.user), is_active=True
+                ).order_by("login"),
+                "case": case,
+                "is_edit": task is not None,
+                "task": task,
+                "modal_id": modal_id,
+                "form_id": form_id,
+            },
+            status=200,
+        )
+    # Non-HTMX fallback
+    for msg in errors.values():
+        messages.error(request, msg)
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_task_edit(request: HttpRequest, task_id: str) -> HttpResponse:
+    """Edit a task (title, description, status, assignee, due_date, flag).
+
+    Resolves the task through its case (org-scoped via `resolve_task`). Same validation
+    and error handling as `case_task_create`. Publishes a `task` frame on success.
+    """
+    task = resolve_task(request.user, task_id, write=True)
+    if task is None:
+        raise Http404()
+    case = task.case
+
+    title = (request.POST.get("title") or "").strip()
+    if not title:
+        errors = {"title": "A task needs a title."}
+        return _render_task_form_error(request, case, errors, request.POST, task=task)
+
+    status_val = (request.POST.get("status") or "Waiting").strip()
+    valid_statuses = {s for s, _ in TASK_STATUS_CHOICES}
+    if status_val not in valid_statuses:
+        errors = {"status": f"Invalid status: {status_val}"}
+        return _render_task_form_error(request, case, errors, request.POST, task=task)
+
+    due_date_raw = (request.POST.get("due_date") or "").strip()
+    due_date = _parse_due_date(due_date_raw) if due_date_raw else None
+    if due_date_raw and due_date is None:
+        errors = {"due_date": "Invalid date format. Use YYYY-MM-DD."}
+        return _render_task_form_error(request, case, errors, request.POST, task=task)
+
+    login = (request.POST.get("assignee") or "").strip()
+    assignee = (
+        User.objects.filter(org_q("org", request.user), login=login).first() if login else None
+    )
+
+    flag = request.POST.get("flag") == "on"
+    description = (request.POST.get("description") or "").strip()
+
+    task.title = title[:500]
+    task.description = description
+    task.status = status_val
+    task.assignee = assignee
+    task.due_date = due_date
+    task.flag = flag
+    task.save(
+        update_fields=[
+            "title",
+            "description",
+            "status",
+            "assignee",
+            "due_date",
+            "flag",
+            "updated_at",
+        ]
+    )
+
+    transaction.on_commit(
+        partial(publish_case_event, str(case.id), "task", {"event": task_json(task)})
+    )
+
+    if request.headers.get("HX-Request"):
+        return _htmx_redirect(_case_detail_redirect(request, case.number).url)
+
+    messages.success(request, "Task updated.")
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_task_delete(request: HttpRequest, task_id: str) -> HttpResponse:
+    """Delete a task (scoped to the user's org via `resolve_task`).
+
+    Resolves and records the case ID *before* deletion (since `task.case` becomes
+    inaccessible after). Publishes a `task` frame, then redirects to the case detail
+    preserving `?tab=tasks`.
+    """
+    task = resolve_task(request.user, task_id, write=True)
+    if task is None:
+        raise Http404()
+    case = task.case
+    case_number = case.number
+    case_id_str = str(case.id)
+
+    task.delete()
+
+    transaction.on_commit(
+        partial(
+            publish_case_event,
+            case_id_str,
+            "task",
+            {"event": {"id": task_id, "deleted": True}},
+        )
+    )
+
+    messages.success(request, "Task deleted.")
+    return _case_detail_redirect(request, case_number)
+
+
+@not_viewer
 @login_required
 @require_POST
 def case_task_toggle(request: HttpRequest, case_id: str, task_id: str) -> HttpResponse:
     """Flip a task between `Waiting` and `Completed`."""
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     task = get_object_or_404(Task, pk=task_id, case=case)
     task.status = "Waiting" if task.status == "Completed" else "Completed"
     task.save(update_fields=["status", "updated_at"])
-    return HttpResponseRedirect(reverse("ui-case-detail", kwargs={"case_id": case.number}))
+
+    # Publish `task` frame for live list refresh
+    transaction.on_commit(
+        partial(publish_case_event, str(case.id), "task", {"event": task_json(task)})
+    )
+
+    return _case_detail_redirect(request, case.number)
 
 
+@login_required
+@require_GET
+def task_detail(request: HttpRequest, task_id: str) -> HttpResponse:
+    """Task detail page: all fields + notes log + add-note composer.
+
+    Viewer-readable (no `@not_viewer`). Resolves the task via `resolve_task` (read
+    access through case visibility). Renders `ui/task_detail.html`.
+    """
+    task = resolve_task(request.user, task_id, write=False)
+    if task is None:
+        raise Http404()
+    case = task.case
+    can_mutate = not is_viewer(request.user)
+
+    notes = task.notes.select_related("created_by").order_by("created_at")
+
+    return render(
+        request,
+        "ui/task_detail.html",
+        _base_context(
+            request,
+            task=task,
+            case=case,
+            notes=notes,
+            can_mutate=can_mutate,
+            task_status_options=TASK_STATUS_CHOICES,
+            # The edit modal's assignee picker needs the same uncapped, org-scoped list the tab
+            # passes; without it the <select> would render empty and a save would clear the
+            # assignee. Same query as `case_detail`'s `task_assignees`.
+            task_assignees=User.objects.filter(org_q("org", request.user), is_active=True).order_by(
+                "login"
+            ),
+        ),
+    )
+
+
+@not_viewer
+@login_required
+@require_POST
+def task_note(request: HttpRequest, task_id: str) -> HttpResponse:
+    """Append a note to a task.
+
+    Validates non-empty body. In one transaction: creates `TaskNote` (+ `created_by`)
+    and mirrors into the case ledger via `append_timeline_event(kind="task-note")`.
+    On HTMX: returns 204 with `HX-Redirect` to the task detail URL (avoids depending
+    on a template the frontend owns). On non-HTMX: redirects with flash.
+    """
+    task = resolve_task(request.user, task_id, write=True)
+    if task is None:
+        raise Http404()
+    case = task.case
+
+    body = (request.POST.get("body") or "").strip()
+    if not body:
+        if request.headers.get("HX-Request"):
+            return HttpResponse("A note needs a body.", status=400)
+        messages.error(request, "A note needs a body.")
+        return redirect("ui-task-detail", task_id=task.id)
+
+    with transaction.atomic():
+        note = TaskNote.objects.create(task=task, message=body, created_by=request.user)
+        append_timeline_event(
+            case,
+            title="Task note",
+            description=body[:10000],
+            kind="task-note",
+            actor=request.user,
+            metadata={"task_id": str(task.id), "note_id": str(note.id)},
+        )
+
+    task_detail_url = reverse("ui-task-detail", kwargs={"task_id": task.id})
+    if request.headers.get("HX-Request"):
+        # Reuse the shared 204+HX-Redirect helper so the note composer behaves like the task modals.
+        return _htmx_redirect(task_detail_url)
+
+    messages.success(request, "Note added.")
+    return redirect("ui-task-detail", task_id=task.id)
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_page_create(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Add a TheHive-style page to the case from the UI.
+
+    `POST /case/{id}/page` is JSON-only, so a browser form cannot drive it; this writes the same row
+    through the same model instead — the same reason `case_task_create` writes a `Task` directly.
+
+    `order` is a required API field that the UI never shows, so a new page is *appended* (after the
+    highest existing `order`) rather than left at the model default: at `order=0` every UI-created
+    page would tie with the API-created ones and the list would silently re-order itself.
+
+    The insert publishes the same `page` frame the API publishes, so a colleague with the case open
+    sees it without a reload; the author already sees it through the POST→redirect.
+    """
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        raise Http404()
+    title = (request.POST.get("title") or "").strip()
+    if not title:
+        messages.error(request, "A page needs a title.")
+        return _case_detail_redirect(request, case.number)
+    # Do not trust the form with `order`: it is not rendered, and a hidden field would let a crafted
+    # POST re-order the analyst's pages. The highest existing `order` wins.
+    last = case.pages.aggregate(highest=Max("order"))["highest"]
+    page = Page.objects.create(
+        case=case,
+        title=title[:500],
+        content=(request.POST.get("content") or "").strip(),
+        category=(request.POST.get("category") or "").strip()[:100],
+        order=0 if last is None else last + 1,
+        created_by=request.user,
+    )
+    transaction.on_commit(
+        partial(publish_case_event, str(case.id), "page", {"event": page_json(page)})
+    )
+    messages.success(request, f"Page '{page.title}' added.")
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_page_update(request: HttpRequest, case_id: str, page_id: str) -> HttpResponse:
+    """Save an edited page (title, Markdown body, category).
+
+    One form owns all three fields, so they are written unconditionally instead of field-by-field the
+    way the API's `PATCH` does: an empty *submitted* textarea means the analyst cleared the body,
+    which is not the same thing as "field absent".
+
+    `order` is excluded from `update_fields` on purpose (plan N1): editing a body must not undo an
+    arrangement the analyst made through the API.
+
+    `updated_by` is stamped so the entry can show "edited by …" — the model carries the field and the
+    API's `PATCH` sets it, but nothing has ever rendered it.
+    """
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        raise Http404()
+    page = get_object_or_404(Page, pk=page_id, case=case)
+    title = (request.POST.get("title") or "").strip()
+    if not title:
+        messages.error(request, "A page needs a title.")
+        return _case_detail_redirect(request, case.number)
+    page.title = title[:500]
+    page.content = (request.POST.get("content") or "").strip()
+    page.category = (request.POST.get("category") or "").strip()[:100]
+    page.updated_by = request.user
+    page.save(update_fields=["title", "content", "category", "updated_by", "updated_at"])
+    transaction.on_commit(
+        partial(publish_case_event, str(case.id), "page", {"event": page_json(page)})
+    )
+    messages.success(request, f"Page '{page.title}' updated.")
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_page_delete(request: HttpRequest, case_id: str, page_id: str) -> HttpResponse:
+    """Delete a page.
+
+    Reached *through* its case (`pk` **and** `case=case`), so a page id belonging to another case — or
+    another tenant — is a 404 rather than a deletion.
+
+    Unlike create and update this publishes nothing, matching the API's `DELETE`, which has never
+    emitted a frame. A page deleted here therefore leaves a colleague's open list on their next load
+    (plan R2) rather than mid-edit.
+    """
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        raise Http404()
+    page = get_object_or_404(Page, pk=page_id, case=case)
+    title = page.title
+    page.delete()
+    messages.success(request, f"Deleted page '{title}'.")
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
 @login_required
 @require_POST
 def case_extract_observables(request: HttpRequest, case_id: str) -> HttpResponse:
@@ -576,14 +1385,14 @@ def case_extract_observables(request: HttpRequest, case_id: str) -> HttpResponse
     """
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     with transaction.atomic():
         found = extract_into_case(case, case.title, case.description)
     messages.success(
         request,
         f"Extracted {len(found)} new artifact(s); automation dispatched for each new link.",
     )
-    return redirect("ui-case-detail", case_id=case.number)
+    return _case_detail_redirect(request, case.number)
 
 
 @login_required
@@ -647,6 +1456,7 @@ def playbook_list(request: HttpRequest) -> HttpResponse:
     )
 
 
+@not_viewer
 @login_required
 @require_http_methods(["GET", "POST"])
 def playbook_create(request: HttpRequest) -> HttpResponse:
@@ -710,6 +1520,7 @@ def playbook_create(request: HttpRequest) -> HttpResponse:
     return redirect("ui-playbook-list")
 
 
+@not_viewer
 @login_required
 def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
     """View or edit a playbook.
@@ -844,6 +1655,7 @@ def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
     return redirect("ui-playbook-detail", playbook_id=playbook_id)
 
 
+@not_viewer
 @login_required
 @require_http_methods(["GET", "POST"])
 def playbook_edit(request: HttpRequest, playbook_id: str) -> HttpResponse:
@@ -910,6 +1722,7 @@ def playbook_edit(request: HttpRequest, playbook_id: str) -> HttpResponse:
     return redirect("ui-playbook-detail", playbook_id=playbook_id)
 
 
+@not_viewer
 @login_required
 @require_POST
 def playbook_delete(request: HttpRequest, playbook_id: str) -> HttpResponse:
@@ -935,6 +1748,7 @@ def playbook_delete(request: HttpRequest, playbook_id: str) -> HttpResponse:
     return redirect("ui-playbook-list")
 
 
+@not_viewer
 @login_required
 @require_POST
 def playbook_run(request: HttpRequest, playbook_id: str) -> HttpResponse:
@@ -1004,7 +1818,7 @@ def case_export(request: HttpRequest, case_id: str) -> HttpResponse:
     """Download case export (JSON)."""
     case = resolve_case(request.user, case_id, write=False)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     from cases.views import _case_export_document
 
     doc = _case_export_document(case)
@@ -1024,7 +1838,7 @@ def case_tags(request: HttpRequest, case_id: str) -> HttpResponse:
     """Manage tags on a case."""
     case = resolve_case(request.user, case_id, write=False)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     tags = Tag.objects.all().order_by("name")
     case_tag_ids = set(case.tags.values_list("id", flat=True))
     return render(
@@ -1039,13 +1853,14 @@ def case_tags(request: HttpRequest, case_id: str) -> HttpResponse:
     )
 
 
+@not_viewer
 @login_required
 @require_POST
 def case_tag_toggle(request: HttpRequest, case_id: str, tag_id: str) -> HttpResponse:
     """Add or remove a tag from a case."""
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     tag = get_object_or_404(Tag, pk=tag_id)
     if tag in case.tags.all():
         case.tags.remove(tag)
@@ -1056,12 +1871,13 @@ def case_tag_toggle(request: HttpRequest, case_id: str, tag_id: str) -> HttpResp
     return redirect("ui-case-tags", case_id=case.number)
 
 
+@not_viewer
 @login_required
 def case_apply_template(request: HttpRequest, case_id: str) -> HttpResponse:
     """Apply a case template to a case."""
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     if request.method == "GET":
         templates = CaseTemplate.objects.all().order_by("name")
         return render(
@@ -1079,7 +1895,7 @@ def case_apply_template(request: HttpRequest, case_id: str) -> HttpResponse:
 
     _apply_template(case, template, actor=request.user)
     messages.success(request, f"Applied template '{template.name}' to case {case.number}.")
-    return redirect("ui-case-detail", case_id=case.number)
+    return _case_detail_redirect(request, case.number)
 
 
 # --- Case Templates ---
@@ -1151,6 +1967,7 @@ def _parse_template_form(request: HttpRequest) -> dict:
     }
 
 
+@not_viewer
 @login_required
 def case_template_create(request: HttpRequest) -> HttpResponse:
     """Create a case template.
@@ -1180,6 +1997,7 @@ def case_template_create(request: HttpRequest) -> HttpResponse:
     return redirect("ui-case-template-list")
 
 
+@not_viewer
 @login_required
 def case_template_detail(request: HttpRequest, template_id: str) -> HttpResponse:
     """View a case template."""
@@ -1198,6 +2016,7 @@ def case_template_detail(request: HttpRequest, template_id: str) -> HttpResponse
     )
 
 
+@not_viewer
 @login_required
 @require_http_methods(["GET", "POST"])
 def case_template_edit(request: HttpRequest, template_id: str) -> HttpResponse:
@@ -1258,6 +2077,7 @@ def case_template_edit(request: HttpRequest, template_id: str) -> HttpResponse:
     return redirect("ui-case-template-detail", template_id=template.id)
 
 
+@not_viewer
 @login_required
 @require_POST
 def case_template_delete(request: HttpRequest, template_id: str) -> HttpResponse:
@@ -1295,6 +2115,7 @@ def tag_list(request: HttpRequest) -> HttpResponse:
     )
 
 
+@not_viewer
 @login_required
 def tag_create(request: HttpRequest) -> HttpResponse:
     """Create a tag."""
@@ -1312,6 +2133,7 @@ def tag_create(request: HttpRequest) -> HttpResponse:
     return redirect("ui-tag-list")
 
 
+@not_viewer
 @login_required
 def tag_detail(request: HttpRequest, tag_id: str) -> HttpResponse:
     """View or edit a tag."""
@@ -1331,6 +2153,7 @@ def tag_detail(request: HttpRequest, tag_id: str) -> HttpResponse:
     return redirect("ui-tag-detail", tag_id=tag.id)
 
 
+@not_viewer
 @login_required
 @require_POST
 def tag_delete(request: HttpRequest, tag_id: str) -> HttpResponse:
@@ -1400,6 +2223,7 @@ def observable_detail(request: HttpRequest, observable_id: str) -> HttpResponse:
 # =============================================================================
 
 
+@not_viewer
 @login_required
 @require_POST
 def alert_status(request: HttpRequest, alert_id: str) -> HttpResponse:
@@ -1410,7 +2234,7 @@ def alert_status(request: HttpRequest, alert_id: str) -> HttpResponse:
     system-assigned by escalation) so a garbage value cannot auto-create a junk
     status (ADR-002 §D11 tolerance in the API path).
     """
-    alert = resolve_alert(request.user, alert_id)
+    alert = resolve_alert(request.user, alert_id, write=True)
     if alert is None:
         return render(request, "ui/404.html", status=404)
 
@@ -1457,6 +2281,7 @@ def alert_status(request: HttpRequest, alert_id: str) -> HttpResponse:
     return redirect("ui-alert-detail", alert_id=alert.id)
 
 
+@not_viewer
 @login_required
 @require_http_methods(["GET", "POST"])
 def case_edit(request: HttpRequest, case_id: str) -> HttpResponse:
@@ -1468,7 +2293,7 @@ def case_edit(request: HttpRequest, case_id: str) -> HttpResponse:
     """
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
 
     # Context values for the form (shared by GET and error re-render)
     status_options = CaseStatus.objects.all().order_by("order", "value")
@@ -1584,7 +2409,7 @@ def case_edit(request: HttpRequest, case_id: str) -> HttpResponse:
         return _render_case_edit_form(request, case, status_options, assignees, request.POST)
 
     messages.success(request, f"Case {case.number} updated.")
-    return redirect("ui-case-detail", case_id=case.number)
+    return _case_detail_redirect(request, case.number)
 
 
 def _render_case_edit_form(
@@ -1628,6 +2453,7 @@ def _render_case_edit_form(
     )
 
 
+@not_viewer
 @login_required
 @require_http_methods(["GET", "POST"])
 def observable_edit(request: HttpRequest, observable_id: str) -> HttpResponse:
@@ -1637,7 +2463,7 @@ def observable_edit(request: HttpRequest, observable_id: str) -> HttpResponse:
     editable set is applied through `_set_observable_fields` so normalisation, validation and
     the wire shape match the API exactly (P2 C3).
     """
-    observable = resolve_observable(request.user, observable_id)
+    observable = resolve_observable(request.user, observable_id, write=True)
     if observable is None:
         return render(request, "ui/404.html", status=404)
 
@@ -1786,6 +2612,7 @@ def _render_observable_edit_form(
     )
 
 
+@not_viewer
 @login_required
 @require_POST
 def observable_delete(request: HttpRequest, observable_id: str) -> HttpResponse:
@@ -1794,7 +2621,7 @@ def observable_delete(request: HttpRequest, observable_id: str) -> HttpResponse:
     Reads `force` from POST data. If the observable is linked to multiple cases
     and `force` is not set, refuses with a message and redirects back.
     """
-    observable = resolve_observable(request.user, observable_id)
+    observable = resolve_observable(request.user, observable_id, write=True)
     if observable is None:
         return render(request, "ui/404.html", status=404)
 
@@ -1825,15 +2652,242 @@ def observable_delete(request: HttpRequest, observable_id: str) -> HttpResponse:
     return redirect("ui-observable-list")
 
 
+# --- Case-scoped observable CRUD (tab affordances) ---
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_observable_create(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Add a manually supplied artifact to a case from the Observables tab.
+
+    Mirrors the API's `POST /case/{id}/observable` but accepts a plain form POST so the
+    browser gets a redirect + message. Delegates to `add_observable_with_status` (the same
+    service the API's `add_observable` wraps) so normalization, dedupe, linking and automation
+    dispatch are identical.
+    """
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        raise Http404()
+
+    type_name = (request.POST.get("dataType") or "").strip()
+    value = (request.POST.get("data") or "").strip()
+    if not value:
+        messages.error(request, "An artifact needs a value.")
+        return _case_detail_redirect(request, case.number)
+
+    with transaction.atomic():
+        resolved = add_observable_with_status(case, type_name, value)
+    if resolved is None:
+        messages.error(request, f"Unknown artifact type: {type_name!r}")
+        return _case_detail_redirect(request, case.number)
+    observable, created = resolved
+
+    # The optional fields are applied ONLY when the artifact row is brand new. A known value is
+    # deduped per org (`resolve_observable`) and may already be shared by other cases, so re-adding
+    # it here must link it and stop — applying the form's defaults would reset the message/TLP/PAP/
+    # enrichment the other cases rely on, and would do so without the edit route's force guard.
+    if not created:
+        messages.success(request, "Artifact already known — linked to this case.")
+        return _case_detail_redirect(request, case.number)
+
+    # Optional fields: message, tlp, pap, ioc, sighted, ignoreSimilarity, enrichment_data
+    payload: dict[str, Any] = {}
+    if "message" in request.POST:
+        payload["message"] = (request.POST.get("message") or "").strip()
+    if "tlp" in request.POST and request.POST.get("tlp") != "":
+        try:
+            payload["tlp"] = int(request.POST.get("tlp"))
+        except ValueError:
+            messages.error(request, "Invalid value for tlp")
+            return _case_detail_redirect(request, case.number)
+    if "pap" in request.POST and request.POST.get("pap") != "":
+        try:
+            payload["pap"] = int(request.POST.get("pap"))
+        except ValueError:
+            messages.error(request, "Invalid value for pap")
+            return _case_detail_redirect(request, case.number)
+    for key in ("ioc", "sighted", "ignoreSimilarity"):
+        if key in request.POST:
+            payload[key] = request.POST.get(key) == "on"
+
+    enrichment_touched = "enrichment_data" in request.POST
+    parsed_enrichment = None
+    if enrichment_touched:
+        raw_json = (request.POST.get("enrichment_data") or "").strip()
+        if raw_json:
+            import json
+
+            try:
+                parsed_enrichment = json.loads(raw_json)
+            except json.JSONDecodeError:
+                messages.error(request, "Enrichment data is not valid JSON.")
+                return _case_detail_redirect(request, case.number)
+        else:
+            parsed_enrichment = {}
+        if not isinstance(parsed_enrichment, dict):
+            messages.error(request, "Enrichment data must be a JSON object.")
+            return _case_detail_redirect(request, case.number)
+
+    fields = _set_observable_fields(observable, payload)
+    if isinstance(fields, Response):
+        messages.error(request, fields.data.get("message", "Validation failed"))
+        return _case_detail_redirect(request, case.number)
+    if enrichment_touched:
+        observable.enrichment_data = parsed_enrichment
+        fields = [*fields, "enrichment_data"]
+    if fields:
+        observable.save(update_fields=[*fields, "updated_at"])
+
+    messages.success(request, "Artifact added.")
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_observable_update(
+    request: HttpRequest, case_id: str, observable_id: uuid.UUID
+) -> HttpResponse:
+    """Edit an artifact's editable fields from the Observables tab.
+
+    The observable is reached *through* the case (CaseObservable link), so a foreign id 404s.
+    Edit is owner-org-only (parity with the standalone detail page): a share-org writer may add/
+    remove but not edit another org's artifact.
+    """
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        raise Http404()
+
+    link = (
+        CaseObservable.objects.filter(case=case, observable_id=observable_id)
+        .select_related("observable")
+        .first()
+    )
+    if link is None:
+        raise Http404()
+    observable = link.observable
+
+    # Owner-org-only edit (Q5): share-org writers can add/remove but not edit. `is_case_owner`
+    # is the app's own predicate (case owner org, or a `superAdmin` role) — not Django's
+    # `is_superuser` flag, which this product never sets, so using it would 404 every superAdmin.
+    # An observable is always created with its case's `owner_org` (`add_observable`), so the case
+    # owner and the observable owner are the same org here.
+    if not is_case_owner(request.user, case):
+        raise Http404()
+
+    force = (request.POST.get("force") or "").lower() in ("on", "1", "true", "yes")
+    guard = _observable_cross_case_guard(observable, force)
+    if guard is not None:
+        messages.error(request, guard.data.get("message", "This observable is shared."))
+        return _case_detail_redirect(request, case.number)
+
+    # Build payload exactly like observable_edit (data is immutable)
+    payload: dict[str, Any] = {}
+    if "message" in request.POST:
+        payload["message"] = (request.POST.get("message") or "").strip()
+    if "dataType" in request.POST and (request.POST.get("dataType") or "").strip():
+        payload["dataType"] = request.POST["dataType"].strip()
+
+    for key in ("tlp", "pap"):
+        raw = request.POST.get(key)
+        if raw is not None and raw != "":
+            try:
+                payload[key] = int(raw)
+            except ValueError:
+                messages.error(request, f"Invalid value for {key}")
+                return _case_detail_redirect(request, case.number)
+
+    for key in ("ioc", "sighted", "ignoreSimilarity"):
+        if key in request.POST:
+            payload[key] = request.POST.get(key) == "on"
+
+    enrichment_touched = "enrichment_data" in request.POST
+    parsed_enrichment = None
+    if enrichment_touched:
+        raw_json = (request.POST.get("enrichment_data") or "").strip()
+        if raw_json:
+            import json
+
+            try:
+                parsed_enrichment = json.loads(raw_json)
+            except json.JSONDecodeError:
+                messages.error(request, "Enrichment data is not valid JSON.")
+                return _case_detail_redirect(request, case.number)
+        else:
+            parsed_enrichment = {}
+        if not isinstance(parsed_enrichment, dict):
+            messages.error(request, "Enrichment data must be a JSON object.")
+            return _case_detail_redirect(request, case.number)
+
+    fields = _set_observable_fields(observable, payload)
+    if isinstance(fields, Response):
+        messages.error(request, fields.data.get("message", "Validation failed"))
+        return _case_detail_redirect(request, case.number)
+    if enrichment_touched:
+        observable.enrichment_data = parsed_enrichment
+        fields = [*fields, "enrichment_data"]
+    if not fields:
+        messages.error(request, "No updatable field supplied.")
+        return _case_detail_redirect(request, case.number)
+
+    with transaction.atomic():
+        observable.save(update_fields=[*fields, "updated_at"])
+
+    messages.success(request, "Observable updated.")
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_observable_remove(
+    request: HttpRequest, case_id: str, observable_id: uuid.UUID
+) -> HttpResponse:
+    """Remove an artifact from a case (non-destructive unlink, Q1).
+
+    Deletes the CaseObservable link only; the Observable survives on its other cases.
+    Any case writer may unlink (Q5); no force guard (unlinking is a case-membership op).
+    Emits a ledger event (R3).
+    """
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        raise Http404()
+
+    link = (
+        CaseObservable.objects.filter(case=case, observable_id=observable_id)
+        .select_related("observable")
+        .first()
+    )
+    if link is None:
+        raise Http404()
+
+    observable = link.observable
+
+    with transaction.atomic():
+        link.delete()
+        append_timeline_event(
+            case,
+            title=f"Artifact removed: {observable.data_type.name} {observable.data}",
+            kind="artifact-removed",
+            actor=request.user,
+            metadata={"observable_id": str(observable.id)},
+        )
+
+    messages.success(request, "Artifact removed from case.")
+    return _case_detail_redirect(request, case.number)
+
+
 # --- Case share management (P7) ---
 
 
+@not_viewer
 @login_required
 def case_share_list(request: HttpRequest, case_id: str) -> HttpResponse:
     """List and manage case shares (owner org only)."""
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     if not is_case_owner(request.user, case):
         return render(request, "ui/404.html", status=404)
 
@@ -1883,13 +2937,14 @@ def case_share_list(request: HttpRequest, case_id: str) -> HttpResponse:
     )
 
 
+@not_viewer
 @login_required
 @require_POST
 def case_share_revoke(request: HttpRequest, case_id: str, share_id: str) -> HttpResponse:
     """Revoke a case share (owner org only)."""
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     if not is_case_owner(request.user, case):
         return render(request, "ui/404.html", status=404)
 
@@ -1927,6 +2982,7 @@ def taxonomy(request: HttpRequest) -> HttpResponse:
     )
 
 
+@not_viewer
 @login_required
 def case_merge(request: HttpRequest, case_id: str) -> HttpResponse:
     """Merge cases via UI."""
@@ -1934,7 +2990,7 @@ def case_merge(request: HttpRequest, case_id: str) -> HttpResponse:
 
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     if request.method == "GET":
         # Show merge form with candidate cases
         candidates = (
@@ -1958,7 +3014,7 @@ def case_merge(request: HttpRequest, case_id: str) -> HttpResponse:
         with transaction.atomic():
             merged = merge_cases([target, case], actor=request.user)
         messages.success(request, f"Merged case {case.number} into {merged.number}.")
-        return redirect("ui-case-detail", case_id=merged.number)
+        return _case_detail_redirect(request, merged.number)
     except ValueError as exc:
         messages.error(request, str(exc))
         return redirect("ui-case-merge", case_id=case.number)
@@ -1969,7 +3025,7 @@ def case_merge(request: HttpRequest, case_id: str) -> HttpResponse:
 def case_attachment_list(request: HttpRequest, case_id: str) -> HttpResponse:
     case = resolve_case(request.user, case_id, write=False)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     return render(
         request,
         "ui/case_attachments.html",
@@ -1977,6 +3033,7 @@ def case_attachment_list(request: HttpRequest, case_id: str) -> HttpResponse:
     )
 
 
+@not_viewer
 @login_required
 @require_POST
 def case_attachment_upload(request: HttpRequest, case_id: str) -> HttpResponse:
@@ -1984,15 +3041,15 @@ def case_attachment_upload(request: HttpRequest, case_id: str) -> HttpResponse:
 
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     # The API view expects multipart/form-data with 'attachments' field
     # We just pass through
     response = api_view(request, case_id=case.id)
     if response.status_code == 201:
         messages.success(request, "Attachment uploaded.")
     else:
-        messages.error(request, f"Upload failed: {response.content.decode()[:200]}")
-    return redirect("ui-case-detail", case_id=case.number)
+        messages.error(request, f"Upload failed: {_api_error_detail(response)}")
+    return _case_detail_redirect(request, case.number)
 
 
 @login_required
@@ -2004,10 +3061,11 @@ def case_attachment_download(
 
     case = resolve_case(request.user, case_id, write=False)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     return api_view(request, case_id=case_id, attachment_id=attachment_id)
 
 
+@not_viewer
 @login_required
 @require_POST
 def case_attachment_delete(request: HttpRequest, case_id: str, attachment_id: str) -> HttpResponse:
@@ -2023,14 +3081,14 @@ def case_attachment_delete(request: HttpRequest, case_id: str, attachment_id: st
     """
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     attachment = get_object_or_404(Attachment, pk=attachment_id, case=case)
     name = attachment.name
     path = attachment.path
     attachment.delete()
     default_storage.delete(path)
     messages.success(request, f"Deleted attachment '{name}'.")
-    return redirect("ui-case-detail", case_id=case.number)
+    return _case_detail_redirect(request, case.number)
 
 
 @login_required
@@ -2041,10 +3099,11 @@ def case_attachment_detail(request: HttpRequest, case_id: str, attachment_id: st
 
     case = resolve_case(request.user, case_id, write=False)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
     return api_view(request, case_id=case_id, attachment_id=attachment_id)
 
 
+@not_viewer
 @login_required
 @require_POST
 def case_procedure_create(request: HttpRequest, case_id: str) -> HttpResponse:
@@ -2058,13 +3117,13 @@ def case_procedure_create(request: HttpRequest, case_id: str) -> HttpResponse:
 
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
 
     # Build payload from form fields (matching TheHive wire keys for parse_procedure)
     pattern_id = (request.POST.get("patternId") or "").strip()
     if not pattern_id:
         messages.error(request, "Invalid patternId: ATT&CK ID is required")
-        return redirect("ui-case-detail", case_id=case.number)
+        return _case_detail_redirect(request, case.number)
 
     payload = {
         "occurDate": request.POST.get("occurDate") or None,
@@ -2079,7 +3138,7 @@ def case_procedure_create(request: HttpRequest, case_id: str) -> HttpResponse:
     if error is not None:
         field, message = error
         messages.error(request, f"Invalid {field}: {message}")
-        return redirect("ui-case-detail", case_id=case.number)
+        return _case_detail_redirect(request, case.number)
 
     try:
         with transaction.atomic():
@@ -2088,12 +3147,13 @@ def case_procedure_create(request: HttpRequest, case_id: str) -> HttpResponse:
         # The exception text can carry schema/SQL detail; keep it in the log, not in the flash.
         logger.exception("procedure create failed", extra={"case_id": str(case.id)})
         messages.error(request, "Could not attach the procedure.")
-        return redirect("ui-case-detail", case_id=case.number)
+        return _case_detail_redirect(request, case.number)
 
     messages.success(request, "Procedure attached to case.")
-    return redirect("ui-case-detail", case_id=case.number)
+    return _case_detail_redirect(request, case.number)
 
 
+@not_viewer
 @login_required
 @require_POST
 def case_procedures_create(request: HttpRequest, case_id: str) -> HttpResponse:
@@ -2108,7 +3168,7 @@ def case_procedures_create(request: HttpRequest, case_id: str) -> HttpResponse:
 
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
-        return render(request, "ui/404.html", status=404)
+        raise Http404()
 
     # Collect repeated fields — the simplest correct option: indexed fields like patternId_0, patternId_1...
     # Also support list-style field names for compatibility.
@@ -2133,11 +3193,11 @@ def case_procedures_create(request: HttpRequest, case_id: str) -> HttpResponse:
 
     if not item_indices:
         messages.error(request, "No procedures provided.")
-        return redirect("ui-case-detail", case_id=case.number)
+        return _case_detail_redirect(request, case.number)
 
     if len(item_indices) > MAX_BULK_PROCEDURES:
         messages.error(request, f"Too many procedures in one request (max {MAX_BULK_PROCEDURES}).")
-        return redirect("ui-case-detail", case_id=case.number)
+        return _case_detail_redirect(request, case.number)
 
     # Hoist the repeated-field reads out of the loop: `post.getlist` re-walks the QueryDict on every
     # call, which made the item loop quadratic in the number of submitted fields.
@@ -2214,14 +3274,14 @@ def case_procedures_create(request: HttpRequest, case_id: str) -> HttpResponse:
         # Same rule as the single-item path: the exception text stays out of the flash message.
         logger.exception("bulk procedure create aborted", extra={"case_id": str(case.id)})
         messages.error(request, "Could not attach the procedures.")
-        return redirect("ui-case-detail", case_id=case.number)
+        return _case_detail_redirect(request, case.number)
 
     if created_count:
         messages.success(request, f"Attached {created_count} procedure(s) to case.")
     if error_count:
         messages.warning(request, f"{error_count} procedure(s) had errors and were skipped.")
 
-    return redirect("ui-case-detail", case_id=case.number)
+    return _case_detail_redirect(request, case.number)
 
 
 # =============================================================================
@@ -2254,6 +3314,7 @@ def _org_blockers_text(org: object) -> str:
     return ", ".join(parts)
 
 
+@not_viewer
 @login_required
 def settings_organisations(request: HttpRequest) -> HttpResponse:
     """Organisations list + create (superAdmin only)."""
@@ -2312,6 +3373,7 @@ def settings_organisations(request: HttpRequest) -> HttpResponse:
     )
 
 
+@not_viewer
 @login_required
 def settings_organisations_edit(request: HttpRequest, org_id: str) -> HttpResponse:
     """Edit an organisation (superAdmin only)."""
@@ -2357,6 +3419,7 @@ def settings_organisations_edit(request: HttpRequest, org_id: str) -> HttpRespon
     )
 
 
+@not_viewer
 @login_required
 @require_POST
 def settings_organisations_delete(request: HttpRequest, org_id: str) -> HttpResponse:
@@ -2414,6 +3477,7 @@ def settings_organisations_delete(request: HttpRequest, org_id: str) -> HttpResp
     return redirect("ui-settings-organisations")
 
 
+@not_viewer
 @login_required
 def settings_users(request: HttpRequest) -> HttpResponse:
     """Users list + create (superAdmin only)."""
@@ -2490,6 +3554,7 @@ def settings_users(request: HttpRequest) -> HttpResponse:
     )
 
 
+@not_viewer
 @login_required
 @serializes_superadmin_changes
 def settings_users_edit(request: HttpRequest, user_id: str) -> HttpResponse:
@@ -2509,11 +3574,16 @@ def settings_users_edit(request: HttpRequest, user_id: str) -> HttpResponse:
         is_active = request.POST.get("is_active") == "on"
         password = request.POST.get("password") or None
 
+        org = resolve_organisation(org_id) if org_id else None
+
         errors = {}
         if role and role not in USER_ROLE_VALUES:
             errors["role"] = f"must be one of {', '.join(USER_ROLE_VALUES)}"
-
-        org = resolve_organisation(org_id) if org_id else None
+        # An org can be reassigned but never cleared. Absent ⇒ leave unchanged
+        # (partial posts such as a password reset must keep working); present-but-empty
+        # is an explicit attempt to clear it and is rejected.
+        if "org" in request.POST and not org_id:
+            errors["org"] = "required"
         if org_id and org is None:
             errors["org"] = "organisation not found"
 
@@ -2595,6 +3665,7 @@ def settings_users_edit(request: HttpRequest, user_id: str) -> HttpResponse:
                 messages.info(request, "No changes made.")
             return redirect("ui-settings-users")
 
+    # GET: render the edit form
     orgs = Organisation.objects.order_by("name")
     return render(
         request,
@@ -2605,6 +3676,7 @@ def settings_users_edit(request: HttpRequest, user_id: str) -> HttpResponse:
     )
 
 
+@not_viewer
 @login_required
 @require_POST
 @serializes_superadmin_changes

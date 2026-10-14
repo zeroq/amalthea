@@ -253,6 +253,135 @@ New guard: `tests/conformance/test_ui_procedures.py` (22 cases) + `tests/conform
 **Residual risk (accepted, Low):** the bulk create form is not yet reachable from the UI (only the single create is on the case detail page). The bulk endpoint exists and is tested but has no entry point — consistent with the plan's scope (P3 only requires the single attach form on case detail).
 
 
+## Wave 6.16-P5.1 — viewer role enforcement (ADR-006, 2026-10-12)
+
+Plan: `docs/planning/PLAN-2026-10-12-viewer-role-enforcement.md`. Verification:
+`docs/verification/VERIFY-2026-10-12-viewer-role-enforcement.md`. Security review:
+`docs/reviews/REVIEW-2026-10-12-viewer-role-enforcement.md` (0 Critical / 0 High).
+
+| # | Plan / AGENTS.md says | Implemented | Status | Code pointer · Evidence |
+|---|---|---|---|---|
+| **V1** | `User.role` value `read-only` (ADR-004) | value + label renamed to **`viewer`**; data migration rewrites existing rows and reverses | ACCEPTED (owner-approved Q1) | `core/enums.py`, `identity/migrations/0008_role_viewer_rename.py` · `test_viewer_role_rename.py` |
+| **V2** | "Read routes unchanged" (§7) | `not_viewer` denies **GET** as well, so `case-template-detail` (a pure read) and the GETs of `playbook_detail`/`tag_detail` return 404 to a viewer | ACCEPTED — those pages double as authoring forms; the lists stay readable and the entry links are hidden (P4) | `ui/views.py`, `ui/templates/ui/*_list.html` · `test_viewer_readonly_ui.py` |
+| **V3** | Layer 1 `write=True` on **all** mutating call sites | wired at the **5 UI** sites only; the API's alert/observable mutations rely on Layer 2 | ACCEPTED — defence in depth, not the guarantee; Layer 2 covers every endpoint globally | `ui/views.py` · `test_viewer_readonly_api.py` |
+| **V4** | `POST /api/v1/query` is read-through-POST | a viewer gets **403** (the global `ViewerReadOnly` sees an unsafe verb) | ACCEPTED — consistent with the existing read-scope-key decision; documented in plan §6 | `query/views.py`, `settings/base.py` · `test_viewer_readonly_api.py` |
+| **V5** | UI 404 / API 403 (decision 3) | as specified; the API answer is normalised by `compat.errors` so a viewer never sees the scoping shape | ACCEPTED (deliberate, no oracle) | `compat/errors.py`, `identity/permissions.py` · `test_viewer_precedence.py` |
+| **V6** | Role vs share precedence | the **role wins**: `write=True` resolution denies a viewer before the owner/share branches | ACCEPTED (owner-approved Q2) | `identity/scoping.py` · `test_viewer_precedence.py` |
+| **V7** | Keyboard shortcuts (`keys.js`) | **no change needed** — the file is navigation-only; one minor pre-existing gap: `,` → `/settings/organisations` still navigates for a non-superAdmin (the nav link itself is hidden) | ACCEPTED (Low) | `ui/static/ui/keys.js` · `test_viewer_affordances.py` |
+| **V7a** | — | `ui/views.py::not_viewer` logged `request.path` (percent-decoded; `<str:case_id>` accepts `%0A`) → CWE-117 log forgery | FIXED (security review L1) — logs resolver `url_name` + method | `ui/views.py::not_viewer` |
+| **V6b** | The viewer denial sat *below* the privileged branch in `resolve_case` (and was skipped outright for superAdmins in `resolve_alert`/`resolve_observable`) | the deny is now the **first** statement of all three resolvers, so it holds even for an account that also looks privileged | ACCEPTED — decision 2 makes "viewer" a cap rather than another grant to arbitrate. Note the combination is *unreachable* by decision 4 and the old ordering was therefore harmless; the ordering is pinned by a monkeypatched test so it cannot silently regress (round-2 review **R2-L1**: the first version of this test set `is_superuser` and passed for an unrelated reason) | `identity/scoping.py` · `test_viewer_precedence.py::test_the_viewer_deny_precedes_the_privileged_branch` |
+| **V7b** | (pre-existing bug, found by the new tests) | `ui-case-attachment-download` 500'd for **every** user: the route's `<uuid:attachment_id>` converter handed a `UUID` to the API helper, which did `UUID(value)` → `AttributeError` | FIXED | `cases/views.py::_as_uuid` · `test_viewer_reads.py` |
+
+**Residual risk (accepted, Low) — reported by the review, not fixed:**
+
+- **Django admin is outside the role model** (round-2 review **L2** — kept open, tracked as `TODO §11.5`). `role` is orthogonal to `is_staff`/`is_superuser`, and
+  `/admin/` is not reached by any of the three enforcement layers. A viewer who is also `is_staff`
+  keeps whatever the admin site grants them. Mitigation is deployment-side (do not grant `is_staff`
+  to a viewer) — a structural fix (an admin `has_permission` hook) is tracked as a follow-up.
+- **Layer 3 is UX, not a boundary.** `can_mutate` guards keep dead controls off the page; the server
+  layers are the guarantee, and the route-enumeration sweeps are what catch drift.
+- **Django's own 404 logger still writes `request.path` verbatim** (`django.request`), so an
+  authenticated caller can forge log lines in the framework's log even though `not_viewer` no longer
+  can (round-2 review **R2-I1**). Pre-existing and role-independent; a follow-up (`TODO §11.5`) rather
+  than a blocker — the fix is a logging filter, and it belongs to the logging configuration, not to
+  the role work.
+- **`ui-case-attachment-detail` is a dead route.** The UI view is `@require_GET` but delegates to the
+  API's `DELETE`-only `case_attachment_detail`, so a GET answers 405. It is not linked from any
+  template and is exercised only by the tenant-scoping route tables. Pre-existing; tracked as a
+  follow-up rather than fixed here (out of scope for the role work).
+
+
+## Wave 10.2 — UI Case Create (2026-10-13)
+
+Per `PLAN-2026-10-13-ui-case-create.md`. Adds `/cases/new` (GET form + POST create) and extracts the
+case-construction logic into `cases/create.py::create_case`, shared by `POST /api/v1/case` and the UI.
+
+| ID | Plan / AGENTS.md says | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **W102-1** | API and UI had separate construction logic | **Shared `cases.create.create_case` service** | Mirrors the P2 update-surface collapse (`cases.update.apply_case_update`, deviation **W616P2-3**). One definition of field set, enum bounds, org-scoped assignee, tags, extraction, ledger entry. `cases/create.py`, `cases/views.py::_create_case`, `ui/views.py::case_create`. |
+| **W102-2** | Plan §7 form included "Extract observables" checkbox (Q1) | **Checkbox dropped; extraction is unconditional** | `create_case` always runs `extract_into_case` over title + description (same as `_create_case` before and `import_alert_to_case` for escalation). Payload `extract`/`observables` only *adds* explicit strings. UI template shows a hint line instead of a checkbox. `cases/create.py:142`, `ui/views.py:536`. |
+| **W102-3** | Enum tolerance (ADR-002 §D11): out-of-range reached DB `CHECK` as 500; `severity: 0`/empty fell back to default 2 silently | **Stricter enum validation on create** | `create_case` range-checks `severity`/`tlp`/`pap` via `_set_case_fields` (SEC-2026-10-11 L1). Non-integer or out-of-range → 400 (`CaseUpdateError`), no row written. Empty/null/empty-string still means "model default" (tolerance preserved). `cases/create.py:74-77`, `cases/update.py:_set_case_fields`. |
+| **W102-4** | No `case.created` automation trigger (plan §3 non-goal) | **No trigger added** | `automation/dispatcher.py::TRIGGER_EVENTS` remains `observable.created`, `alert.ingested`, `case.status_changed`, `task.completed`. Extraction fires `observable.created` which drives playbooks — the loop an analyst sees. |
+| **W102-5** | `CaseUpdateError` retained (plan table §4) | **Error type not renamed** | Renaming to `CaseWriteError` would churn `cases/update.py`, `cases/create.py`, `ui/views.py`, `cases/views.py`. Recorded as deviation rather than churn; a rename is a §2.5-style cleanup. |
+| **W102-6** | Plan §3 adds an ungated rail entry + `n` shortcut | **Rail link and cheat-sheet row are `can_mutate`-gated; the raw `n` shortcut is not** | ADR-006 §4.4 Layer 3 ("a viewer is never offered a control"): the rail `<li>` and its cheat-sheet `<tr>` render only when `can_mutate` (security review **L1**). The keyboard shortcut itself stays in `ui/static/ui/keys.js` — a static, CSP-allowed file cannot read the role, so an `n` press by a viewer still navigates to a 404; same accepted limitation as the `,` → Settings shortcut (see **V7**). `ui/templates/ui/base.html`. |
+| **W102-7** | Audit parity between the UI and API create paths | **Only the UI path writes `case.created`** | `POST /api/v1/case` (`cases/views.py::_create_case`) writes no `AuditLog` row (pre-existing); the new `ui/views.py::case_create` writes one inside the create transaction. Recorded as an informational asymmetry (security review **Info**), not a regression — closing it is a `cases/create.py` decision (audit every create, or neither) rather than part of §10.2. |
+
+**Superseded by Wave 10.3 (below):** the rail `<li>` described in **W102-6** was later removed entirely and
+`n` became a non-nav key — see **W103-1**.
+
+**Defect fixed during the wave (not a deviation).** Security review **M1**: `POST /api/v1/case` with
+`status: ""`/`null` returned **500** — a regression introduced by the shared-applier refactor, whose
+predecessor spelled `str(payload.get("status") or "InProgress")`. The empty value reached
+`resolve_case_status`, which `get_or_create`d a `CaseStatus` whose `stage=""` violates the
+`case_status_stage_valid` `CHECK`. `cases/create.py::_create_scalars` no longer forwards a falsy `status`
+(absent/`""`/`null` now keep the default `InProgress`, matching the pre-refactor behaviour); pinned by 3
+regression tests in `tests/conformance/test_ui_case_create.py` and documented in `docs/spec/api.md`.
+
+
+## Wave 10.3 — Cases view: trailing-slash tolerance + New-case modal (2026-10-13)
+
+Per `PLAN-2026-10-13-cases-view-fixes.md`. Owner report: `GET /cases/` 404'd as an `admin`. Root cause was
+URL registration, not the view: `ui/urls.py` registers every UI route slash-less and Django's `APPEND_SLASH`
+only ever *appends* a slash, never strips one.
+
+| ID | Plan / AGENTS.md says | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **W103-1** | §10.2 put "New case" on the left rail with an `n` shortcut (and AGENTS.md §6 wants discoverable keyboard shortcuts) | **Rail item removed; `n` demoted to a non-nav key** | Owner request: creating a case belongs on the cases view, not the main menu. `ui/templates/ui/base.html`'s rail `<li>` is deleted; `ui/templates/ui/case_list.html` renders a `can_mutate`-gated button (`href="/cases/new"` + `data-modal-open="new-case-modal"`) and the server-rendered modal. `n` is removed from `ROUTES` in `ui/static/ui/keys.js` but kept in `CHEATSHEET` and the cheat-sheet table, and is now listed in `_NON_NAV_KEYS` (`tests/conformance/test_ui_nav.py`): the key opens the modal on the cases list, else navigates to `/cases?new=1`. Supersedes W102-6's rail link. |
+| **W103-2** | The API's idiom for trailing slashes is an explicit `-slash` route pair (and `test_t2_p1_surface.py` argues `APPEND_SLASH` must not be relied on because a 301 drops a POST body) | **One UI-wide middleware instead of ~20 per-route aliases** | Completeness is the point: a per-route list silently stops covering the next page that is added. `core/middleware.py::StripTrailingSlashMiddleware` redirects **301** for GET/HEAD and **308** for unsafe methods (preserving method + body), only when the slash-less path `resolve()`s, and never for `/api/`, `/admin/`, `/static/`, `/media/`, `/ws/`. Registered after `CommonMiddleware`. Pinned by `tests/conformance/test_ui_trailing_slash.py` (15 tests), including "`/api/v1/case/` is not rewritten" and "unknown path stays 404". |
+| **W103-3** | Plan §4 says "strip a *single* trailing slash" | **`rstrip("/")` collapses repeated slashes; accepted** | `/cases////` → `/cases` (one hop) rather than `/cases/` (iterated hops). No security impact (security review **LOW-02**): the `resolve()` guard still governs whether a redirect happens at all. Recorded rather than changed; a stricter `path[:-1]` would merely require more round-trips for a malformed URL. |
+
+**Recorded as not-exploitable (security review LOW-01).** The preserved `QUERY_STRING` reaches the
+`Location` header verbatim, but `django.utils.encoding.iri_to_uri` percent-encodes CR/LF
+(`'/cases?a=1\r\nX'` → `'/cases?a=1%0D%0AX'`) and Django's `BadHeaderError` is the fail-closed backstop, so
+header injection is not reachable. No code change; evidence in
+`docs/reviews/REVIEW-2026-10-13-cases-view-fixes.md`.
+
+
+## Wave 10.4 — Case pages: create / edit / delete (2026-10-14)
+
+Plan: `docs/planning/PLAN-2026-10-14-case-pages-ui.md`. Adds analyst-facing CRUD for `Page` on the case
+detail **General** tab (routes `ui-case-page-create/-edit/-delete`), so a page no longer needs the API.
+
+| ID | Plan / AGENTS.md says | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **W104-1** | §3.3 lists a `Page` entity but no UI surface | **Pages get their own card on General, sibling to the case description** | The old markup nested the page list inside the case-description `<section>`; headings, counts and empty states did not match the other cards. `ui/templates/ui/_tab_general.html`, `_page_entry.html`. |
+| **W104-2** | §6 prefers "progressive enhancement, `<dialog>` modals over native dialogs" | **create/edit/delete are `<dialog>` modals** built from the shared `ui/_modal.html` (no inline JS, CSP-safe) | App idiom (fix #9/#10); the body templates `_page_form.html` and `_page_delete_form.html` are shared by the create and edit paths. |
+| **W104-3** | `Case.description` is Markdown | **Page content is rendered as Markdown** (`{{ page.content\|markdown }}`) | Same filter and sanitizer as the description (`ui.markdown.render_markdown`, ADR-005); the raw Markdown stays visible only inside the edit form's textarea. |
+| **W104-4** | §3 `Page` carries `category` and `order` | **`category` is editable in the UI; `order` is not** | `order` is API-managed (create appends `max(order)+1`); a reorder UI is a non-goal (N1) of the plan. `ui/views.py::case_page_create/_update`. |
+| **W104-5** | The API publishes a `page` frame on create only | **The UI publishes on create *and* edit; delete publishes nothing** | Deliberate API parity for delete (open question Q6 in the plan); a delete therefore reaches other analysts on their next load. `ui/views.py` (`transaction.on_commit(partial(publish_case_event, …))`). |
+| **W104-6** | `live.js` had a `pageEntry()`/`appendPage()` mirror of `_page_entry.html` | **Mirror deleted; a `page` frame now re-fetches `#case-pages`** | The mirror was byte-coupled to the template (any markup change silently desynced the two); `refreshPages()` re-renders through the same template, and needs no `innerHTML` sink. `ui/static/ui/live.js`. |
+| **W104-7** | ADR-006 §4.4: a viewer is never offered a control | **Every page control is `can_mutate`-gated and all three routes are `@not_viewer`** | Read-only users still see the pages and their rendered content. `ui/urls.py`, `ui/views.py`. |
+| **W104-8** | The case Audit tab records `case.created`/`case.updated` | **A page create/edit/delete is not `AuditLog`ged** | Pre-existing gap (same as tags/tasks): the UI writes are invisible in Audit. Recorded for `TODO.md`, not fixed here (plan §8 S6 / R3). |
+
+**Defects found and fixed during the wave (not deviations).** Four were in the shared modal/stylesheet
+layer, found by driving the real page in a headless browser rather than by reading CSS:
+
+- **Modal width (was: every `_modal.html` modal).** A `<dialog>` is shrink-to-fit and the `size` classes
+  only set `max-width`, so `size="lg"` modals rendered **270px wide with a 177px Markdown textarea** —
+  the new case form, the new-user form and the org-delete modal were all affected. `.modal--sm/md/lg/xl`
+  in `ui/static/ui/modal.css` now set a real `width` plus `max-width: 100%` (measured 560px, still
+  inside a 482px viewport).
+- **Tall modal overflows the viewport:** the page form (3 fields + an 8-row textarea) grew past the
+  viewport, and with `inset: 0` + `margin: auto` an over-tall `<dialog>` loses its auto margins and pins
+  to the top — the footer's confirm button sat off-screen with nothing to scroll. `.modal-content` is now
+  capped at `calc(100dvh - 2rem)` (with a `vh` fallback) and `.modal-body` is the only scroll region.
+- **Undefined `--color-focus`** in `app.css` (used twice, defined nowhere): the invalid `var()` dropped
+  the declaration, so the tab/panel focus ring was gone (WCAG 2.4.7 / AGENTS.md §6) — and
+  `test_ui_css_tokens.py::test_every_color_token_used_is_defined` was red. Both rules now use
+  `--color-accent`.
+- **`.tabpanel:focus { outline: none }`** — `test_ui_css_tokens.py::test_no_rule_removes_the_focus_outline`
+  was red, and the rule outranked the global `:focus-visible` ring for Tab-reachable panels. Removed;
+  `:focus-visible` keeps the indicator. *(Note for future edits: that guard scans the whole file,
+  comments included — do not write the forbidden declaration even in prose.)*
+- **Page-level horizontal scrollbar on the case page** at common laptop widths: `.main` is a grid item
+  with the automatic minimum size, and the 8-tab strip's min-content (`.tab` is `nowrap`) exceeded the
+  column, so the strip's own `overflow-x: auto` never applied. `.main { min-width: 0 }` lets the strip
+  scroll itself.
+
+Evidence: `PLAN-2026-10-14-case-pages-ui.md` §11 — 63 checks through the Django test client, 31 in
+headless Edge, and 7 dialogs across 4 pages measured at two viewports; `make css-check` clean.
+
+
 ## Evidence index
 
 - `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §13 — full P7/P8/P10/P11 records

@@ -1,12 +1,42 @@
-{# One case page. Mirrored by `pageEntry()` in ui/static/ui/live.js, which renders the same tree
-   from the `page` WebSocket payload — keep the two in step or a page created while the case is open
-   will look different from the same page after a reload. #}
+{% load ui_tags %}
+{% comment %}
+  One case page: title, analyst actions, Markdown body, provenance.
+
+  Unlike every other entry on this page the markup is no longer mirrored in JavaScript. The body is
+  analyst-authored Markdown rendered through the ADR-005 pipeline (`|markdown`), which `live.js`
+  cannot reproduce, so a `page` WebSocket frame re-fetches this list from the server instead
+  (`refreshPages()` in ui/static/ui/live.js). Change the markup here and both paths follow.
+
+  `data-page-id` is contracted (`test_ui_loop` asserts it) and is the only key the client uses.
+{% endcomment %}
+{% with pid=page.id|stringformat:"s" %}
+{% url 'ui-case-page-edit' case.number page.id as page_edit_url %}
+{% url 'ui-case-page-delete' case.number page.id as page_delete_url %}
 <li class="page" data-page-id="{{ page.id }}">
-  <p class="page-title">{{ page.title }}</p>
-  {% if page.content %}<pre class="tl-body">{{ page.content }}</pre>{% endif %}
+  <div class="page-row">
+    <p class="page-title">{{ page.title }}</p>
+    {% if can_mutate %}
+    <div class="page-actions">
+      <button type="button" class="btn btn-sm" data-modal-open="page-edit-{{ pid }}">
+        <i class="fa-solid fa-pen" aria-hidden="true"></i> Edit
+      </button>
+      <button type="button" class="btn btn-sm btn-err" data-modal-open="page-delete-{{ pid }}">
+        <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete
+      </button>
+    </div>
+    {% endif %}
+  </div>
+  {% if page.content %}<div class="body md">{{ page.content|markdown }}</div>{% endif %}
   <p class="tl-meta">
     {% if page.category %}<span class="dim">{{ page.category }}</span> · {% endif %}
     <span class="mono">{{ page.created_at|date:"Y-m-d H:i:s" }}</span>
     {% if page.created_by %} · {{ page.created_by.login }}{% endif %}
+    {% if page.updated_by %} · edited by {{ page.updated_by.login }}{% endif %}
   </p>
+
+  {% if can_mutate %}
+  {% include "ui/_modal.html" with modal_id="page-edit-"|add:pid form_id="page-edit-form-"|add:pid body_template="ui/_page_form.html" title="Edit page" confirm_text="Save changes" form_action=page_edit_url size="lg" %}
+  {% include "ui/_modal.html" with modal_id="page-delete-"|add:pid form_id="page-delete-form-"|add:pid body_template="ui/_page_delete_form.html" title="Delete page?" confirm_text="Delete" confirm_class="btn-err" form_action=page_delete_url size="sm" %}
+  {% endif %}
 </li>
+{% endwith %}

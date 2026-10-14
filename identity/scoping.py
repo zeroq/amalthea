@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from django.db.models import QuerySet
 
     from alerts.models import Alert
-    from cases.models import Case
+    from cases.models import Case, Task
     from identity.models import User
     from observables.models import Observable
 
@@ -42,6 +42,24 @@ def _is_superadmin(user: User | None) -> bool:
         user is not None
         and getattr(user, "is_authenticated", False)
         and getattr(user, "role", "") == "superAdmin"
+    )
+
+
+def is_viewer(user: User | None) -> bool:
+    """
+    True iff the caller is an authenticated user with the viewer (read-only) role.
+
+    Deliberately **deny-only**: anonymous callers, `None`, ingestion tokens and
+    other non-`User` identities are never viewers, so this predicate can be used
+    as an additive guard without turning machine-to-machine paths into denials.
+    See ADR-006.
+    """
+    from core.enums import VIEWER_ROLE
+
+    return (
+        user is not None
+        and getattr(user, "is_authenticated", False)
+        and getattr(user, "role", "") == VIEWER_ROLE
     )
 
 
@@ -111,9 +129,18 @@ def resolve_case(user: User | None, identifier: str, *, write: bool = False) -> 
     - Org-less → `None`.
     - Owner org → allowed.
     - Shared org → allowed if share exists; `write=True` demands `permissions.write`.
+    - Viewer role → `write=True` always denies (role beats share; ADR-006). The deny is checked
+      **first**, so it holds even for an account that also looks privileged — "viewer" is a cap on
+      the person, not another grant to arbitrate (ADR-006 decision 2). The role/privilege
+      combination is unreachable by decision 4, which is exactly why the ordering is pinned by a
+      test (`test_viewer_precedence.py::test_the_viewer_deny_precedes_the_privileged_branch`)
+      rather than left to be re-derived by every reader.
     """
     from alerts.escalation import link_case_from_identifier
     from cases.models import Case, Share
+
+    if write and is_viewer(user):
+        return None
 
     if _is_superadmin(user):
         try:
@@ -141,14 +168,20 @@ def resolve_case(user: User | None, identifier: str, *, write: bool = False) -> 
     return case if shares.exists() else None
 
 
-def resolve_alert(user: User | None, alert_id: str) -> Alert | None:
+def resolve_alert(user: User | None, alert_id: str, *, write: bool = False) -> Alert | None:
     """Resolve an alert the caller may reach (direct org ownership).
+
+    Alerts carry no shares, so `write=True` adds only the viewer-role denial
+    (ADR-006): a viewer may read an alert but never reach a mutation through it.
 
     A tampered/non-UUID id is a uniform 404, not a 500: the pk lookup raises Django's own
     `ValidationError` for a non-UUID string, which is neither `DoesNotExist` nor `ValueError`
     (the same F7-class trap `link_case_from_identifier` guards against).
     """
     from alerts.models import Alert
+
+    if write and is_viewer(user):
+        return None
 
     if _is_superadmin(user):
         try:
@@ -166,9 +199,17 @@ def resolve_alert(user: User | None, alert_id: str) -> Alert | None:
         return None
 
 
-def resolve_observable(user: User | None, observable_id: str) -> Observable | None:
-    """Resolve an observable the caller may reach. A non-UUID id is a uniform 404, not a 500."""
+def resolve_observable(
+    user: User | None, observable_id: str, *, write: bool = False
+) -> Observable | None:
+    """Resolve an observable the caller may reach. A non-UUID id is a uniform 404, not a 500.
+
+    Observables are org-owned; `write=True` adds the viewer-role denial (ADR-006).
+    """
     from observables.models import Observable
+
+    if write and is_viewer(user):
+        return None
 
     if _is_superadmin(user):
         try:
@@ -184,6 +225,47 @@ def resolve_observable(user: User | None, observable_id: str) -> Observable | No
         return Observable.objects.get(pk=observable_id, owner_org_id=org_id)
     except (Observable.DoesNotExist, ValidationError, ValueError, TypeError):
         return None
+
+
+def resolve_task(user: User | None, task_id: str, *, write: bool = False) -> Task | None:
+    """Resolve a task the caller may reach, scoped through its case.
+
+    Mirrors `resolve_observable`: the task is visible iff its case is visible to the
+    caller (owner org or shared with read/write per the `write` flag). A non-UUID id
+    is a uniform 404. `write=True` denies viewers (ADR-006).
+    """
+    from cases.models import Task
+
+    if write and is_viewer(user):
+        return None
+
+    if _is_superadmin(user):
+        try:
+            return Task.objects.select_related("case").get(pk=task_id)
+        except (Task.DoesNotExist, ValidationError, ValueError, TypeError):
+            return None
+
+    org_id = _user_org_id(user)
+    if org_id is None:
+        return None
+
+    try:
+        task = Task.objects.select_related("case").get(pk=task_id)
+    except (Task.DoesNotExist, ValidationError, ValueError, TypeError):
+        return None
+
+    # Task is visible iff its case is visible to this org
+    case = task.case
+    if case.owner_org_id == org_id:
+        return task
+
+    # Shared org — check share permissions
+    from cases.models import Share
+
+    shares = Share.objects.filter(case=case, organisation_id=org_id)
+    if write:
+        shares = shares.filter(permissions__write=True)
+    return task if shares.exists() else None
 
 
 def is_case_owner(user: User | None, case: Case) -> bool:
@@ -206,9 +288,11 @@ def is_case_owner(user: User | None, case: Case) -> bool:
 __all__ = [
     "case_visible_q",
     "is_case_owner",
+    "is_viewer",
     "org_filtered",
     "org_q",
     "resolve_alert",
     "resolve_case",
     "resolve_observable",
+    "resolve_task",
 ]

@@ -110,8 +110,6 @@ Accessibility notes that are not optional:
           <p class="dim tenant-indicator">{{ request.user.org.name }}</p>
         {% elif request.user.role == "superAdmin" %}
           <a class="dim tenant-indicator" href="{% url 'ui-settings-organisations' %}">All organisations</a>
-        {% else %}
-          <p class="dim tenant-indicator">No organisation</p>
         {% endif %}
         <a class="linkish" href="{% url 'ui-password-change' %}">Change password</a>
         <button type="button" class="linkish" data-modal-open="cheatsheet-modal">Keyboard shortcuts <span class="k">?</span></button>
@@ -142,7 +140,6 @@ Accessibility notes that are not optional:
 
 {# Server-rendered cheat-sheet modal (D6) — single source of truth for shortcuts #}
 <dialog id="cheatsheet-modal" class="cheatsheet-modal" role="dialog" aria-modal="true" aria-labelledby="cheatsheet-title">
-  <div class="modal-backdrop" tabindex="-1"></div>
   <div class="modal-content">
     <header class="cheatsheet-header">
       <h2 id="cheatsheet-title" class="cheatsheet-header-title">Keyboard shortcuts</h2>
@@ -159,6 +156,9 @@ Accessibility notes that are not optional:
         <tr><td class="cheatsheet-key"><kbd>g</kbd></td><td>Go to Dashboard</td></tr>
         <tr><td class="cheatsheet-key"><kbd>a</kbd></td><td>Alerts list</td></tr>
         <tr><td class="cheatsheet-key"><kbd>c</kbd></td><td>Cases list</td></tr>
+        {% if can_mutate %}
+        <tr><td class="cheatsheet-key"><kbd>n</kbd></td><td>New case</td></tr>
+        {% endif %}
         <tr><td class="cheatsheet-key"><kbd>o</kbd></td><td>Observables list</td></tr>
         <tr><td class="cheatsheet-key"><kbd>r</kbd></td><td>Automation runs</td></tr>
         <tr><td class="cheatsheet-key"><kbd>p</kbd></td><td>Playbooks list</td></tr>
@@ -179,5 +179,7 @@ Accessibility notes that are not optional:
 <script src="{% static 'vendor/htmx/htmx.min.js' %}" defer></script>
 <script src="{% static 'ui/keys.js' %}" defer></script>
 <script src="{% static 'ui/modal.js' %}" defer></script>
+<script src="{% static 'ui/messages.js' %}" defer></script>
+<script src="{% static 'ui/picker.js' %}" defer></script>
 </body>
 </html>

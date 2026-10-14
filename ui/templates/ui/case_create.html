@@ -1,0 +1,27 @@
+{% extends "ui/base.html" %}
+{% load ui_tags %}
+{% block title %}New case · Amalthea{% endblock %}
+{% block heading %}New case{% endblock %}
+{% block actions %}
+  <a class="btn" href="{% url 'ui-case-list' %}">Cancel</a>
+{% endblock %}
+{% block content %}
+<div class="cols">
+  <section class="card card-narrow" aria-labelledby="h-create">
+    <h2 id="h-create">New case</h2>
+
+    <form method="post" action="{% url 'ui-case-create' %}">{% csrf_token %}
+
+      {% include "ui/_case_create_fields.html" %}
+
+      <div class="field-row">
+        <button type="submit" class="btn btn-primary">Create case</button>
+        <a class="btn" href="{% url 'ui-case-list' %}">Cancel</a>
+      </div>
+
+    </form>
+
+    <p class="hint">Observables (IP addresses, domains, file hashes, mailboxes) found in the title and description are extracted automatically and playbooks bound to those artifact types run on the new case.</p>
+  </section>
+</div>
+{% endblock %}

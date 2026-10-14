@@ -46,6 +46,9 @@ MIDDLEWARE = [
     "csp.middleware.CSPMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    # Strip trailing slashes from UI routes (mirror of APPEND_SLASH).
+    # Must run after CommonMiddleware so path_info is normalised.
+    "core.middleware.StripTrailingSlashMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
@@ -153,6 +156,17 @@ REST_FRAMEWORK = {
         # session and basic auth are unaffected; `login`/`logout` carry an explicit `AllowAny`,
         # which replaces this list outright for those two views.
         "compat.auth.ScopePermission",
+        # ADR-006: the viewer role is read-only on *every* endpoint, present and
+        # future. Deny-only — it refuses unsafe verbs for a viewer and passes
+        # everything else (anonymous is still 401 via `IsAuthenticated`, login/
+        # logout keep their explicit `AllowAny`, and the ingest webhook is a
+        # plain Django view this list never sees).
+        "identity.permissions.ViewerReadOnly",
+        # ADR-007: every authenticated user is guaranteed to have an org_id (User.org is
+        # NOT NULL with PROTECT). This global fail-closed guard denies any caller that
+        # somehow bypasses that invariant. Placed AFTER IsAuthenticated so anonymous
+        # callers still receive 401, not 403. The non-DRF ingest webhook is unaffected.
+        "identity.permissions.IsAuthenticatedAndOrgMember",
     ],
     "DEFAULT_PAGINATION_CLASS": None,
     "PAGE_SIZE": None,

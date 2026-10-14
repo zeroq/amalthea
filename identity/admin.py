@@ -33,6 +33,9 @@ class UserAdmin(DjangoUserAdmin):  # type: ignore[type-arg]
         # ModelAdmin.get_form consumes it by name, so behaviour is identical and the call type-checks.
         form = super().get_form(request, obj, change=change, **kwargs)
         form.base_fields["login"].required = False
+        # On the ADD form (change=False), org is required — an org-less user cannot exist.
+        if not change:
+            form.base_fields["org"].required = True
         return form
 
 

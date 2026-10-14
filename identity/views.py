@@ -521,7 +521,6 @@ def _update_user(request: Request, user: User, actor: User) -> Response:
             user.role = new_role
             changed.append("role")
 
-    # Org
     if "org" in payload:
         org_identifier = payload["org"]
         if org_identifier is None:

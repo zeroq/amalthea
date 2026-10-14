@@ -1,0 +1,39 @@
+{% load ui_tags %}
+{% comment %}
+  Body of the procedure-create modal (`_modal.html` `body_template`). Like `_page_form.html`, every
+  control MUST carry `form="{{ form_id }}"`: the modal's footer <form> owns the submit, and a control
+  rendered outside that form (as these are) is only associated with it through the `form` attribute.
+  Without it the POST arrives with an empty `patternId` and the view always answers
+  "Invalid patternId: ATT&CK ID is required".
+{% endcomment %}
+<div class="form-grid">
+  <div>
+    <label for="f-patternId">ATT&CK ID <span class="required" aria-hidden="true">*</span></label>
+    <input id="f-patternId" name="patternId" required maxlength="255" placeholder="T1566.001"{% if form_id %} form="{{ form_id }}"{% endif %}>
+  </div>
+  <div>
+    <label for="f-patternName">Name</label>
+    <input id="f-patternName" name="patternName" maxlength="255" placeholder="Phishing: Spearphishing Attachment"{% if form_id %} form="{{ form_id }}"{% endif %}>
+  </div>
+  <div>
+    <label for="f-tactic">Tactic</label>
+    <input id="f-tactic" name="tactic" maxlength="100" placeholder="Initial Access"{% if form_id %} form="{{ form_id }}"{% endif %}>
+  </div>
+  <div>
+    <label for="f-occurDate">Occur date (optional)</label>
+    <input id="f-occurDate" name="occurDate" type="text" placeholder="ISO 8601 or epoch ms (e.g. 2024-01-15T10:30:00Z or 1705315800000)"{% if form_id %} form="{{ form_id }}"{% endif %}>
+  </div>
+  <div class="full-width">
+    <label for="f-description">Description</label>
+    <textarea id="f-description" name="description" rows="3" placeholder="What was observed?"{% if form_id %} form="{{ form_id }}"{% endif %}></textarea>
+  </div>
+  <div class="full-width">
+    <label for="f-ttpId">Link to TTP vocabulary (optional)</label>
+    <select id="f-ttpId" name="ttpId"{% if form_id %} form="{{ form_id }}"{% endif %}>
+      <option value="">-- none --</option>
+      {% for ttp in ttps %}
+        <option value="{{ ttp.id }}">{{ ttp.name }} {% if ttp.ttp_code %}({{ ttp.ttp_code }}){% endif %}</option>
+      {% endfor %}
+    </select>
+  </div>
+</div>

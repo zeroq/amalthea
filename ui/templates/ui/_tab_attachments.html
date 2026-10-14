@@ -1,0 +1,56 @@
+{% load ui_tags %}
+<section class="card" aria-labelledby="h-attachments">
+  <h2 id="h-attachments">Attachments</h2>
+  {% if can_mutate %}
+  <form method="post" action="{% url 'ui-case-attachment-upload' case.number %}" enctype="multipart/form-data" class="attachment-upload">{% csrf_token %}
+    <input type="hidden" name="tab" value="attachments">
+    <label for="f-attachment">Upload file</label>
+    <input type="file" id="f-attachment" name="attachments" required>
+    <button type="submit" class="btn">Upload</button>
+  </form>
+  {% endif %}
+  {% if attachments %}
+    <div class="table-wrap card-spaced">
+      <table class="data-table data-table-tight">
+        <caption class="sr-only">Attachments for this case</caption>
+        <thead><tr><th scope="col">Name</th><th scope="col">Size</th><th scope="col">Uploaded by</th><th scope="col">Actions</th></tr></thead>
+        <tbody>
+          {% for attachment in attachments %}
+            <tr>
+              <td class="mono break">{{ attachment.name }}</td>
+              <td class="mono dim">{{ attachment.size|filesizeformat }}</td>
+              <td class="dim">{{ attachment.created_by.login|default:"—" }}</td>
+              <td>
+                <a class="btn btn-sm" href="{% url 'ui-case-attachment-download' case.number attachment.id %}">Download</a>
+                {% if can_mutate %}
+                <button type="button" class="btn btn-sm btn-err" data-modal-open="attachment-delete-{{ attachment.id }}">Delete</button>
+                <dialog id="attachment-delete-{{ attachment.id }}" class="modal modal--sm" role="dialog" aria-modal="true" aria-labelledby="attachment-delete-{{ attachment.id }}-title">
+                  <div class="modal-content">
+                    <header class="modal-header">
+                      <h2 id="attachment-delete-{{ attachment.id }}-title" class="modal-title">Delete attachment?</h2>
+                      <button type="button" class="modal-close" aria-label="Close" data-modal-close="attachment-delete-{{ attachment.id }}">&times;</button>
+                    </header>
+                    <div class="modal-body">
+                      <p>Delete <strong>{{ attachment.name }}</strong>? This cannot be undone.</p>
+                    </div>
+                    <footer class="modal-footer">
+                      <button type="button" class="btn modal-cancel" data-modal-close="attachment-delete-{{ attachment.id }}">Cancel</button>
+                      <form id="attachment-delete-{{ attachment.id }}-form" method="post" action="{% url 'ui-case-attachment-delete' case.number attachment.id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="tab" value="attachments">
+                        <button type="submit" class="btn btn-err">Delete</button>
+                      </form>
+                    </footer>
+                  </div>
+                </dialog>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No attachments yet.</p>
+  {% endif %}
+</section>

@@ -4,7 +4,9 @@
 {% block heading %}Playbooks{% endblock %}
 
 {% block actions %}
+{% if can_mutate %}
 <a class="btn btn-primary" href="{% url 'ui-playbook-create' %}">New playbook</a>
+{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -27,7 +29,8 @@
       {% for pb in playbooks %}
       <tr>
         <td>
-          <a href="{% url 'ui-playbook-detail' pb.id %}">{{ pb.name }}</a>
+          {% if can_mutate %}<a href="{% url 'ui-playbook-detail' pb.id %}">{{ pb.name }}</a>
+          {% else %}{{ pb.name }}{% endif %}
         </td>
         <td>{{ pb.trigger_event }}</td>
         <td>
@@ -53,6 +56,7 @@
           <span class="pill">{{ pb.runs.count }}</span>
         </td>
         <td>
+          {% if can_mutate %}
           <a class="btn" href="{% url 'ui-playbook-detail' pb.id %}">Open</a>
           {% if pb.runs.count == 0 %}
           {% url 'ui-playbook-delete' pb.id as delete_url %}
@@ -60,6 +64,9 @@
           {% include "ui/_modal.html" with modal_id=modal_id title="Delete playbook?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
           {% endwith %}
           <button type="button" class="btn btn-err" data-modal-open="delete-playbook-{{ pb.id }}">Delete</button>
+          {% endif %}
+          {% else %}
+          <span class="dim">—</span>
           {% endif %}
         </td>
       </tr>
@@ -69,7 +76,9 @@
   </table>
   </div>
   {% if not playbooks %}
-  <p class="empty">No playbooks yet. <a href="{% url 'ui-playbook-create' %}">Create one</a>.</p>
+  <p class="empty">
+    No playbooks yet.{% if can_mutate %} <a href="{% url 'ui-playbook-create' %}">Create one</a>.{% endif %}
+  </p>
   {% endif %}
 </div>
 {% endblock %}

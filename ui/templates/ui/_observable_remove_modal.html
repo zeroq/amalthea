@@ -1,0 +1,16 @@
+{% comment %}
+  Body of the "Remove artifact from case?" confirmation modal (AGENTS.md §6: destructive actions
+  use a styled modal, never a native `confirm()`). A body template rather than `_modal.html`'s
+  `body` argument because the artifact type/value is markup and `{{ body }}` is escaped.
+
+  This is a NON-destructive unlink (Q1): the CaseObservable link is removed; the Observable
+  survives on its other cases. The modal explains this.
+{% endcomment %}
+<p class="modal-body-text">
+  Remove <strong>{{ observable.data_type.name }} {{ observable.data }}</strong> from this case?
+</p>
+<p class="hint">
+  This only unlinks the artifact from <strong>{{ case.number }}</strong>.
+  The artifact remains on {{ observable.case_observables.count|add:"-1" }} other case(s).
+</p>
+<input type="hidden" name="tab" value="observables" form="{{ form_id }}">

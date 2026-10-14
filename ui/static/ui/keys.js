@@ -11,6 +11,10 @@
  * The cheat-sheet modal is now server-rendered in base.html (D6). This file only handles opening
  * it via `?` and the navigation shortcuts. The CHEATSHEET array is the single source of truth for
  * both the JS navigation and the server-rendered table — a conformance test enforces this.
+ *
+ * The `n` key opens the New-case modal when the cases list is on screen (the button with
+ * `data-modal-open="new-case-modal"` exists), otherwise it navigates to `/cases?new=1`
+ * (which renders the list with the modal auto-opened).
  */
 (function () {
   "use strict";
@@ -19,6 +23,7 @@
     { key: "g", label: "Go to Dashboard" },
     { key: "a", label: "Alerts list" },
     { key: "c", label: "Cases list" },
+    { key: "n", label: "New case" },
     { key: "o", label: "Observables list" },
     { key: "r", label: "Automation runs" },
     { key: "p", label: "Playbooks list" },
@@ -71,6 +76,18 @@
 
   document.addEventListener("keydown", function (event) {
     if (isModified(event) || isTyping(event.target)) return;
+
+    // `n` opens the New-case modal on the cases list, otherwise navigates to /cases?new=1
+    if (event.key === "n") {
+      event.preventDefault();
+      var opener = document.querySelector('[data-modal-open="new-case-modal"]');
+      if (opener) {
+        opener.click();
+      } else {
+        window.location.href = "/cases?new=1";
+      }
+      return;
+    }
 
     var route = ROUTES[event.key];
     if (route) {

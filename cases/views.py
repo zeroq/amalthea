@@ -34,11 +34,9 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 import identity.scoping
-from alerts.escalation import (
-    link_alert_from_identifier,
-    resolve_case_status,
-)
+from alerts.escalation import link_alert_from_identifier
 from alerts.models import Alert, AlertStatus
+from cases.create import create_case
 from cases.ledger import append_timeline_event
 from cases.merge import merge_cases
 from cases.models import (
@@ -123,10 +121,17 @@ def _as_uuid(value: Any) -> UUID | None:
     `filter(pk="not-a-uuid")` raises `ValidationError` out of the query compiler, which the
     exception handler does not map — a 500 where the contract promises a 404. Parsing here
     keeps "not found" and "malformed" the same honest answer at the path boundary.
+
+    A `UUID` instance is returned as-is: the API routes take `<str:attachment_id>`, but the UI
+    routes that delegate here use `<uuid:...>` converters, so this helper is reached with an
+    already-parsed value too — and `UUID(some_uuid)` raises `AttributeError`, not ValueError,
+    which used to escape as a 500 on every UI attachment download.
     """
+    if isinstance(value, UUID):
+        return value
     try:
         return UUID(value)
-    except (TypeError, ValueError):
+    except (AttributeError, TypeError, ValueError):
         return None
 
 
@@ -290,49 +295,27 @@ def case_detail(request: Request, case_id: str) -> Response:
 
 
 def _create_case(request: Request) -> Response:
-    """Create a case directly (no alert behind it)."""
+    """Create a case directly (no alert behind it) — the shared `cases.create.create_case` (P1).
+
+    Thin wrapper in the `_update_case` style: the construction lives in the service, so the UI's
+    create form posts to the exact same field set. The recorded API behaviour is preserved — a
+    missing title is the same 400 envelope, an actor without an organisation is the same 403 body
+    (two keys, as before the service existed), a success is the same 201 `case_json(detail=True)`
+    with the same "Case created" ledger entry.
+    """
     payload = request.data if isinstance(request.data, dict) else {}
-    title = str(payload.get("title") or "").strip()
-    if not title:
-        return Response(
-            {
-                "type": "BadRequest",
-                "message": "title is required",
-                "fields": {"title": ["required"]},
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
     user = _actor(request)
-    org = getattr(user, "org", None) if user else None
-    if org is None:
-        return Response(
-            {
-                "type": "AuthorizationError",
-                "message": "User must belong to an organisation to create cases",
-            },
-            status=status.HTTP_403_FORBIDDEN,
+    try:
+        case, _warnings = create_case(
+            payload, actor=user, org=getattr(user, "org", None) if user else None
         )
-    warnings: list[str] = []
-    case = Case.objects.create(
-        title=title[:500],
-        description=str(payload.get("description") or ""),
-        severity=int(payload.get("severity") or 2),
-        status=resolve_case_status(str(payload.get("status") or "InProgress"), warnings=warnings),
-        start_date=timezone.now(),
-        owner_org=org,
-    )
-    texts = [case.title, case.description]
-    if payload.get("extract") or payload.get("observables"):
-        texts.extend(str(v) for v in (payload.get("observables") or []))
-    extract_into_case(case, *texts)
-    append_timeline_event(
-        case,
-        title="Case created",
-        description=case.description[:500],
-        kind="case-created",
-        actor=user,
-    )
-    case.refresh_from_db()
+    except CaseUpdateError as exc:
+        if exc.error_type == "AuthorizationError":
+            return Response(
+                {"type": exc.error_type, "message": exc.message},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return Response(exc.to_response_payload(), status=status.HTTP_400_BAD_REQUEST)
     return Response(case_json(case, detail=True), status=status.HTTP_201_CREATED)
 
 

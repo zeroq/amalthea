@@ -7,9 +7,16 @@ They complement the scoping helpers in `identity.scoping` — the helpers answer
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from rest_framework import permissions
-from rest_framework.request import Request
-from rest_framework.views import APIView
+
+if TYPE_CHECKING:
+    # Annotation-only, and deliberately not imported at runtime: this module is named by
+    # `REST_FRAMEWORK["DEFAULT_PERMISSION_CLASSES"]`, so it is imported while settings load —
+    # pulling in `rest_framework.views` there is a circular import.
+    from rest_framework.request import Request
+    from rest_framework.views import APIView
 
 
 class IsSuperAdmin(permissions.BasePermission):  # type: ignore[misc]
@@ -64,6 +71,32 @@ class IsAnalystOrAbove(permissions.BasePermission):  # type: ignore[misc]
         return role in ("superAdmin", "admin", "analyst")
 
 
+class ViewerReadOnly(permissions.BasePermission):  # type: ignore[misc]
+    """
+    Deny every unsafe method (POST/PUT/PATCH/DELETE) to the viewer role (ADR-006).
+
+    **Additive, not an allow-list**: it denies if and only if the caller is a viewer
+    and the verb is unsafe. Anything else passes, so it composes with the classes
+    already in `DEFAULT_PERMISSION_CLASSES` — anonymous callers are still a 401 from
+    `IsAuthenticated`, a read-scoped API key still hits `ScopePermission`, and the
+    `AllowAny` login/logout and the non-DRF ingest webhook are untouched.
+
+    Registered globally, which is what makes it fail-closed: a new endpoint is
+    covered without being touched. The counterpart for the UI is
+    `ui.views.not_viewer`, and the invariants are asserted by
+    `tests/conformance/test_viewer_readonly_*.py`.
+    """
+
+    message = "Your role is read-only."
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        from identity.scoping import is_viewer
+
+        return not is_viewer(getattr(request, "user", None))
+
+
 class IsAuthenticatedAndOrgMember(permissions.BasePermission):  # type: ignore[misc]
     """
     Allow only authenticated users who belong to an organisation.
@@ -88,4 +121,5 @@ __all__ = [
     "IsAuthenticatedAndOrgMember",
     "IsOrgAdminOrAbove",
     "IsSuperAdmin",
+    "ViewerReadOnly",
 ]

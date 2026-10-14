@@ -15,6 +15,10 @@ template path and an explicit `form_id`; the fields inside use `form="{{ form_id
      body_template="ui/_settings_org_create_form.html" title="New organisation"
      confirm_text="Create" form_action=org_create_url size="md" %}
 
+Optional HTMX error path (D-8): pass `form_hx_post` and `form_hx_target` to make the
+footer form submit via HTMX and swap the response into the modal body (for inline errors).
+When absent, the form is a plain POST (existing behaviour, byte-identical).
+
 Parameters:
   modal_id          Unique dialog id (required).
   title             Dialog heading.
@@ -32,13 +36,16 @@ Parameters:
   size              sm | md | lg | xl.
   close_on_escape   Reserved (Esc is handled by modal.js for every dialog).
   show_close_button Show the X button (default true).
+  autoopen          If truthy, render `data-autoopen="1"` on the <dialog>; modal.js will
+                    open it on DOMContentLoaded.
+  form_hx_post      Optional: if set, the form gets hx-post/hx-target/hx-swap for HTMX error path.
+  form_hx_target    Optional: target selector for HTMX swap (used with form_hx_post).
 {% endcomment %}
 
 {% load static %}
 
 {% with form_id=form_id|default:modal_id %}
-<dialog id="{{ modal_id }}" class="modal modal--{{ size|default:'md' }}" role="dialog" aria-modal="true" aria-labelledby="{{ modal_id }}-title">
-  <div class="modal-backdrop" tabindex="-1"></div>
+<dialog id="{{ modal_id }}" class="modal modal--{{ size|default:'md' }}" role="dialog" aria-modal="true" aria-labelledby="{{ modal_id }}-title"{% if autoopen %} data-autoopen="1"{% endif %}>
   <div class="modal-content">
     <header class="modal-header">
       <h2 id="{{ modal_id }}-title" class="modal-title">{{ title }}</h2>
@@ -46,7 +53,7 @@ Parameters:
       <button type="button" class="modal-close" aria-label="Close" data-modal-close="{{ modal_id }}">&times;</button>
       {% endif %}
     </header>
-    <div class="modal-body">
+    <div class="modal-body" id="{{ modal_id }}-body">
       {% if body %}
       <p class="modal-body-text">{{ body }}</p>
       {% endif %}
@@ -55,7 +62,8 @@ Parameters:
     <footer class="modal-footer">
       <button type="button" class="btn modal-cancel" data-modal-close="{{ modal_id }}">{{ cancel_text|default:"Cancel" }}</button>
       {% if form_action %}
-      <form id="{{ form_id }}" method="{{ form_method|default:'post' }}" action="{{ form_action }}">
+      <form id="{{ form_id }}" method="{{ form_method|default:'post' }}" action="{{ form_action }}"
+            {% if form_hx_post %}hx-post="{{ form_hx_post }}" hx-target="{{ form_hx_target }}" hx-swap="innerHTML"{% endif %}>
         {% csrf_token %}
         {% if extra_fields %}
           {% for key, value in extra_fields.items %}
