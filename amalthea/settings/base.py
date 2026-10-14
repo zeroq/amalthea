@@ -136,6 +136,7 @@ AUTH_USER_MODEL = "identity.User"
 # `@login_required` on the UI views must redirect to the analyst sign-in page, not Django's
 # stock `/accounts/login/`. The route is resolved by URL name so the setting survives URL moves.
 LOGIN_URL = "login"
+LOGOUT_REDIRECT_URL = "login"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
