@@ -430,3 +430,27 @@
 }
 
 /* ============================================================================
+   Observables filter bar — equal-height controls
+   The row is a flex container, so the auto-height text input and type dropdown
+   stretch to the tallest item, while the base `.btn` adds a 14px top margin.
+   Pin every control to the button height (mirrors the .case-actions pattern).
+   ============================================================================ */
+.filter-bar {
+  align-items: center;
+}
+.filter-bar .btn {
+  margin-top: 0;
+}
+.filter-bar input[type="text"],
+.filter-bar select,
+.filter-bar .btn {
+  box-sizing: border-box;
+  height: 34px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.filter-bar .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
