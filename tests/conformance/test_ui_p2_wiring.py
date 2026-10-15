@@ -605,3 +605,91 @@ def test_case_detail_has_edit_link(browser: Client, case: Case) -> None:
     url = reverse("ui-case-detail", kwargs={"case_id": case.number})
     body = browser.get(url).content.decode()
     assert reverse("ui-case-edit", kwargs={"case_id": case.number}) in body
+
+
+# --------------------------------------------------------------------------
+# TLP/PAP display rendering (zero-safe choice_name filter)
+# --------------------------------------------------------------------------
+
+
+def test_case_detail_renders_tlp_pap_labels(browser: Client, case: Case) -> None:
+    """Case detail renders TLP/PAP as labels (Amber/Amber), not raw integers.
+
+    Regression guard: TLP 0 / PAP 0 must render "White" (choice_label collapses
+    falsy values to "Unset/Unknown", so this would fail if the template used
+    choice_label instead of the new choice_name filter).
+    """
+    # Default fixture has tlp=2, pap=2 (Amber/Amber)
+    url = reverse("ui-case-detail", kwargs={"case_id": case.number})
+    body = browser.get(url).content.decode()
+
+    # The TLP/PAP row in _tab_general.html shows "Amber / Amber". Assert the joined pair rather
+    # than the bare word "Amber": the edit modal on the same page already lists the option
+    # "Amber", so a bare `"Amber" in body` would pass even if the row still rendered `2 / 2`.
+    assert "Amber / Amber" in body
+    assert "2 / 2" not in body  # raw integers must not appear
+
+
+def test_case_detail_renders_tlp_zero_as_white(browser: Client, case: Case) -> None:
+    """Zero-trap guard: TLP 0 / PAP 0 render as White, not Unset/Unknown.
+
+    This test would FAIL if the template used `choice_label` (which returns
+    "Unset/Unknown" for falsy values including 0). The new `choice_name` filter
+    correctly handles 0 as a legitimate value meaning "White".
+    """
+    case.tlp = 0
+    case.pap = 0
+    case.save(update_fields=["tlp", "pap"])
+
+    url = reverse("ui-case-detail", kwargs={"case_id": case.number})
+    body = browser.get(url).content.decode()
+
+    # The TLP/PAP row specifically should show "White / White"
+    assert "White / White" in body
+    # The raw integers must not appear in the TLP/PAP row
+    assert "0 / 0" not in body
+    # Scope/Type/Classification/Phase legitimately show "Unset/Unknown" for their "unset" defaults
+    # so we don't assert absence of that string globally
+
+
+def test_case_detail_renders_tlp_unknown(browser: Client, case: Case) -> None:
+    """TLP 4 renders as Unknown (the full TLP_CHOICES includes 4=Unknown)."""
+    case.tlp = 4
+    case.save(update_fields=["tlp"])
+
+    url = reverse("ui-case-detail", kwargs={"case_id": case.number})
+    body = browser.get(url).content.decode()
+
+    # TLP 4 keeps its own label while the PAP column (still 2) must also be a name, not a number.
+    assert "Unknown / Amber" in body
+    assert "4 / 2" not in body
+
+
+# --------------------------------------------------------------------------
+# Taxonomy page content (upstream 3255f1f broke the template's tag nesting)
+# --------------------------------------------------------------------------
+
+
+def test_taxonomy_page_renders_every_vocabulary_card(browser: Client) -> None:
+    """Every taxonomy card renders, including when Observable Types is non-empty.
+
+    Regression guard for upstream 3255f1f: the refactor deleted the ``{% endif %}`` that
+    closed the Observable Types card, so the four new vocabulary cards fell *inside* the
+    ``{% else %}`` branch and disappeared whenever at least one ``ObservableType`` row
+    existed (the normal case). The suite only caught the follow-on syntax error (HTTP 500);
+    a "page renders" smoke test cannot see the content loss, so assert the real content.
+    """
+    ObservableType.objects.get_or_create(name="ip", defaults={"is_case_sensitive": False})
+
+    body = browser.get(reverse("ui-taxonomy")).content.decode()
+
+    # The non-empty branch of `{% if observable_types %}` must be the one rendered.
+    assert "No observable types defined." not in body
+    for heading in (
+        "Observable Types",
+        "Case Scope",
+        "Case Phase",
+        "Case Type",
+        "Data Classification",
+    ):
+        assert heading in body

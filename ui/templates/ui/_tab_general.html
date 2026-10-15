@@ -8,7 +8,7 @@
         <dt>Assignee</dt><dd>{{ case.assignee.login|default:"Unassigned" }}</dd>
         <dt>Owner org</dt><dd>{{ case.owner_org.name }}</dd>
         <dt>Started</dt><dd class="mono">{{ case.start_date|date:"Y-m-d H:i" }}</dd>
-        <dt>TLP / PAP</dt><dd>{{ case.tlp }} / {{ case.pap }}</dd>
+        <dt>TLP / PAP</dt><dd>{{ case.tlp|choice_name:tlp_choices }} / {{ case.pap|choice_name:pap_choices }}</dd>
         {% if case.closed_date %}<dt>Closed</dt><dd class="mono">{{ case.closed_date|date:"Y-m-d H:i" }}</dd>{% endif %}
       </dl>
       <dl class="meta meta-col" role="listitem">

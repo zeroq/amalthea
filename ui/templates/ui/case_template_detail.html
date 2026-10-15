@@ -37,10 +37,10 @@
         <dd><span class="sev sev-{{ template.severity }}">{{ template.get_severity_display }}</span></dd>
 
         <dt>TLP</dt>
-        <dd>{{ template.tlp }}</dd>
+        <dd>{{ template.tlp|choice_name:tlp_choices }}</dd>
 
         <dt>PAP</dt>
-        <dd>{{ template.pap }}</dd>
+        <dd>{{ template.pap|choice_name:pap_choices }}</dd>
 
         <dt>Flags</dt>
         <dd>{{ template.flag|default:"—" }}</dd>

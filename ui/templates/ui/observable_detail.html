@@ -143,10 +143,10 @@
         <dd>{{ observable.updated_at|date:"Y-m-d H:i" }}</dd>
 
         <dt>TLP</dt>
-        <dd>{{ observable.tlp }}</dd>
+        <dd>{{ observable.tlp|choice_name:tlp_choices }}</dd>
 
         <dt>PAP</dt>
-        <dd>{{ observable.pap }}</dd>
+        <dd>{{ observable.pap|choice_name:pap_choices }}</dd>
 
         <dt>IOC</dt>
         <dd>{{ observable.ioc|yesno:"Yes,No" }}</dd>

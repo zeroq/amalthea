@@ -108,3 +108,15 @@ def choice_label(value: Any, choices: Any) -> str:
         return choice_dict.get(value, str(value))
     except (TypeError, ValueError):
         return str(value)
+
+
+@register.filter
+def choice_name(value: Any, choices: Any) -> str:
+    """Human name for a choice whose 0 is a real value (TLP/PAP).
+
+    Unlike `choice_label` this does NOT collapse falsy values: TLP 0 / PAP 0 mean "White".
+    """
+    try:
+        return dict(choices).get(int(value), str(value))
+    except (TypeError, ValueError):
+        return str(value)

@@ -1,5 +1,5 @@
 {% extends "ui/base.html" %}
-{% load static %}
+{% load static ui_tags %}
 
 {% block heading %}Case Templates{% endblock %}
 
@@ -34,8 +34,8 @@
         </td>
         <td>{{ t.display_name }}</td>
         <td><span class="sev sev-{{ t.severity }}">{{ t.get_severity_display }}</span></td>
-        <td>{{ t.tlp }}</td>
-        <td>{{ t.pap }}</td>
+        <td>{{ t.tlp|choice_name:tlp_choices }}</td>
+        <td>{{ t.pap|choice_name:pap_choices }}</td>
         <td>{{ t.flag|default:"—" }}</td>
         <td>
           {% if can_mutate %}

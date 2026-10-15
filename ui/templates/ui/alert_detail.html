@@ -33,7 +33,7 @@
       <dt>Correlation key</dt><dd class="mono">{{ alert.correlation_key|default:"—" }}</dd>
       <dt>Seen</dt><dd class="mono">{{ alert.date|date:"Y-m-d H:i:s" }}</dd>
       <dt>Ingested</dt><dd class="mono">{{ alert.created_at|date:"Y-m-d H:i:s" }}</dd>
-      <dt>TLP / PAP</dt><dd>{{ alert.tlp }} / {{ alert.pap }}</dd>
+      <dt>TLP / PAP</dt><dd>{{ alert.tlp|choice_name:tlp_choices }} / {{ alert.pap|choice_name:pap_choices }}</dd>
       <dt>Owner org</dt><dd>{{ alert.owner_org.name }}</dd>
     </dl>
 
