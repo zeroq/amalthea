@@ -190,6 +190,8 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     # cannot be deleted, CASCADE on source so retiring the source removes its tokens.
     ("identity", "IngestionToken", "organisation"): models.PROTECT,
     ("identity", "IngestionToken", "source"): models.CASCADE,
+    # created_by is audit: the token outlives a departing analyst, it just loses attribution.
+    ("identity", "IngestionToken", "created_by"): models.SET_NULL,
     # AuditLog: immutable trail; all org/user FKs are SET_NULL so the log survives deletion.
     ("identity", "AuditLog", "actor"): models.SET_NULL,
     ("identity", "AuditLog", "actor_org"): models.SET_NULL,
@@ -246,11 +248,11 @@ def test_fk_audit_covers_the_whole_model_inventory() -> None:
         f"undeclared={sorted(set(actual) - set(EXPECTED_ON_DELETE))}, "
         f"stale={sorted(set(EXPECTED_ON_DELETE) - set(actual))}"
     )
-    # 57 = 51 previous + 6 new (IngestionToken x2, AuditLog x3, Observable.owner_org);
-    # 59 = 57 + TaskNote x2 (task, created_by). Kept as a literal on purpose: it is a tripwire
+    # 59 = 57 + TaskNote x2 (task, created_by).
+    # 60 = 59 + IngestionToken.created_by. Kept as a literal on purpose: it is a tripwire
     # for a model silently dropping out of `OWN_APPS`, and `EXPECTED_ON_DELETE` already pins the
     # exact set, so a bump here is always a real change.
-    assert len(actual) == 59, f"expected the full FK set, found only {len(actual)}"
+    assert len(actual) == 60, f"expected the full FK set, found only {len(actual)}"
 
 
 @pytest.mark.django_db

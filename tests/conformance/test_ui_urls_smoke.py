@@ -130,6 +130,12 @@ def test_every_get_routable_ui_page_renders(browser: Client, case: Case) -> None
         "ui-settings-users-edit",
     }
 
+    # Admin-or-superAdmin routes: these return 404 for analyst/viewer but 200 for admin/superAdmin.
+    admin_or_superadmin = {
+        "ui-settings",
+        "ui-settings-sources",
+    }
+
     exercised: list[str] = []
     for name, kwargs in _reverse_candidates(names, case):
         try:
@@ -142,6 +148,12 @@ def test_every_get_routable_ui_page_renders(browser: Client, case: Case) -> None
         if name in superadmin_only:
             assert response.status_code == 404, (
                 f"GET {name} ({url}) -> {response.status_code}, expected 404 for non-superAdmin"
+            )
+            continue
+        if name in admin_or_superadmin:
+            # These are admin+superAdmin only; analyst gets 404 (correct)
+            assert response.status_code == 404, (
+                f"GET {name} ({url}) -> {response.status_code}, expected 404 for analyst"
             )
             continue
         exercised.append(name)

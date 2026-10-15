@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from django.http import HttpRequest
 
 if TYPE_CHECKING:
-    from identity.models import Organisation, User
+    from identity.models import IngestionToken, Organisation, User
 
 
 def _get_client_ip(request: HttpRequest) -> str | None:
@@ -194,5 +194,35 @@ def record_user_change(
         action=action,
         target_type="User",
         target_id=str(target_id),
+        ip=ip,
+    )
+
+
+def record_ingestion_token_change(
+    request: HttpRequest,
+    *,
+    actor: User,
+    action: str,
+    token: IngestionToken,
+) -> None:
+    """
+    Record an ingestion token create/revoke.
+
+    Args:
+        request: The HTTP request (for IP extraction).
+        actor: The user performing the action (admin or superAdmin).
+        action: One of "ingestion_token.created", "ingestion_token.revoked".
+        token: The IngestionToken instance.
+    """
+    from identity.models import AuditLog
+
+    ip = _get_client_ip(request)
+    AuditLog.objects.create(
+        actor=actor,
+        actor_org=getattr(actor, "org", None),
+        target_org=token.organisation,
+        action=action,
+        target_type="IngestionToken",
+        target_id=str(token.id),
         ip=ip,
     )

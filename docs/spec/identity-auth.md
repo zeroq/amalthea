@@ -63,6 +63,44 @@
   actions use `<dialog>` modals (`ui/templates/ui/_modal.html`), never native `confirm()`. The
   deletion guard is shared with the API via `identity/services.py::delete_organisation` (atomic,
   refuses `reassign` without a real different target).
+- **Settings UI — Sources (2026-10-15):** `/settings` landing page + `/settings/sources` token list,
+  `/settings/sources/token` (POST, create), `/settings/sources/<id>/revoke` (POST, revoke)
+  (`ui/views.py`; guarded by `_require_admin_ui`, accessible to `admin` and `superAdmin`).
+  `admin` users see only their own organisation's tokens; `superAdmin` sees all organisations'
+  tokens and must select an organisation when creating. Token plaintext is shown **exactly once**
+  at creation via a show-once modal; `secret_hash` is never rendered. Revocation sets
+  `revoked_at` and is audited. The `,` keyboard shortcut now targets `/settings`.
+
+## Ingestion tokens
+
+`IngestionToken` is the per-org webhook credential (ADR-004 Q6). It binds an `IngestionSource`
+to exactly one `Organisation`. The secret is stored as an Argon2 hash (`secret_hash`); the
+plaintext is shown **once** at creation and is never recoverable. The token carries a 12-char
+unique `prefix` for O(1) lookup, a `name` (≤200 chars), optional `created_by` (FK to `User`,
+nullable, `SET_NULL`), and `revoked_at` for soft-revocation.
+
+**Auth flow:** `ingest/views.py::_authenticate_token` accepts the secret via `X-Webhook-Secret`,
+`X-Api-Key`, or `Authorization: Bearer`. It matches by `prefix`, then verifies with Argon2.
+Revoked tokens (`revoked_at IS NOT NULL`) are rejected. A source with no active tokens ⇒ **401**.
+The token's `organisation` — never the request body — stamps the alert's `owner_org`.
+
+**Management UI (Settings → Sources):**
+- **List** (`GET /settings/sources`): tokens scoped to caller's org (admin) or all orgs (superAdmin).
+  Columns: Source, Organisation (superAdmin only), Name, Prefix, Created, Last used, Issued by,
+  Status/Action. Empty state and webhook endpoint/header hint included.
+- **Create** (`POST /settings/sources/token`): admin → own org; superAdmin → required org select.
+  Validates `source` (slug), `name`. Calls `IngestionToken.create_token(..., created_by=request.user)`.
+  On success: **renders** (200) a show-once modal with the plaintext. Bounded retry on `prefix`
+  collision (`unique=True`). Audit: `ingestion_token.created`.
+- **Revoke** (`POST /settings/sources/<id>/revoke`): sets `revoked_at=now()`. Scoped lookup
+  (admin → own org; superAdmin → any). Uniform 404 for cross-org access. Audit: `ingestion_token.revoked`.
+
+**Audit:** `record_ingestion_token_change` writes `AuditLog` rows with `action` ∈
+`{"ingestion_token.created", "ingestion_token.revoked"}`, `target_type="IngestionToken"`,
+`target_id=<uuid>`, `target_org=<token.organisation>`, `actor`, `actor_org`, `ip`. No secret material.
+
+**End-to-end:** A token minted in the UI works immediately for `POST /api/v1/alerts/webhook/<slug>/`
+with `X-Webhook-Secret`; a revoked token returns **401**.
 
 ## Authentication order (`REST_FRAMEWORK.DEFAULT_AUTHENTICATION_CLASSES`, `amalthea/settings/base.py`)
 

@@ -58,8 +58,8 @@ print('X-Webhook-Secret:', secret)
 > The secret is printed **once** and stored only as an Argon2 hash — copy it now. Under tenant
 > isolation (ADR-004) a token binds the `o365` source to **one** organisation, and that org is what
 > stamps the ingested alert's `owner_org`. The same source can fan out to several tenants by issuing
-> one token each. There is no Settings UI for tokens yet (TODO §6.13, §6.16 P4) — mint them from the
-> shell until P4 lands.
+> one token each. Tokens can be minted and revoked in the UI under **Settings → Sources** (accessible
+> to `admin` and `superAdmin` roles).
 
 For tenant administration, also create a `superAdmin` (only a `superAdmin` can open **Settings**):
 

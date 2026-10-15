@@ -25,7 +25,7 @@
           <td>{{ source.name }}</td>
           <td class="mono">{{ source.alert_count }}</td>
           <td>
-            {% if source.webhook_secret_hash %}
+            {% if source.has_token %}
               <span class="pill pill-on">required</span>
             {% else %}
               <span class="pill pill-off">open</span>

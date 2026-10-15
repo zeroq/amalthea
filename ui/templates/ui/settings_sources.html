@@ -1,0 +1,83 @@
+{% extends "ui/base.html" %}
+{% load static %}
+
+{% block heading %}Sources{% endblock %}
+
+{% block actions %}
+<a class="btn btn-primary" href="#" data-modal-open="token-create-modal">New token</a>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="hint-block hint-block--compact">
+    <p class="dim">
+      Ingestion endpoint: <code>{{ webhook_path }}</code>
+      <br>Header: <code>X-Webhook-Secret: <token></code> (or <code>Authorization: Bearer <token></code>)
+    </p>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Ingestion tokens</caption>
+      <thead>
+        <tr>
+          <th scope="col">Source</th>
+          {% if show_org_column %}
+          <th scope="col">Organisation</th>
+          {% endif %}
+          <th scope="col">Name</th>
+          <th scope="col">Prefix</th>
+          <th scope="col">Created</th>
+          <th scope="col">Last used</th>
+          <th scope="col">Issued by</th>
+          <th scope="col">Status / Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for token in tokens %}
+        <tr data-token-id="{{ token.id }}">
+          <td>
+            {{ token.source.name }} <span class="mono dim">({{ token.source.slug }})</span>
+          </td>
+          {% if show_org_column %}
+          <td>{{ token.organisation.name }}</td>
+          {% endif %}
+          <td>{{ token.name }}</td>
+          <td class="mono">{{ token.prefix }}</td>
+          <td class="mono dim">{{ token.created_at|date:"Y-m-d H:i" }}</td>
+          <td class="mono dim">{{ token.last_used_at|date:"Y-m-d H:i"|default:"never" }}</td>
+          <td class="dim">{{ token.created_by.login|default:"—" }}</td>
+          <td>
+            {% if token.revoked_at %}
+              <span class="pill pill-off">Revoked</span>
+              <span class="mono dim token-revoked-at">{{ token.revoked_at|date:"Y-m-d H:i" }}</span>
+            {% else %}
+              <span class="pill pill-on">Active</span>
+              {% url 'ui-settings-token-revoke' token.id as revoke_url %}
+              {% with sid=token.id|stringformat:"s" %}
+              {% with modal_id="revoke-token-"|add:sid form_id="revoke-token-"|add:sid|add:"-form" %}
+              {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_revoke_form.html" title="Revoke token?" confirm_text="Revoke" confirm_class="btn-err" cancel_text="Cancel" form_action=revoke_url size="md" %}
+              {% endwith %}
+              {% endwith %}
+              <button type="button" class="btn btn-err" data-modal-open="revoke-token-{{ token.id }}">Revoke</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="{% if show_org_column %}8{% else %}7{% endif %}" class="empty">
+            No ingestion tokens yet. <a href="#" data-modal-open="token-create-modal">Create one</a> to let a source send alerts.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# Create token modal — fields rendered server-side (no inline JS, CSP-safe) #}
+{% url 'ui-settings-token-create' as token_create_url %}
+{% include "ui/_modal.html" with modal_id="token-create-modal" form_id="token-create-form" body_template="ui/_settings_token_create_form.html" title="New ingestion token" confirm_text="Create" confirm_class="btn-primary" cancel_text="Cancel" form_action=token_create_url size="md" %}
+
+{% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
+{% endblock %}

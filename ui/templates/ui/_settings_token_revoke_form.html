@@ -1,0 +1,10 @@
+{% comment %}
+Server-rendered body for the "Revoke token" confirmation modal.
+The token cannot be re-activated; mint a new one instead.
+{% endcomment %}
+<p class="modal-body-text">
+  Revoke token <strong>{{ token.name }}</strong> (prefix <code>{{ token.prefix }}</code>)?
+  This cannot be undone — the token will stop accepting webhooks immediately.
+  If you need to restore access, create a new token.
+</p>
+<input type="hidden" name="token_id" value="{{ token.id }}" form="{{ form_id }}">

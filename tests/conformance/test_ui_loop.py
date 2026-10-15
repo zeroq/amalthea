@@ -517,16 +517,24 @@ def test_the_automation_page_shows_runs_and_their_errors(
 def test_the_sources_page_shows_whether_a_secret_is_required(
     browser: Client, source: IngestionSource
 ) -> None:
-    """An "open" feed is a deployment mistake; the page should make it visible."""
-    from django.contrib.auth.hashers import make_password
+    """An "open" feed is a deployment mistake; the page should make it visible.
 
-    source.webhook_secret_hash = make_password("a-secret")
-    source.save()
+    A source is protected if it has a non-revoked IngestionToken (not the legacy
+    webhook_secret_hash). This test verifies the token-driven behaviour.
+    """
+    from identity.models import IngestionToken, Organisation
 
+    # Source with NO token → "open"
     body = browser.get(reverse("ui-sources-list")).content.decode()
+    assert "open" in body
+    assert "required" not in body.split("Alerts")[0], "an unprotected source renders as required"
 
+    # Source WITH a non-revoked token → "required"
+    org = Organisation.objects.first()
+    IngestionToken.create_token(source=source, organisation=org, name="test-token")
+    body = browser.get(reverse("ui-sources-list")).content.decode()
     assert "required" in body
-    assert "open" not in body.split("Alerts")[0], "a locked source still renders as open"
+    assert "open" not in body.split("Alerts")[0], "a token-protected source still renders as open"
 
 
 def test_an_artifact_seen_in_two_cases_shows_its_case_count(browser: Client) -> None:

@@ -31,7 +31,7 @@
     { key: "t", label: "Tags list" },
     { key: "m", label: "Case templates" },
     { key: "x", label: "Taxonomy" },
-    { key: ",", label: "Settings (Organisations)" },
+    { key: ",", label: "Settings" },
     { key: "/", label: "Focus search / first input" },
     { key: "?", label: "Show this cheat sheet" },
   ];
@@ -47,7 +47,7 @@
     t: "/tags",
     m: "/case-templates",
     x: "/taxonomy",
-    ",": "/settings/organisations",
+    ",": "/settings",
   };
 
   function isTyping(target) {

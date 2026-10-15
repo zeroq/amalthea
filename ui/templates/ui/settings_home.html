@@ -1,0 +1,30 @@
+{% extends "ui/base.html" %}
+{% load static %}
+
+{% block heading %}Settings{% endblock %}
+
+{% block content %}
+<div class="card-grid">
+  {% comment %} Organisations card - superAdmin only {% endcomment %}
+  {% if request.user.role == "superAdmin" %}
+    {% url 'ui-settings-organisations' as org_url %}
+    <a class="card card-link" href="{{ org_url }}">
+      <div class="card-icon" aria-hidden="true"><i class="fa-solid fa-gear"></i></div>
+      <h3>Organisations</h3>
+      <p>Manage organisations and their members.</p>
+    </a>
+  {% endif %}
+
+  {% comment %} Sources card - admin and superAdmin {% endcomment %}
+  {% if request.user.role == "admin" or request.user.role == "superAdmin" %}
+    {% url 'ui-settings-sources' as sources_url %}
+    <a class="card card-link" href="{{ sources_url }}">
+      <div class="card-icon" aria-hidden="true"><i class="fa-solid fa-rss"></i></div>
+      <h3>Sources</h3>
+      <p>Create and revoke ingestion tokens for alert sources.</p>
+    </a>
+  {% endif %}
+</div>
+
+{% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
+{% endblock %}

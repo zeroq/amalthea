@@ -94,9 +94,9 @@ Accessibility notes that are not optional:
           <span class="k">x</span> Taxonomy
         </a>
       </li>
-      {% if request.user.role == "superAdmin" %}
+      {% if request.user.role == "admin" or request.user.role == "superAdmin" %}
       <li>
-        <a href="{% url 'ui-settings-organisations' %}" {% if request.resolver_match.url_name == 'ui-settings-organisations' or request.resolver_match.url_name == 'ui-settings-users' %}aria-current="page"{% endif %}>
+        <a href="{% url 'ui-settings' %}" {% if request.resolver_match.url_name == 'ui-settings' or request.resolver_match.url_name == 'ui-settings-organisations' or request.resolver_match.url_name == 'ui-settings-sources' or request.resolver_match.url_name == 'ui-settings-users' %}aria-current="page"{% endif %}>
           <i class="fa-solid fa-gear" aria-hidden="true"></i>
           <span class="k">,</span> Settings
         </a>
@@ -166,8 +166,8 @@ Accessibility notes that are not optional:
         <tr><td class="cheatsheet-key"><kbd>t</kbd></td><td>Tags list</td></tr>
         <tr><td class="cheatsheet-key"><kbd>m</kbd></td><td>Case templates</td></tr>
         <tr><td class="cheatsheet-key"><kbd>x</kbd></td><td>Taxonomy</td></tr>
-        {% if request.user.role == "superAdmin" %}
-        <tr><td class="cheatsheet-key"><kbd>,</kbd></td><td>Settings (Organisations)</td></tr>
+        {% if request.user.role == "admin" or request.user.role == "superAdmin" %}
+        <tr><td class="cheatsheet-key"><kbd>,</kbd></td><td>Settings</td></tr>
         {% endif %}
         <tr><td class="cheatsheet-key"><kbd>/</kbd></td><td>Focus search / first input</td></tr>
         <tr><td class="cheatsheet-key"><kbd>?</kbd></td><td>Show this cheat sheet</td></tr>
@@ -181,5 +181,6 @@ Accessibility notes that are not optional:
 <script src="{% static 'ui/modal.js' %}" defer></script>
 <script src="{% static 'ui/messages.js' %}" defer></script>
 <script src="{% static 'ui/picker.js' %}" defer></script>
+<script src="{% static 'ui/clipboard.js' %}" defer></script>
 </body>
 </html>

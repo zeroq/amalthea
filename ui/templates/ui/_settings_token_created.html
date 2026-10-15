@@ -1,0 +1,31 @@
+{% comment %}
+Show-once modal for a newly created ingestion token.
+Rendered directly by the POST response (HTTP 200, NOT a redirect).
+The plaintext secret is passed only in this render context and is never re-rendered.
+{% endcomment %}
+{% load static %}
+
+<div class="token-created" role="alert">
+  <div class="token-warning">
+    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+    <div>
+      <strong>You will not see this token again.</strong>
+      <p class="dim">Copy it now. If you lose it, revoke this token and create a new one.</p>
+    </div>
+  </div>
+
+  <div class="token-display">
+    <label for="token-plaintext" class="dim">Ingestion token (plaintext)</label>
+    <div class="token-code-wrap">
+      <code id="token-plaintext">{{ token_plaintext }}</code>
+      <button type="button" class="btn" data-clipboard-target="#token-plaintext" aria-label="Copy token to clipboard">Copy</button>
+    </div>
+  </div>
+
+  <div class="token-hint">
+    <p class="dim"><strong>Endpoint:</strong> <code>{{ webhook_path }}</code></p>
+    <p class="dim"><strong>Header:</strong> <code>X-Webhook-Secret: {{ token_plaintext }}</code> (or <code>Authorization: Bearer {{ token_plaintext }}</code>)</p>
+  </div>
+</div>
+
+{% comment %}The modal footer Close button is rendered by _modal.html{% endcomment %}

@@ -56,4 +56,6 @@
 {# Create organisation modal — fields rendered server-side (no inline JS, CSP-safe) #}
 {% url 'ui-settings-organisations' as org_create_url %}
 {% include "ui/_modal.html" with modal_id="org-create-modal" form_id="org-create-form" body_template="ui/_settings_org_create_form.html" title="New organisation" confirm_text="Create" confirm_class="btn-primary" cancel_text="Cancel" form_action=org_create_url size="md" %}
+
+{% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
 {% endblock %}

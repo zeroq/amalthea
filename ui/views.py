@@ -1480,7 +1480,9 @@ def automation_list(request: HttpRequest) -> HttpResponse:
 @require_GET
 def sources_list(request: HttpRequest) -> HttpResponse:
     """Configured feeds and how many alerts each has produced (org-scoped)."""
-    from django.db.models import Q
+    from django.db.models import Exists, OuterRef, Q
+
+    from identity.models import IngestionToken
 
     user_org_id = getattr(request.user, "org_id", None)
     if user_org_id is None:
@@ -1488,13 +1490,22 @@ def sources_list(request: HttpRequest) -> HttpResponse:
     else:
         alert_filter = Q(alerts__owner_org_id=user_org_id)
 
+    # A source is "protected" if it has at least one non-revoked IngestionToken.
+    # This replaces the legacy webhook_secret_hash check, since the receiver
+    # now authenticates via IngestionToken rows.
+    token_subquery = IngestionToken.objects.filter(
+        source=OuterRef("pk"),
+        revoked_at__isnull=True,
+    )
+
     return render(
         request,
         "ui/sources_list.html",
         _base_context(
             request,
             sources=IngestionSource.objects.annotate(
-                alert_count=Count("alerts", filter=alert_filter)
+                alert_count=Count("alerts", filter=alert_filter),
+                has_token=Exists(token_subquery),
             ).order_by("slug"),
         ),
     )
@@ -3446,6 +3457,18 @@ def _require_superadmin_ui(request: HttpRequest) -> HttpResponse | None:
     return None
 
 
+def _require_admin_ui(request: HttpRequest) -> HttpResponse | None:
+    """Return a 404 response if the user is not an admin or superAdmin, else None.
+
+    Used for Settings sub-pages accessible to both admin and superAdmin roles.
+    """
+    from identity.scoping import is_admin
+
+    if not is_admin(request.user):
+        return render(request, "ui/404.html", status=404)
+    return None
+
+
 def _org_blockers_text(org: object) -> str:
     """Human summary of the tenant data that PROTECTs an org from deletion.
 
@@ -3855,6 +3878,230 @@ def settings_users_delete(request: HttpRequest, user_id: str) -> HttpResponse:
     delete_user(user, actor=request.user, request=request)
     messages.success(request, f"User '{user.login}' deleted.")
     return redirect("ui-settings-users")
+
+
+# =============================================================================
+# Settings — Sources (admin + superAdmin)
+# =============================================================================
+
+
+@not_viewer
+@login_required
+def settings_home(request: HttpRequest) -> HttpResponse:
+    """Settings landing page (card grid), role-filtered."""
+    guard = _require_admin_ui(request)
+    if guard:
+        return guard
+
+    is_superadmin = request.user.role == "superAdmin"
+    cards = []
+    if is_superadmin:
+        cards.append(
+            {
+                "title": "Organisations",
+                "description": "Manage organisations and their members.",
+                "url": reverse("ui-settings-organisations"),
+                "icon": "fa-solid fa-building",
+            }
+        )
+    cards.append(
+        {
+            "title": "Sources",
+            "description": "Manage ingestion tokens for webhook sources.",
+            "url": reverse("ui-settings-sources"),
+            "icon": "fa-solid fa-rss",
+        }
+    )
+
+    return render(
+        request,
+        "ui/settings_home.html",
+        _base_context(request, cards=cards, is_superadmin=is_superadmin),
+    )
+
+
+@not_viewer
+@login_required
+def settings_sources(request: HttpRequest) -> HttpResponse:
+    """Token list for ingestion sources (admin + superAdmin)."""
+    guard = _require_admin_ui(request)
+    if guard:
+        return guard
+
+    is_superadmin = request.user.role == "superAdmin"
+    from identity.models import IngestionToken
+
+    qs = (
+        IngestionToken.objects.select_related("source", "organisation", "created_by")
+        .defer("secret_hash")
+        .order_by("-created_at")
+    )
+    if not is_superadmin:
+        qs = qs.filter(organisation_id=request.user.org_id)
+
+    tokens = list(qs)
+
+    from ingest.models import IngestionSource
+
+    sources = IngestionSource.objects.order_by("name")
+    organisations = Organisation.objects.order_by("name") if is_superadmin else None
+
+    # Build webhook path hint
+    webhook_path = "/api/v1/alerts/webhook/<slug>/"
+
+    return render(
+        request,
+        "ui/settings_sources.html",
+        _base_context(
+            request,
+            tokens=tokens,
+            show_org_column=is_superadmin,
+            sources=sources,
+            organisations=organisations,
+            is_superadmin=is_superadmin,
+            webhook_path=webhook_path,
+        ),
+    )
+
+
+@not_viewer
+@login_required
+@require_POST
+def settings_token_create(request: HttpRequest) -> HttpResponse:
+    """Mint a new ingestion token (show-once)."""
+    guard = _require_admin_ui(request)
+    if guard:
+        return guard
+
+    is_superadmin = request.user.role == "superAdmin"
+
+    # Resolve source by slug
+    source_slug = (request.POST.get("source") or "").strip()
+    if not source_slug:
+        messages.error(request, "Source is required.")
+        return redirect("ui-settings-sources")
+
+    from ingest.models import IngestionSource
+
+    try:
+        source = IngestionSource.objects.get(slug=source_slug)
+    except IngestionSource.DoesNotExist:
+        messages.error(request, f"Unknown source: {source_slug}")
+        return redirect("ui-settings-sources")
+
+    # Resolve organisation
+    if is_superadmin:
+        org_id = request.POST.get("organisation")
+        if not org_id:
+            messages.error(request, "Organisation is required.")
+            return redirect("ui-settings-sources")
+        try:
+            organisation = Organisation.objects.get(pk=org_id)
+        except Organisation.DoesNotExist:
+            messages.error(request, "Organisation not found.")
+            return redirect("ui-settings-sources")
+    else:
+        organisation = request.user.org
+
+    # Validate name
+    name = (request.POST.get("name") or "").strip()
+    if not name:
+        messages.error(request, "Name is required.")
+        return redirect("ui-settings-sources")
+    if len(name) > 200:
+        messages.error(request, "Name must be 200 characters or fewer.")
+        return redirect("ui-settings-sources")
+
+    # Create token with bounded retry on prefix collision
+    from django.db import IntegrityError, transaction
+
+    from identity.models import IngestionToken
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            with transaction.atomic():
+                token, plaintext = IngestionToken.create_token(
+                    source=source,
+                    organisation=organisation,
+                    name=name,
+                    created_by=request.user,
+                )
+                # Write audit row in the same transaction
+                from identity.audit import record_ingestion_token_change
+
+                record_ingestion_token_change(
+                    request,
+                    actor=request.user,
+                    action="ingestion_token.created",
+                    token=token,
+                )
+        except IntegrityError:
+            # The only unique constraint on IngestionToken is `prefix` (PK is UUID).
+            # A collision here can only mean a prefix collision — retry with a new random prefix.
+            if attempt < max_retries - 1:
+                continue
+            messages.error(request, "Could not generate a unique token. Please try again.")
+            return redirect("ui-settings-sources")
+        else:
+            break
+
+    # Render the show-once modal with the plaintext. The template reads
+    # `token_plaintext` and `webhook_path` — pass exactly those names. A silent
+    # mismatch here would render an empty secret, defeating the whole feature
+    # (covered by test_show_once_displays_the_plaintext).
+    return render(
+        request,
+        "ui/_settings_token_created.html",
+        _base_context(
+            request,
+            token_plaintext=plaintext,
+            webhook_path=f"/api/v1/alerts/webhook/{source.slug}/",
+        ),
+    )
+
+
+@not_viewer
+@login_required
+@require_POST
+def settings_token_revoke(request: HttpRequest, token_id: str) -> HttpResponse:
+    """Revoke an ingestion token."""
+    guard = _require_admin_ui(request)
+    if guard:
+        return guard
+
+    is_superadmin = request.user.role == "superAdmin"
+    from identity.models import IngestionToken
+
+    qs = IngestionToken.objects.select_related("organisation")
+    if not is_superadmin:
+        qs = qs.filter(organisation_id=request.user.org_id)
+
+    try:
+        token = qs.get(pk=token_id)
+    except IngestionToken.DoesNotExist:
+        # Uniform 404 for cross-org access (no existence oracle)
+        return render(request, "ui/404.html", status=404)
+
+    if token.revoked_at is None:
+        from django.utils import timezone
+
+        token.revoked_at = timezone.now()
+        token.save(update_fields=["revoked_at", "updated_at"])
+
+        from identity.audit import record_ingestion_token_change
+
+        record_ingestion_token_change(
+            request,
+            actor=request.user,
+            action="ingestion_token.revoked",
+            token=token,
+        )
+        messages.success(request, f"Token '{token.name}' revoked.")
+    else:
+        messages.info(request, f"Token '{token.name}' was already revoked.")
+
+    return redirect("ui-settings-sources")
 
 
 # =============================================================================

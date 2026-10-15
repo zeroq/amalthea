@@ -1,0 +1,32 @@
+{% comment %}
+Server-rendered body for the "New ingestion token" modal (no inline JS, CSP-safe).
+Fields target the modal's form via form="{{ form_id }}" so they work with JS disabled.
+For admin: no org field (org comes from request.user.org_id).
+For superAdmin: required organisation <select>.
+{% endcomment %}
+<div class="meta-inline">
+  <label for="token-create-source">Source <span class="required">*</span></label>
+  <select id="token-create-source" name="source" required form="{{ form_id }}">
+    <option value="">— select —</option>
+    {% for source in sources %}
+    <option value="{{ source.slug }}">{{ source.name }} ({{ source.slug }})</option>
+    {% endfor %}
+  </select>
+</div>
+
+{% if is_superadmin %}
+<div class="meta-inline">
+  <label for="token-create-org">Organisation <span class="required">*</span></label>
+  <select id="token-create-org" name="organisation" required form="{{ form_id }}">
+    <option value="">— select —</option>
+    {% for org in organisations %}
+    <option value="{{ org.id }}">{{ org.name }}</option>
+    {% endfor %}
+  </select>
+</div>
+{% endif %}
+
+<div class="meta-inline">
+  <label for="token-create-name">Name <span class="required">*</span></label>
+  <input type="text" id="token-create-name" name="name" maxlength="200" required autofocus form="{{ form_id }}" placeholder="e.g. CrowdStrike EDR production">
+</div>

@@ -102,8 +102,8 @@ class TestSettingsNav:
         resp = client.get(reverse("ui-dashboard"))
         assert resp.status_code == 200
         content = resp.content.decode()
-        # Settings link should be in the rail for superAdmin
-        assert "/settings/organisations" in content
+        # Settings link should be in the rail for superAdmin (now points to /settings)
+        assert "/settings" in content
         assert "Settings" in content
 
     def test_organisations_route_404_for_non_superadmin(self, db: None) -> None:
@@ -667,14 +667,14 @@ class TestKeyboardShortcuts:
 
         keys_js = Path(__file__).resolve().parents[2] / "ui" / "static" / "ui" / "keys.js"
         content = keys_js.read_text()
-        assert '",": "/settings/organisations"' in content
+        assert '",": "/settings"' in content
 
     def test_cheatsheet_has_settings_entry(self, db: None) -> None:
         from pathlib import Path
 
         keys_js = Path(__file__).resolve().parents[2] / "ui" / "static" / "ui" / "keys.js"
         content = keys_js.read_text()
-        assert 'label: "Settings (Organisations)"' in content
+        assert 'label: "Settings"' in content
         assert 'key: ","' in content
 
 

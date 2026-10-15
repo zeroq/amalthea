@@ -189,6 +189,13 @@ class IngestionToken(UUIDModel, TimeStampedModel):
     secret_hash = models.CharField(max_length=255)
     revoked_at = models.DateTimeField(null=True, blank=True)
     last_used_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
 
     class Meta:
         db_table = "identity_ingestion_token"
@@ -206,6 +213,7 @@ class IngestionToken(UUIDModel, TimeStampedModel):
         source: ingest.models.IngestionSource,
         organisation: Organisation,
         name: str,
+        created_by: User | None = None,
     ) -> tuple[IngestionToken, str]:
         """
         Create a new token, returning `(token, plaintext)`.
@@ -222,6 +230,7 @@ class IngestionToken(UUIDModel, TimeStampedModel):
             name=name,
             prefix=prefix,
             secret_hash=_hash_secret(plaintext),
+            created_by=created_by,
         )
         return token, plaintext
 
