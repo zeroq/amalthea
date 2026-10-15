@@ -2242,17 +2242,49 @@ def tag_delete(request: HttpRequest, tag_id: str) -> HttpResponse:
 @login_required
 @require_GET
 def observable_list(request: HttpRequest) -> HttpResponse:
-    """Global observables list with cross-case links (org-scoped)."""
+    """Global observables list with cross-case links (org-scoped).
+
+    The filter bar is a plain `GET` form, so its state lives in the query string: `q`
+    matches the artifact value (case-insensitive substring) and `type` narrows to one
+    `ObservableType` id. Both are optional — an absent or blank filter leaves the list
+    whole. A `type` that is not a UUID is dropped rather than handed to the ORM: a
+    malformed id would otherwise raise a 500 out of the UUID column, and form-supplied
+    identifiers are never trusted anywhere else in the UI.
+
+    `observable_types` feeds the dropdown. It is the full vocabulary (types are global
+    taxonomy, not tenant data — ADR-002 §D4), ordered so the options do not reshuffle
+    between loads.
+    """
+    query = (request.GET.get("q") or "").strip()
+    type_filter = (request.GET.get("type") or "").strip()
+    if type_filter:
+        try:
+            uuid.UUID(type_filter)
+        except ValueError:
+            # Malformed id: ignore it and keep the raw value out of the context, so the
+            # dropdown falls back to "All types" instead of echoing junk back into the form.
+            type_filter = ""
+
     queryset = (
         Observable.objects.select_related("data_type", "owner_org")
         .prefetch_related("case_observables__case")
         .filter(org_q("owner_org", request.user))
-        .order_by("-created_at")[:PAGE_SIZE]
     )
+    if query:
+        queryset = queryset.filter(data__icontains=query)
+    if type_filter:
+        queryset = queryset.filter(data_type_id=type_filter)
+
     return render(
         request,
         "ui/observable_list.html",
-        _base_context(request, observables=queryset),
+        _base_context(
+            request,
+            observables=queryset.order_by("-created_at")[:PAGE_SIZE],
+            observable_types=ObservableType.objects.order_by("name"),
+            query=query,
+            type_filter=type_filter,
+        ),
     )
 
 

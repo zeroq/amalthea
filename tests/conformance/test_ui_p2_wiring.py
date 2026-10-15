@@ -125,6 +125,14 @@ def _link(observable: Observable, case: Case) -> CaseObservable:
     return CaseObservable.objects.create(case=case, observable=observable)
 
 
+def _artifact(org: Organisation, type_name: str, value: str) -> Observable:
+    """An org-owned observable of `type_name`, so list-filter tests read as one line each."""
+    otype, _ = ObservableType.objects.get_or_create(name=type_name)
+    return Observable.objects.create(
+        data_type=otype, owner_org=org, data=value, normalized_data=value
+    )
+
+
 # --------------------------------------------------------------------------
 # C1 — Alert triage
 # --------------------------------------------------------------------------
@@ -486,6 +494,74 @@ def test_observable_mutations_are_org_scoped_uniform_404(
     assert outsider_browser.post(edit_url, {"message": "x"}).status_code == 404
     assert outsider_browser.post(delete_url).status_code == 404
     assert Observable.objects.filter(pk=observable.pk).exists()
+
+
+# --------------------------------------------------------------------------
+# Observables list — the filter bar reads the query string (regression)
+#
+# The bar rendered but the view never read `request.GET`, so `q`/`type` were
+# decorative: the table always showed the unfiltered page and the type dropdown
+# was empty (`observable_types` was never passed).
+# --------------------------------------------------------------------------
+
+
+def test_observable_list_filter_by_value(browser: Client, org: Organisation) -> None:
+    """`q` narrows the list to matching values (case-insensitive substring)."""
+    _artifact(org, "ip", "192.0.2.10")
+    _artifact(org, "hash", "d41d8cd98f00b204e9800998ecf8427e")
+
+    body = browser.get(reverse("ui-observable-list"), {"q": "192.0"}).content.decode()
+
+    assert "192.0.2.10" in body
+    assert "d41d8cd98f00b204e9800998ecf8427e" not in body
+    # the field round-trips the term so the analyst sees what is applied
+    assert 'value="192.0"' in body
+
+
+def test_observable_list_filter_by_type(browser: Client, org: Organisation) -> None:
+    """`type` narrows to one vocabulary row; the dropdown offers them all and keeps the choice."""
+    _artifact(org, "ip", "192.0.2.10")
+    domain, _ = ObservableType.objects.get_or_create(name="domain")
+    _artifact(org, "domain", "evil.example")
+
+    body = browser.get(reverse("ui-observable-list"), {"type": str(domain.id)}).content.decode()
+
+    assert "evil.example" in body
+    assert "192.0.2.10" not in body
+    # the dropdown is populated (it used to render empty) …
+    ip_type = ObservableType.objects.get(name="ip")
+    assert f'value="{ip_type.id}"' in body
+    # … and the submitted type stays selected
+    assert f'value="{domain.id}" selected' in body
+
+
+def test_observable_list_ignores_malformed_type(browser: Client, org: Organisation) -> None:
+    """A non-UUID `type` is dropped (200, not 500) and never echoed back.
+
+    Handing a raw `type` to `filter(data_type_id=...)` raises out of the UUID column, so
+    a hand-edited URL must degrade to the unfiltered list rather than 500.
+    """
+    _artifact(org, "ip", "192.0.2.10")
+
+    response = browser.get(reverse("ui-observable-list"), {"type": "not-a-uuid"})
+    body = response.content.decode()
+
+    assert response.status_code == 200
+    assert "192.0.2.10" in body  # the bogus filter is dropped, not applied
+    assert "not-a-uuid" not in body  # and not reflected into the form
+
+
+def test_observable_list_filter_stays_org_scoped(
+    browser: Client, org: Organisation, other_org: Organisation
+) -> None:
+    """A filter never widens scope: another org's matching artifact stays hidden."""
+    _artifact(org, "ip", "192.0.2.10")
+    _artifact(other_org, "ip", "192.0.2.99")
+
+    body = browser.get(reverse("ui-observable-list"), {"q": "192.0.2"}).content.decode()
+
+    assert "192.0.2.10" in body
+    assert "192.0.2.99" not in body
 
 
 # --------------------------------------------------------------------------

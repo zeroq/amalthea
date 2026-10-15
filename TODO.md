@@ -44,7 +44,7 @@ hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the
 | **1** | **§12.3 — No cross-case / correlation surface (Modules B + C)** | `correlation_key` is derived, indexed and queryable but **nothing consumes it**: no auto-bundling of correlated alerts into a Case, and no "cases sharing this observable" view. The observable page lists its linked cases, but nothing links *from* a case. Also settles §10.7 "Similar" + Q-D4. | **Highest** — the marquee differentiator ("instantly highlight an advanced persistent pattern") is invisible in the UI. |
 | **2** | **§6.16 P6 — Global search (B3)** | No search surface anywhere in the UI; the only affordance is browsing lists, which §12.1/12.2 make lossy. Plan: `PLAN-2026-10-11-ui-completeness.md` B3/Q5 (cases + alerts + observables). | **Highest** — "have we seen this hash / IP / user before?" is the most asked triage question and has no answer. |
 | **3** | **§12.1 — Lists are silently truncated at 200, with no pager** | Every list view slices `[:PAGE_SIZE]` (200); no `Paginator`/`?page=` exists in `ui/`. | **High** — on any real instance the analyst cannot reach last month's cases, and is not told rows were cut. |
-| **4** | **§12.2 — The observables-list filter does nothing** | The `Filter by value…` + type form in `observable_list.html` has no backend (never read `request.GET`) and its dropdown renders empty. | **High** — a control that lies: the analyst filters, sees everything, and trusts a search that never ran. |
+| **4** | **§12.2 — The observables-list filter does nothing — SHIPPED 2026-10-15** | `observable_list` now reads `q`/`type` from `request.GET`, passes `observable_types` (the dropdown is no longer empty), stays org-scoped, and tolerates a malformed `type` id. The pager + honest empty state remain §12.1. | **Done** — the control no longer lies; the §12.1 truncation caveat still applies. |
 | **5** | **§12.4 — No bulk actions in the UI** | `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk` (PATCH) exist in the API with per-item isolation; the UI stub was deleted (Q2) and not replaced. | **Medium-High** — a 200-alert morning is single-item work. |
 | **6** | **§10.3–10.6 — Case scope / type / data-classification / phase — SHIPPED 2026-10-15** | `PLAN-2026-10-14-case-classification-fields.md`, commit `822d050`, verified 21/21 ACs. `data_classification` is admin-only and audited; `phase` is a separate field from `CaseStatus` (Q-D2). | **Done** — follow-up is §10.9 (status labels). |
 | **7** | **§12.5 — Case pages: renderable, not authorable** | **Code shipped 2026-10-14, verification pending** (create/edit/delete modal on the General tab). | **Medium** — a documentation surface the analyst can see but never contribute to. |
@@ -477,13 +477,14 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
   "showing N of M" count, and an honest empty state that distinguishes *no rows* from *filtered to none* —
   note the API is *not* a workaround for the analyst: `GET /case` defaults to the same cap
   (`timelineLimit` default 50 / max 200 in `cases/views.py`). Source: audit 2026-10-12.
-- [ ] **12.2 — The observables-list filter is decorative.** `ui/templates/ui/observable_list.html` renders
-  `Filter by value…` + a type `<select name="type">`, but `observable_list` never reads `request.GET` and
-  never passes `query` / `observable_types` / `type_filter` → the form submits and nothing filters, and the
-  dropdown renders **empty** (the only `observable_types=…` context is the detail/edit view, `:1989`).
-  Shipped that way in §6.9 (commit `2382d15`); never wired. A control that lies is a trust problem, not a
-  cosmetic one — the analyst believes a search ran over the whole dataset. Fix with §12.1, or delete the bar.
-  Source: audit 2026-10-12.
+- [x] **12.2 — The observables-list filter is decorative — FIXED 2026-10-15.** `observable_list` now reads
+  `request.GET`: `q` filters the artifact value (`data__icontains`) and `type` narrows to one `ObservableType`
+  id, with `query` / `observable_types` / `type_filter` passed to the context so the dropdown is populated and
+  the submitted type stays selected. The filter stays org-scoped (`org_q`) and a non-UUID `type` is dropped
+  rather than 500-ing out of the UUID column. Regression tests in `tests/conformance/test_ui_p2_wiring.py`
+  (value, type, malformed id, org scoping). **Not** closed by this: §12.1 — there is still no pager and the
+  empty state still cannot tell "no rows" from "filtered to none", so filtering a truncated 200-row list
+  remains a half-answer. Source: audit 2026-10-12.
 - [ ] **12.3 — No cross-case / correlation surface (AGENTS.md §2 Modules B + C).** `Alert.correlation_key`
   is derived at ingest (`ingest/mapping.py::extract_correlation_key`), indexed (`(correlation_key, date)`)
   and exposed to the query engine — but **no code consumes it**: there is no automatic bundling of
