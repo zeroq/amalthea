@@ -106,6 +106,48 @@ class TestSettingsNav:
         assert "/settings" in content
         assert "Settings" in content
 
+    def test_settings_home_redirects_superadmin_to_organisations(self, db: None) -> None:
+        org = _mk_org("Org1")
+        client = _mk_client(_mk_superadmin(org))
+
+        resp = client.get(reverse("ui-settings"))
+        assert resp.status_code == 302
+        assert resp["Location"] == reverse("ui-settings-organisations")
+
+    def test_settings_home_redirects_admin_to_sources(self, db: None) -> None:
+        org = _mk_org("Org1")
+        client = _mk_client(_mk_user("admin1", org, role="admin"))
+
+        resp = client.get(reverse("ui-settings"))
+        assert resp.status_code == 302
+        assert resp["Location"] == reverse("ui-settings-sources")
+
+    def test_rail_submenu_expands_on_settings_routes(self, db: None) -> None:
+        org = _mk_org("Org1")
+        client = _mk_client(_mk_superadmin(org))
+
+        content = client.get(reverse("ui-settings-organisations")).content.decode()
+        # Non-vacuous: both sub-items are present inside the nested rail list.
+        assert 'class="rail-sub"' in content
+        assert reverse("ui-settings-organisations") in content
+        assert reverse("ui-settings-sources") in content
+
+    def test_rail_submenu_is_collapsed_outside_settings(self, db: None) -> None:
+        org = _mk_org("Org1")
+        client = _mk_client(_mk_superadmin(org))
+
+        content = client.get(reverse("ui-dashboard")).content.decode()
+        assert 'class="rail-sub"' not in content
+
+    def test_rail_submenu_hides_organisations_from_admin(self, db: None) -> None:
+        org = _mk_org("Org1")
+        client = _mk_client(_mk_user("admin1", org, role="admin"))
+
+        content = client.get(reverse("ui-settings-sources")).content.decode()
+        assert 'class="rail-sub"' in content
+        assert reverse("ui-settings-sources") in content
+        assert reverse("ui-settings-organisations") not in content
+
     def test_organisations_route_404_for_non_superadmin(self, db: None) -> None:
         org = _mk_org("Org1")
         analyst = _mk_analyst(org)
