@@ -4,7 +4,7 @@ Tabs are defined here (the single source of truth) and filtered by role.
 Adding a third tab is a one-line change in this file.
 Includes aria-current="page" on the active tab.
 
-Usage (from settings_home.html, settings_sources.html, settings_organisations.html,
+Usage (from settings_sources.html, settings_organisations.html,
 settings_users.html):
   {% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
 {% endcomment %}

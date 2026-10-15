@@ -3888,36 +3888,16 @@ def settings_users_delete(request: HttpRequest, user_id: str) -> HttpResponse:
 @not_viewer
 @login_required
 def settings_home(request: HttpRequest) -> HttpResponse:
-    """Settings landing page (card grid), role-filtered."""
+    """Settings entry: redirect to first submenu item."""
+    from django.shortcuts import redirect
+
     guard = _require_admin_ui(request)
     if guard:
         return guard
 
-    is_superadmin = request.user.role == "superAdmin"
-    cards = []
-    if is_superadmin:
-        cards.append(
-            {
-                "title": "Organisations",
-                "description": "Manage organisations and their members.",
-                "url": reverse("ui-settings-organisations"),
-                "icon": "fa-solid fa-building",
-            }
-        )
-    cards.append(
-        {
-            "title": "Sources",
-            "description": "Manage ingestion tokens for webhook sources.",
-            "url": reverse("ui-settings-sources"),
-            "icon": "fa-solid fa-rss",
-        }
-    )
-
-    return render(
-        request,
-        "ui/settings_home.html",
-        _base_context(request, cards=cards, is_superadmin=is_superadmin),
-    )
+    if getattr(request.user, "role", "") == "superAdmin":
+        return redirect("ui-settings-organisations")
+    return redirect("ui-settings-sources")
 
 
 @not_viewer
