@@ -46,7 +46,7 @@ hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the
 | **3** | **§12.1 — Lists are silently truncated at 200, with no pager** | Every list view slices `[:PAGE_SIZE]` (200); no `Paginator`/`?page=` exists in `ui/`. | **High** — on any real instance the analyst cannot reach last month's cases, and is not told rows were cut. |
 | **4** | **§12.2 — The observables-list filter does nothing** | The `Filter by value…` + type form in `observable_list.html` has no backend (never read `request.GET`) and its dropdown renders empty. | **High** — a control that lies: the analyst filters, sees everything, and trusts a search that never ran. |
 | **5** | **§12.4 — No bulk actions in the UI** | `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk` (PATCH) exist in the API with per-item isolation; the UI stub was deleted (Q2) and not replaced. | **Medium-High** — a 200-alert morning is single-item work. |
-| **6** | **§10.3–10.6 — Case scope / type / data-classification / phase** | Model + migration + API + `case_json` + UI fields; Q-D1…Q-D5 open (Q-D2 reconciles `phase` with `CaseStatus`/`stage`). Needs a plan first. | **Medium-High** — how incidents are classified and reported; TheHive parity. |
+| **6** | **§10.3–10.6 — Case scope / type / data-classification / phase — SHIPPED 2026-10-15** | `PLAN-2026-10-14-case-classification-fields.md`, commit `822d050`, verified 21/21 ACs. `data_classification` is admin-only and audited; `phase` is a separate field from `CaseStatus` (Q-D2). | **Done** — follow-up is §10.9 (status labels). |
 | **7** | **§12.5 — Case pages: renderable, not authorable** | **Code shipped 2026-10-14, verification pending** (create/edit/delete modal on the General tab). | **Medium** — a documentation surface the analyst can see but never contribute to. |
 | **8** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; the ledger already syncs on the case page. |
 | **9** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — an ops/onboarding concern, not triage. |
@@ -236,6 +236,20 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
   idempotent and `make css-check` only proves the input compiles (it cannot detect drift). Introduce
   `ui/static/ui/app.src.css`, generate `app.css` from it, and make `css-check` fail when the tree's
   artifact is stale. Visual-regression risk: verify the tokens before switching the pipeline.
+- [ ] **7.5 — Never accept a "pre-existing/unrelated" claim without a baseline; gate on the FULL suite.** Found
+  2026-10-15: a subagent reported `test_ui_markdown.py::…::test_case_description_renders_as_markdown` as
+  "pre-existing/unrelated". It was neither — that same task's template refactor had deleted the case
+  **description** *and* the **ingestion-warnings** block from `ui/templates/ui/_tab_general.html`, and it
+  survived review because only the feature's test *subsets* were executed. Both blocks are restored and the
+  warnings block now has its first test. Three rules from it:
+  (a) a failure is only "pre-existing" once it is **reproduced on the base commit** — otherwise report it as
+  *unverified*, never as *unrelated*;
+  (b) run the **whole** suite as the gate (~107 s — the long-standing "the full suite exceeds the 900 s shell
+  timeout" assumption was simply wrong), not a hand-picked subset; a subset cannot see collateral damage;
+  (c) a template/partial refactor must be diff-reviewed for **deleted** blocks, because block-rendering tests
+  are frequently negative-only (`assertNotIn`) and keep passing when the block vanishes — every removed block
+  needs a *positive* assertion (`tests/conformance/test_ui_markdown.py` had exactly that trap: its positive
+  test caught this, its negative sibling would not have).
 
 ---
 
@@ -286,15 +300,21 @@ backlog once the analyst-visible classification fields (10.3–10.6) are designe
   fields were **not** included (that row still needs its own plan); extracted observables come from the
   shared applier's title/description extraction (no extraction checkbox — deviation W102-2). See
   [`COMPLETED.md`](./COMPLETED.md).
-- [ ] **10.3 — Case `scope`.** New enum field: *Single Asset/User*, *Multiple Assets/Users*, *Single
+> **10.3–10.6 SHIPPED 2026-10-15** — `PLAN-2026-10-14-case-classification-fields.md`, commit `822d050`,
+> verified 21/21 ACs at [`docs/verification/VERIFY-2026-10-14-case-classification-fields.md`](./docs/verification/VERIFY-2026-10-14-case-classification-fields.md)
+> (security audit clean). Q-D1…Q-D5 below were answered as Q-D1…Q-D10 in §12 of that plan — note **Q-D2 went
+> the opposite way** to this section's recommendation: `phase` shipped as a *separate* field, deliberately not
+> folded into `CaseStatus`/`CASE_STAGES`. The bullets are kept verbatim as the original requirement text.
+
+- [x] **10.3 — Case `scope`.** New enum field: *Single Asset/User*, *Multiple Assets/Users*, *Single
   Department*, *Multiple Departments*, *Complete Enterprise*, *Third Party/Supplier*. (Values TBC.)
-- [ ] **10.4 — Case `type`.** New enum/taxonomy: *Malware*, *Phishing*, *Password Leak*, *Ransomware*,
+- [x] **10.4 — Case `type`.** New enum/taxonomy: *Malware*, *Phishing*, *Password Leak*, *Ransomware*,
   *Business Email Compromise*, … — the list is explicitly open; decide free-form vs seeded vocabulary vs
   a `CaseType` table (and how it relates to the existing alert `type` and the `tags` model).
-- [ ] **10.5 — Case `data classification`.** New enum field: *No Data*, *Public Data*, *Personal Data
+- [x] **10.5 — Case `data classification`.** New enum field: *No Data*, *Public Data*, *Personal Data
   (PII)*, *Sensitive Data (Credentials, Intellectual Property)*. **Note:** distinct from TLP/PAP; label is
   a *classification*, not a sharing directive. Per §6 severity rule, never signal by colour alone.
-- [ ] **10.6 — Case `phase` (IR lifecycle).** *Initial Triage*, *Containment*, *Analysis*, *Remediation*,
+- [x] **10.6 — Case `phase` (IR lifecycle).** *Initial Triage*, *Containment*, *Analysis*, *Remediation*,
   *Cleanup*, *Close*. **Reconcile with `CaseStatus` first** (see Q-D2) — the existing `CaseStatus`
   (`value`/`stage`∈{New,InProgress,Closed}/`order`/`hidden`) plus `Case.stage` already model a coarse
   lifecycle, and `resolve_case_status` is ADR-002 §D11-tolerant. Decide: new `phase` field, new
@@ -315,8 +335,26 @@ backlog once the analyst-visible classification fields (10.3–10.6) are designe
   `docs/spec/identity-auth.md` (create/verify/revoke, prefix lookup, Argon2, legacy plaintext fallback)
   and cross-reference it from the README. Mostly absorbed by §6.16 **P4** — recorded here so the stale
   copy is not forgotten if P4 slips.
+- [ ] **10.9 — Status vocabularies have no human `label`, so the UI prints raw stored tokens.** Found
+  2026-10-15 while fixing TLP/PAP display (the TLP/PAP row rendered raw integers; now uses a zero-safe
+  `choice_name` filter). Every *closed set* except statuses renders a human label
+  (`choice_label` / `choice_name`, `core/enums.py`), but `CaseStatus` exposes only `value`/`stage`/`order`/
+  `hidden` and its `__str__` is `value`, so `_tab_general.html` and `case_list.html` print
+  `{{ case.status.value }}` — and `value` is a free `CharField(64)`, so whatever an operator seeded is what
+  the analyst sees ("InProgress", not "In Progress"). The same holds for `AlertStatus.value`
+  (`alert_detail.html`, `alert_list.html`, `_tab_alerts.html`) and for `Task.status`, whose labels are
+  literally identical to their tokens (`TASK_STATUS_CHOICES`: `Waiting`/`InProgress`/`Completed`/`Cancel`).
+  Fix options: add a `label` to `CaseStatus`/`AlertStatus` (+ data migration, keeping ADR-002 §D11-tolerant
+  `resolve_case_status`), or a `*_LABELS` mapping keyed by token, or fix `TASK_STATUS_CHOICES` labels.
+  **Deferred**: purely cosmetic today, and touching `CaseStatus` risks the automation triggers that key on
+  `stage` (see §10.6/Q-D2) — which is exactly why it is its own item, not a rider on 10.3–10.6.
 
 **Open design questions (resolve in the plan before coding):**
+
+> **Resolved 2026-10-14** — Q-D1…Q-D5 were all settled (and widened to Q-D1…Q-D10) in §12 of
+> [`PLAN-2026-10-14-case-classification-fields.md`](./docs/planning/PLAN-2026-10-14-case-classification-fields.md),
+> which shipped as commit `822d050`. The questions are kept below only as the pre-decision context; do not
+> re-litigate them without reading §12 first.
 
 - **Q-D1** — Scope / Type / Data-classification: first-class `Case` enum fields (needs `choices` + a
   `CheckConstraint` per `core/enums.py`: "enforce every closed set twice"), or `CustomField`s
@@ -456,7 +494,10 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
   (§10.7 "Similar" tab semantics, **Q-D4**); then: an automated-bundle service that is **explicit and
   auditable** (silent auto-merges are unacceptable — every bundle must write a ledger entry + `AuditLog` row,
   per §9 of the plan and ADR-002), plus a case-side "related cases" panel reusing
-  `case_observables__observable` (no new model). Source: audit 2026-10-12; AGENTS.md §2.
+  `case_observables__observable` (no new model). Source: audit 2026-10-12; AGENTS.md §2. **Q-D4 decided
+  2026-10-14:** deferred — `PLAN-2026-10-14-case-classification-fields.md` §12 settled it, and the "Similar"
+  tab remains the explicit "not yet implemented" placeholder in `ui/templates/ui/_tab_similar.html`. Nothing
+  else depends on it; it is still unimplemented and unscheduled.
 - [ ] **12.4 — No bulk actions in the UI.** `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk`
   (PATCH) exist in the API with per-item isolation + status reporting (`compat/bulk.py`,
   `test_t2_p4_surface.py`), but the UI stub was deleted under Q2 (P1) and nothing replaced it — triaging a
