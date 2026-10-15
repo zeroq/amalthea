@@ -8,6 +8,7 @@
 {% endblock %}
 
 {% block content %}
+{% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
 <div class="card">
   <div class="hint-block hint-block--compact">
     <p class="dim">
@@ -78,6 +79,4 @@
 {# Create token modal — fields rendered server-side (no inline JS, CSP-safe) #}
 {% url 'ui-settings-token-create' as token_create_url %}
 {% include "ui/_modal.html" with modal_id="token-create-modal" form_id="token-create-form" body_template="ui/_settings_token_create_form.html" title="New ingestion token" confirm_text="Create" confirm_class="btn-primary" cancel_text="Cancel" form_action=token_create_url size="md" %}
-
-{% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
 {% endblock %}

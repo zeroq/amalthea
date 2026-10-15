@@ -1,42 +1,39 @@
 {% comment %}
 Shared Settings sub-navigation tab strip.
-Tabs are defined here (the single source of truth) and filtered by role.
-Adding a third tab is a one-line change in this file.
-Includes aria-current="page" on the active tab.
 
-Usage (from settings_sources.html, settings_organisations.html,
-settings_users.html):
+Rendered at the top of ``{% block content %}`` on the settings pages, directly under the page heading
+and messages — the same position as the case-detail tab strip (`case_detail.html`), which is the
+layout reference for every section strip in the app. Tabs are defined here (the single source of
+truth) and filtered by role; adding a third tab is a one-line change in this file.
+
+Markup mirrors `case_detail.html`: the tabs are **direct children** of `.tabs` so they are the flex
+items and `.tab.tab-on` can paint over the strip's bottom border. Do not re-wrap them in `<ul>/<li>`
+— a `<li>` flex item with an inline-flex `<a>` inside adds a descender gap and breaks the strip.
+
+Usage (from settings_sources.html, settings_organisations.html, settings_users.html):
   {% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
 {% endcomment %}
 
-<nav class="settings-nav" aria-label="Settings sections">
-  <ul class="tabs" role="tablist">
-    {% comment %} Organisations tab - superAdmin only {% endcomment %}
-    {% if request.user.role == "superAdmin" %}
-      {% url 'ui-settings-organisations' as org_url %}
-      <li role="presentation">
-        <a role="tab"
-           href="{{ org_url }}"
-           class="tab{% if active_tab == 'ui-settings-organisations' %} tab-on{% endif %}"
-           {% if active_tab == 'ui-settings-organisations' %}aria-current="page"{% endif %}>
-          <i class="fa-solid fa-gear" aria-hidden="true"></i>
-          Organisations
-        </a>
-      </li>
-    {% endif %}
+<nav class="tabs" aria-label="Settings sections">
+  {% comment %} Organisations tab - superAdmin only {% endcomment %}
+  {% if request.user.role == "superAdmin" %}
+    {% url 'ui-settings-organisations' as org_url %}
+    <a class="tab{% if active_tab == 'ui-settings-organisations' %} tab-on{% endif %}"
+       href="{{ org_url }}"
+       {% if active_tab == 'ui-settings-organisations' %}aria-current="page"{% endif %}>
+      <i class="fa-solid fa-gear" aria-hidden="true"></i>
+      Organisations
+    </a>
+  {% endif %}
 
-    {% comment %} Sources tab - admin and superAdmin {% endcomment %}
-    {% if request.user.role == "admin" or request.user.role == "superAdmin" %}
-      {% url 'ui-settings-sources' as sources_url %}
-      <li role="presentation">
-        <a role="tab"
-           href="{{ sources_url }}"
-           class="tab{% if active_tab == 'ui-settings-sources' %} tab-on{% endif %}"
-           {% if active_tab == 'ui-settings-sources' %}aria-current="page"{% endif %}>
-          <i class="fa-solid fa-rss" aria-hidden="true"></i>
-          Sources
-        </a>
-      </li>
-    {% endif %}
-  </ul>
+  {% comment %} Sources tab - admin and superAdmin {% endcomment %}
+  {% if request.user.role == "admin" or request.user.role == "superAdmin" %}
+    {% url 'ui-settings-sources' as sources_url %}
+    <a class="tab{% if active_tab == 'ui-settings-sources' %} tab-on{% endif %}"
+       href="{{ sources_url }}"
+       {% if active_tab == 'ui-settings-sources' %}aria-current="page"{% endif %}>
+      <i class="fa-solid fa-rss" aria-hidden="true"></i>
+      Sources
+    </a>
+  {% endif %}
 </nav>

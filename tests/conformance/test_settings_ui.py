@@ -10,6 +10,7 @@ Tests:
 
 from __future__ import annotations
 
+import re
 from uuid import uuid4
 
 from django.test import Client
@@ -180,6 +181,65 @@ class TestSettingsNav:
 
         resp = client.get(reverse("ui-settings-users-edit", kwargs={"user_id": user.id}))
         assert resp.status_code == 404
+
+
+class TestSettingsTabStrip:
+    """The settings tab strip mirrors the case-detail strip.
+
+    `case_detail.html` is the layout role model: the strip is the first thing in
+    ``{% block content %}`` (immediately under the page heading) and ``.tabs`` holds the tab links as
+    its *direct* children. A ``<ul>``/``<li>`` wrapper puts the ``<a>`` inside a block box, which
+    breaks the active tab's overlap and pushes the strip below the page's content.
+    """
+
+    def _content(self, client: Client, url_name: str) -> str:
+        resp = client.get(reverse(url_name))
+        assert resp.status_code == 200
+        return resp.content.decode()
+
+    def test_strip_sits_under_the_heading_and_above_the_content_card(self, db: None) -> None:
+        client = _mk_client(_mk_superadmin(_mk_org("Org1")))
+
+        for url_name in (
+            "ui-settings-organisations",
+            "ui-settings-sources",
+            "ui-settings-users",
+        ):
+            content = client.get(reverse(url_name)).content.decode()
+            heading = content.index("<h1")
+            strip = content.index('aria-label="Settings sections"')
+            card = content.index('<div class="card"')
+            assert heading < strip < card, (
+                f"{url_name}: the settings strip must render under the page heading and above the "
+                "content card (case-detail position)"
+            )
+
+    def test_strip_uses_the_case_detail_markup(self, db: None) -> None:
+        client = _mk_client(_mk_superadmin(_mk_org("Org1")))
+        content = client.get(reverse("ui-settings-sources")).content.decode()
+
+        assert '<nav class="tabs" aria-label="Settings sections">' in content
+        # No `<ul>`/`<li>` wrapper and none of the old unstyled wrapper class.
+        assert '<ul class="tabs"' not in content
+        assert 'role="presentation"' not in content
+        assert "settings-nav" not in content
+
+    def test_active_tab_carries_tab_on_and_aria_current(self, db: None) -> None:
+        client = _mk_client(_mk_superadmin(_mk_org("Org1")))
+        content = client.get(reverse("ui-settings-sources")).content.decode()
+
+        match = re.search(r'<a class="tab tab-on"[^>]*aria-current="page"', content)
+        assert match is not None, (
+            'the active settings tab must be marked with both `tab-on` and `aria-current="page"`'
+        )
+        assert reverse("ui-settings-sources") in match.group(0)
+
+    def test_strip_tabs_are_filtered_by_role(self, db: None) -> None:
+        admin = _mk_client(_mk_user("admin1", _mk_org("Org1"), role="admin"))
+        content = admin.get(reverse("ui-settings-sources")).content.decode()
+
+        assert reverse("ui-settings-sources") in content
+        assert reverse("ui-settings-organisations") not in content
 
 
 class TestOrganisationsCRUD:

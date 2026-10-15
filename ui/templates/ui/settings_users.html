@@ -8,6 +8,7 @@
 {% endblock %}
 
 {% block content %}
+{% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
 <div class="card">
   <div class="table-wrap">
   <table class="data-table">
@@ -64,6 +65,4 @@
 {# Create user modal — fields rendered server-side (no inline JS, CSP-safe) #}
 {% url 'ui-settings-users' as user_create_url %}
 {% include "ui/_modal.html" with modal_id="user-create-modal" form_id="user-create-form" body_template="ui/_settings_user_create_form.html" title="New user" confirm_text="Create" confirm_class="btn-primary" cancel_text="Cancel" form_action=user_create_url size="lg" %}
-
-{% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
 {% endblock %}
