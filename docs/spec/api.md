@@ -155,7 +155,13 @@ inline themselves.
   `title` (required), `description`, `summary`, `severity` (1-4), `tlp` (0-4), `pap` (0-3),
   `status` (tolerant, existing vocabulary; **absent/empty/`null` keeps the default `InProgress**),
   `flag` (bool), `tags` (array of strings), `assignee` (login or UUID, org-scoped),
-  `extract` (bool, defaults false), `observables` (array of strings added to extraction corpus).
+  `extract` (bool, defaults false), `observables` (array of strings added to extraction corpus),
+  `scope` (enum: `unset`, `single_asset_user`, `multiple_assets_users`, `single_department`,
+  `multiple_departments`, `complete_enterprise`, `third_party_supplier`),
+  `caseType` (enum: `unset`, `malware`, `phishing`, `password_leak`, `ransomware`, `bec`),
+  `dataClassification` (enum: `unset`, `no_data`, `public_data`, `personal_data`, `sensitive_data` —
+  **admin/superAdmin write only**),
+  `phase` (enum: `unset`, `initial_triage`, `containment`, `analysis`, `remediation`, `cleanup`, `close`).
   Extraction is **unconditional** — `extract_into_case` always runs over title and description;
   `extract`/`observables` only add explicit strings. Stricter enum validation: non-integer or
   out-of-range `severity`/`tlp`/`pap` → 400; empty/null enum keeps the model default
@@ -163,7 +169,10 @@ inline themselves.
   201 `case_json(detail=True)` with ledger `kind="case-created"`.
 - `case_detail` GET: `case_json(detail=True)` (adds `observables[]`, `timeline[]`,
   `automationRuns[]`, `tasks[]`). DELETE ⇒ **204** — hard delete, children cascade, alerts `SET_NULL`
-  (P10-3). PATCH: writes `status-changed` and `assigned` ledger events in the same transaction.
+  (P10-3). PATCH: writes `status-changed`, `assigned` and `classification-changed` ledger events in
+  the same transaction. Accepted payload keys include the four classification fields
+  (`scope`, `caseType`, `dataClassification`, `phase`); `dataClassification` is **admin/superAdmin
+  write only**; out-of-vocabulary → 400; empty/null keeps model default.
 - `task` POST: 201 `{"_id","id","title","status"}`; default status `"Waiting"`.
 - `task_detail` PATCH ⇒ **204, no body** (no plan number — see [`deviations.md`](./deviations.md));
   `status` validated against

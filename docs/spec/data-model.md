@@ -124,6 +124,18 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 - `title`(500) · `description` · `severity` (default 2) · `status` — FK → `CaseStatus`, `PROTECT`,
   `db_index=False`.
 - `assignee` — FK → `User` · `tags` — M2M through `CaseTagLink` · `flag` · `tlp` · `pap` · `summary`.
+- **Classification fields (PLAN-2026-10-14):**
+  - `scope` — CharField(32), choices `CASE_SCOPE_CHOICES` (`unset`, `single_asset_user`,
+    `multiple_assets_users`, `single_department`, `multiple_departments`, `complete_enterprise`,
+    `third_party_supplier`), default `unset`. Constraint `case_scope_valid`.
+  - `case_type` — CharField(32), choices `CASE_TYPE_CHOICES` (`unset`, `malware`, `phishing`,
+    `password_leak`, `ransomware`, `bec`), default `unset`. Constraint `case_type_valid`.
+  - `data_classification` — CharField(32), choices `DATA_CLASSIFICATION_CHOICES` (`unset`,
+    `no_data`, `public_data`, `personal_data`, `sensitive_data`), default `unset`.
+    Constraint `case_data_classification_valid`. **Writes are admin/superAdmin only** (Q-D5).
+  - `phase` — CharField(32), choices `CASE_PHASE_CHOICES` (`unset`, `initial_triage`,
+    `containment`, `analysis`, `remediation`, `cleanup`, `close`), default `initial_triage`.
+    Constraint `case_phase_valid`.
 - `start_date` (default now, NOT NULL) · `end_date` · `closed_date` · `owner_org` — FK →
   `Organisation`, **`NOT NULL`**, `on_delete=PROTECT` (ADR-004) · `ingestion_warnings` — JSONB.
 - Manager: `AllocatingQuerySet.as_manager()` (number allocation covers `save` **and** `bulk_create`).
@@ -131,7 +143,14 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
   `stamp_closed_date()` sets `closed_date` **once**, on entry to stage `Closed`.
 - Indexes: `case_status_start_idx ("status","-start_date")`, `case_severity_idx ("-severity")`,
   `case_created_at_idx ("-created_at")`.
-- Constraints: `case_severity_range`, `case_tlp_range`, `case_pap_range`.
+- Constraints: `case_severity_range`, `case_tlp_range`, `case_pap_range`,
+  `case_scope_valid`, `case_type_valid`, `case_data_classification_valid`, `case_phase_valid`.
+
+**`Case.status.stage` vs `Case.phase` (Q-D2 / R1 mitigation):** `CaseStatus.stage` is the stable
+3-bucket *openness* axis (`New`, `InProgress`, `Closed`) that automation triggers and `CASE_STAGES`
+key on. `Case.phase` is an independent IR-lifecycle enum (`initial_triage` … `close`) recording the
+analyst's position in the incident-response loop. The two axes are deliberately separate: changing
+`phase` does not move `stage`, and automation must not read `phase` for trigger decisions.
 
 ### Task (`task`, extends `UUIDModel` + `TimeStampedModel`)
 - `case` — FK → `Case`, `CASCADE` · `title`(500) · `description` · `group`(100).
@@ -190,6 +209,11 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 ### CaseTemplate (`case_template`, extends `UUIDModel` + `TimeStampedModel`) — T2 P4
 - `name` **unique** · `display_name` · `title_prefix` · `description` · `summary` · `flag`.
 - `severity` / `tlp` / `pap` — SmallInteger with the same range CHECKs as `Case`.
+- **Classification fields (Q-D6):** `scope` (choices `CASE_SCOPE_CHOICES`, default `unset`,
+  constraint `case_template_scope_valid`), `case_type` (choices `CASE_TYPE_CHOICES`, default `unset`,
+  constraint `case_template_case_type_valid`), `phase` (choices `CASE_PHASE_CHOICES`, default
+  `initial_triage`, constraint `case_template_phase_valid`). **No `data_classification`** — that is
+  a per-incident judgement and a template must not set or overwrite it.
 - `tags` — JSONB list · `tasks` — JSONB list of task definitions · `custom_fields` — JSONB list.
 - Applying a template **copies** these definitions into the case (tasks/tag links/custom-field
   values); nothing is shared with the template row (AC6.1-P4-c).

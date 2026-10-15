@@ -2,14 +2,24 @@
 {% url 'ui-case-page-create' case.number as page_create_url %}
 <section class="card" aria-labelledby="h-meta">
   <div class="case-meta">
-    <dl class="meta meta-inline">
-      <dt>Status</dt><dd>{{ case.status.value }}</dd>
-      <dt>Assignee</dt><dd>{{ case.assignee.login|default:"Unassigned" }}</dd>
-      <dt>Owner org</dt><dd>{{ case.owner_org.name }}</dd>
-      <dt>Started</dt><dd class="mono">{{ case.start_date|date:"Y-m-d H:i" }}</dd>
-      <dt>TLP / PAP</dt><dd>{{ case.tlp }} / {{ case.pap }}</dd>
-      {% if case.closed_date %}<dt>Closed</dt><dd class="mono">{{ case.closed_date|date:"Y-m-d H:i" }}</dd>{% endif %}
-    </dl>
+    <div class="meta-grid" role="list">
+      <dl class="meta meta-col" role="listitem">
+        <dt>Status</dt><dd>{{ case.status.value }}</dd>
+        <dt>Assignee</dt><dd>{{ case.assignee.login|default:"Unassigned" }}</dd>
+        <dt>Owner org</dt><dd>{{ case.owner_org.name }}</dd>
+        <dt>Started</dt><dd class="mono">{{ case.start_date|date:"Y-m-d H:i" }}</dd>
+        <dt>TLP / PAP</dt><dd>{{ case.tlp }} / {{ case.pap }}</dd>
+        {% if case.closed_date %}<dt>Closed</dt><dd class="mono">{{ case.closed_date|date:"Y-m-d H:i" }}</dd>{% endif %}
+      </dl>
+      <dl class="meta meta-col" role="listitem">
+        <dt>Severity</dt>
+        <dd><span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span></dd>
+        <dt>Scope</dt><dd>{{ case.scope|choice_label:scope_choices }}</dd>
+        <dt>Type</dt><dd>{{ case.case_type|choice_label:case_type_choices }}</dd>
+        <dt>Classification</dt><dd>{{ case.data_classification|choice_label:data_classification_choices }}</dd>
+        <dt>Phase</dt><dd>{{ case.phase|choice_label:phase_choices }}</dd>
+      </dl>
+    </div>
 
     {% if can_mutate %}
     <div class="case-actions">

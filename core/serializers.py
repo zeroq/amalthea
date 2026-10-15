@@ -286,6 +286,10 @@ def case_json(
         "createdAt": _iso(case.created_at),
         "updatedAt": _iso(case.updated_at),
         "alertCount": case.alerts.count(),
+        "scope": case.scope,
+        "caseType": case.case_type,
+        "dataClassification": case.data_classification,
+        "phase": case.phase,
     }
     if detail:
         payload["observables"] = [
@@ -471,6 +475,9 @@ def case_template_json(template: CaseTemplate) -> dict[str, Any]:
         "pap": template.pap,
         "papLabel": PAP_LABELS.get(template.pap, ""),
         "summary": template.summary,
+        "scope": template.scope,
+        "caseType": template.case_type,
+        "phase": template.phase,
         "tasks": list(template.tasks or []),
         "customFields": list(template.custom_fields or []),
         "extraData": {},

@@ -81,12 +81,23 @@ from cases.views import (
     _resolve_ttp_value,
     _set_observable_fields,
 )
-from core.enums import ALERT_STAGES, PAP_CHOICES, SEVERITY_CHOICES, TASK_STATUS_CHOICES, TLP_CHOICES
+from core.enums import (
+    ALERT_STAGES,
+    CASE_PHASE_CHOICES,
+    CASE_SCOPE_CHOICES,
+    CASE_TYPE_CHOICES,
+    DATA_CLASSIFICATION_CHOICES,
+    PAP_CHOICES,
+    SEVERITY_CHOICES,
+    TASK_STATUS_CHOICES,
+    TLP_CHOICES,
+)
 from core.serializers import page_json, task_json
 from identity.models import AuditLog, Organisation, User
 from identity.ratelimit import check_login_rate_limit, record_failed_login, record_successful_login
 from identity.scoping import (
     case_visible_q,
+    is_admin,
     is_case_owner,
     is_viewer,
     org_filtered,
@@ -482,6 +493,8 @@ def _case_create_form_context(
     post_data: Any,
     status_options: Any,
     assignees: Any,
+    *,
+    request: HttpRequest | None = None,
 ) -> dict[str, Any]:
     """Build the context extras for the case create form (page or modal).
 
@@ -489,6 +502,7 @@ def _case_create_form_context(
     `['x']`, so scalars are read with `.get()` (SEC-2026-10-11 N1). The numeric selects fall back
     to the model defaults, which is what the service applies when the wire omits them.
     """
+    can_classify = is_admin(request.user) if request is not None else False
     form_values = {
         "title": "",
         "description": "",
@@ -500,6 +514,10 @@ def _case_create_form_context(
         "assignee": "",
         "tags": "",
         "flag": "",
+        "scope": "unset",
+        "case_type": "unset",
+        "data_classification": "unset",
+        "phase": "initial_triage",
     }
     if post_data is not None:
         for key in (
@@ -512,8 +530,14 @@ def _case_create_form_context(
             "status",
             "assignee",
             "tags",
+            "scope",
+            "case_type",
+            "phase",
         ):
             form_values[key] = post_data.get(key, "")
+        # data_classification is admin-only (Q-D5); only echo back if the actor may classify
+        if can_classify:
+            form_values["data_classification"] = post_data.get("data_classification", "")
         form_values["flag"] = "on" if post_data.get("flag") == "on" else ""
     return {
         "form_values": form_values,
@@ -522,6 +546,11 @@ def _case_create_form_context(
         "severity_choices": SEVERITY_CHOICES,
         "tlp_choices": TLP_CHOICES,
         "pap_choices": PAP_CHOICES,
+        "scope_choices": CASE_SCOPE_CHOICES,
+        "case_type_choices": CASE_TYPE_CHOICES,
+        "data_classification_choices": DATA_CLASSIFICATION_CHOICES,
+        "phase_choices": CASE_PHASE_CHOICES,
+        "can_classify": can_classify,
     }
 
 
@@ -535,7 +564,10 @@ def _render_case_create_form(
     return render(
         request,
         "ui/case_create.html",
-        _base_context(request, **_case_create_form_context(post_data, status_options, assignees)),
+        _base_context(
+            request,
+            **_case_create_form_context(post_data, status_options, assignees, request=request),
+        ),
     )
 
 
@@ -577,7 +609,9 @@ def _render_case_list(
                 .select_related("org")
                 .order_by("login")[:PAGE_SIZE]
             )
-        context.update(_case_create_form_context(post_data, status_options, assignees))
+        context.update(
+            _case_create_form_context(post_data, status_options, assignees, request=request)
+        )
 
     return render(request, "ui/case_list.html", _base_context(request, **context))
 
@@ -629,6 +663,17 @@ def case_create(request: HttpRequest) -> HttpResponse:
             payload[key] = raw
     # The form always renders the checkbox, so an absent key means "unchecked".
     payload["flag"] = request.POST.get("flag") == "on"
+
+    # Classification fields (PLAN-2026-10-14) — explicit allow-list, never splat request.POST
+    for key in ("scope", "case_type", "phase"):
+        raw = request.POST.get(key)
+        if raw not in (None, ""):
+            payload[key] = raw
+    # data_classification is admin-only (Q-D5); only include if the actor can classify
+    if is_admin(request.user):
+        raw = request.POST.get("data_classification")
+        if raw not in (None, ""):
+            payload["data_classification"] = raw
 
     # Origin-aware error re-render: if the POST came from the cases list modal
     # (origin=cases), re-render the list with the modal open and values kept.
@@ -811,6 +856,10 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
         "status": case.status.value if case.status_id else "",
         "assignee": case.assignee.login if case.assignee_id else "",
         "tags": ", ".join(case.tags.values_list("name", flat=True)),
+        "scope": case.scope,
+        "case_type": case.case_type,
+        "data_classification": case.data_classification,
+        "phase": case.phase,
     }
 
     case_status_options = list(CaseStatus.objects.filter(hidden=False).order_by("order", "value"))
@@ -820,6 +869,8 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
         "login"
     )
     task_status_options = TASK_STATUS_CHOICES
+
+    can_classify = is_admin(request.user)
 
     return render(
         request,
@@ -859,6 +910,11 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             severity_choices=SEVERITY_CHOICES,
             tlp_choices=TLP_CHOICES,
             pap_choices=PAP_CHOICES,
+            scope_choices=CASE_SCOPE_CHOICES,
+            case_type_choices=CASE_TYPE_CHOICES,
+            data_classification_choices=DATA_CLASSIFICATION_CHOICES,
+            phase_choices=CASE_PHASE_CHOICES,
+            can_classify=can_classify,
             case_status_options=case_status_options,
             case_edit_extra_fields={"tab": active_tab},
             # Observables tab create/edit modals. The per-row Edit gate uses `is_owner` above
@@ -2320,7 +2376,12 @@ def case_edit(request: HttpRequest, case_id: str) -> HttpResponse:
             # NEW-1).
             "assignee": case.assignee.login if case.assignee_id else "",
             "tags": ", ".join(case.tags.values_list("name", flat=True)),
+            "scope": case.scope,
+            "case_type": case.case_type,
+            "data_classification": case.data_classification,
+            "phase": case.phase,
         }
+        can_classify = is_admin(request.user)
         return render(
             request,
             "ui/case_edit.html",
@@ -2332,6 +2393,11 @@ def case_edit(request: HttpRequest, case_id: str) -> HttpResponse:
                 severity_choices=SEVERITY_CHOICES,
                 tlp_choices=TLP_CHOICES,
                 pap_choices=PAP_CHOICES,
+                scope_choices=CASE_SCOPE_CHOICES,
+                case_type_choices=CASE_TYPE_CHOICES,
+                data_classification_choices=DATA_CLASSIFICATION_CHOICES,
+                phase_choices=CASE_PHASE_CHOICES,
+                can_classify=can_classify,
                 case_status_options=status_options,
                 assignees=assignees,
             ),
@@ -2358,6 +2424,17 @@ def case_edit(request: HttpRequest, case_id: str) -> HttpResponse:
 
     # The form always renders the flag checkbox, so an absent key means "unchecked".
     payload["flag"] = request.POST.get("flag") == "on"
+
+    # Classification fields (PLAN-2026-10-14) — explicit allow-list, never splat request.POST
+    for key in ("scope", "case_type", "phase"):
+        raw = request.POST.get(key)
+        if raw not in (None, ""):
+            payload[key] = raw
+    # data_classification is admin-only (Q-D5); only include if the actor can classify
+    if is_admin(request.user):
+        raw = request.POST.get("data_classification")
+        if raw not in (None, ""):
+            payload["data_classification"] = raw
 
     # Status (CaseStatus.value) — bounded to the existing vocabulary so a crafted POST cannot
     # mint a new status (the shared applier is tolerant by design; ADR-002 §D11).
@@ -2420,8 +2497,9 @@ def _render_case_edit_form(
     post_data,
 ) -> HttpResponse:
     """Re-render the case edit form with submitted values and error message."""
-    # `post_data` is a QueryDict; `dict(...)` yields lists (`{"title": ["x"]}`), which render as
+    # `post_data` is a QueryDict; `dict(...)` would yield lists (`{"title": ["x"]}`), which render as
     # `['x']`. Read scalars with `.get()` so the form echoes what was typed (SEC-2026-10-11 N1).
+    can_classify = is_admin(request.user)
     fields = (
         "title",
         "description",
@@ -2432,8 +2510,18 @@ def _render_case_edit_form(
         "status",
         "assignee",
         "tags",
+        "scope",
+        "case_type",
+        "phase",
     )
     form_values = {key: post_data.get(key, "") for key in fields}
+    # data_classification is admin-only (Q-D5); only echo back if the actor may classify
+    if can_classify:
+        form_values["data_classification"] = post_data.get("data_classification", "")
+    # For classification fields, if POST doesn't carry them (e.g. non-admin form), fall back to persisted value
+    for key in ("scope", "case_type", "data_classification", "phase"):
+        if form_values.get(key, "") == "":
+            form_values[key] = getattr(case, key)
     # Ensure checkbox renders correctly
     form_values["flag"] = "on" if post_data.get("flag") == "on" else ""
     return render(
@@ -2447,6 +2535,11 @@ def _render_case_edit_form(
             severity_choices=SEVERITY_CHOICES,
             tlp_choices=TLP_CHOICES,
             pap_choices=PAP_CHOICES,
+            scope_choices=CASE_SCOPE_CHOICES,
+            case_type_choices=CASE_TYPE_CHOICES,
+            data_classification_choices=DATA_CLASSIFICATION_CHOICES,
+            phase_choices=CASE_PHASE_CHOICES,
+            can_classify=can_classify,
             case_status_options=status_options,
             assignees=assignees,
         ),

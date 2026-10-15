@@ -60,7 +60,9 @@ def bulk_patch(
                 outcome = apply(obj, body)
                 if isinstance(outcome, Response):
                     message = str(getattr(outcome, "data", {}).get("message", "invalid"))
-                    results.append({"id": str(obj.id), "status": 400, "message": message})
+                    results.append(
+                        {"id": str(obj.id), "status": outcome.status_code, "message": message}
+                    )
                     continue
                 if outcome is None:
                     results.append(

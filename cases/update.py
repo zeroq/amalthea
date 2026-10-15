@@ -16,11 +16,35 @@ from alerts.escalation import resolve_case_status
 from cases.ledger import append_timeline_event
 from cases.models import Case, CaseTagLink, Tag
 from cases.tagging import tag_names_from_payload
-from core.enums import PAP_MAX, PAP_MIN, SEVERITY_MAX, SEVERITY_MIN, TLP_MAX, TLP_MIN
+from core.enums import (
+    CASE_PHASE_CHOICES,
+    CASE_SCOPE_CHOICES,
+    CASE_TYPE_CHOICES,
+    DATA_CLASSIFICATION_CHOICES,
+    PAP_MAX,
+    PAP_MIN,
+    SEVERITY_MAX,
+    SEVERITY_MIN,
+    TLP_MAX,
+    TLP_MIN,
+)
+from identity.scoping import is_admin
 
 #: Scalar/enum fields the update surface accepts. One definition shared by the single PATCH
 #: (`_update_case`), the bulk PATCH (`_bulk_update_cases`) and the UI (`ui-case-edit`).
-CASE_SCALAR_FIELDS = ("title", "description", "summary", "severity", "tlp", "pap", "flag")
+CASE_SCALAR_FIELDS = (
+    "title",
+    "description",
+    "summary",
+    "severity",
+    "tlp",
+    "pap",
+    "flag",
+    "scope",
+    "case_type",
+    "data_classification",
+    "phase",
+)
 
 #: The three enum scalars carry a DB `CheckConstraint` (core/enums.py). Validating here means an
 #: out-of-range value is a clean 400 / form error instead of an unhandled `IntegrityError` 500 —
@@ -29,6 +53,16 @@ _CASE_RANGE_FIELDS: dict[str, tuple[int, int]] = {
     "severity": (SEVERITY_MIN, SEVERITY_MAX),
     "tlp": (TLP_MIN, TLP_MAX),
     "pap": (PAP_MIN, PAP_MAX),
+}
+
+#: String enum fields with their allowed values (derived from core/enums.py, never hardcoded).
+#: An out-of-vocabulary value raises CaseUpdateError("BadRequest", ...); an empty/None value is
+#: dropped (keeps the model default) — mirroring the _CASE_RANGE_FIELDS tolerance.
+_CASE_ENUM_FIELDS: dict[str, tuple[str, ...]] = {
+    "scope": tuple(v for v, _ in CASE_SCOPE_CHOICES),
+    "case_type": tuple(v for v, _ in CASE_TYPE_CHOICES),
+    "data_classification": tuple(v for v, _ in DATA_CLASSIFICATION_CHOICES),
+    "phase": tuple(v for v, _ in CASE_PHASE_CHOICES),
 }
 
 
@@ -64,7 +98,7 @@ def _resolve_assignee(value: Any, org: Any) -> Any:
 
 
 def _set_case_fields(
-    case: Case, payload: Mapping[str, Any], *, warnings: list[str] | None = None
+    case: Case, payload: Mapping[str, Any], *, warnings: list[str] | None = None, actor: Any
 ) -> list[str]:
     """Apply the scalar/enum FK fields of `payload` to `case`; return the touched columns.
 
@@ -75,12 +109,16 @@ def _set_case_fields(
     `warnings` is an out-parameter for a caller that must not swallow the resolver's record of an
     auto-created status: `cases.create.create_case` stores it on `ingestion_warnings`. The update
     path passes nothing and keeps discarding it (the recorded behaviour of a PATCH).
+
+    `actor` is required for the `data_classification` admin gate (Q-D5).
     """
     fields: list[str] = []
     for key in CASE_SCALAR_FIELDS:
         if key not in payload:
             continue
         value = payload[key]
+
+        # Integer range fields (severity, tlp, pap)
         bounds = _CASE_RANGE_FIELDS.get(key)
         if bounds is not None:
             low, high = bounds
@@ -91,8 +129,32 @@ def _set_case_fields(
             if value is None or not low <= value <= high:
                 message = f"{key} must be between {low} and {high}"
                 raise CaseUpdateError("BadRequest", message, {key: [message]})
+            setattr(case, key, value)
+            fields.append(key)
+            continue
+
+        # String enum fields (scope, case_type, data_classification, phase)
+        allowed = _CASE_ENUM_FIELDS.get(key)
+        if allowed is not None:
+            # Admin gate for data_classification (Q-D5): admin/superAdmin only
+            if key == "data_classification" and not is_admin(actor):
+                message = "data_classification may only be changed by an administrator"
+                raise CaseUpdateError("AuthorizationError", message, {key: [message]})
+            # Empty/None keeps the model default — mirror _CASE_RANGE_FIELDS tolerance
+            if value is None or value == "":
+                continue
+            value_str = str(value).strip()
+            if value_str not in allowed:
+                message = f"{key} must be one of: {', '.join(allowed)}"
+                raise CaseUpdateError("BadRequest", message, {key: [message]})
+            setattr(case, key, value_str)
+            fields.append(key)
+            continue
+
+        # Regular scalar fields
         setattr(case, key, value)
         fields.append(key)
+
     if "status" in payload:
         case.status = resolve_case_status(
             str(payload["status"]), warnings=warnings if warnings is not None else []
@@ -135,13 +197,18 @@ def apply_case_update(case: Case, payload: Mapping[str, Any], *, actor: Any) -> 
     """Apply a case update from a plain mapping (API `request.data` or a UI POST dict).
 
     The single source of truth for the updatable field set, tag handling, the timeline events
-    (`status-changed`, `assigned`/`Unassigned`) and the "no updatable field" error.
+    (`status-changed`, `assigned`/`Unassigned`, `classification-changed`) and the "no updatable field" error.
     """
     previous_status = case.status.value if case.status_id else None
     # Captured before the field loop mutates `case`, so the assignment event below can tell an
     # assignee that actually changed from an update that merely restated the same one.
     previous_assignee_id = case.assignee_id
-    fields = _set_case_fields(case, payload)
+
+    # Capture previous classification values for change detection (Q-D5 audit + timeline)
+    classification_fields = ("scope", "case_type", "data_classification", "phase")
+    previous_classification = {f: getattr(case, f) for f in classification_fields}
+
+    fields = _set_case_fields(case, payload, actor=actor)
     tags_touched = any(key in payload for key in ("tags", "addTags", "removeTags"))
     if tags_touched:
         _apply_case_tags(case, payload)
@@ -172,4 +239,43 @@ def apply_case_update(case: Case, payload: Mapping[str, Any], *, actor: Any) -> 
             actor=actor,
             metadata={"assignee": login},
         )
+
+    # Classification changes → timeline + audit log (only when value actually changes)
+    _emit_classification_changes(case, previous_classification, actor=actor)
+
     return fields
+
+
+def _capture_classification_values(case: Case) -> dict[str, str]:
+    """Capture the current classification field values for later change detection."""
+    classification_fields = ("scope", "case_type", "data_classification", "phase")
+    return {f: getattr(case, f) for f in classification_fields}
+
+
+def _emit_classification_changes(case: Case, previous: dict[str, str], *, actor: Any) -> None:
+    """Emit TimelineEvent and AuditLog for any classification fields that changed.
+
+    Called after `case.save()` so `case` has the new values. `previous` is a dict
+    mapping field name -> old value, as returned by `_capture_classification_values()`.
+    """
+    from identity.models import AuditLog
+
+    for field_name, old_value in previous.items():
+        new_value = getattr(case, field_name)
+        if new_value != old_value:
+            append_timeline_event(
+                case,
+                title=f"Classification changed: {field_name}",
+                kind="classification-changed",
+                actor=actor,
+                metadata={"field": field_name, "from": old_value, "to": new_value},
+            )
+            AuditLog.objects.create(
+                actor=actor,
+                actor_org=getattr(actor, "org", None) if actor else None,
+                target_org=case.owner_org,
+                action=f"case.{field_name}",
+                target_type="case",
+                target_id=str(case.id),
+                ip=None,
+            )

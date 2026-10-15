@@ -62,13 +62,21 @@ from cases.tagging import tag_names_from_payload
 from cases.update import (
     CaseUpdateError,
     _apply_case_tags,
+    _capture_classification_values,
+    _emit_classification_changes,
     _set_case_fields,
     apply_case_update,
 )
 from compat.bulk import bulk_patch
 from compat.procedures import parse_procedure
 from compat.time import parse_timestamp, to_epoch_ms
-from core.enums import CASE_STAGES, TASK_STATUS_CHOICES
+from core.enums import (
+    CASE_PHASE_CHOICES,
+    CASE_SCOPE_CHOICES,
+    CASE_STAGES,
+    CASE_TYPE_CHOICES,
+    TASK_STATUS_CHOICES,
+)
 from core.serializers import (
     alert_json,
     alert_status_json,
@@ -303,7 +311,21 @@ def _create_case(request: Request) -> Response:
     (two keys, as before the service existed), a success is the same 201 `case_json(detail=True)`
     with the same "Case created" ledger entry.
     """
-    payload = request.data if isinstance(request.data, dict) else {}
+    # Build a mutable copy first — request.data may be an immutable QueryDict (form-encoded body)
+    # QueryDict.dict() returns last-value-per-key; plain dict is already fine.
+    from django.http import QueryDict
+
+    if isinstance(request.data, QueryDict):
+        payload = request.data.dict()
+    elif isinstance(request.data, dict):
+        payload = dict(request.data)
+    else:
+        payload = {}
+    # Map wire names (camelCase) to model field names (snake_case) for the service layer
+    if "caseType" in payload:
+        payload["case_type"] = payload.pop("caseType")
+    if "dataClassification" in payload:
+        payload["data_classification"] = payload.pop("dataClassification")
     user = _actor(request)
     try:
         case, _warnings = create_case(
@@ -326,10 +348,29 @@ def _update_case(request: Request, case: Case) -> Response:
     API behaviour must not change; this preserves the exact 200/400 shapes and
     timeline kinds emitted by the original implementation.
     """
-    payload = request.data if isinstance(request.data, dict) else {}
+    # Build a mutable copy first — request.data may be an immutable QueryDict (form-encoded body)
+    # QueryDict.dict() returns last-value-per-key; plain dict is already fine.
+    from django.http import QueryDict
+
+    if isinstance(request.data, QueryDict):
+        payload = request.data.dict()
+    elif isinstance(request.data, dict):
+        payload = dict(request.data)
+    else:
+        payload = {}
+    # Map wire names (camelCase) to model field names (snake_case) for the service layer
+    if "caseType" in payload:
+        payload["case_type"] = payload.pop("caseType")
+    if "dataClassification" in payload:
+        payload["data_classification"] = payload.pop("dataClassification")
     try:
         apply_case_update(case, payload, actor=_actor(request))
     except CaseUpdateError as exc:
+        if exc.error_type == "AuthorizationError":
+            return Response(
+                {"type": exc.error_type, "message": exc.message},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         return Response(exc.to_response_payload(), status=status.HTTP_400_BAD_REQUEST)
     return Response(case_json(case, detail=True))
 
@@ -1848,12 +1889,38 @@ def case_bulk_update(request: Request) -> Response:
     """
 
     def apply_one(case: Case, body: Mapping[str, Any]) -> Response | list[str] | None:
-        fields = _set_case_fields(case, body)
-        tags_touched = any(key in body for key in ("tags", "addTags", "removeTags"))
+        # Map wire names (camelCase) to model field names (snake_case) for the service layer
+        mapped_body = dict(body)
+        if "caseType" in mapped_body:
+            mapped_body["case_type"] = mapped_body.pop("caseType")
+        if "dataClassification" in mapped_body:
+            mapped_body["data_classification"] = mapped_body.pop("dataClassification")
+
+        # Capture previous classification values for audit/timeline (S2)
+        previous_classification = _capture_classification_values(case)
+
+        try:
+            fields = _set_case_fields(case, mapped_body, actor=_actor(request))
+        except CaseUpdateError as exc:
+            # Return a DRF Response so bulk_patch reports the correct per-item status
+            status_code = (
+                status.HTTP_403_FORBIDDEN
+                if exc.error_type == "AuthorizationError"
+                else status.HTTP_400_BAD_REQUEST
+            )
+            return Response(exc.to_response_payload(), status=status_code)
+        tags_touched = any(key in mapped_body for key in ("tags", "addTags", "removeTags"))
         if not fields and not tags_touched:
             return None
         if tags_touched:
-            _apply_case_tags(case, body)
+            _apply_case_tags(case, mapped_body)
+        if fields:
+            case.save(update_fields=[*fields, "updated_at"])
+        case.refresh_from_db()
+
+        # Emit classification change events + audit log (S2)
+        _emit_classification_changes(case, previous_classification, actor=_actor(request))
+
         append_timeline_event(
             case, title="Case updated (bulk)", kind="case-updated", actor=_actor(request)
         )
@@ -1982,6 +2049,10 @@ def _apply_template(
     case.tlp = template.tlp
     case.pap = template.pap
     case.flag = template.flag
+    # Q-D6: template carries scope/case_type/phase; data_classification is per-incident and not copied.
+    case.scope = template.scope
+    case.case_type = template.case_type
+    case.phase = template.phase
     if template.summary:
         case.summary = template.summary
     if template.description and not case.description:
@@ -2085,6 +2156,38 @@ def _create_case_template(request: Request) -> Response:
         return _bad("name is required", {"name": ["required"]})
     if CaseTemplate.objects.filter(name=name[:100]).exists():
         return _bad("name already exists", {"name": ["already exists"]})
+
+    # Validate enum fields — empty/null means "use the model default" (consistent with Case create/update)
+    scope_val = payload.get("scope")
+    if scope_val in (None, ""):
+        scope_val = "unset"
+    case_type_val = payload.get("caseType", payload.get("case_type"))
+    if case_type_val in (None, ""):
+        case_type_val = "unset"
+    phase_val = payload.get("phase")
+    if phase_val in (None, ""):
+        phase_val = "initial_triage"
+
+    allowed_scope = tuple(v for v, _ in CASE_SCOPE_CHOICES)
+    allowed_case_type = tuple(v for v, _ in CASE_TYPE_CHOICES)
+    allowed_phase = tuple(v for v, _ in CASE_PHASE_CHOICES)
+
+    if scope_val not in allowed_scope:
+        return _bad(
+            f"scope must be one of: {', '.join(allowed_scope)}",
+            {"scope": [f"must be one of: {', '.join(allowed_scope)}"]},
+        )
+    if case_type_val not in allowed_case_type:
+        return _bad(
+            f"caseType must be one of: {', '.join(allowed_case_type)}",
+            {"caseType": [f"must be one of: {', '.join(allowed_case_type)}"]},
+        )
+    if phase_val not in allowed_phase:
+        return _bad(
+            f"phase must be one of: {', '.join(allowed_phase)}",
+            {"phase": [f"must be one of: {', '.join(allowed_phase)}"]},
+        )
+
     template = CaseTemplate.objects.create(
         name=name[:100],
         display_name=str(payload.get("displayName") or "")[:200],
@@ -2095,6 +2198,9 @@ def _create_case_template(request: Request) -> Response:
         pap=int(payload.get("pap") or 2),
         flag=bool(payload.get("flag") or False),
         summary=str(payload.get("summary") or ""),
+        scope=scope_val,
+        case_type=case_type_val,
+        phase=phase_val,
         tasks=payload.get("tasks") if isinstance(payload.get("tasks"), list) else [],
         custom_fields=(
             payload.get("customFields") if isinstance(payload.get("customFields"), list) else []
@@ -2155,6 +2261,39 @@ def _update_case_template(template: CaseTemplate, request: Request) -> Response:
     if "flag" in payload:
         template.flag = bool(payload["flag"])
         fields.append("flag")
+
+    # Enum fields for CaseTemplate (scope, caseType, phase) — validate against vocabularies
+    if "scope" in payload:
+        val = str(payload["scope"]).strip()
+        allowed_scope = tuple(v for v, _ in CASE_SCOPE_CHOICES)
+        if val not in allowed_scope:
+            return _bad(
+                f"scope must be one of: {', '.join(allowed_scope)}",
+                {"scope": [f"must be one of: {', '.join(allowed_scope)}"]},
+            )
+        template.scope = val
+        fields.append("scope")
+    if "caseType" in payload:
+        val = str(payload["caseType"]).strip()
+        allowed_case_type = tuple(v for v, _ in CASE_TYPE_CHOICES)
+        if val not in allowed_case_type:
+            return _bad(
+                f"caseType must be one of: {', '.join(allowed_case_type)}",
+                {"caseType": [f"must be one of: {', '.join(allowed_case_type)}"]},
+            )
+        template.case_type = val
+        fields.append("case_type")
+    if "phase" in payload:
+        val = str(payload["phase"]).strip()
+        allowed_phase = tuple(v for v, _ in CASE_PHASE_CHOICES)
+        if val not in allowed_phase:
+            return _bad(
+                f"phase must be one of: {', '.join(allowed_phase)}",
+                {"phase": [f"must be one of: {', '.join(allowed_phase)}"]},
+            )
+        template.phase = val
+        fields.append("phase")
+
     if "tasks" in payload:
         template.tasks = payload["tasks"] if isinstance(payload["tasks"], list) else []
         fields.append("tasks")

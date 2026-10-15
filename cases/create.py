@@ -32,6 +32,7 @@ from alerts.escalation import resolve_case_status
 from cases.ledger import append_timeline_event
 from cases.models import Case
 from cases.update import (
+    _CASE_ENUM_FIELDS,
     _CASE_RANGE_FIELDS,
     CASE_SCALAR_FIELDS,
     CaseUpdateError,
@@ -74,6 +75,9 @@ def _create_scalars(payload: Mapping[str, Any]) -> dict[str, Any]:
         if key in _CASE_RANGE_FIELDS and value in (None, ""):
             # Absent/null/empty means "the model default" — the tolerance this endpoint has
             # always had — not a rejection.
+            continue
+        if key in _CASE_ENUM_FIELDS and value in (None, ""):
+            # Same tolerance for string enums: empty/null keeps the model default.
             continue
         if key in ("description", "summary"):
             value = str(value or "")  # NOT NULL columns: a JSON `null` is an empty body
@@ -134,7 +138,7 @@ def create_case(
     # The update surface's applier, not a second copy of it (deviation W616P2-3): severity/TLP/PAP
     # bounds, the tolerant `status` read and the org-scoped `assignee` resolution behave here
     # exactly as they do on a PATCH of the same fields.
-    _set_case_fields(case, scalars, warnings=warnings)
+    _set_case_fields(case, scalars, warnings=warnings, actor=actor)
     if warnings:
         case.ingestion_warnings = {"warnings": warnings}
     # Saved before the tag links: a `CaseTagLink` needs a pk (the same ordering

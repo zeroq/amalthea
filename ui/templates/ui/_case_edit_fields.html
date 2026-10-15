@@ -15,6 +15,8 @@ Rule: each control gets `{% if form_id %} form="{{ form_id }}"{% endif %}`.
 The title input also gets `{% if form_id %}autofocus{% endif %}` (modal.js focuses [autofocus]).
 {% endcomment %}
 
+{% load ui_tags %}
+
 {% if origin %}
 <input type="hidden" name="origin" value="{{ origin }}"{% if form_id %} form="{{ form_id }}"{% endif %}>
 {% endif %}
@@ -59,6 +61,46 @@ The title input also gets `{% if form_id %}autofocus{% endif %}` (modal.js focus
       <option value="{{ val }}" {% if form_values.pap|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
     {% endfor %}
   </select>
+</div>
+
+<div class="field-row">
+  <label for="f-scope">Scope</label>
+  <select id="f-scope" name="scope"{% if form_id %} form="{{ form_id }}"{% endif %}>
+    {% for val, label in scope_choices %}
+      <option value="{{ val }}" {% if form_values.scope|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="field-row">
+  <label for="f-case_type">Type</label>
+  <select id="f-case_type" name="case_type"{% if form_id %} form="{{ form_id }}"{% endif %}>
+    {% for val, label in case_type_choices %}
+      <option value="{{ val }}" {% if form_values.case_type|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="field-row">
+  <label for="f-phase">Phase</label>
+  <select id="f-phase" name="phase"{% if form_id %} form="{{ form_id }}"{% endif %}>
+    {% for val, label in phase_choices %}
+      <option value="{{ val }}" {% if form_values.phase|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="field-row">
+  <label for="f-data_classification">Data Classification</label>
+  {% if can_classify %}
+  <select id="f-data_classification" name="data_classification"{% if form_id %} form="{{ form_id }}"{% endif %}>
+    {% for val, label in data_classification_choices %}
+      <option value="{{ val }}" {% if form_values.data_classification|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  {% else %}
+  <span id="f-data_classification" class="readonly-value">{{ form_values.data_classification|choice_label:data_classification_choices }}</span>
+  {% endif %}
 </div>
 
 <div class="field-row">

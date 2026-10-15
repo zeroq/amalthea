@@ -63,6 +63,27 @@ def is_viewer(user: User | None) -> bool:
     )
 
 
+def is_admin(user: User | None) -> bool:
+    """
+    True iff the caller may perform administrative writes (`admin` or `superAdmin`).
+
+    Used for the writes that are deliberately narrower than the writer role — currently
+    `Case.data_classification` (PLAN-2026-10-14 Q-D5): classifying an incident's data changes
+    how it is reported, so it is an administrative act rather than an analyst one. Like
+    `is_viewer`, this is **deny-only**: anonymous or non-`User` identities are never admins.
+
+    `superAdmin` "sees all" (ADR-004) and therefore also passes; `_is_superadmin` remains the
+    narrower predicate for the cross-org read paths that must audit a break-glass read.
+    """
+    from core.enums import CASE_CLASSIFICATION_ROLES
+
+    return (
+        user is not None
+        and getattr(user, "is_authenticated", False)
+        and getattr(user, "role", "") in CASE_CLASSIFICATION_ROLES
+    )
+
+
 def case_visible_q(user: User | None) -> Q:
     """
     Return a `Q` object matching cases visible to `user`.

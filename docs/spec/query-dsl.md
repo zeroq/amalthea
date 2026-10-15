@@ -81,6 +81,20 @@ queryset.
 union, but the compiler resolves per kind (so a field valid on cases and alerts is a cannot-match on
 observables). Sort fields are checked against the same whitelist.
 
+### Case fields (filterable + sortable)
+
+The following fields are available on the `case` branch (and `listAny` when the case branch is active).
+Wire name → ORM path:
+
+| Wire name | ORM path | Type | Notes |
+|---|---|---|---|
+| `scope` | `scope` | string enum | Values: `unset`, `single_asset_user`, `multiple_assets_users`, `single_department`, `multiple_departments`, `complete_enterprise`, `third_party_supplier` |
+| `caseType` | `case_type` | string enum | Values: `unset`, `malware`, `phishing`, `password_leak`, `ransomware`, `bec` |
+| `dataClassification` | `data_classification` | string enum | Values: `unset`, `no_data`, `public_data`, `personal_data`, `sensitive_data` |
+| `phase` | `phase` | string enum | Values: `unset`, `initial_triage`, `containment`, `analysis`, `remediation`, `cleanup`, `close` |
+
+All four support `_eq`, `_ne`, `_in`, `_like`, `_gt`, `_gte`, `_lt`, `_lte`, `_between` and can be used in `sort` steps.
+
 ## Deterministic paging & sorting
 
 - ORM path: `branch.qs.order_by(*(order or ["id"]), "id")` — the `id` tie-break is appended so equal

@@ -127,6 +127,66 @@ USER_ROLE_VALUES: Final[tuple[str, ...]] = tuple(value for value, _ in USER_ROLE
 #: The read-only role value. Never hardcode the literal: import this (ADR-006 decision 1).
 VIEWER_ROLE: Final[str] = "viewer"
 
+#: The two administrative roles. Named so a caller never hardcodes the literal, and so
+#: "who may perform an administrative write" has exactly one definition (`is_admin`).
+SUPER_ADMIN_ROLE: Final[str] = "superAdmin"
+ADMIN_ROLE: Final[str] = "admin"
+
+#: Roles permitted to change a case's `data_classification` (PLAN-2026-10-14 Q-D5): reclassifying
+#: an incident changes how it is reported, so it is an administrative act. The *other* three
+#: classification fields (`scope`/`case_type`/`phase`) are any-writer.
+CASE_CLASSIFICATION_ROLES: Final[tuple[str, ...]] = (ADMIN_ROLE, SUPER_ADMIN_ROLE)
+
+
+# --- Amalthea-native case classification (PLAN-2026-10-14) --------------------
+#
+# These four vocabularies are **Amalthea extensions**, not TheHive fields: TheHive 5 has no
+# case-level scope / type / data-classification / phase, so ``compat/enums.py`` does not map
+# them and the ``case_json`` key names (`scope`, `caseType`, `dataClassification`, `phase`) are
+# ours alone (Q-D3) — we claim no TheHive semantics for them.
+#
+# `phase` is a **separate IR-lifecycle axis** from `CaseStatus.stage`: `stage` stays the stable
+# 3-bucket New/InProgress/Closed *openness* axis that automation triggers and ``CASE_STAGES``
+# key on, while `phase` records the analyst's position in the incident-response loop. Keep the
+# two distinct — do **not** fold `phase` into `CASE_STAGES` (Q-D2).
+#
+# Every set carries an explicit ``unset`` ("Unset/Unknown") so a fresh case can say "not yet
+# classified" rather than guessing (Q-D8). `case_type` is a closed enum: a new type costs a
+# small additive migration rather than being an open string (Q-D9).
+CASE_SCOPE_CHOICES: Final[tuple[tuple[str, str], ...]] = (
+    ("unset", "Unset/Unknown"),
+    ("single_asset_user", "Single Asset/User"),
+    ("multiple_assets_users", "Multiple Assets/Users"),
+    ("single_department", "Single Department"),
+    ("multiple_departments", "Multiple Departments"),
+    ("complete_enterprise", "Complete Enterprise"),
+    ("third_party_supplier", "Third Party/Supplier"),
+)
+CASE_TYPE_CHOICES: Final[tuple[tuple[str, str], ...]] = (
+    ("unset", "Unset/Unknown"),
+    ("malware", "Malware"),
+    ("phishing", "Phishing"),
+    ("password_leak", "Password Leak"),
+    ("ransomware", "Ransomware"),
+    ("bec", "BEC"),
+)
+DATA_CLASSIFICATION_CHOICES: Final[tuple[tuple[str, str], ...]] = (
+    ("unset", "Unset/Unknown"),
+    ("no_data", "No Data"),
+    ("public_data", "Public Data"),
+    ("personal_data", "Personal Data (PII)"),
+    ("sensitive_data", "Sensitive Data (Credentials, IP)"),
+)
+CASE_PHASE_CHOICES: Final[tuple[tuple[str, str], ...]] = (
+    ("unset", "Unset/Unknown"),
+    ("initial_triage", "Initial Triage"),
+    ("containment", "Containment"),
+    ("analysis", "Analysis"),
+    ("remediation", "Remediation"),
+    ("cleanup", "Cleanup"),
+    ("close", "Close"),
+)
+
 
 # --- Constraint builders ------------------------------------------------------
 

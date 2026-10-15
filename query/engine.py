@@ -111,6 +111,10 @@ def _case_fields() -> dict[str, _FieldSpec]:
         "_createdAt": _FieldSpec("created_at", is_datetime=True),
         "_updatedAt": _FieldSpec("updated_at", is_datetime=True),
         "alertCount": _FieldSpec("alert_count", counter="alerts"),
+        "scope": _FieldSpec("scope"),
+        "caseType": _FieldSpec("case_type"),
+        "dataClassification": _FieldSpec("data_classification"),
+        "phase": _FieldSpec("phase"),
     }
 
 

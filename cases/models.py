@@ -7,8 +7,12 @@ from django.db.models import Q
 from django.utils import timezone
 
 from core.enums import (
+    CASE_PHASE_CHOICES,
+    CASE_SCOPE_CHOICES,
     CASE_STAGES,
+    CASE_TYPE_CHOICES,
     CUSTOM_FIELD_TYPES,
+    DATA_CLASSIFICATION_CHOICES,
     PAP_CHOICES,
     PAP_MAX,
     PAP_MIN,
@@ -106,6 +110,19 @@ class Case(UUIDModel, TimeStampedModel):
     flag = models.BooleanField(default=False)
     tlp = models.SmallIntegerField(default=2, choices=list(TLP_CHOICES))
     pap = models.SmallIntegerField(default=2, choices=list(PAP_CHOICES))
+    # Plan-2026-10-14 case classification (Q-D1). `scope` is the incident's **blast radius**
+    # (how far it reaches: one asset -> the enterprise), NOT tenant "scoping". Tenant scoping
+    # (`identity/scoping.py`) decides which organisation a caller may see; the two share a word
+    # and nothing else (Q-D10). Defaults are the vocabulary's own `unset` so a fresh case says
+    # "not yet classified" (Q-D8); `phase` starts at `initial_triage`.
+    scope = models.CharField(max_length=32, choices=list(CASE_SCOPE_CHOICES), default="unset")
+    case_type = models.CharField(max_length=32, choices=list(CASE_TYPE_CHOICES), default="unset")
+    data_classification = models.CharField(
+        max_length=32, choices=list(DATA_CLASSIFICATION_CHOICES), default="unset"
+    )
+    phase = models.CharField(
+        max_length=32, choices=list(CASE_PHASE_CHOICES), default="initial_triage"
+    )
     summary = models.TextField(blank=True)
     # NOT NULL with a default: on Postgres `ORDER BY start_date DESC` returns NULLs
     # FIRST, so a nullable start_date put undated cases at the top of the queue (L5).
@@ -137,6 +154,14 @@ class Case(UUIDModel, TimeStampedModel):
             in_range("case_severity_range", "severity", SEVERITY_MIN, SEVERITY_MAX),
             in_range("case_tlp_range", "tlp", TLP_MIN, TLP_MAX),
             in_range("case_pap_range", "pap", PAP_MIN, PAP_MAX),
+            in_values("case_scope_valid", "scope", tuple(v for v, _ in CASE_SCOPE_CHOICES)),
+            in_values("case_type_valid", "case_type", tuple(v for v, _ in CASE_TYPE_CHOICES)),
+            in_values(
+                "case_data_classification_valid",
+                "data_classification",
+                tuple(v for v, _ in DATA_CLASSIFICATION_CHOICES),
+            ),
+            in_values("case_phase_valid", "phase", tuple(v for v, _ in CASE_PHASE_CHOICES)),
         ]
 
     def __str__(self) -> str:
@@ -563,6 +588,15 @@ class CaseTemplate(UUIDModel, TimeStampedModel):
     severity = models.SmallIntegerField(default=2, choices=list(SEVERITY_CHOICES))
     tlp = models.SmallIntegerField(default=2, choices=list(TLP_CHOICES))
     pap = models.SmallIntegerField(default=2, choices=list(PAP_CHOICES))
+    # Q-D6: a template seeds the three that are structurally part of a case blueprint. It
+    # deliberately does NOT carry `data_classification` — that is a per-incident judgement
+    # about what data was touched, and applying a template must not set it (nor overwrite a
+    # classification an analyst already made).
+    scope = models.CharField(max_length=32, choices=list(CASE_SCOPE_CHOICES), default="unset")
+    case_type = models.CharField(max_length=32, choices=list(CASE_TYPE_CHOICES), default="unset")
+    phase = models.CharField(
+        max_length=32, choices=list(CASE_PHASE_CHOICES), default="initial_triage"
+    )
     flag = models.BooleanField(default=False)
     summary = models.TextField(blank=True)
     # `[{"title", "group", "description", "order", "mandatory"}]`.
@@ -577,6 +611,17 @@ class CaseTemplate(UUIDModel, TimeStampedModel):
             in_range("case_template_severity_range", "severity", SEVERITY_MIN, SEVERITY_MAX),
             in_range("case_template_tlp_range", "tlp", TLP_MIN, TLP_MAX),
             in_range("case_template_pap_range", "pap", PAP_MIN, PAP_MAX),
+            in_values(
+                "case_template_scope_valid", "scope", tuple(v for v, _ in CASE_SCOPE_CHOICES)
+            ),
+            in_values(
+                "case_template_case_type_valid",
+                "case_type",
+                tuple(v for v, _ in CASE_TYPE_CHOICES),
+            ),
+            in_values(
+                "case_template_phase_valid", "phase", tuple(v for v, _ in CASE_PHASE_CHOICES)
+            ),
         ]
 
     def __str__(self) -> str:

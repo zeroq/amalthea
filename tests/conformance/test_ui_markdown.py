@@ -318,3 +318,26 @@ class CaseDetailMarkdownIntegrationTests(TestCase):
         # No .body element at all when description is empty
         self.assertNotIn('class="body md"', body)
         self.assertNotIn("<pre", body)
+
+    def test_case_ingestion_warnings_render_on_detail_page(self) -> None:
+        """A case with ingestion_warnings.warnings renders the warnings block on the General tab."""
+        status = CaseStatus.objects.get(value="New")
+        case = Case.objects.create(
+            title="Case with warnings",
+            status=status,
+            owner_org=self.org,
+            description="Has warnings",
+            ingestion_warnings={"warnings": ["field_missing:source_ref", "severity_defaulted:3"]},
+        )
+        client = self.client_class()
+        client.force_login(self.user)
+        response = client.get(reverse("ui-case-detail", kwargs={"case_id": str(case.number)}))
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode()
+        # The "Ingestion warnings" heading should appear
+        self.assertIn("Ingestion warnings", body)
+        # Each warning should appear as a list item
+        self.assertIn("field_missing:source_ref", body)
+        self.assertIn("severity_defaulted:3", body)
+        # Should be wrapped in .warns list
+        self.assertIn('class="warns"', body)

@@ -92,3 +92,19 @@ def markdown(value: Any) -> str:
     # Already sanitized by nh3 (ADR-005); marking safe is precisely the filter's job. S308 is a
     # blanket heuristics warning and the allow-list in ui.markdown is the control that answers it.
     return mark_safe(html)  # noqa: S308
+
+
+@register.filter
+def choice_label(value: Any, choices: Any) -> str:
+    """Human label for a choice value, e.g. `personal_data` + DATA_CLASSIFICATION_CHOICES -> `Personal Data (PII)`.
+
+    Falls back to the raw value if not found, and to "Unset/Unknown" for falsy values.
+    This ensures the UI always shows a human-readable label, never the stored token.
+    """
+    if not value:
+        return "Unset/Unknown"
+    try:
+        choice_dict = dict(choices)
+        return choice_dict.get(value, str(value))
+    except (TypeError, ValueError):
+        return str(value)

@@ -66,6 +66,46 @@
       </div>
 
       <div class="field-row">
+        <label for="f-scope">Scope</label>
+        <select id="f-scope" name="scope">
+          {% for val, label in scope_choices %}
+            <option value="{{ val }}" {% if form_values.scope|default:case.scope|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field-row">
+        <label for="f-case_type">Type</label>
+        <select id="f-case_type" name="case_type">
+          {% for val, label in case_type_choices %}
+            <option value="{{ val }}" {% if form_values.case_type|default:case.case_type|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field-row">
+        <label for="f-phase">Phase</label>
+        <select id="f-phase" name="phase">
+          {% for val, label in phase_choices %}
+            <option value="{{ val }}" {% if form_values.phase|default:case.phase|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field-row">
+        <label for="f-data_classification">Data Classification</label>
+        {% if can_classify %}
+        <select id="f-data_classification" name="data_classification">
+          {% for val, label in data_classification_choices %}
+            <option value="{{ val }}" {% if form_values.data_classification|default:case.data_classification|stringformat:"s" == val|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        {% else %}
+        <span id="f-data_classification" class="readonly-value">{{ form_values.data_classification|default:case.data_classification|choice_label:data_classification_choices }}</span>
+        {% endif %}
+      </div>
+
+      <div class="field-row">
         <label for="f-status">Status</label>
         <select id="f-status" name="status">
           {% for opt in case_status_options %}
