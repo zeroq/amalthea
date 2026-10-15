@@ -82,85 +82,75 @@
       </div>
       {% else %}
       <p class="empty">No observable types defined.</p>
-      {% endif %}
-    </div>
-
-    <div class="card">
-      <h3>Case Templates</h3>
-      {% if case_templates %}
-      <div class="table-wrap">
-      <table class="data-table">
-        <caption class="sr-only">Case templates</caption>
-        <thead>
-          <tr><th scope="col">Name</th><th scope="col">Display Name</th><th scope="col">Severity</th></tr>
-        </thead>
-        <tbody>
-          {% for t in case_templates %}
-          <tr>
-            <td>{{ t.name }}</td>
-            <td>{{ t.display_name }}</td>
-            <td><span class="sev sev-{{ t.severity }}">{{ t.get_severity_display }}</span></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      </div>
-      {% else %}
-      <p class="empty">No case templates defined.</p>
-      {% endif %}
-    </div>
   </div>
 
   <div class="stack">
     <div class="card">
-      <h3>Tags</h3>
-      {% if tags %}
+      <h3>Case Scope</h3>
       <div class="table-wrap">
-      <table class="data-table">
-        <caption class="sr-only">Tags</caption>
-        <thead>
-          <tr><th scope="col">Name</th><th scope="col">Cases</th><th scope="col">Alerts</th><th scope="col">Observables</th></tr>
-        </thead>
-        <tbody>
-          {% for t in tags %}
-          <tr>
-            <td>{{ t.name }}</td>
-            <td>{{ t.case_set.count }}</td>
-            <td>{{ t.alert_set.count }}</td>
-            <td>{{ t.observable_set.count }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+        <table class="data-table">
+          <caption class="sr-only">Case scope</caption>
+          <thead>
+            <tr><th scope="col">Code</th><th scope="col">Label</th></tr>
+          </thead>
+          <tbody>
+            {% for val, label in scope_choices %}
+              <tr><td class="mono">{{ val }}</td><td>{{ label }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
-      {% else %}
-      <p class="empty">No tags defined.</p>
-      {% endif %}
     </div>
 
     <div class="card">
-      <h3>TTPs (ATT&CK)</h3>
-      {% if ttps %}
+      <h3>Case Phase</h3>
       <div class="table-wrap">
-      <table class="data-table">
-        <caption class="sr-only">TTPs (ATT&CK)</caption>
-        <thead>
-          <tr><th scope="col">Name</th><th scope="col">Code</th><th scope="col">Tactic</th></tr>
-        </thead>
-        <tbody>
-          {% for t in ttps %}
-          <tr>
-            <td>{{ t.name }}</td>
-            <td class="mono">{{ t.ttp_code }}</td>
-            <td>{{ t.tactic }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+        <table class="data-table">
+          <caption class="sr-only">Case phase</caption>
+          <thead>
+            <tr><th scope="col">Code</th><th scope="col">Label</th></tr>
+          </thead>
+          <tbody>
+            {% for val, label in phase_choices %}
+              <tr><td class="mono">{{ val }}</td><td>{{ label }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
-      {% else %}
-      <p class="empty">No TTPs defined.</p>
-      {% endif %}
+    </div>
+
+    <div class="card">
+      <h3>Case Type</h3>
+      <div class="table-wrap">
+        <table class="data-table">
+          <caption class="sr-only">Case type</caption>
+          <thead>
+            <tr><th scope="col">Code</th><th scope="col">Label</th></tr>
+          </thead>
+          <tbody>
+            {% for val, label in case_type_choices %}
+              <tr><td class="mono">{{ val }}</td><td>{{ label }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Data Classification</h3>
+      <div class="table-wrap">
+        <table class="data-table">
+          <caption class="sr-only">Data classification</caption>
+          <thead>
+            <tr><th scope="col">Code</th><th scope="col">Label</th></tr>
+          </thead>
+          <tbody>
+            {% for val, label in data_classification_choices %}
+              <tr><td class="mono">{{ val }}</td><td>{{ label }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 {% endblock %}

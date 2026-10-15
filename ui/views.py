@@ -3058,7 +3058,16 @@ def case_share_revoke(request: HttpRequest, case_id: str, share_id: str) -> Http
 def taxonomy(request: HttpRequest) -> HttpResponse:
     """Aggregate taxonomy page for UI pickers."""
     from alerts.models import AlertStatus
-    from cases.models import TTP, CaseStatus
+    from cases.models import CaseStatus
+    from observables.models import ObservableType
+    from tags.models import Tag
+
+    from core.enums import (
+        CASE_PHASE_CHOICES,
+        CASE_SCOPE_CHOICES,
+        CASE_TYPE_CHOICES,
+        DATA_CLASSIFICATION_CHOICES,
+    )
 
     return render(
         request,
@@ -3068,9 +3077,11 @@ def taxonomy(request: HttpRequest) -> HttpResponse:
             case_statuses=CaseStatus.objects.filter(hidden=False).order_by("order", "value"),
             alert_statuses=AlertStatus.objects.filter(hidden=False).order_by("order", "value"),
             observable_types=ObservableType.objects.all().order_by("name"),
-            case_templates=CaseTemplate.objects.all().order_by("name"),
             tags=Tag.objects.all().order_by("name"),
-            ttps=TTP.objects.all().order_by("name"),
+            scope_choices=CASE_SCOPE_CHOICES,
+            phase_choices=CASE_PHASE_CHOICES,
+            case_type_choices=CASE_TYPE_CHOICES,
+            data_classification_choices=DATA_CLASSIFICATION_CHOICES,
         ),
     )
 
