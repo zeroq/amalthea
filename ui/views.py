@@ -436,6 +436,8 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
             .order_by("-start_date")[:PAGE_SIZE],
             is_cross_org=is_cross_org,
             alert_status_options=alert_status_options,
+            tlp_choices=TLP_CHOICES,
+            pap_choices=PAP_CHOICES,
         ),
     )
 
@@ -1967,6 +1969,8 @@ def case_template_list(request: HttpRequest) -> HttpResponse:
         _base_context(
             request,
             templates=CaseTemplate.objects.all().order_by("name"),
+            tlp_choices=TLP_CHOICES,
+            pap_choices=PAP_CHOICES,
         ),
     )
 
@@ -2068,7 +2072,12 @@ def case_template_detail(request: HttpRequest, template_id: str) -> HttpResponse
     return render(
         request,
         "ui/case_template_detail.html",
-        _base_context(request, template=template),
+        _base_context(
+            request,
+            template=template,
+            tlp_choices=TLP_CHOICES,
+            pap_choices=PAP_CHOICES,
+        ),
     )
 
 
@@ -2270,6 +2279,8 @@ def observable_detail(request: HttpRequest, observable_id: str) -> HttpResponse:
             affected_cases=affected_cases,
             is_owner=is_cross_org is False,  # owner org can manage
             is_cross_org=is_cross_org,
+            tlp_choices=TLP_CHOICES,
+            pap_choices=PAP_CHOICES,
         ),
     )
 
@@ -3056,18 +3067,21 @@ def case_share_revoke(request: HttpRequest, case_id: str, share_id: str) -> Http
 @login_required
 @require_GET
 def taxonomy(request: HttpRequest) -> HttpResponse:
-    """Aggregate taxonomy page for UI pickers."""
+    """Aggregate taxonomy page for UI pickers.
+
+    ``Tag`` and ``CaseTemplate`` are imported at module level from ``cases.models`` — there
+    is no ``tags`` app. (Commit 3255f1f added a local ``from tags.models import Tag`` here,
+    which made ``/taxonomy`` raise ``ModuleNotFoundError`` → HTTP 500.)
+    """
     from alerts.models import AlertStatus
     from cases.models import CaseStatus
-    from observables.models import ObservableType
-    from tags.models import Tag
-
     from core.enums import (
         CASE_PHASE_CHOICES,
         CASE_SCOPE_CHOICES,
         CASE_TYPE_CHOICES,
         DATA_CLASSIFICATION_CHOICES,
     )
+    from observables.models import ObservableType
 
     return render(
         request,
