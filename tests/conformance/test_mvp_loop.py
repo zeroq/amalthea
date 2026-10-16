@@ -97,7 +97,7 @@ def _post_alert(anonymous_api: object, source: IngestionSource, **overrides: obj
     # Include the ingestion token for authentication
     headers = {"HTTP_X_WEBHOOK_SECRET": source._test_token}
     posted = anonymous_api.post(
-        reverse("alerts-webhook", kwargs={"source_id": source.slug}),
+        reverse("alerts-webhook"),
         data=json.dumps(payload),
         content_type="application/json",
         **headers,

@@ -26,6 +26,22 @@ Parameters:
   body_template     Optional template path rendered inside `.modal-body` (for forms).
   form_id           id of the footer <form>; server-rendered body fields target it
                     (also exposed to `body_template`). Defaults to `modal_id`.
+Optional HTMX error path (D-8): pass `form_hx_post` and `form_hx_target` to make the
+footer form submit via HTMX and swap the response into the modal body (for inline errors).
+When absent, the form is a plain POST (existing behaviour, byte-identical).
+
+One-action dialogs (a show-once secret, an acknowledgement) pass `show_cancel=False` and an
+explicit `close_url`: the footer then holds a single anchor that closes the dialog in place
+when `modal.js` is loaded and navigates to `close_url` when it is not. The dialog itself opts
+out of stray-dismissal with `modal_static=True` (Esc and backdrop clicks then leave it open).
+
+Parameters:
+  modal_id          Unique dialog id (required).
+  title             Dialog heading.
+  body              Plain text paragraph rendered in the body.
+  body_template     Optional template path rendered inside `.modal-body` (for forms).
+  form_id           id of the footer <form>; server-rendered body fields target it
+                    (also exposed to `body_template`). Defaults to `modal_id`.
   form_action       If set, the footer renders a real POST form; otherwise a plain button.
   form_method       Defaults to "post".
   extra_fields      Mapping of hidden inputs to add to the form.
@@ -33,8 +49,14 @@ Parameters:
   confirm_class     Button class for the confirm control.
   confirm_disabled  Render the confirm control disabled (server-side "can't do this").
   cancel_text       Cancel label.
+  show_cancel       Render the Cancel button (default True).
+  close_url         No-`form_action` only: render the confirm control as an <a href> that also
+                    carries `data-modal-close`, so it closes in place with JS and navigates
+                    without it (a JS-less fallback that does not strand the user in a dialog).
   size              sm | md | lg | xl.
   close_on_escape   Reserved (Esc is handled by modal.js for every dialog).
+  modal_static      If truthy, render `data-modal-static`: neither a backdrop click nor Esc
+                    dismisses the dialog; only an explicit close control does.
   show_close_button Show the X button (default true).
   autoopen          If truthy, render `data-autoopen="1"` on the <dialog>; modal.js will
                     open it on DOMContentLoaded.
@@ -45,7 +67,7 @@ Parameters:
 {% load static %}
 
 {% with form_id=form_id|default:modal_id %}
-<dialog id="{{ modal_id }}" class="modal modal--{{ size|default:'md' }}" role="dialog" aria-modal="true" aria-labelledby="{{ modal_id }}-title"{% if autoopen %} data-autoopen="1"{% endif %}>
+<dialog id="{{ modal_id }}" class="modal modal--{{ size|default:'md' }}" role="dialog" aria-modal="true" aria-labelledby="{{ modal_id }}-title"{% if autoopen %} data-autoopen="1"{% endif %}{% if modal_static %} data-modal-static{% endif %}>
   <div class="modal-content">
     <header class="modal-header">
       <h2 id="{{ modal_id }}-title" class="modal-title">{{ title }}</h2>
@@ -60,7 +82,9 @@ Parameters:
       {% if body_template %}{% include body_template %}{% endif %}
     </div>
     <footer class="modal-footer">
+      {% if show_cancel is not False %}
       <button type="button" class="btn modal-cancel" data-modal-close="{{ modal_id }}">{{ cancel_text|default:"Cancel" }}</button>
+      {% endif %}
       {% if form_action %}
       <form id="{{ form_id }}" method="{{ form_method|default:'post' }}" action="{{ form_action }}"
             {% if form_hx_post %}hx-post="{{ form_hx_post }}" hx-target="{{ form_hx_target }}" hx-swap="innerHTML"{% endif %}>
@@ -72,6 +96,8 @@ Parameters:
         {% endif %}
         <button type="submit" class="btn {{ confirm_class|default:'btn-primary' }}"{% if confirm_disabled %} disabled{% endif %}>{{ confirm_text|default:"Confirm" }}</button>
       </form>
+      {% elif close_url %}
+      <a class="btn {{ confirm_class|default:'btn-primary' }}" href="{{ close_url }}" data-modal-close="{{ modal_id }}">{{ confirm_text|default:"Close" }}</a>
       {% else %}
       <button type="button" class="btn {{ confirm_class|default:'btn-primary' }}" data-modal-confirm="{{ modal_id }}"{% if confirm_disabled %} disabled{% endif %}>{{ confirm_text|default:"Confirm" }}</button>
       {% endif %}

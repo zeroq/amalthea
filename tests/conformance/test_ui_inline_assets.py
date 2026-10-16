@@ -21,7 +21,12 @@ import pytest
 TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "ui" / "templates" / "ui"
 
 _COMMENT_BLOCK = re.compile(r"{%\s*comment\s*%}.*?{%\s*endcomment\s*%}", re.DOTALL)
-_COMMENT_INLINE = re.compile(r"{#.*?#}", re.DOTALL)
+# Django's `{# #}` is single-line ONLY: a multi-line one is *not* a comment, it is rendered into the
+# page verbatim. So this deliberately does NOT use `re.DOTALL` — with DOTALL the leaked text was
+# stripped here as if it were a comment, which is how a four-line `{# … #}` in `settings_sources.html`
+# sailed through this scan and shipped literal `{# … #}` markup on a live Settings page (found
+# 2026-10-16; guarded by test_no_multiline_inline_comment below).
+_COMMENT_INLINE = re.compile(r"{#[^\n]*?#}")
 
 # A `<script>` tag that does not carry `src=` is inline and will be blocked by CSP.
 _INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)", re.IGNORECASE)
@@ -39,6 +44,27 @@ def _templates() -> list[Path]:
 
 def _strip_comments(text: str) -> str:
     return _COMMENT_INLINE.sub("", _COMMENT_BLOCK.sub("", text))
+
+
+def _unclosed_inline_comment_lines(text: str) -> list[int]:
+    """Line numbers where a `{#` has no matching `#}` on the same line.
+
+    Django's `{# #}` comment syntax is **single-line only** — unlike
+    `{% comment %}…{% endcomment %}`, which may span lines. A `{#` whose `#}` falls on a later
+    line is therefore emitted verbatim into the rendered HTML (e.g. a multi-line "comment"
+    leaks its prose, including any `data-*` tokens it names, into the page). Legitimate
+    `{% comment %}` blocks are stripped first so prose inside them cannot false-positive.
+    """
+    without_blocks = _COMMENT_BLOCK.sub("", text)
+    offenders: list[int] = []
+    for lineno, line in enumerate(without_blocks.splitlines(), start=1):
+        pos = line.find("{#")
+        while pos != -1:
+            if "#}" not in line[pos:]:
+                offenders.append(lineno)
+                break
+            pos = line.find("{#", pos + 2)
+    return offenders
 
 
 def _read(path: Path) -> str:
@@ -84,3 +110,16 @@ def test_no_template_renders_json_via_json_script() -> None:
         path.name for path in _templates() if "json_script" in path.read_text(encoding="utf-8")
     ]
     assert offenders == []
+
+
+@pytest.mark.parametrize("path", _templates(), ids=lambda p: p.name)
+def test_no_multiline_inline_comment(path: Path) -> None:
+    # A `{#` closed on a later line is not a comment to Django — it renders as literal text.
+    lines = _unclosed_inline_comment_lines(path.read_text(encoding="utf-8"))
+    assert lines == [], (
+        str(path.name)
+        + ": `{#` at line(s) "
+        + str(lines)
+        + " has no closing `#}` on the same line. Django's `{# #}` comment is single-line "
+        "only, so it is rendered as literal text; use `{% comment %}...{% endcomment %}`."
+    )

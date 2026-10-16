@@ -455,9 +455,9 @@ def test_mutation_13_idempotency_key_unique_detects_a_deletion() -> None:
 def test_mutation_14_ingestion_source_slug_unique_detects_a_deletion() -> None:
     """Round-2 **H-4**: `IngestionSource.slug` unique=True removed + migrate.
 
-    `POST /api/v1/alerts/webhook/{source_id}` resolves the source by slug, so two sources
-    sharing one makes the route non-deterministic — two mapping configs at one URL. The
-    endpoint is Phase 4 work; the key it will look up is Phase 3's to enforce.
+    `slug` is the key a typed source name resolves to in Settings → Sources (it left the webhook URL
+    on 2026-10-15, when the route became source-less), so dropping the constraint would let one typed
+    name match two mapping profiles.
     """
     from ingest.models import IngestionSource
 

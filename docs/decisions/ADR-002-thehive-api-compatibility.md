@@ -175,7 +175,7 @@ Amalthea-only surface, deliberately outside TheHive's namespace:
 
 | Path | Purpose |
 |---|---|
-| `POST /api/v1/alerts/webhook/{source_id}` | Gossamer feed — arbitrary JSON ingest (AGENTS.md Module A) |
+| `POST /api/v1/alerts/webhook/` | Gossamer feed — arbitrary JSON ingest (AGENTS.md Module A). Source-less path (ADR-008) |
 | `GET /api/v1/alert/{id}/raw` | TheHive has no raw-payload accessor |
 | `/api/v1/automation/…` | Playbook definitions, `AutomationRun` records, execution logs |
 | `GET /api/v1/case/{id}/observable/_graph` | Cross-case observable neighbourhood (Module C) |

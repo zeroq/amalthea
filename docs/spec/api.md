@@ -32,16 +32,20 @@ inline themselves.
 - **Timeline wire renders epoch-ms** (`realtime.md`; deviation P8-1). This is the recorded split:
   entity JSON = ISO-8601, timeline envelope = ms.
 
-## Ingest — `POST /api/v1/alerts/webhook/{source_id}` (+ no-slash twin)
+## Ingest — `POST /api/v1/alerts/webhook/` (+ no-slash twin)
+
+ADR-008: the path names no source. The credential is the only routing fact — it resolves both the
+`IngestionSource` (mapping rules, rate-limit bucket) and the `Organisation` that stamps `owner_org`.
 
 - `@csrf_exempt`, `@require_POST`. Checks in order: `Content-Length` vs
   `settings.WEBHOOK_MAX_BODY_SIZE` (default 5 MiB) → **413** `entityTooLarge`; content-type must
   start with `application/json` / `application/cloudevents+json` / `application/problem+json` →
-  **415** `unsupportedMediaType`; unknown source → **404**; auth against the source's non-revoked
-  `IngestionToken` rows (`X-Webhook-Secret` || `X-Api-Key` || `Authorization: Bearer`) — tokenless,
-  invalid, **or no active token configured** ⇒ **401** `unauthorized` (strict since 2026-10-10,
-  ADR-004); the matched token's `organisation` is what stamps the alert's `owner_org`; throttle
-  (cache keys `wh:src:{slug}:{window}` + `wh:ip:{ip}:{window}` + `wh:token:{prefix}:{window}`,
+  **415** `unsupportedMediaType`; the presented secret (`X-Webhook-Secret` || `X-Api-Key` ||
+  `Authorization: Bearer`) is looked up by its unique 12-char prefix and verified against the Argon2
+  hash — missing, unknown, wrong, **or revoked** ⇒ **401** `unauthorized` (strict since 2026-10-10,
+  ADR-004; uniform since 2026-10-15, ADR-008 — there is no 404 and no existence oracle left); the
+  matched token's `organisation` is what stamps the alert's `owner_org`; throttle (cache keys
+  `wh:src:{slug}:{window}` + `wh:ip:{ip}:{window}` + `wh:token:{prefix}:{window}`,
   per-source 60/min, per-IP 300/min defaults) → **429**
   `rateLimitExceeded`; then `json.loads` + object check + depth ≤ `WEBHOOK_MAX_DEPTH` (30) → **400**.
 - Mapping: `_mapped(payload, mapping, *keys)` — JSONPath first (`ingest/mapping.py`), literal

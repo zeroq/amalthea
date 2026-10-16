@@ -261,7 +261,7 @@ def test_webhook_and_session_endpoints_are_reachable_anonymously(
 
     # Webhook with valid token → 201
     webhook = anonymous_api.post(
-        f"/api/v1/alerts/webhook/{source.slug}",
+        "/api/v1/alerts/webhook/",
         data=json.dumps({"title": "from the matrix", "sourceRef": "authz-1"}),
         content_type="application/json",
         HTTP_AUTHORIZATION=f"Bearer {plaintext}",
@@ -271,7 +271,7 @@ def test_webhook_and_session_endpoints_are_reachable_anonymously(
 
     # Webhook without token → 401 (tenant isolation requirement)
     webhook_no_token = anonymous_api.post(
-        f"/api/v1/alerts/webhook/{source.slug}",
+        "/api/v1/alerts/webhook/",
         data=json.dumps({"title": "no token", "sourceRef": "authz-2"}),
         content_type="application/json",
     )

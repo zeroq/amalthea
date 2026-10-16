@@ -16,7 +16,10 @@ Amalthea is built around a decoupled **headless API-first design** with a lightw
 
 ### Module A: Universal Ingestion (The "Gossamer" Feed)
 Instead of forcing structured schemas on external tools, Amalthea uses a schema-agnostic receiver.
-*   **The Endpoint:** Exposed HTTP POST `/api/v1/alerts/webhook/{source_id}`.
+*   **The Endpoint:** Exposed HTTP POST `/api/v1/alerts/webhook/`. The path names no source: the
+    ingestion token presented in the request (e.g. `X-Webhook-Secret`) identifies both the feed (and
+    therefore its mapping rules) and the organisation the resulting alert belongs to. See
+    `docs/decisions/ADR-008-webhook-routing.md`.
 *   **The Logic:** Accepts raw JSON payloads from any security tool (SIEM, EDR, CloudTrail, phishing boxes). 
 *   **Mapping Engine:** A simple, built-in JSON-path mapping layer that pulls core values out of raw telemetry (e.g., mapping `src_ip`, `target_user`, or `file_hash`) into a standardized internal `Alert` schema without losing the raw original context.
 

@@ -4,7 +4,7 @@
 `Alert.source_ref`, and its acceptance criteria (AC4.3 "an unconfigured source ingests
 without error, never a 500", AC4.4 "replay is idempotent") are only provable against a
 real persistence step. This module is that step — nothing else. Phase 4 still owns the
-HTTP surface (`POST /api/v1/alerts/webhook/{source_id}`), secret verification, size caps,
+HTTP surface (`POST /api/v1/alerts/webhook/`), secret verification, size caps,
 throttling and the jsonpath-ng mapping engine; this function is what they will call.
 
 Idempotency comes from the database, not from application bookkeeping: the lookup is on

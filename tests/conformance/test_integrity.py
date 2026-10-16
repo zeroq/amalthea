@@ -181,12 +181,11 @@ def test_h3_automation_run_idempotency_key_is_unique(case: Case) -> None:
 
 @pytest.mark.django_db
 def test_h4_ingestion_source_slug_is_unique() -> None:
-    """REVIEW-2026-10-04 round-2 **H-4**: `slug` is the webhook's route key.
+    """REVIEW-2026-10-04 round-2 **H-4**: `slug` is the key a typed source name resolves to.
 
-    `POST /api/v1/alerts/webhook/{source_id}` resolves the source by slug, so two sources
-    sharing one would make the route non-deterministic: two different mapping configs
-    reachable at the same URL. The endpoint itself is Phase 4 work, but the key it will
-    look up is enforced now.
+    `slug` is no longer part of the webhook URL (the route is source-less since 2026-10-15), but it
+    is still how Settings → Sources turns a typed name into a mapping profile. Two sources sharing
+    one would make that resolution non-deterministic, so the key stays unique.
     """
     from ingest.models import IngestionSource
 

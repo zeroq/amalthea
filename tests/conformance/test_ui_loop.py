@@ -106,7 +106,7 @@ def _ingest(source: IngestionSource) -> Alert:
     )
 
     response = Client().post(
-        reverse("alerts-webhook", kwargs={"source_id": source.slug}),
+        reverse("alerts-webhook"),
         data=json.dumps(PHISHING),
         content_type="application/json",
         HTTP_AUTHORIZATION=f"Bearer {plaintext}",

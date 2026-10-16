@@ -67,7 +67,9 @@
   `/settings/sources/token` (POST, create), `/settings/sources/<id>/revoke` (POST, revoke)
   (`ui/views.py`; guarded by `_require_admin_ui`, accessible to `admin` and `superAdmin`).
   `admin` users see only their own organisation's tokens; `superAdmin` sees all organisations'
-  tokens and must select an organisation when creating. Token plaintext is shown **exactly once**
+  tokens and must select an organisation when creating. The feed is named, not picked: the typed
+  source name is slugified and its `IngestionSource` is provisioned on demand, so an existing name
+  reuses that mapping profile (ADR-008). Token plaintext is shown **exactly once**
   at creation via a show-once modal; `secret_hash` is never rendered. Revocation sets
   `revoked_at` and is audited. The `,` keyboard shortcut now targets `/settings`.
 
@@ -79,27 +81,39 @@ plaintext is shown **once** at creation and is never recoverable. The token carr
 unique `prefix` for O(1) lookup, a `name` (≤200 chars), optional `created_by` (FK to `User`,
 nullable, `SET_NULL`), and `revoked_at` for soft-revocation.
 
-**Auth flow:** `ingest/views.py::_authenticate_token` accepts the secret via `X-Webhook-Secret`,
-`X-Api-Key`, or `Authorization: Bearer`. It matches by `prefix`, then verifies with Argon2.
-Revoked tokens (`revoked_at IS NOT NULL`) are rejected. A source with no active tokens ⇒ **401**.
-The token's `organisation` — never the request body — stamps the alert's `owner_org`.
+**Auth flow:** `ingest/views.py::_authenticate_token` reads the secret from `X-Webhook-Secret`,
+`X-Api-Key`, or `Authorization: Bearer` and resolves it to a *single* token with no prior context —
+there is no source in the URL (ADR-008). It matches by `prefix` (one indexed query), then verifies
+with Argon2. Revoked tokens (`revoked_at IS NOT NULL`) are rejected. The token's `organisation` —
+never the request body — stamps the alert's `owner_org`.
+
+**Authentication (ADR-008).** The webhook route carries no source, so there is no "unknown source"
+case: the presented secret is looked up by its unique 12-char `prefix` (one indexed query) and
+verified against the Argon2 hash. Revoked tokens are excluded by the queryset, so a revoked secret,
+an unknown prefix and a wrong secret are one and the same answer ⇒ **401**
+`unauthorized`. A source with no active tokens therefore also rejects every post. The token's
+`organisation` — never the request body — stamps the alert's `owner_org`.
 
 **Management UI (Settings → Sources):**
 - **List** (`GET /settings/sources`): tokens scoped to caller's org (admin) or all orgs (superAdmin).
   Columns: Source, Organisation (superAdmin only), Name, Prefix, Created, Last used, Issued by,
   Status/Action. Empty state and webhook endpoint/header hint included.
 - **Create** (`POST /settings/sources/token`): admin → own org; superAdmin → required org select.
-  Validates `source` (slug), `name`. Calls `IngestionToken.create_token(..., created_by=request.user)`.
+  Validates `source_name` (free text; slugified, row provisioned on demand), `name`. Calls
+  `IngestionToken.create_token(..., created_by=request.user)`.
   On success: **renders** (200) a show-once modal with the plaintext. Bounded retry on `prefix`
-  collision (`unique=True`). Audit: `ingestion_token.created`.
+  collision (`unique=True`). Audit: `ingestion_token.created`, plus `ingestion_source.created` when
+  the typed name had to provision a new profile.
 - **Revoke** (`POST /settings/sources/<id>/revoke`): sets `revoked_at=now()`. Scoped lookup
   (admin → own org; superAdmin → any). Uniform 404 for cross-org access. Audit: `ingestion_token.revoked`.
 
 **Audit:** `record_ingestion_token_change` writes `AuditLog` rows with `action` ∈
 `{"ingestion_token.created", "ingestion_token.revoked"}`, `target_type="IngestionToken"`,
 `target_id=<uuid>`, `target_org=<token.organisation>`, `actor`, `actor_org`, `ip`. No secret material.
+Provisioning a feed writes `record_ingestion_source_created` (`action="ingestion_source.created"`,
+`target_type="IngestionSource"`, `target_org=None` — a source is not org-owned).
 
-**End-to-end:** A token minted in the UI works immediately for `POST /api/v1/alerts/webhook/<slug>/`
+**End-to-end:** A token minted in the UI works immediately for `POST /api/v1/alerts/webhook/`
 with `X-Webhook-Secret`; a revoked token returns **401**.
 
 ## Authentication order (`REST_FRAMEWORK.DEFAULT_AUTHENTICATION_CLASSES`, `amalthea/settings/base.py`)

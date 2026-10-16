@@ -1,7 +1,11 @@
 {% comment %}
-Show-once modal for a newly created ingestion token.
-Rendered directly by the POST response (HTTP 200, NOT a redirect).
-The plaintext secret is passed only in this render context and is never re-rendered.
+Body for the show-once dialog (`token-created-modal`), included as `body_template` by
+`settings_sources.html`. Rendered only by the create POST's 200 (never a redirect), so the plaintext
+exists in exactly one response and is never re-rendered: `settings_sources` does not put
+`token_plaintext` in its context, and no other view sets it.
+
+The dialog chrome — header, footer Close, `data-autoopen` and `data-modal-static` — comes from the
+`_modal.html` include on that page, not from here.
 {% endcomment %}
 {% load static %}
 

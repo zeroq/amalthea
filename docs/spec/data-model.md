@@ -57,6 +57,10 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 
 ### IngestionSource (`ingestion_source`, extends `UUIDModel` + `TimeStampedModel`)
 - `slug` — **unique** · `name` · `mapping_config` — JSONB (the JSON-path mapping table).
+- The slug left the webhook URL on 2026-10-15 (ADR-008): the route is `/api/v1/alerts/webhook/`
+  and the token does the routing. `slug` is what a name typed in Settings → Sources resolves to
+  (`slugify`, get-or-create), and `webhook_secret_hash` is the legacy route a secret was presented
+  on directly.
 - `default_severity` — SmallInteger, default 2, choices `SEVERITY_CHOICES` 1..4.
 - `correlation_enabled` — BooleanField, default True.
 - `webhook_secret_hash` — CharField(255), blank; hasher-backed secret (argon2; legacy plaintext

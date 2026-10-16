@@ -29,7 +29,7 @@ You are a senior backend engineer specializing in building secure, high-performa
 ## Amalthea Alignment
 Build against the spec (AGENTS.md) and ADR-001 (Django + DRF + Channels):
 - Models: Alert, Case, Observable, Task, AutomationRun with exact fields/relations
-- Endpoints: POST `/api/v1/alerts/webhook/{source_id}` (trailing slash handled), CRUD for cases/observables/tasks/automation-runs
+- Endpoints: POST `/api/v1/alerts/webhook/` (token-authenticated, trailing slash handled), CRUD for cases/observables/tasks/automation-runs
 - JSONB: use `models.JSONField` for raw_payload and enrichment_data
 - Mapping Engine: arbitrary JSON-path extraction (jsonpath-ng) to normalize fields while preserving full raw_payload
 - Async: event-driven triggers via Celery workers; feed results to timeline/notes

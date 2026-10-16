@@ -6,7 +6,7 @@ and heavy automation workflows (like Tines) by treating **Alerts, Cases, Observa
 Playbook Triggers as deeply interconnected, first-class objects**.
 
 - **Schema-agnostic ingestion** — receive raw JSON from any security tool (SIEM, EDR, CloudTrail,
-  phishing boxes) at `POST /api/v1/alerts/webhook/{source_id}`, authenticated with a per-org ingestion
+  phishing boxes) at `POST /api/v1/alerts/webhook/`, authenticated with a per-org ingestion
   token (`X-Webhook-Secret`) and normalised into a standard `Alert` by a JSON-path mapping layer that
   keeps the raw context.
 - **Incident lifecycle** — triage alerts, escalate or merge them into `Case`s, correlate on
@@ -39,7 +39,7 @@ python manage.py migrate    # defaults to amalthea.settings.dev
 python manage.py runserver  # http://127.0.0.1:8000/
 ```
 
-Create an analyst account, a webhook source, and its **per-org ingestion token**:
+Create an analyst account plus a **per-org ingestion token**:
 
 ```bash
 python manage.py shell -c "
@@ -56,10 +56,11 @@ print('X-Webhook-Secret:', secret)
 ```
 
 > The secret is printed **once** and stored only as an Argon2 hash — copy it now. Under tenant
-> isolation (ADR-004) a token binds the `o365` source to **one** organisation, and that org is what
-> stamps the ingested alert's `owner_org`. The same source can fan out to several tenants by issuing
-> one token each. Tokens can be minted and revoked in the UI under **Settings → Sources** (accessible
-> to `admin` and `superAdmin` roles).
+> isolation (ADR-004) a token binds a feed to **one** organisation, and that org is what stamps the
+> ingested alert's `owner_org`. The same feed can fan out to several tenants by issuing one token
+> each. Tokens can be minted (and the feed named) in the UI under **Settings → Sources**, which is
+> accessible to `admin` and `superAdmin` roles — an `admin` for their own organisation, a
+> `superAdmin` for any. Typing an existing feed name reuses that profile; a new name provisions one.
 
 For tenant administration, also create a `superAdmin` (only a `superAdmin` can open **Settings**):
 
@@ -74,7 +75,7 @@ User.objects.create_user(username='admin', password='change-me', org=org, role='
 Log in at <http://127.0.0.1:8000/> and fire a mock alert (pass the token printed above):
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/alerts/webhook/o365/ \
+curl -X POST http://127.0.0.1:8000/api/v1/alerts/webhook/ \
   -H "Content-Type: application/json" \
   -H "X-Webhook-Secret: $TOKEN" \
   -d '{"title":"Suspicious inbox rule","severity":3,"sourceRef":"demo-1",

@@ -76,9 +76,9 @@ def locked_token(locked_source: IngestionSource, default_org: Organisation) -> s
     return plaintext
 
 
-def _post(client: Client, slug: str, body: Any, **headers: str) -> Any:
+def _post(client: Client, body: Any, **headers: str) -> Any:
     return client.post(
-        reverse("alerts-webhook", kwargs={"source_id": slug}),
+        reverse("alerts-webhook"),
         data=json.dumps(body),
         content_type="application/json",
         **headers,
@@ -89,7 +89,7 @@ def _post(client: Client, slug: str, body: Any, **headers: str) -> Any:
 
 
 def test_a_well_formed_post_creates_an_alert(source: IngestionSource, source_token: str) -> None:
-    response = _post(Client(), "o365", PHISHING, HTTP_AUTHORIZATION=f"Bearer {source_token}")
+    response = _post(Client(), PHISHING, HTTP_AUTHORIZATION=f"Bearer {source_token}")
 
     assert response.status_code == 201, response.content
     body = response.json()
@@ -106,8 +106,8 @@ def test_a_well_formed_post_creates_an_alert(source: IngestionSource, source_tok
 def test_a_replay_is_accepted_but_not_re_stored(source: IngestionSource, source_token: str) -> None:
     """AC4.4 — a retry under back-pressure is not an error and does not duplicate the alert."""
     client = Client()
-    first = _post(client, "o365", PHISHING, HTTP_AUTHORIZATION=f"Bearer {source_token}")
-    second = _post(client, "o365", PHISHING, HTTP_AUTHORIZATION=f"Bearer {source_token}")
+    first = _post(client, PHISHING, HTTP_AUTHORIZATION=f"Bearer {source_token}")
+    second = _post(client, PHISHING, HTTP_AUTHORIZATION=f"Bearer {source_token}")
 
     assert first.status_code == 201
     assert second.status_code == 200, "a replay was reported as an error"
@@ -125,7 +125,6 @@ def test_the_mapping_config_wins_over_a_literal_key(
 
     response = _post(
         Client(),
-        "o365",
         {"title": "ignored", "detail": {"summary": "real", "rank": 4}},
         HTTP_AUTHORIZATION=f"Bearer {source_token}",
     )
@@ -147,7 +146,6 @@ def test_a_source_without_a_mapping_still_works_via_literal_keys(
     )
     response = _post(
         Client(),
-        "bare",
         {"title": "literal", "severity": 1, "id": "x-1"},
         HTTP_AUTHORIZATION=f"Bearer {plaintext}",
     )
@@ -159,14 +157,14 @@ def test_a_source_without_a_mapping_still_works_via_literal_keys(
 
 
 def test_a_missing_token_is_401(source: IngestionSource) -> None:
-    response = _post(Client(), "o365", {"title": "no token"})
+    response = _post(Client(), {"title": "no token"})
     assert response.status_code == 401
     assert response.json()["type"] == "unauthorized"
     assert Alert.objects.count() == 0
 
 
 def test_an_invalid_token_is_401(source: IngestionSource) -> None:
-    response = _post(Client(), "o365", {"title": "wrong"}, HTTP_AUTHORIZATION="Bearer invalid")
+    response = _post(Client(), {"title": "wrong"}, HTTP_AUTHORIZATION="Bearer invalid")
     assert response.status_code == 401
     assert response.json()["type"] == "unauthorized"
     assert Alert.objects.count() == 0
@@ -174,9 +172,7 @@ def test_an_invalid_token_is_401(source: IngestionSource) -> None:
 
 def test_a_valid_token_is_accepted(source: IngestionSource, source_token: str) -> None:
     """Guards against the stored digest being compared as if it were the plaintext."""
-    response = _post(
-        Client(), "o365", {"title": "authed"}, HTTP_AUTHORIZATION=f"Bearer {source_token}"
-    )
+    response = _post(Client(), {"title": "authed"}, HTTP_AUTHORIZATION=f"Bearer {source_token}")
     assert response.status_code == 201, response.content
     assert Alert.objects.count() == 1
 
@@ -194,16 +190,14 @@ def test_a_legacy_plaintext_secret_still_verifies(db: None, default_org: Organis
         prefix="plain-secret"[:12],
         secret_hash="plain-secret",
     )
-    response = _post(Client(), "legacy", {"title": "ok"}, HTTP_AUTHORIZATION="Bearer plain-secret")
+    response = _post(Client(), {"title": "ok"}, HTTP_AUTHORIZATION="Bearer plain-secret")
     assert response.status_code == 201
 
 
 def test_a_bearer_token_is_accepted_as_the_secret(
     source: IngestionSource, source_token: str
 ) -> None:
-    response = _post(
-        Client(), "o365", {"title": "bearer"}, HTTP_AUTHORIZATION=f"Bearer {source_token}"
-    )
+    response = _post(Client(), {"title": "bearer"}, HTTP_AUTHORIZATION=f"Bearer {source_token}")
     assert response.status_code == 201
 
 
@@ -212,7 +206,7 @@ def test_a_bearer_token_is_accepted_as_the_secret(
 
 def test_an_oversized_declared_length_is_413(source: IngestionSource, source_token: str) -> None:
     response = Client().post(
-        reverse("alerts-webhook", kwargs={"source_id": "o365"}),
+        reverse("alerts-webhook"),
         data="{}",
         content_type="application/json",
         CONTENT_LENGTH="99999999",
@@ -245,7 +239,7 @@ def test_the_body_is_re_measured_and_not_just_the_header(
     body = json.dumps({"title": "x" * 5000}).encode()
 
     request = RequestFactory().post(
-        reverse("alerts-webhook", kwargs={"source_id": "o365"}),
+        reverse("alerts-webhook"),
         data=body,
         content_type="application/json",
         HTTP_AUTHORIZATION=f"Bearer {source_token}",
@@ -255,7 +249,7 @@ def test_the_body_is_re_measured_and_not_just_the_header(
     else:
         request.META["CONTENT_LENGTH"] = declared
 
-    response = webhook_alerts(request, "o365")
+    response = webhook_alerts(request)
 
     assert response.status_code == 413, response.content
     assert Alert.objects.count() == 0
@@ -263,7 +257,7 @@ def test_the_body_is_re_measured_and_not_just_the_header(
 
 def test_malformed_json_is_400_with_fields(source: IngestionSource, source_token: str) -> None:
     response = Client().post(
-        reverse("alerts-webhook", kwargs={"source_id": "o365"}),
+        reverse("alerts-webhook"),
         data="{not json",
         content_type="application/json",
         HTTP_AUTHORIZATION=f"Bearer {source_token}",
@@ -279,7 +273,7 @@ def test_a_non_object_json_body_is_400(
 ) -> None:
     """Valid JSON that is not an object would otherwise reach `payload.get(...)` and 500."""
     response = Client().post(
-        reverse("alerts-webhook", kwargs={"source_id": "o365"}),
+        reverse("alerts-webhook"),
         data=body,
         content_type="application/json",
         HTTP_AUTHORIZATION=f"Bearer {source_token}",
@@ -295,7 +289,7 @@ def test_a_deeply_nested_body_is_400(source: IngestionSource, source_token: str)
         node["child"] = {}
         node = node["child"]
 
-    response = _post(Client(), "o365", payload, HTTP_AUTHORIZATION=f"Bearer {source_token}")
+    response = _post(Client(), payload, HTTP_AUTHORIZATION=f"Bearer {source_token}")
     assert response.status_code == 400
     assert "too deep" in response.json()["fields"]["body"][0]
     assert Alert.objects.count() == 0
@@ -304,7 +298,6 @@ def test_a_deeply_nested_body_is_400(source: IngestionSource, source_token: str)
 def test_a_shallow_body_is_accepted(source: IngestionSource, source_token: str) -> None:
     response = _post(
         Client(),
-        "o365",
         {"title": "fine", "nested": {"a": {"b": 1}}},
         HTTP_AUTHORIZATION=f"Bearer {source_token}",
     )
@@ -313,7 +306,7 @@ def test_a_shallow_body_is_accepted(source: IngestionSource, source_token: str) 
 
 def test_a_non_json_content_type_is_415(source: IngestionSource, source_token: str) -> None:
     response = Client().post(
-        reverse("alerts-webhook", kwargs={"source_id": "o365"}),
+        reverse("alerts-webhook"),
         data="<xml/>",
         content_type="application/xml",
         HTTP_AUTHORIZATION=f"Bearer {source_token}",
@@ -323,7 +316,7 @@ def test_a_non_json_content_type_is_415(source: IngestionSource, source_token: s
 
 def test_a_malformed_content_length_is_400(source: IngestionSource, source_token: str) -> None:
     response = Client().post(
-        reverse("alerts-webhook", kwargs={"source_id": "o365"}),
+        reverse("alerts-webhook"),
         data="{}",
         content_type="application/json",
         CONTENT_LENGTH="banana",
@@ -332,9 +325,22 @@ def test_a_malformed_content_length_is_400(source: IngestionSource, source_token
     assert response.status_code == 400
 
 
-def test_an_unknown_source_is_404(source: IngestionSource, source_token: str) -> None:
-    response = _post(Client(), "nope", {"title": "x"}, HTTP_AUTHORIZATION=f"Bearer {source_token}")
-    assert response.status_code == 404
+def test_an_unknown_token_does_not_leak_whether_a_feed_exists(
+    source: IngestionSource, source_token: str
+) -> None:
+    """The route is source-less, so there is no "unknown source" case left to distinguish.
+
+    A stranger's secret and a real token's prefix with a wrong body are the same request now: one
+    401, with no existence oracle for an unauthenticated caller to probe.
+    """
+    stranger = "zzzzzzzzzzzz" + "0" * 20
+    assert not source_token.startswith(stranger[:12]), "pick a prefix that matches nothing"
+    same_prefix_wrong_body = source_token[:12] + "x" * 20
+
+    for secret in (stranger, same_prefix_wrong_body):
+        response = _post(Client(), {"title": "x"}, HTTP_AUTHORIZATION=f"Bearer {secret}")
+        assert response.status_code == 401
+        assert response.json()["type"] == "unauthorized"
     assert Alert.objects.count() == 0
 
 
@@ -354,7 +360,7 @@ def test_severity_is_coerced_or_defaulted(
     because its severity scale is unfamiliar loses the alert, which is the expensive mistake here.
     """
     payload = {"title": "sev"} if sent is None else {"title": "sev", "severity": sent}
-    response = _post(Client(), "o365", payload, HTTP_AUTHORIZATION=f"Bearer {source_token}")
+    response = _post(Client(), payload, HTTP_AUTHORIZATION=f"Bearer {source_token}")
     assert response.status_code == 201, response.content
     assert Alert.objects.get(pk=response.json()["_id"]).severity == stored
 
@@ -363,7 +369,6 @@ def test_a_non_string_title_does_not_500(source: IngestionSource, source_token: 
     """`str(title)` on a dict would be fine, but on an object it must not become a traceback."""
     response = _post(
         Client(),
-        "o365",
         {"title": {"nested": "value"}},
         HTTP_AUTHORIZATION=f"Bearer {source_token}",
     )
@@ -392,7 +397,6 @@ def test_the_webhook_is_rate_limited(
     codes = [
         _post(
             client,
-            "o365",
             {"title": f"flood {i}", "sourceRef": f"r{i}"},
             HTTP_AUTHORIZATION=f"Bearer {source_token}",
         ).status_code
@@ -427,14 +431,13 @@ def test_throttling_is_per_source_not_global(
     for i in range(4):
         _post(
             client,
-            "o365",
             {"title": f"n{i}", "sourceRef": f"n{i}"},
             HTTP_AUTHORIZATION=f"Bearer {source_token}",
         )
 
     assert (
         _post(
-            client, "quiet", {"title": "still fine"}, HTTP_AUTHORIZATION=f"Bearer {plaintext2}"
+            client, {"title": "still fine"}, HTTP_AUTHORIZATION=f"Bearer {plaintext2}"
         ).status_code
         == 201
     ), "one source exhausting its limit blocked a different source"
@@ -461,7 +464,6 @@ def test_throttling_is_per_ip_not_global(
     codes = [
         _post(
             noisy,
-            "o365",
             {"title": f"ip {i}", "sourceRef": f"ip{i}"},
             HTTP_AUTHORIZATION=f"Bearer {source_token}",
         ).status_code
@@ -476,7 +478,6 @@ def test_throttling_is_per_ip_not_global(
     assert (
         _post(
             other,
-            "o365",
             {"title": "other ip", "sourceRef": "other"},
             HTTP_AUTHORIZATION=f"Bearer {source_token}",
         ).status_code
@@ -501,15 +502,10 @@ def test_the_secret_is_checked_before_the_rate_budget_is_spent(
 
     client = Client()
     for _ in range(10):
-        assert (
-            _post(client, "locked", {"title": "x"}, HTTP_AUTHORIZATION="Bearer wrong").status_code
-            == 401
-        )
+        assert _post(client, {"title": "x"}, HTTP_AUTHORIZATION="Bearer wrong").status_code == 401
 
     assert (
-        _post(
-            client, "locked", {"title": "real"}, HTTP_AUTHORIZATION=f"Bearer {locked_token}"
-        ).status_code
+        _post(client, {"title": "real"}, HTTP_AUTHORIZATION=f"Bearer {locked_token}").status_code
         == 201
     )
     cache.clear()

@@ -524,7 +524,7 @@ class TestWebhookTokenRouting:
 
         client = APIClient()
         resp = client.post(
-            f"/api/v1/alerts/webhook/{source.slug}",
+            "/api/v1/alerts/webhook/",
             data=json.dumps({"title": "Webhook Alert", "sourceRef": "wh-1"}),
             content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {plaintext}",
@@ -537,11 +537,11 @@ class TestWebhookTokenRouting:
 
     def test_webhook_without_token_is_401(self, db: None) -> None:
         source = IngestionSource.objects.create(slug="no-token", name="No Token Source")
-        # No tokens created for this source
+        assert not source.tokens.exists(), "this test is about a feed with no token at all"
 
         client = APIClient()
         resp = client.post(
-            f"/api/v1/alerts/webhook/{source.slug}",
+            "/api/v1/alerts/webhook/",
             data=json.dumps({"title": "No Token", "sourceRef": "wh-1"}),
             content_type="application/json",
         )
@@ -555,7 +555,7 @@ class TestWebhookTokenRouting:
 
         client = APIClient()
         resp = client.post(
-            f"/api/v1/alerts/webhook/{source.slug}",
+            "/api/v1/alerts/webhook/",
             data=json.dumps({"title": "Bad Token", "sourceRef": "wh-1"}),
             content_type="application/json",
             HTTP_AUTHORIZATION="Bearer invalidtoken123456789012",
@@ -581,7 +581,7 @@ class TestWebhookTokenRouting:
 
         # Post with token1 → alert in org1
         resp1 = client.post(
-            f"/api/v1/alerts/webhook/{source.slug}",
+            "/api/v1/alerts/webhook/",
             data=json.dumps({"title": "Alert for Org1", "sourceRef": "mt-1"}),
             content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {token1}",
@@ -592,7 +592,7 @@ class TestWebhookTokenRouting:
 
         # Post with token2 → alert in org2
         resp2 = client.post(
-            f"/api/v1/alerts/webhook/{source.slug}",
+            "/api/v1/alerts/webhook/",
             data=json.dumps({"title": "Alert for Org2", "sourceRef": "mt-2"}),
             content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {token2}",
@@ -661,7 +661,7 @@ class TestWebhookTokenRouting:
         # The legacy secret should work via the token
         client = APIClient()
         resp = client.post(
-            "/api/v1/alerts/webhook/legacy",
+            "/api/v1/alerts/webhook/",
             data=json.dumps({"title": "Legacy", "sourceRef": "wh-legacy"}),
             content_type="application/json",
             HTTP_AUTHORIZATION="Bearer legacys3cr3t",

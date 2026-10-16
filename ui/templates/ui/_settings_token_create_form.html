@@ -3,15 +3,20 @@ Server-rendered body for the "New ingestion token" modal (no inline JS, CSP-safe
 Fields target the modal's form via form="{{ form_id }}" so they work with JS disabled.
 For admin: no org field (org comes from request.user.org_id).
 For superAdmin: required organisation <select>.
+
+The source is a free-text *name*, not a picker: the webhook URL is source-less, so the source is
+only the mapping profile behind the token. Typing a name that already exists reuses that profile;
+a new name provisions one. The <datalist> lists the existing profiles so reuse is discoverable.
 {% endcomment %}
 <div class="meta-inline">
   <label for="token-create-source">Source <span class="required">*</span></label>
-  <select id="token-create-source" name="source" required form="{{ form_id }}">
-    <option value="">— select —</option>
+  <input type="text" id="token-create-source" name="source_name" maxlength="200" required form="{{ form_id }}" list="token-create-source-names" placeholder="e.g. Microsoft 365" autocomplete="off">
+  <datalist id="token-create-source-names">
     {% for source in sources %}
-    <option value="{{ source.slug }}">{{ source.name }} ({{ source.slug }})</option>
+    <option value="{{ source.name }}"></option>
     {% endfor %}
-  </select>
+  </datalist>
+  <p class="dim">The feed this token belongs to. An existing name reuses its mapping profile.</p>
 </div>
 
 {% if is_superadmin %}
@@ -28,5 +33,5 @@ For superAdmin: required organisation <select>.
 
 <div class="meta-inline">
   <label for="token-create-name">Name <span class="required">*</span></label>
-  <input type="text" id="token-create-name" name="name" maxlength="200" required autofocus form="{{ form_id }}" placeholder="e.g. CrowdStrike EDR production">
+  <input type="text" id="token-create-name" name="name" maxlength="200" required form="{{ form_id }}" placeholder="e.g. CrowdStrike EDR production">
 </div>

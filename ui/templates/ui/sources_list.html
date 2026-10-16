@@ -4,8 +4,9 @@
 
 {% block content %}
 <p class="hint">
-  Each row is a configured feed. Point a sender at
-  <code>POST /api/v1/alerts/webhook/&lt;slug&gt;/</code> and its payloads become alerts.
+  Each row is a mapping profile. Every sender posts to the same
+  <code>POST /api/v1/alerts/webhook/</code> and identifies itself with an ingestion token — the
+  token decides both the profile and the organisation the alert lands in.
 </p>
 
 {% if sources %}

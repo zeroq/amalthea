@@ -150,3 +150,59 @@ dialog.cheatsheet-modal {
   display: block;
   margin-bottom: 4px;
 }
+
+/* Settings: ingestion token show-once dialog.
+ *
+ * The one secret Amalthea can never show again, so the layout's job is to make it hard to lose:
+ * an amber warning first, then the token on its own line in a mono block. `overflow-wrap:
+ * anywhere` keeps a 43-char `secrets.token_urlsafe(32)` inside the 560px `modal--lg` box instead
+ * of pushing it wider than the viewport. Every token used here is defined in `app.css` `@theme`;
+ * an undefined custom property silently drops the declaration.
+ */
+.token-warning {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  border-left: 3px solid var(--color-warn);
+  border-radius: var(--radius);
+  background: var(--color-bg-inset);
+}
+.token-warning > i {
+  flex: none;
+  margin-top: 2px;
+  color: var(--color-warn);
+}
+.token-warning p {
+  margin: 4px 0 0;
+}
+.token-display > label:first-child {
+  margin-top: 0;
+}
+.token-code-wrap {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.token-code-wrap > code {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-bg-inset);
+  color: var(--color-text);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.token-code-wrap > .btn {
+  flex: none;
+  margin-top: 0;
+}
+.token-hint {
+  margin-top: 16px;
+}
+.token-hint > p + p {
+  margin-top: 6px;
+}

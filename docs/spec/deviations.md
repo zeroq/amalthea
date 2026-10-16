@@ -382,6 +382,39 @@ Evidence: `PLAN-2026-10-14-case-pages-ui.md` §11 — 63 checks through the Djan
 headless Edge, and 7 dialogs across 4 pages measured at two viewports; `make css-check` clean.
 
 
+## Wave 2026-10-15/16 — token-only ingest routing + the show-once token dialog
+
+Plans: `docs/planning/PLAN-2026-10-15-token-only-webhook-routing.md` (routes, ADR-008) and
+`docs/planning/PLAN-2026-10-16-token-created-modal.md` (the show-once dialog).
+
+| ID | Plan / AGENTS.md says | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **WTR-1** | `PLAN-2026-10-15-settings-sources-ingestion-tokens` non-goal **N1**: "No source CRUD…" | **`IngestionSource` is now provisionable by name from the token form** | That plan shipped a create form whose source list had no writer in the product (`IngestionSource.objects.order_by("name")` had no write path). Sources stay global and gain no editor. `ui/views.py::settings_token_create`. |
+| **WTR-2** | `sources_list.html` describes sources as `open`/`required` and says an open source "accepts unauthenticated posts" | **Stale copy left in place** (only the URL sentence was fixed) | The claim has been false since strict token auth (2026-10-10) and is pinned by `test_ui_loop.py:520-537`; copy-and-pin is its own change. `TODO.md` §10.8. |
+| **WTC-1** | §6 prefers progressive enhancement; a fragment view was fine | **`_modal.html` gains `show_cancel`, `close_url`, `modal_static`** | All three are opt-in, so every existing dialog renders unchanged (`test_settings_ingestion_tokens.py`). |
+| **WTC-2** | `data-modal-static` documented as "backdrop-click only" | **Esc now respects it too** | A static dialog whose purpose is to hold a one-time secret must not be dismissible with a single key; no dialog carried the attribute before, so no behaviour changed. `ui/static/ui/modal.js`. |
+| **WTC-3** | `[data-modal-close]` was button-only | **`preventDefault()` for the anchor form of the closer** | The only way to provide a JS-less exit from a static dialog is a real `<a>`; with JS it must close in place, not navigate. Buttons have no default action, so their path is untouched. `ui/static/ui/modal.js`. |
+| **WTC-4** | The show-once dialog was rendered as a bare partial | **The create POST's 200 renders the whole Sources page with the dialog opened** | The partial had no `{% extends %}`, so the response was a document with no shell and no stylesheets — the one secret shown once landed unstyled. Polluting the response with the list is accepted; `token_plaintext` is set on that path only, never in a URL/session/log. `ui/views.py`. |
+| **WTC-5** | `app.css` is where component styles live | **The `.token-*` rules went into `modal.css`** | They style only the dialog body. Trade-off recorded: `test_ui_css_tokens.py` scans `app.css` only, so a typo'd token here is not caught (and `.blockers-warning` at `modal.css:123` is already broken by undefined tokens — see `TODO.md`). |
+
+**Defects found and fixed during the wave (not deviations).**
+
+- **A multi-line `{# … #}` is not a comment.** The first version of the added block in
+  `settings_sources.html` spanned four lines, so Django emitted it verbatim: every
+  `GET /settings/sources` carried literal `{# … #}` markup (and a raw `data-modal-static` substring on a
+  page where no dialog has the attribute). Found by `qa-tester`, fixed to
+  `{% comment %}…{% endcomment %}`; no other template has this shape.
+- **The scanner that should have caught it assumed the wrong syntax.** `test_ui_inline_assets.py` used
+  `{#.*?#}` `re.DOTALL`, i.e. it *stripped* multi-line `{# … #}` as if it were a comment, hiding exactly
+  this leak. Now single-line-only, with a new `test_no_multiline_inline_comment` parametrized over all 69
+  templates and two rendered-body assertions in `test_settings_ingestion_tokens.py`.
+- **`{# #}` inside `{% comment %}` is not stripped in prose** — noted in the guard's docstring so the
+  next editor does not "fix" the new test by widening the regex again.
+
+Evidence: `PLAN-2026-10-16-token-created-modal.md` §6/§10 — AC1–AC8, 8 rendered assertions, 69 template
+cases; full suite 1918 passed / 3 skipped (109 s), `ruff` clean, `make css-check` clean.
+
+
 ## Evidence index
 
 - `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §13 — full P7/P8/P10/P11 records

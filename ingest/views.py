@@ -1,6 +1,6 @@
 """Webhook receiver for Module A — the schema-agnostic "Gossamer" feed.
 
-`POST /api/v1/alerts/webhook/<source_id>/` accepts raw JSON from any tool, on the terms the plan set
+`POST /api/v1/alerts/webhook/` accepts raw JSON from any tool, on the terms the plan set
 (AC4.1—AC4.8). Four decisions here are load-bearing and each one exists because of a specific failure
 mode, not because the code is shaped that way:
 
@@ -25,14 +25,17 @@ mode, not because the code is shaped that way:
 The receiver is `@csrf_exempt` because a webhook is a machine-to-machine call with no session and no
 CSRF token; it is *not* unauthenticated — see the token check.
 
-**P2 — Tenant Isolation:** Authentication now resolves an `IngestionToken` (bound to one
-`Organisation`). A valid token yields its organisation, used to stamp the alert's `owner_org`.
-**Strict: if the source has no valid token / no token presented → 401** (closes the open-source hole).
+**P2 — Tenant Isolation:** The credential is the *only* routing fact. A presented secret resolves to
+exactly one `IngestionToken`, which carries both the `IngestionSource` (mapping rules, rate-limit
+bucket) and the `Organisation` used to stamp the alert's `owner_org`. There is no source slug in the
+path, so an unauthenticated caller cannot probe which feeds exist: **missing or invalid token → 401,
+always** (closes the open-source hole).
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import Any
 
@@ -40,7 +43,7 @@ from argon2 import PasswordHasher
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils.crypto import constant_time_compare
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -48,6 +51,8 @@ from django.views.decorators.http import require_POST
 from identity.models import IngestionToken
 from ingest.models import IngestionSource
 from ingest.pipeline import store_ingested_alert
+
+logger = logging.getLogger(__name__)
 
 _JSON_CONTENT_TYPES = (
     "application/json",
@@ -111,23 +116,16 @@ def _verify_secret(stored_hash: str, presented: str) -> bool:
         return constant_time_compare(presented.encode("utf-8"), stored_hash.encode("utf-8"))
 
 
-def _authenticate_token(
-    request: HttpRequest, source: IngestionSource
-) -> tuple[IngestionToken | None, HttpResponse | None]:
+def _authenticate_token(request: HttpRequest) -> tuple[IngestionToken | None, HttpResponse | None]:
     """
-    Authenticate the request against `IngestionToken` rows for this source.
+    Resolve the presented secret to its `IngestionToken`.
+
+    The token is the single routing fact of this endpoint: it carries the `IngestionSource` (mapping
+    rules, rate-limit bucket) *and* the `Organisation` that stamps the alert. Lookup is by the unique
+    12-char `prefix` — one indexed query — then the secret is verified against the Argon2 hash.
 
     Returns `(token, None)` on success, or `(None, error_response)` on failure.
     """
-    # Collect tokens for this source that are not revoked
-    tokens = list(IngestionToken.objects.filter(source=source, revoked_at__isnull=True))
-    if not tokens:
-        # No valid tokens configured for this source — strict deny (closes open-source hole)
-        return None, _error(
-            401, "Unauthorized: no valid ingestion token configured", type_="unauthorized"
-        )
-
-    # Extract presented secret from headers
     presented = (
         request.headers.get("X-Webhook-Secret")
         or request.headers.get("X-Api-Key")
@@ -136,20 +134,22 @@ def _authenticate_token(
     if not presented:
         return None, _error(401, "Unauthorized: missing token", type_="unauthorized")
 
-    # Match by prefix (first 12 chars) then verify hash
-    prefix = presented[:12]
-    for token in tokens:
-        if token.prefix != prefix:
-            continue
-        if token.verify(presented):
-            # Update last_used_at (best-effort, non-blocking)
-            from django.utils import timezone
+    token = (
+        IngestionToken.objects.select_related("source", "organisation")
+        .filter(prefix=presented[:12], revoked_at__isnull=True)
+        .first()
+    )
+    # Revoked tokens are excluded by the queryset, so a revoked secret, an unknown prefix and a wrong
+    # secret are one and the same answer — the caller learns nothing about which tokens exist.
+    # `verify` only runs on a prefix hit, so a flood of junk secrets costs one indexed SELECT each.
+    if token is None or not token.verify(presented):
+        return None, _error(401, "Unauthorized: invalid token", type_="unauthorized")
 
-            IngestionToken.objects.filter(pk=token.pk).update(last_used_at=timezone.now())
-            return token, None
+    # Update last_used_at (best-effort, non-blocking)
+    from django.utils import timezone
 
-    # No matching token or hash mismatch
-    return None, _error(401, "Unauthorized: invalid token", type_="unauthorized")
+    IngestionToken.objects.filter(pk=token.pk).update(last_used_at=timezone.now())
+    return token, None
 
 
 def _throttled(
@@ -196,7 +196,7 @@ def _mapped(payload: dict[str, Any], mapping: dict[str, Any] | None, *keys: str)
     return None
 
 
-def _coerce_severity(value: Any, source: IngestionSource) -> int | None:
+def _coerce_severity(value: Any) -> int | None:
     """Severity must be an int in the model's 1—4 range, or `None` so the pipeline defaults it."""
     if value is None:
         return None
@@ -209,8 +209,13 @@ def _coerce_severity(value: Any, source: IngestionSource) -> int | None:
 
 @csrf_exempt
 @require_POST
-def webhook_alerts(request: HttpRequest, source_id: str) -> HttpResponse:
-    """Accept one raw alert from a configured source (AC4.1—AC4.8)."""
+def webhook_alerts(request: HttpRequest) -> HttpResponse:
+    """Accept one raw alert from any registered source (AC4.1—AC4.8).
+
+    The path is source-less by design: the credential decides which feed this is and which tenant it
+    belongs to. Everything cheap happens before the DB is touched, and the body is still never parsed
+    before the size cap has had its say.
+    """
     max_size = settings.WEBHOOK_MAX_BODY_SIZE
     max_depth = settings.WEBHOOK_MAX_DEPTH
 
@@ -230,17 +235,13 @@ def webhook_alerts(request: HttpRequest, source_id: str) -> HttpResponse:
             type_="unsupportedMediaType",
         )
 
-    try:
-        source = IngestionSource.objects.get(slug=source_id)
-    except IngestionSource.DoesNotExist as exc:
-        raise Http404(f"No ingestion source with slug {source_id!r}") from exc
-
-    # Authenticate via IngestionToken (strict: token required)
-    token, denied = _authenticate_token(request, source)
+    # The credential is the only routing fact: it resolves both the feed and the tenant.
+    token, denied = _authenticate_token(request)
     if denied is not None:
         return denied
     # `_authenticate_token` returns `(None, error)` on failure, so a token is guaranteed here.
     assert token is not None
+    source = token.source
 
     # Throttle after auth — auth is cheap and prevents DoS against legitimate sources
     if _throttled(request, source, token):
@@ -273,7 +274,7 @@ def webhook_alerts(request: HttpRequest, source_id: str) -> HttpResponse:
 
     mapping = source.mapping_config or {}
     title = _mapped(payload, mapping, "title", "summary", "message")
-    severity = _coerce_severity(_mapped(payload, mapping, "severity", "severityLevel"), source)
+    severity = _coerce_severity(_mapped(payload, mapping, "severity", "severityLevel"))
     source_ref = _mapped(payload, mapping, "sourceRef", "source_ref", "id")
     alert_type = _mapped(payload, mapping, "type", "event", "alertType") or "generic"
 
@@ -293,6 +294,15 @@ def webhook_alerts(request: HttpRequest, source_id: str) -> HttpResponse:
         return _error(400, "Bad request", type_="badRequest", fields=detail)
 
     alert = stored.alert
+    # The path no longer names the feed, so this line is the provenance trail for an ingest.
+    logger.info(
+        "ingest %s source=%s token=%s org=%s alert=%s",
+        "accepted" if stored.created else "replayed",
+        source.slug,
+        token.prefix,
+        token.organisation_id,
+        alert.id,
+    )
     return JsonResponse(
         {
             "_id": str(alert.id),

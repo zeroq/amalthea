@@ -327,14 +327,20 @@ backlog once the analyst-visible classification fields (10.3–10.6) are designe
   **Similar** = the §2-Module-C cross-case observable linking — **now tracked as §12.3** (with the missing
   auto-bundle consumer; decide Q-D4 there, not here); **Audit** = the read-only `AuditLog` viewer
   (pull forward §6.13/P4).
-- [ ] **10.8 — Ingestion-token surface + stale webhook copy (mostly absorbed by §6.16 P4).** The README
-  Quickstart now documents the per-org token, but the rest of the surface is still thin: (a)
-  `ui/templates/ui/sources_list.html` says *"POST `/api/v1/alerts/webhook/<slug>/` … become alerts"* with
-  no mention of the required token — fold the token (and its show-once secret) into that page when **P4**
-  builds Settings → Ingestion tokens (§6.13); (b) add a short **Ingestion tokens** section to
-  `docs/spec/identity-auth.md` (create/verify/revoke, prefix lookup, Argon2, legacy plaintext fallback)
-  and cross-reference it from the README. Mostly absorbed by §6.16 **P4** — recorded here so the stale
-  copy is not forgotten if P4 slips.
+- [ ] **10.8 — Ingestion-token surface + stale webhook copy (mostly absorbed by §6.16 P4).** *(Partly
+  done 2026-10-15.)* (a) The `sources_list.html` URL copy is **fixed** — it now shows the source-less
+  `POST /api/v1/alerts/webhook/` (ADR-008) — but the page still carries the `open` / `required` pills
+  and the sentence *"A source marked open accepts unauthenticated posts"*, which has been factually
+  wrong since strict token auth (2026-10-10) and is now doubly wrong. That stale security claim is
+  pinned by `test_ui_loop.py:520-537`, so fix copy **and** test together. (b) **Done**: the **Ingestion
+  tokens** section exists in `docs/spec/identity-auth.md` (create/verify/revoke, prefix lookup, Argon2,
+  legacy plaintext fallback) and the README cross-references Settings → Sources.
+- [ ] **10.10 — No pre-auth per-IP throttle on the webhook (requested 2026-10-15, ADR-008).** The
+  per-IP bucket (`wh:ip:{ip}`) is consulted only **after** the token verifies, so an unauthenticated
+  flood still costs one indexed token lookup + one Argon2 attempt per request. Add a cheap pre-auth
+  per-IP limiter ahead of `_authenticate_token` (same `cache.incr` idiom, own bucket/documented limit
+  so it cannot mask the post-auth 429), then confirm the budget in `docs/spec/api.md`. Consider a
+  fail-closed setting under `amalthea/settings/prod.py` style (mirrors AGENTS.md §5).
 - [ ] **10.9 — Status vocabularies have no human `label`, so the UI prints raw stored tokens.** Found
   2026-10-15 while fixing TLP/PAP display (the TLP/PAP row rendered raw integers; now uses a zero-safe
   `choice_name` filter). Every *closed set* except statuses renders a human label
@@ -348,6 +354,14 @@ backlog once the analyst-visible classification fields (10.3–10.6) are designe
   `resolve_case_status`), or a `*_LABELS` mapping keyed by token, or fix `TASK_STATUS_CHOICES` labels.
   **Deferred**: purely cosmetic today, and touching `CaseStatus` risks the automation triggers that key on
   `stage` (see §10.6/Q-D2) — which is exactly why it is its own item, not a rider on 10.3–10.6.
+- [ ] **10.11 — Reloading the "create ingestion token" POST mints a second live token.** Success is a
+  200 body, not a redirect — deliberately, because a PRG would have to park the plaintext somewhere
+  server-side (session, cache, signed URL) to re-render it, and the whole point is that the secret
+  exists in exactly one response. The side effect: a browser reload of that response re-submits the
+  form and creates *another* token, invisible until someone looks at Settings → Sources. Fix options:
+  a one-shot nonce in a hidden field (server-cached; the reload returns the same 200 without
+  re-creating), or an explicit "create another token?" nudge. Exposure is low (authenticated admin,
+  their own org, the token is listed) — hence deferred rather than fixed blind.
 
 **Open design questions (resolve in the plan before coding):**
 

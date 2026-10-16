@@ -12,6 +12,7 @@ from django.http import HttpRequest
 
 if TYPE_CHECKING:
     from identity.models import IngestionToken, Organisation, User
+    from ingest.models import IngestionSource
 
 
 def _get_client_ip(request: HttpRequest) -> str | None:
@@ -225,4 +226,29 @@ def record_ingestion_token_change(
         target_type="IngestionToken",
         target_id=str(token.id),
         ip=ip,
+    )
+
+
+def record_ingestion_source_created(
+    request: HttpRequest,
+    *,
+    actor: User,
+    source: IngestionSource,
+) -> None:
+    """
+    Record the on-demand creation of an `IngestionSource` from Settings → Sources.
+
+    An `IngestionSource` is *global* configuration (it has no `Organisation`), so `target_org` is
+    `None` — but provisioning one is a fleet-level act, and who did it is worth a row.
+    """
+    from identity.models import AuditLog
+
+    AuditLog.objects.create(
+        actor=actor,
+        actor_org=getattr(actor, "org", None),
+        target_org=None,
+        action="ingestion_source.created",
+        target_type="IngestionSource",
+        target_id=str(source.id),
+        ip=_get_client_ip(request),
     )

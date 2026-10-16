@@ -62,6 +62,13 @@
     if (closer) {
       var modal = closer.closest("dialog");
       if (modal) {
+        // A close control may be a real <a href> (the JS-less fallback needs somewhere to go:
+        // see the show-once token dialog). With JS the dialog should close in place instead of
+        // navigating, so the anchor's default action is suppressed — `<button>` closers have no
+        // default action, so this is a no-op for them.
+        if (closer.tagName === "A") {
+          event.preventDefault();
+        }
         modal.close();
       }
     }
@@ -93,7 +100,13 @@
       return;
     }
     if (event.key === "Escape") {
-      modal.close();
+      // `data-modal-static` means "only an explicit close control dismisses me". It already opts
+      // out of click-outside below; Esc has to opt out too, or it is a one-key way to destroy
+      // something the dialog exists to protect (the show-once token secret). No dialog used the
+      // attribute before this, so no existing behaviour changes.
+      if (!modal.hasAttribute("data-modal-static")) {
+        modal.close();
+      }
       return;
     }
     if (event.key !== "Tab") {

@@ -120,7 +120,7 @@ def mail_playbook(db: None) -> Playbook:
 def _escalate(anonymous_api: object, api: object, source: IngestionSource) -> Case:
     headers = {"HTTP_X_WEBHOOK_SECRET": source._test_token}
     posted = anonymous_api.post(
-        reverse("alerts-webhook", kwargs={"source_id": source.slug}),
+        reverse("alerts-webhook"),
         data=json.dumps(PHISHING_PAYLOAD),
         content_type="application/json",
         **headers,

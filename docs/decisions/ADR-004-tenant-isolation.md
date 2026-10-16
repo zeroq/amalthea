@@ -20,7 +20,13 @@ The project is **greenfield** — no production data to preserve — so strict s
 3. **Observables are org-scoped.** Unique on `(owner_org, data_type, data_hash)` (was global); the same value in two orgs is two rows, and case auto-linking is confined to one org. **This narrows the "same artifact across cases over months" feature from global to per-tenant** — an accepted trade for isolation.
 4. **Roles.** `User.role ∈ {superAdmin, admin, analyst, read-only}` (default `analyst`), enforced by DRF permission classes. One org per user (`User.org`, DB-nullable but required for access; `NOT NULL` is avoided because it breaks `createsuperuser`).
 5. **superAdmin is cross-tenant and audited.** A new `AuditLog` records break-glass reads and role/org/share/token changes.
-6. **Ingest is token-routed.** A new `IngestionToken(source, organisation, secret_hash, …)` binds a token to exactly one org; the same `IngestionSource` routes to different tenants by token. A tokenless/invalid request is `401` (closes today's open-source hole). Organisation is **never** taken from the request body.
+6. **Ingest is token-routed.** A new `IngestionToken(source, organisation, secret_hash, …)` binds
+   a token to exactly one org; the same `IngestionSource` routes to different tenants by token. A
+   tokenless/invalid request is `401` (closes today's open-source hole). Organisation is **never**
+   taken from the request body.
+    *Implemented 2026-10-15 (ADR-008): the webhook URL carries no source slug — the credential alone
+    identifies the feed, so the token is looked up by `prefix` with no path context.*
+
 7. **Sharing stays.** `Share` remains the only sanctioned cross-tenant read, additive and default-deny, and is itself authorized (owner org only).
 
 ## Rationale

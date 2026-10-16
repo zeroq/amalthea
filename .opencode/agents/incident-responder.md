@@ -66,7 +66,7 @@ Bridge alert ingestion → case creation → observable extraction → automated
 ## Integration with Amalthea Architecture
 
 Align with Amalthea spec:
-- **Ingestion**: `/api/v1/alerts/webhook/{source_id}`, schema-agnostic, preserve raw_payload (JSONB)
+- **Ingestion**: `/api/v1/alerts/webhook/` (token-identified feed + tenant), schema-agnostic, preserve raw_payload (JSONB)
 - **Models**: Alert (New/Triaged/Dismissed), Case (Open/Investigating/Containment/Closed), Observable (IP/Domain/Hash/User), Task, AutomationRun
 - **Relationships**: Alert→Case (1:0..1), Case→Observable/Task/AutomationRun (1:0..*)
 - **Event-driven**: Triggers on state changes fire async workers

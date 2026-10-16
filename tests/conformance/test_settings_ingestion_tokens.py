@@ -12,6 +12,20 @@ Covers PLAN-2026-10-15-settings-sources-ingestion-tokens AC-5..AC-17:
 * the end-to-end loop: mint in the UI → webhook accepted (201, stamped with the
   org) → revoke in the UI → the same secret is now rejected (401) — AC-9/AC-15
 
+PLAN-2026-10-16-token-created-modal (TestModalShowOnce / TestModalJsPins):
+
+* the create-POST success renders the full Sources page (shell + stylesheet
+  links), not a bare fragment — AC1
+* that page carries the autoopened `token-created-modal` dialog — AC2
+* the dialog is `data-modal-static` and no other dialog gains it — AC3/AC7
+* the dialog footer has a single Close anchor and no Cancel — AC4
+* `GET /settings/sources` is unchanged (no dialog, no plaintext) — AC6
+* the plaintext element is unique and confined to the dialog body — AC5
+* textual pins on modal.js's Escape guard and the anchor preventDefault — AC8
+* rendered pages carry no leaked `{#`/`#}` comment markers (a multi-line `{# #}` is not
+  a Django comment and renders as literal text); the repo-wide mechanical guard is
+  `test_ui_inline_assets.py::test_no_multiline_inline_comment`
+
 The end-to-end test is the one that proves the feature is real: it is the first
 test to exercise the show-once render and the webhook together, and it was the
 missing coverage that let a context-name mismatch (an empty plaintext modal)
@@ -22,6 +36,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 import pytest
 from django.core.cache import cache
@@ -34,6 +49,13 @@ from ingest.models import IngestionSource
 
 # The show-once modal renders `<code id="token-plaintext">{{ plaintext }}</code>`.
 _PLAINTEXT_RE = re.compile(r'id="token-plaintext">([^<]+)<')
+
+
+def _dialog_tag(html: str, modal_id: str) -> str:
+    """Return the opening ``<dialog id="…">`` tag so its attributes can be inspected."""
+    match = re.search(rf'<dialog id="{re.escape(modal_id)}"[^>]*>', html)
+    assert match is not None, f"dialog id={modal_id!r} not found in rendered HTML"
+    return match.group(0)
 
 
 @pytest.fixture(autouse=True)
@@ -80,15 +102,17 @@ def _create_token_via_ui(
     name: str,
     organisation: Organisation | None = None,
 ):
-    data: dict[str, str] = {"source": source.slug, "name": name}
+    # The feed is chosen by *name*, not by slug: the webhook URL carries no source, so the source is
+    # only the mapping profile the token points at.
+    data: dict[str, str] = {"source_name": source.name, "name": name}
     if organisation is not None:
         data["organisation"] = str(organisation.id)
     return client.post(reverse("ui-settings-token-create"), data)
 
 
-def _localhost_webhook(client: Client, slug: str, token: str, *, source_ref: str):
+def _localhost_webhook(client: Client, token: str, *, source_ref: str):
     return client.post(
-        f"/api/v1/alerts/webhook/{slug}/",
+        "/api/v1/alerts/webhook/",
         data=json.dumps({"title": "Test alert", "sourceRef": source_ref}),
         content_type="application/json",
         HTTP_X_WEBHOOK_SECRET=token,
@@ -129,10 +153,10 @@ class TestShowOnce:
         org = _mk_org("Org1")
         admin = _mk_user("admin", org, role="admin")
         client = _ui_client(admin)
-        source = _mk_source(slug="crowdstrike")
+        source = _mk_source(slug="crowdstrike", name="Crowdstrike")
 
         body = _create_token_via_ui(client, source=source, name="prod").content.decode()
-        assert "/api/v1/alerts/webhook/crowdstrike/" in body
+        assert "/api/v1/alerts/webhook/" in body
 
 
 class TestHashSecrecy:
@@ -198,7 +222,8 @@ class TestRoleGates:
         assert client.get(reverse("ui-settings-sources")).status_code == 404
         assert (
             client.post(
-                reverse("ui-settings-token-create"), {"source": source.slug, "name": "sneaky"}
+                reverse("ui-settings-token-create"),
+                {"source_name": source.name, "name": "sneaky"},
             ).status_code
             == 404
         )
@@ -307,7 +332,7 @@ class TestEndToEnd:
         org = _mk_org("Org1")
         admin = _mk_user("admin", org, role="admin")
         client = _ui_client(admin)
-        source = _mk_source(slug="e2e-src")
+        source = _mk_source(slug="e2e-src", name="E2E Src")
 
         # 1. Mint through the UI and read the plaintext off the show-once modal.
         resp = _create_token_via_ui(client, source=source, name="prod")
@@ -316,7 +341,7 @@ class TestEndToEnd:
         token = IngestionToken.objects.get(name="prod")
 
         # 2. The freshly-minted secret authenticates a webhook, stamped with the admin's org.
-        accepted = _localhost_webhook(client, source.slug, plaintext, source_ref="e2e-1")
+        accepted = _localhost_webhook(client, plaintext, source_ref="e2e-1")
         assert accepted.status_code == 201, accepted.content
         alert = Alert.objects.get(pk=accepted.json()["_id"])
         assert alert.owner_org_id == org.id
@@ -328,6 +353,274 @@ class TestEndToEnd:
         assert token.revoked_at is not None
 
         # 4. The same secret is now refused.
-        rejected = _localhost_webhook(client, source.slug, plaintext, source_ref="e2e-2")
+        rejected = _localhost_webhook(client, plaintext, source_ref="e2e-2")
         assert rejected.status_code == 401
         assert rejected.json()["type"] == "unauthorized"
+
+
+class TestSourceProvisioning:
+    """The feed is *named*, not picked: the webhook URL is source-less, so the token points at a
+    mapping profile and the operator supplies a name rather than choosing from a list."""
+
+    def test_a_new_name_provisions_a_profile_with_a_slugified_key(self, db: None) -> None:
+        org = _mk_org("Org1")
+        client = _ui_client(_mk_user("admin", org, role="admin"))
+        assert not IngestionSource.objects.exists()
+
+        resp = client.post(
+            reverse("ui-settings-token-create"),
+            {"source_name": "CrowdStrike EDR (production)", "name": "prod"},
+        )
+        assert resp.status_code == 200, resp.content
+
+        source = IngestionSource.objects.get()
+        assert source.name == "CrowdStrike EDR (production)"
+        assert source.slug == "crowdstrike-edr-production"
+        assert source.mapping_config == {}, "an on-demand profile starts with no mapping rules"
+        assert IngestionToken.objects.get(name="prod").source_id == source.id
+        # Provisioning global configuration is audited.
+        assert AuditLog.objects.filter(action="ingestion_source.created").count() == 1
+
+    def test_the_same_name_reuses_the_profile_across_organisations(self, db: None) -> None:
+        """One profile, one token per tenant — the ADR-004 Q6 pattern, now by name."""
+        org_a, org_b = _mk_org("Org A"), _mk_org("Org B")
+        client = _ui_client(_mk_user("super", org_a, role="superAdmin"))
+
+        for org in (org_a, org_b):
+            resp = client.post(
+                reverse("ui-settings-token-create"),
+                {
+                    "source_name": "Microsoft 365",
+                    "name": f"token-{org.name}",
+                    "organisation": str(org.id),
+                },
+            )
+            assert resp.status_code == 200, resp.content
+
+        assert IngestionSource.objects.count() == 1, "the second token did not reuse the profile"
+        assert {t.organisation_id for t in IngestionToken.objects.all()} == {org_a.id, org_b.id}
+        assert AuditLog.objects.filter(action="ingestion_source.created").count() == 1
+
+    def test_a_name_with_nothing_slugable_is_rejected(self, db: None) -> None:
+        """A name that slugifies to nothing would collide with every other one, so it is refused."""
+        org = _mk_org("Org1")
+        client = _ui_client(_mk_user("admin", org, role="admin"))
+
+        resp = client.post(
+            reverse("ui-settings-token-create"), {"source_name": "!!!", "name": "prod"}
+        )
+        assert resp.status_code == 302
+        assert not IngestionSource.objects.exists()
+        assert not IngestionToken.objects.exists()
+
+
+class TestModalShowOnce:
+    """AC1-AC7: the show-once token is rendered in a modal on the full Sources page."""
+
+    def test_success_renders_full_sources_page(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client = _ui_client(admin)
+        source = _mk_source()
+
+        resp = _create_token_via_ui(client, source=source, name="prod")
+        assert resp.status_code == 200
+        body = resp.content.decode()
+
+        # AC1: the response is the full page shell, not the bare partial it replaced.
+        assert "<!doctype html>" in body
+        assert '<html lang="en"' in body
+        assert 'class="shell"' in body
+        assert '<link rel="stylesheet" href="/static/ui/app.css">' in body
+        assert '<link rel="stylesheet" href="/static/ui/modal.css">' in body
+        # Page-specific content: the token list's create modal and heading.
+        assert 'id="token-create-modal"' in body
+        assert "<h1>Sources</h1>" in body
+
+    def test_modal_dialog_has_expected_attributes(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client = _ui_client(admin)
+        source = _mk_source()
+
+        resp = _create_token_via_ui(client, source=source, name="prod")
+        assert resp.status_code == 200
+        body = resp.content.decode()
+
+        dialog = _dialog_tag(body, "token-created-modal")
+        # AC2: has data-autoopen="1"
+        assert 'data-autoopen="1"' in dialog, dialog
+        # AC3: has data-modal-static
+        assert "data-modal-static" in dialog, dialog
+
+    def test_modal_footer_has_single_close_anchor(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client = _ui_client(admin)
+        source = _mk_source()
+
+        resp = _create_token_via_ui(client, source=source, name="prod")
+        assert resp.status_code == 200
+        body = resp.content.decode()
+
+        # Scope into the token-created dialog so the assertions are about ITS footer, not the page.
+        dialog_open = _dialog_tag(body, "token-created-modal")
+        start = body.find(dialog_open)
+        assert start != -1
+        end = body.find("</dialog>", start)
+        assert end != -1
+        dialog = body[start:end]
+
+        footer = re.search(r'<footer class="modal-footer">(.*?)</footer>', dialog, re.S)
+        assert footer is not None, "the token-created modal has no footer"
+        footer_html = footer.group(1)
+
+        # AC4: the footer holds exactly one action control — an <a> to the settings-sources URL
+        # that carries data-modal-close="token-created-modal" — and no Cancel button.
+        anchors = re.findall(r"<a\b[^>]*>", footer_html)
+        assert len(anchors) == 1, f"expected exactly one anchor in the footer: {footer_html}"
+        anchor = anchors[0]
+        assert 'href="' + reverse("ui-settings-sources") + '"' in anchor, anchor
+        assert 'data-modal-close="token-created-modal"' in anchor, anchor
+        assert "<button" not in footer_html, "the one-action footer also rendered a button"
+        assert "modal-cancel" not in dialog
+        assert "Cancel" not in footer_html
+
+    def test_get_sources_unchanged(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client = _ui_client(admin)
+        source = _mk_source()
+
+        # Create a token first
+        resp_create = _create_token_via_ui(client, source=source, name="prod")
+        assert resp_create.status_code == 200
+        plaintext = _plaintext_from(resp_create)
+
+        # AC6: GET /settings/sources is unchanged
+        get_resp = client.get(reverse("ui-settings-sources"))
+        assert get_resp.status_code == 200
+        get_body = get_resp.content.decode()
+        # No token-created-modal
+        assert 'id="token-created-modal"' not in get_body
+        # No plaintext anywhere
+        assert plaintext not in get_body
+        # Raw-substring reading: no dialog on the list carries `data-modal-static`, and (since
+        # the multi-line `{# … #}` comment leak in settings_sources.html was fixed) the marker
+        # must not appear anywhere in the GET body at all — not even in leaked comment text.
+        assert "data-modal-static" not in get_body
+
+    def test_rendered_pages_carry_no_template_comment_markers(self, db: None) -> None:
+        """Guard for the multi-line `{# … #}` bug class: a `{#` closed on a later line is not
+        a comment to Django, so it renders as literal text. Assert on both rendered bodies.
+
+        Repo-wide mechanical coverage lives in
+        `tests/conformance/test_ui_inline_assets.py::test_no_multiline_inline_comment`.
+        """
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client = _ui_client(admin)
+        source = _mk_source()
+
+        post_body = _create_token_via_ui(client, source=source, name="prod").content.decode()
+        get_body = client.get(reverse("ui-settings-sources")).content.decode()
+
+        for label, body in (("POST success", post_body), ("GET list", get_body)):
+            assert "{#" not in body, f"{label}: a template-comment opener leaked into the HTML"
+            assert "#}" not in body, f"{label}: a template-comment closer leaked into the HTML"
+
+    def test_no_other_dialog_gained_modal_static(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client = _ui_client(admin)
+        source = _mk_source()
+
+        resp = _create_token_via_ui(client, source=source, name="prod")
+        assert resp.status_code == 200
+        body = resp.content.decode()
+
+        # AC7: `data-modal-static` is a *dialog attribute*, so count it among the opening
+        # <dialog …> tags rather than as a raw substring of the whole page.
+        dialog_tags = re.findall(r"<dialog\b[^>]*>", body)
+        static_tags = [tag for tag in dialog_tags if "data-modal-static" in tag]
+        assert len(static_tags) == 1, (
+            f"expected exactly one static dialog, got {len(static_tags)}: {static_tags}"
+        )
+        assert 'id="token-created-modal"' in static_tags[0], static_tags[0]
+
+        # The create (unrelated) dialog must NOT be static.
+        assert "data-modal-static" not in _dialog_tag(body, "token-create-modal")
+
+    def test_plaintext_element_unique_and_in_dialog(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client = _ui_client(admin)
+        source = _mk_source()
+
+        resp = _create_token_via_ui(client, source=source, name="prod")
+        assert resp.status_code == 200
+        body = resp.content.decode()
+        plaintext = _plaintext_from(resp)
+
+        # AC5 (as written) wants `content.count(plaintext) == 1`, but the body partial also
+        # interpolates the secret into the two header hint lines, so the raw string appears
+        # three times. The invariant that actually holds is about confinement, not raw count.
+        assert body.count('id="token-plaintext"') == 1, "the plaintext <code> element is not unique"
+        assert body.count(plaintext) == 3, (
+            "expected the body partial's three interpolations (code element + two header hints)"
+        )
+
+        # Every occurrence of the secret is inside the token-created dialog body.
+        dialog_open = _dialog_tag(body, "token-created-modal")
+        start = body.find(dialog_open)
+        assert start != -1
+        end = body.find("</dialog>", start)
+        assert end != -1
+        dialog_content = body[start:end]
+        assert body.count(plaintext) == dialog_content.count(plaintext), (
+            "the plaintext escaped the show-once dialog into the surrounding page"
+        )
+
+
+class TestModalJsPins:
+    """AC8 — textual pins on the two modal.js behaviours the show-once dialog relies on.
+
+    Precedent: `test_settings_ui.py:805` asserts on served/file content for the modal
+    assets; real Esc/backdrop/anchor behaviour needs a browser, so we pin the source.
+    """
+
+    @property
+    def _modal_js(self) -> str:
+        return (
+            Path(__file__).resolve().parents[2] / "ui" / "static" / "ui" / "modal.js"
+        ).read_text(encoding="utf-8")
+
+    def test_escape_branch_respects_data_modal_static(self) -> None:
+        js = self._modal_js
+        # The Escape keydown branch must guard on data-modal-static before closing.
+        escape_branch = re.search(r'if \(event\.key === "Escape"\) \{(.*?)\n\s*\}', js, re.S)
+        assert escape_branch is not None, "modal.js has no Escape keydown branch"
+        branch = escape_branch.group(1)
+        # Assert the guard CALL, not the substring: `data-modal-static` also appears in a
+        # comment inside this branch, so a bare substring check would pass on prose alone.
+        assert 'hasAttribute("data-modal-static")' in branch, (
+            "the Escape branch does not guard on data-modal-static; a static dialog "
+            "would be dismissable with one key"
+        )
+        assert "modal.close()" in branch
+
+    def test_modal_close_handler_prevent_default_for_anchors(self) -> None:
+        js = self._modal_js
+        # The [data-modal-close] delegation must preventDefault when the closer is an <a>.
+        close_handler = re.search(
+            r'var closer = event\.target\.closest\("\[data-modal-close\]"\);(.*?)modal\.close\(\);',
+            js,
+            re.S,
+        )
+        assert close_handler is not None, "modal.js has no [data-modal-close] handler"
+        handler = close_handler.group(1)
+        assert 'tagName === "A"' in handler, (
+            'the close handler does not branch on tagName === "A"; a Close <a href> '
+            "would navigate away instead of closing in place"
+        )
+        assert "preventDefault()" in handler

@@ -3900,14 +3900,13 @@ def settings_home(request: HttpRequest) -> HttpResponse:
     return redirect("ui-settings-sources")
 
 
-@not_viewer
-@login_required
-def settings_sources(request: HttpRequest) -> HttpResponse:
-    """Token list for ingestion sources (admin + superAdmin)."""
-    guard = _require_admin_ui(request)
-    if guard:
-        return guard
+def _settings_sources_context(request: HttpRequest) -> dict:
+    """Page context for Sources: the token list plus the create-modal lookups.
 
+    Shared by the GET list and by `settings_token_create`'s show-once re-render, so the modal the
+    operator just submitted still finds its datalist (existing feed names) and — for a superAdmin —
+    its organisation options when the page comes back.
+    """
     is_superadmin = request.user.role == "superAdmin"
     from identity.models import IngestionToken
 
@@ -3919,28 +3918,31 @@ def settings_sources(request: HttpRequest) -> HttpResponse:
     if not is_superadmin:
         qs = qs.filter(organisation_id=request.user.org_id)
 
-    tokens = list(qs)
-
     from ingest.models import IngestionSource
 
-    sources = IngestionSource.objects.order_by("name")
-    organisations = Organisation.objects.order_by("name") if is_superadmin else None
+    return {
+        "tokens": list(qs),
+        "show_org_column": is_superadmin,
+        "sources": IngestionSource.objects.order_by("name"),
+        "organisations": Organisation.objects.order_by("name") if is_superadmin else None,
+        "is_superadmin": is_superadmin,
+        # The endpoint is source-less: every feed posts to the same URL and the token does the routing.
+        "webhook_path": "/api/v1/alerts/webhook/",
+    }
 
-    # Build webhook path hint
-    webhook_path = "/api/v1/alerts/webhook/<slug>/"
+
+@not_viewer
+@login_required
+def settings_sources(request: HttpRequest) -> HttpResponse:
+    """Token list for ingestion sources (admin + superAdmin)."""
+    guard = _require_admin_ui(request)
+    if guard:
+        return guard
 
     return render(
         request,
         "ui/settings_sources.html",
-        _base_context(
-            request,
-            tokens=tokens,
-            show_org_column=is_superadmin,
-            sources=sources,
-            organisations=organisations,
-            is_superadmin=is_superadmin,
-            webhook_path=webhook_path,
-        ),
+        _base_context(request, **_settings_sources_context(request)),
     )
 
 
@@ -3948,28 +3950,20 @@ def settings_sources(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 def settings_token_create(request: HttpRequest) -> HttpResponse:
-    """Mint a new ingestion token (show-once)."""
+    """Mint a new ingestion token (show-once).
+
+    Success is a 200 that re-renders the Sources list with the show-once dialog open (never a
+    redirect: the plaintext must not survive in a URL, a session or a cache). Validation failures
+    redirect back with a message.
+    """
     guard = _require_admin_ui(request)
     if guard:
         return guard
 
     is_superadmin = request.user.role == "superAdmin"
 
-    # Resolve source by slug
-    source_slug = (request.POST.get("source") or "").strip()
-    if not source_slug:
-        messages.error(request, "Source is required.")
-        return redirect("ui-settings-sources")
-
-    from ingest.models import IngestionSource
-
-    try:
-        source = IngestionSource.objects.get(slug=source_slug)
-    except IngestionSource.DoesNotExist:
-        messages.error(request, f"Unknown source: {source_slug}")
-        return redirect("ui-settings-sources")
-
-    # Resolve organisation
+    # Resolve organisation first: the purely-request fields are validated before anything is
+    # provisioned, so a rejected submission cannot leave a stray global `IngestionSource` behind.
     if is_superadmin:
         org_id = request.POST.get("organisation")
         if not org_id:
@@ -3992,8 +3986,44 @@ def settings_token_create(request: HttpRequest) -> HttpResponse:
         messages.error(request, "Name must be 200 characters or fewer.")
         return redirect("ui-settings-sources")
 
+    # Resolve the source by *name*. The webhook URL is source-less, so the source is no longer a
+    # routing key — it is the reusable mapping profile this token points at. A name is therefore all
+    # the operator supplies, and the row is provisioned on demand. `slugify` gives it a stable key,
+    # so typing an existing name reuses that profile (the ADR-004 Q6 multi-tenant pattern: one
+    # profile, one token per organisation).
+    from django.db import IntegrityError
+    from django.utils.text import slugify
+
+    from ingest.models import IngestionSource
+
+    source_name = (request.POST.get("source_name") or "").strip()
+    if not source_name:
+        messages.error(request, "Source name is required.")
+        return redirect("ui-settings-sources")
+    if len(source_name) > 200:
+        messages.error(request, "Source name must be 200 characters or fewer.")
+        return redirect("ui-settings-sources")
+
+    source_slug = slugify(source_name)[:100]
+    if not source_slug:
+        messages.error(request, "Source name must contain at least one letter or digit.")
+        return redirect("ui-settings-sources")
+
+    try:
+        source, source_created = IngestionSource.objects.get_or_create(
+            slug=source_slug, defaults={"name": source_name}
+        )
+    except IntegrityError:
+        # Lost a race with a concurrent create — the row exists now, so just bind to it.
+        source, source_created = IngestionSource.objects.get(slug=source_slug), False
+
+    if source_created:
+        from identity.audit import record_ingestion_source_created
+
+        record_ingestion_source_created(request, actor=request.user, source=source)
+
     # Create token with bounded retry on prefix collision
-    from django.db import IntegrityError, transaction
+    from django.db import transaction
 
     from identity.models import IngestionToken
 
@@ -4026,19 +4056,17 @@ def settings_token_create(request: HttpRequest) -> HttpResponse:
         else:
             break
 
-    # Render the show-once modal with the plaintext. The template reads
-    # `token_plaintext` and `webhook_path` — pass exactly those names. A silent
-    # mismatch here would render an empty secret, defeating the whole feature
-    # (covered by test_show_once_displays_the_plaintext).
-    return render(
-        request,
-        "ui/_settings_token_created.html",
-        _base_context(
-            request,
-            token_plaintext=plaintext,
-            webhook_path=f"/api/v1/alerts/webhook/{source.slug}/",
-        ),
-    )
+    # Show-once render. The secret is rendered into the `token-created-modal` dialog on the Sources
+    # page (an `{% if token_created %}` include in `settings_sources.html`) instead of into a bare
+    # partial: a partial with no `{% extends %}` arrived as a document with no shell and no
+    # stylesheets, so the one secret we can never show again landed on an unstyled page. Re-rendering
+    # the list also means its new row is already behind the modal when the modal is dismissed.
+    #
+    # `token_plaintext` is set on THIS path only — never a redirect, a session, the URL or a log — and
+    # the body partial reads it by that exact name (`test_show_once_displays_the_plaintext`).
+    context = _settings_sources_context(request)
+    context.update(token_created=True, token_plaintext=plaintext)
+    return render(request, "ui/settings_sources.html", _base_context(request, **context))
 
 
 @not_viewer
