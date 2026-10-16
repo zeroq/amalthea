@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
+from uuid import UUID
 
 from argon2 import PasswordHasher
 from django.conf import settings
@@ -163,7 +164,7 @@ def _verify_secret(hash_: str, plaintext: str) -> bool:
         return constant_time_compare(plaintext.encode("utf-8"), hash_.encode("utf-8"))
 
 
-def _source_org_id(source_id: object) -> object:
+def _source_org_id(source_id: UUID | str | None) -> UUID | None:
     """The organisation PK of the source `source_id` names, or `None` if it is gone.
 
     Imported lazily: `ingest.models` carries the FK back to this app, so a module-level import here
@@ -171,6 +172,8 @@ def _source_org_id(source_id: object) -> object:
     """
     from ingest.models import IngestionSource
 
+    if source_id is None:  # no source named (unsaved token) — nothing to compare
+        return None
     return (
         IngestionSource.objects.filter(pk=source_id)
         .values_list("organisation_id", flat=True)

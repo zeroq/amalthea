@@ -327,17 +327,13 @@ def _as_datetime(value: Any) -> datetime | None:
     if not match:
         return None
     try:
+        # Unpacked into names rather than splatted: `datetime(*(int(part) for part in ...))` is a
+        # star-arg the stubs cannot map onto the parameter list, and mypy is the pre-push gate.
+        year, month, day = (int(part) for part in match.group("date").split("-"))
         hour, minute, second = (int(part) for part in match.group("time").split(":"))
         frac = match.group("frac") or ""
         micro = int((frac + "000000")[:6]) if frac else 0
-        moment = datetime(
-            *(int(part) for part in match.group("date").split("-")),
-            hour,
-            minute,
-            second,
-            micro,
-            tzinfo=UTC,
-        )
+        moment = datetime(year, month, day, hour, minute, second, micro, tzinfo=UTC)
     except ValueError:
         return None
     tz = match.group("tz")
