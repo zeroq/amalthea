@@ -155,6 +155,10 @@ def organisation_blockers(org: Organisation) -> dict[str, int]:
         "alerts": org.alerts.count(),
         "observables": org.observables.count(),
         "ingestionTokens": org.ingestion_tokens.count(),
+        # ADR-009: an IngestionSource is org-owned and PROTECTs, so an org that owns feeds cannot be
+        # deleted without first removing (or reassigning) them. Reporting it here is what keeps the
+        # refusal *explicable* instead of a bare ProtectedError.
+        "ingestionSources": org.ingestion_sources.count(),
     }
 
 

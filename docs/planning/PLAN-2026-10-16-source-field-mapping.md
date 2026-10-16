@@ -1,9 +1,11 @@
 # PLAN 2026-10-16 — Per-source field mapping (JSON → Alert)
 
-**Status: APPROVED 2026-10-16** — all eight questions answered (now §11 Decisions, not §11 questions);
-one consequence of Q5 is called out in §6.1 and is the only thing still worth a nod before P2.
-Written by the planner agent; hand off to
-`django-backend` + `django-frontend` only after the questions are settled.
+**Status: APPROVED 2026-10-16 — P1, P2 and P3 IMPLEMENTED 2026-10-16** (records in §8 P1, §8 P2,
+§8 P3); P4 (sample preview) and P5 (health & docs) are the next phases, and P3's `ingest/editor.py` is
+what P4's dialog reuses. All eight questions answered (§11 Decisions); the Q5 consequence is recorded in
+§6.1 and implemented as **ADR-009**. Written by the planner agent; the `django-backend` /
+`django-frontend` / `verifier` subagents were unavailable (504/400), so the planner implemented
+P1–P3 directly.
 
 Related: `AGENTS.md` §2 Module A · `docs/decisions/ADR-008-webhook-routing.md` (the token resolves the
 source) · `docs/planning/PLAN-2026-10-15-token-only-webhook-routing.md` (§6 deviation: "`mapping_config`
@@ -234,17 +236,35 @@ with the row linking to the page.
 Each phase is independently shippable and has ACs. P1 is required by all; P2 (org gate) before P3
 (the page it guards); P4's dialog lives on the P3 page.
 
-### P1 — Engine + schema (`django-backend`)
+### P1 — Engine + schema (`django-backend`) — **IMPLEMENTED 2026-10-16**
 `ingest/mapping.py` rewritten around `apply_mapping(source_or_config, payload) -> AlertDraft`;
 `ingest/views.py` calls it; the pipeline takes the draft; `default_severity` becomes live; warnings
 gain structure.
+
+**Implementation record.** The `django-backend` subagent returned 504 on every attempt, so the planner
+implemented P1 directly. Files: `ingest/mapping.py` (`AlertDraft`, `FieldWarning`, `TARGETS`,
+`LEGACY_KEYS`, the transform table, `_normalize`, `apply_mapping`, `validate_config`), `ingest/views.py`
+(one `apply_mapping` call replaces `_mapped` + `_coerce_severity`; both helpers deleted),
+`ingest/pipeline.py` (`description`/`summary` in the create `defaults`, a `default_severity` parameter,
+`ingestion_warnings["mapping"]`). Evidence: `tests/conformance/test_mapping_engine.py` (184 cases:
+AC1 via a cursor tripwire, AC2 the synonym table + score bands, AC3 the real CrowdStrike payload both
+on the engine and through `/api/v1/alerts/webhook/`, AC4/AC5 legacy shapes + 132 malformed-config ×
+non-object-payload combinations, AC6 `default_severity`, AC7 the structured warnings); the five
+pre-existing flat-`mapping_config` fixture files pass unchanged; full suite 2181 passed / 3 skipped;
+`ruff` clean. Two decisions beyond the plan, both in `docs/spec/deviations.md` (MAP-2, MAP-4): a
+compiled-JSONPath cache (`jsonpath_ng.parse` measured at 1.8 ms, and the engine walks up to ~20 paths
+per webhook ⇒ now ~1 µs), and per-target `not_found` warnings when a configured rule matched nothing
+(the old reader was silent). `validate_config` landed here rather than in P3 (it is pure; P3 consumes
+it unchanged).
 
 AC:
 1. `apply_mapping` is pure (no ORM/HTTP/settings import) and returns a frozen dataclass + warnings.
 2. `severity_name` handles all four dev payload values (`Critical`→4, `High`→3) and every synonym of
    §5.3; a bogus name ⇒ rule default + warning, never an exception.
 3. A v2 config maps the **real stored** `crowdstrike-edr` payload to title `HiveCredTheft`,
-   severity 4, date from `$.timestamp`, type `ldt`, tags `["T1000…"]` (§7 test).
+   severity 4, date from `$.timestamp`, type `ldt`, `source_ref` `ind:2f1c9a` — asserted on the engine
+   and through `/api/v1/alerts/webhook/`. **Corrected during implementation:** the original AC also
+   listed `tags ["T1000…"]`, but tags left v1 in §11 Q8, so there is no `tags` target.
 4. Legacy flat config (`{"title": "$.title", "severity": "$.severity"}`) behaves exactly as today —
    all five existing fixture files still pass.
 5. Empty config: no 500, literal-key fallback only (AC4.3 preserved).
@@ -254,9 +274,27 @@ AC:
    for compatibility with `test_ui_case_create.py:425`.
 
 ### P2 — Source-page shell + org gate (`django-frontend` + `django-backend`)
-The route/§7 page, plus the §6.1 migration and the `IngestionToken.organisation ==
+**IMPLEMENTED 2026-10-16.** The route/§7 page, plus the §6.1 migration and the `IngestionToken.organisation ==
 IngestionSource.organisation` invariant. This is the phase that touches tenancy, so it lands with
 ADR-009 and the two conformance tests below.
+
+**Record.** Files: `ingest/models.py` (`organisation` FK PROTECT, `unique(organisation, slug)`),
+`ingest/migrations/0003_ingestion_source_organisation.py` (**new**; add-null → backfill → not-null →
+constraint → drop-slug-unique; applied to the dev DB — all three feeds resolved to `Default`, 0 mismatched
+tokens), `identity/models.py` (`_source_org_id`, the `save()`/`create_token()` invariant),
+`identity/scoping.py` (`resolve_ingestion_source`), `identity/audit.py` (`target_org` now the feed's org),
+`identity/services.py` (`organisation_blockers["ingestionSources"]`), `ui/views.py`
+(`settings_source_detail`, org-filtered `_settings_sources_context`/`sources_list`, org-scoped
+`settings_token_create`, `_org_blockers_text` + "ingestion source"), `ui/urls.py`
+(`ui-settings-source-detail`), `ui/templates/ui/source_detail.html` (**new**) and `sources_list.html`
+(row link + rule summary). Tests: `tests/conformance/test_settings_source_mapping.py` (**new**, 16 cases —
+AC7 driven through `MigrationExecutor` because pytest-django has already applied the migration; AC8/AC9/AC10
++ PROTECT/blocker), plus fixture updates across 15 conformance files (`organisation=` is now required),
+`test_fk_audit.py` (+1 FK, 60 → 61), `test_schema_mutation_guards.py` (mutation 14 moved from
+`slug unique=True` to `detach_constraint("ingestion_source_org_slug_uniq")`), `test_org_user_management.py`
+(+`blockers["ingestionSources"]`). Docs: **ADR-009** (new; supersedes ADR-008 §4), ADR-008 header +
+decision 4 amended, `data-model.md`, `api.md` blocker list, `identity-auth.md`.
+Evidence: full suite green (see §8 P5 for the final run), `ruff` clean, `make css-check` clean.
 
 AC:
 7. Migration assigns every existing source the org of its tokens and asserts the post-state; a fixture
@@ -267,8 +305,54 @@ AC:
    path (UI form, `create_token`, and the model), because a cross-table constraint cannot express it.
 10. Duplicate slugs are now allowed *across* orgs and still refused *within* one.
 
-### P3 — Mapping editor + validation (`django-frontend` + `django-backend`)
+### P3 — Mapping editor + validation (`django-frontend` + `django-backend`) — **IMPLEMENTED 2026-10-16**
 The form table §7.2, the read-only JSON §7.4, save-time validation §7.3, audit.
+
+**Record.** Files: `ingest/editor.py` (**new** — the pure half: `parse_paths` (newline-only, MAP-6),
+`build_table_config`, `parse_json_config`, `editor_rows`, `submitted_rows`, `canonical_form`,
+`is_noop_save`, `changed_keys`, `EditorResult`, `TARGET_LABELS`/`TRANSFORM_HELP`), `ingest/mapping.py`
+(`config_shape` added so the page can say *which* shape it is showing; `validate_config`'s shape branch
+aligned with `_normalize`'s — dev PM-adjacent fix, see the deviations wave record),
+`identity/models.py` (`AuditLog.details`, **MAP-7**) +
+`identity/migrations/0011_auditlog_details.py` (**new**), `identity/audit.py`
+(`record_ingestion_source_updated`), `ui/views.py` (`settings_source_detail` is now
+`@require_http_methods(["GET","POST"])` + `_source_detail_context` / `_source_mapping_rows` /
+`_save_source_mapping`), `ui/templates/ui/source_detail.html` (rewritten: Identity card, the rules table,
+a Tokens card, the advanced-JSON card, and the legacy-conversion warning).
+
+**The four promises the editor keeps** (`ingest/editor.py`'s docstring is the contract):
+(1) the table owns `version`/`fields` only — `value_maps`, `correlation_key`, `bands`, `max_length` and
+unknown keys are preserved verbatim; (2) paths are newline-separated only (MAP-6); (3) **an empty row is
+a deletion**, which is the only delete control the table has, and a preserved `bands` may not resurrect
+it; (4) a conversion is announced, never silent (the legacy notice).
+
+**Implementation record.** `ingest/editor.py` (392→~460 lines, pure: an import-level guard test asserts
+it never imports Django, plus a cursor tripwire); `identity/migrations/0011_auditlog_details.py`
+applied; `ui/views.py::settings_source_detail` is now GET+POST with `_source_detail_context` /
+`_source_mapping_rows` / `_save_source_mapping` (PRG on success, **200 echoing the input** on a
+rejection, `Transaction.atomic` + `update_fields=["mapping_config", "updated_at"]`, and
+`record_ingestion_source_updated(...)` with `changed_keys`); `ui/templates/ui/source_detail.html`
+rewritten (Identity card, the rule table with per-row errors and literal-key hints, the `POST`-with-
+`{target}` rows, the transform help `<details>`, the Tokens card unchanged, and the advanced-JSON card
+which renders **every** error message — a rule-level JSON failure must be visible, not silently
+attributed to a card the operator is not looking at). No new CSS class (the page reuses `card`,
+`data-table`, `field-error`, `hint`, `case-actions`, `msg msg-error`; `make css-check` clean).
+
+**Deviations recorded:** **MAP-5** (no Django `Form` — hand-parsed POST, as everywhere else in the
+repo), **MAP-6** (newline-only paths), **MAP-7** (new `AuditLog.details`), **MAP-8** (no `required`
+column), all in `docs/spec/deviations.md`.
+
+Evidence: `tests/conformance/test_mapping_editor.py` (**new**, 66 pure cases — round-trip/no-op,
+preservation, MAP-6, deletions, defaults, the one-schema-authority rejections, the JSON box,
+`changed_keys`, the preview rows, and the target/transform coverage invariants);
+`tests/conformance/test_settings_source_mapping.py` **16 → 34 cases** (AC11 write + audit with
+`details.changed == ["fields.severity.default", "fields.title.paths", "fields.title.transform"]` and
+`"$.name" not in str(log.details)`; AC11's echo-on-error and the legacy warning; AC12 no-op on the
+rendered page **and** on a `transform: "str"` config, plus "a real edit is not swallowed"; AC13 the JSON
+box (verbatim store, `{}` clears, empty box refused, invalid JSON keeps the text, a rule-level failure
+visible on the card); AC14 the analyst/foreign-admin 404 and the cross-org superAdmin write audited on
+both organisations). Full suite **2288 passed / 3 skipped** (115 s), `ruff` clean, `make css-check`
+clean, `makemigrations --check` clean.
 
 AC:
 11. `GET` renders the form for a permitted actor; a POST with a bad path/transform keeps the
@@ -358,7 +442,15 @@ table row each and means P5 does not have to reopen the schema.)
 
 ## 13. Deviations to record when implemented
 
-- `ingestion_warnings` gains a structured `mapping` list (existing string list kept).
+Recorded in `docs/spec/deviations.md`, § "Wave 2026-10-16 — the per-source field mapping engine (P1)"
+(ids MAP-1…MAP-4):
+
+- `ingestion_warnings` gains a structured `mapping` list (existing string list kept) — done.
 - `IngestionSource.default_severity` starts being honoured (it was ignored) — a behaviour change for
-  any source that set it.
-- The legacy flat config keeps working but is no longer what the UI writes.
+  any source that set it — done.
+- The legacy flat config keeps working but is no longer what the UI writes — the *working* half is done
+  (P1); the "no longer what the UI writes" half is owed by P3.
+- Also recorded, beyond the plan: `severity_defaulted:` now names the paths it tried; a rule that
+  matched nothing warns where the old reader was silent; an empty string is no longer an answer; a
+  legacy severity that cannot be coerced no longer ends the candidate search; a compiled-JSONPath cache
+  (1.8 ms → ~1 µs per path).

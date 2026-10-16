@@ -53,8 +53,9 @@ def browser(analyst: User) -> Client:
 
 
 @pytest.fixture
-def source(db: None) -> IngestionSource:
+def source(default_org: Organisation, db: None) -> IngestionSource:
     return IngestionSource.objects.create(
+        organisation=default_org,
         slug="o365",
         name="Microsoft 365 hook",
         mapping_config={

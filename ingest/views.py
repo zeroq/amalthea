@@ -49,6 +49,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from identity.models import IngestionToken
+from ingest.mapping import apply_mapping
 from ingest.models import IngestionSource
 from ingest.pipeline import store_ingested_alert
 
@@ -179,34 +180,6 @@ def _throttled(
     return False
 
 
-def _mapped(payload: dict[str, Any], mapping: dict[str, Any] | None, *keys: str) -> Any:
-    """Read `payload` through `IngestionSource.mapping_config`, falling back to literal keys."""
-    from ingest.mapping import extract_by_jsonpath
-
-    if mapping:
-        for key in keys:
-            path = mapping.get(key)
-            if isinstance(path, str) and path.strip():
-                found = extract_by_jsonpath(path.strip(), payload)
-                if found is not None:
-                    return found
-    for key in keys:
-        if key in payload:
-            return payload[key]
-    return None
-
-
-def _coerce_severity(value: Any) -> int | None:
-    """Severity must be an int in the model's 1—4 range, or `None` so the pipeline defaults it."""
-    if value is None:
-        return None
-    try:
-        severity = int(value)
-    except (TypeError, ValueError):
-        return None
-    return severity if 1 <= severity <= 4 else None
-
-
 @csrf_exempt
 @require_POST
 def webhook_alerts(request: HttpRequest) -> HttpResponse:
@@ -272,22 +245,30 @@ def webhook_alerts(request: HttpRequest) -> HttpResponse:
             fields={"body": ["nesting too deep"]},
         )
 
-    mapping = source.mapping_config or {}
-    title = _mapped(payload, mapping, "title", "summary", "message")
-    severity = _coerce_severity(_mapped(payload, mapping, "severity", "severityLevel"))
-    source_ref = _mapped(payload, mapping, "sourceRef", "source_ref", "id")
-    alert_type = _mapped(payload, mapping, "type", "event", "alertType") or "generic"
+    # One pass over the payload, by the source's rules. `default_severity` is the source's own floor
+    # rather than the module constant, so declaring "everything from this feed is at least a High" is
+    # a setting rather than a code change.
+    draft = apply_mapping(
+        source.mapping_config,
+        payload,
+        default_severity=source.default_severity,
+    )
 
     try:
         stored = store_ingested_alert(
             wire_source=str(payload.get("source") or source.slug),
-            alert_type=str(alert_type)[:100],
+            alert_type=str(draft.type or "generic")[:100],
             payload=payload,
-            title=str(title or "Alert")[:200],
-            mapped_source_ref=None if source_ref is None else str(source_ref),
-            severity=severity if severity is not None else None,
+            title=str(draft.title or "Alert")[:200],
+            description=draft.description,
+            summary=draft.summary,
+            mapped_source_ref=draft.source_ref,
+            severity=draft.severity,
+            date=draft.date,
             ingestion_source=source,
             owner_org=token.organisation,
+            extra_warnings=draft.warnings,
+            mapping_warnings=draft.field_warnings,
         )
     except ValidationError as exc:
         detail = getattr(exc, "message_dict", None) or {"nonFieldErrors": [str(exc)]}

@@ -244,7 +244,7 @@ def test_webhook_and_session_endpoints_are_reachable_anonymously(
     from identity.models import IngestionToken, Organisation
 
     org = Organisation.objects.create(name="Webhook Org")
-    source = IngestionSource.objects.create(slug="authz-src", name="authz source")
+    source = IngestionSource.objects.create(organisation=org, slug="authz-src", name="authz source")
     # Actually create a real token
     _, plaintext = IngestionToken.create_token(source=source, organisation=org, name="test token")
 

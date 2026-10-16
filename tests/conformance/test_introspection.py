@@ -102,6 +102,8 @@ REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
         "updated_at",
     ),
     "ingestion_source": (
+        # ADR-009: the source is org-owned, so the tenant column joined the required set.
+        "organisation_id",
         "slug",
         "name",
         "default_severity",

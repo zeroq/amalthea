@@ -22,7 +22,13 @@
     <tbody>
       {% for source in sources %}
         <tr>
-          <td class="mono">{{ source.slug }}</td>
+          <td class="mono">
+            {% if can_open_source_page %}
+              <a href="{% url 'ui-settings-source-detail' source.id %}">{{ source.slug }}</a>
+            {% else %}
+              {{ source.slug }}
+            {% endif %}
+          </td>
           <td>{{ source.name }}</td>
           <td class="mono">{{ source.alert_count }}</td>
           <td>
@@ -34,8 +40,8 @@
           </td>
           <td>{{ source.correlation_enabled|yesno:"on,off" }}</td>
           <td class="mono break">
-            {% if source.mapping_config %}
-              {% for key, value in source.mapping_config.items %}{{ key }}={{ value }}{% if not forloop.last %} {% endif %}{% endfor %}
+            {% if source.rule_count %}
+              {{ source.rule_count }} rule{{ source.rule_count|pluralize }}{% if source.severity_rule %} · severity←{{ source.severity_rule }}{% endif %}
             {% else %}<span class="dim">none — literal keys only</span>{% endif %}
           </td>
         </tr>

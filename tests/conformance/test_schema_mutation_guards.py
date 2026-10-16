@@ -453,20 +453,23 @@ def test_mutation_13_idempotency_key_unique_detects_a_deletion() -> None:
 
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
 def test_mutation_14_ingestion_source_slug_unique_detects_a_deletion() -> None:
-    """Round-2 **H-4**: `IngestionSource.slug` unique=True removed + migrate.
+    """Round-2 **H-4** + ADR-009: `UniqueConstraint(organisation, slug)` removed + migrate.
 
-    `slug` is the key a typed source name resolves to in Settings → Sources (it left the webhook URL
+    `slug` is the key a typed source name resolves to within an organisation (it left the webhook URL
     on 2026-10-15, when the route became source-less), so dropping the constraint would let one typed
-    name match two mapping profiles.
+    name match two mapping profiles *in the same tenant*. ADR-009 narrowed the constraint from a global
+    `unique=True` on `slug` to the composite, so the guard moved with it — the old
+    `detach_field_unique(IngestionSource, "slug")` is now a no-op assertion (`field.unique` is False)
+    and would fail loudly, which is why this test names the constraint instead.
     """
     from ingest.models import IngestionSource
 
-    with schema_mutation("ingestion_source", label="drop slug UNIQUE") as m:
-        m.detach_field_unique(IngestionSource, "slug")
-        m.assert_ddl_delta(missing=["UNIQUE"])
+    with schema_mutation("ingestion_source", label="drop uniq organisation+slug") as m:
+        m.detach_constraint(IngestionSource, "ingestion_source_org_slug_uniq")
+        m.assert_ddl_delta(missing=["ingestion_source_org_slug_uniq"])
         print(
             "MUTATION-14 ASSERTION:",
-            _detected(test_integrity.test_h4_ingestion_source_slug_is_unique),
+            _detected(test_integrity.test_h4_ingestion_source_slug_is_unique_per_organisation),
         )
 
 

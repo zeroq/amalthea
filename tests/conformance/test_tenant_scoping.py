@@ -519,7 +519,9 @@ class TestWebhookTokenRouting:
 
     def test_webhook_with_valid_token_stamps_org(self, db: None) -> None:
         org1 = _mk_org("Org1")
-        source = IngestionSource.objects.create(slug="test-src", name="Test Source")
+        source = IngestionSource.objects.create(
+            organisation=org1, slug="test-src", name="Test Source"
+        )
         _, plaintext = IngestionToken.create_token(source=source, organisation=org1, name="test")
 
         client = APIClient()
@@ -536,7 +538,9 @@ class TestWebhookTokenRouting:
         assert alert.owner_org_id == org1.id
 
     def test_webhook_without_token_is_401(self, db: None) -> None:
-        source = IngestionSource.objects.create(slug="no-token", name="No Token Source")
+        source = IngestionSource.objects.create(
+            organisation=_mk_org("No-Token Org"), slug="no-token", name="No Token Source"
+        )
         assert not source.tokens.exists(), "this test is about a feed with no token at all"
 
         client = APIClient()
@@ -550,7 +554,9 @@ class TestWebhookTokenRouting:
 
     def test_webhook_with_invalid_token_is_401(self, db: None) -> None:
         org1 = _mk_org("Org1")
-        source = IngestionSource.objects.create(slug="bad-token", name="Bad Token Source")
+        source = IngestionSource.objects.create(
+            organisation=org1, slug="bad-token", name="Bad Token Source"
+        )
         IngestionToken.create_token(source=source, organisation=org1, name="valid")
 
         client = APIClient()
@@ -563,19 +569,29 @@ class TestWebhookTokenRouting:
         assert resp.status_code == 401
         assert resp.json()["type"] == "unauthorized"
 
-    def test_same_source_different_tenants_by_token(self, db: None) -> None:
-        """One IngestionSource routes to different tenants depending on the token used (Q6/ADR-004).
+    def test_each_token_routes_to_its_own_tenant(self, db: None) -> None:
+        """The token is the only routing fact: each one stamps the alert with *its* organisation.
 
-        Two IngestionTokens on the same source, bound to different organisations.
-        Posting with each token stamps the alert with that token's org.
+        ADR-009 note: this used to be one feed with two tokens (ADR-004 Q6 / ADR-008 §4). The feed is
+        now org-owned, so the two tenants have one feed each — the routing guarantee under test is
+        unchanged, and the pairing is now enforced rather than merely conventional.
         """
         org1 = _mk_org("Org1")
         org2 = _mk_org("Org2")
-        source = IngestionSource.objects.create(slug="multi-tenant", name="Multi-Tenant Source")
+        source1 = IngestionSource.objects.create(
+            organisation=org1, slug="multi-tenant", name="Multi-Tenant Source"
+        )
+        source2 = IngestionSource.objects.create(
+            organisation=org2, slug="multi-tenant", name="Multi-Tenant Source"
+        )
 
-        # Create two tokens for the same source, different orgs
-        _, token1 = IngestionToken.create_token(source=source, organisation=org1, name="org1-token")
-        _, token2 = IngestionToken.create_token(source=source, organisation=org2, name="org2-token")
+        # One token per tenant, each on that tenant's own feed (same slug, different org).
+        _, token1 = IngestionToken.create_token(
+            source=source1, organisation=org1, name="org1-token"
+        )
+        _, token2 = IngestionToken.create_token(
+            source=source2, organisation=org2, name="org2-token"
+        )
 
         client = APIClient()
 
@@ -632,13 +648,18 @@ class TestWebhookTokenRouting:
 
         default_org_name = getattr(settings, "AMALTHEA_DEFAULT_ORG_NAME", "Default")
 
-        # Ensure default org doesn't exist yet (simulate pre-migration state)
-        Organisation.objects.filter(name=default_org_name).delete()
+        # The legacy source belongs to the org the migration adopts it into. Post-ADR-009 that org has
+        # to pre-exist (a source requires one), and identity.0006 is where it comes from — which is
+        # exactly why the adoption loop cannot run against an org-less source any more.
+        default_org, _ = Organisation.objects.get_or_create(name=default_org_name)
         IngestionToken.objects.filter(source__slug="legacy").delete()
 
         # Seed a legacy source with webhook_secret_hash (simulating pre-migration state)
         source = IngestionSource.objects.create(
-            slug="legacy", name="Legacy Source", webhook_secret_hash="legacys3cr3t"
+            organisation=default_org,
+            slug="legacy",
+            name="Legacy Source",
+            webhook_secret_hash="legacys3cr3t",
         )
 
         # Call the migration's create_default_org function directly with real models
@@ -653,8 +674,8 @@ class TestWebhookTokenRouting:
         migration = import_module("identity.migrations.0006_create_default_org")
         migration.create_default_org(_FakeApps(), None)
 
-        # Verify the migration created the default org and adopted the token
-        default_org = Organisation.objects.get(name=default_org_name)
+        # Verify the migration adopted the legacy secret as a token of the default org
+        default_org.refresh_from_db()
         token = IngestionToken.objects.get(source=source, organisation=default_org)
         assert token.secret_hash == "legacys3cr3t"
 
@@ -1503,6 +1524,12 @@ class TestUIRouteEnumerationConformance:
         self.case1 = _mk_case("Case Org1", self.org1)
         self.alert1 = _mk_alert("Alert Org1", self.org1, "ref-ui-1")
         self.obs1 = _mk_observable("10.0.0.1", self.org1)
+        # ADR-009: a feed is org-owned, so the Settings source page is a tenant detail route.
+        from ingest.models import IngestionSource
+
+        self.source1 = IngestionSource.objects.create(
+            organisation=self.org1, slug="ui-src", name="UI Source"
+        )
         from django.utils import timezone
 
         from cases.models import CaseObservable, Share, Task, TimelineEvent
@@ -1568,6 +1595,7 @@ class TestUIRouteEnumerationConformance:
             "ui-observable-detail",
             "ui-automation-list",
             "ui-sources-list",
+            "ui-settings-source-detail",
         }
         missing = expected_core - ui_route_names
         assert not missing, f"UI route discovery missing expected routes: {missing}"
@@ -1605,6 +1633,13 @@ class TestUIRouteEnumerationConformance:
             "ui-case-attachment-detail",
         }
 
+        # Admin/superAdmin-only pages: the harness's `user1` is an analyst, for whom the correct
+        # answer is 404 on *both* own-org and cross-org (the ADR-006 role gate answers before the
+        # ADR-009 org gate, and both are uniform 404s so neither leaks existence). The own-org 200 for
+        # an admin, and the cross-org 404 for a foreign admin, are covered by
+        # `test_settings_source_mapping.py`.
+        admin_only_routes = {"ui-settings-source-detail"}
+
         failures = []
         for name, pattern, methods in ui_routes:
             if name in skip_routes:
@@ -1628,6 +1663,8 @@ class TestUIRouteEnumerationConformance:
                     failures.append(f"{name}: cross-org got {resp_cross.status_code}, expected 404")
                 if resp_fake.status_code != 404:
                     failures.append(f"{name}: fake-id got {resp_fake.status_code}, expected 404")
+                if name in admin_only_routes:
+                    continue
             else:
                 # List routes: cross-org should return 200 with filtered results
                 if resp_cross.status_code != 200:
@@ -1690,6 +1727,7 @@ class TestUIRouteEnumerationConformance:
             "ui-observable-edit": {"observable_id": str(self.obs1.id)},
             "ui-automation-list": {},
             "ui-sources-list": {},
+            "ui-settings-source-detail": {"source_id": str(self.source1.id)},
         }
         return base
 

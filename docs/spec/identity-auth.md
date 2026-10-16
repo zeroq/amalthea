@@ -64,7 +64,8 @@
   deletion guard is shared with the API via `identity/services.py::delete_organisation` (atomic,
   refuses `reassign` without a real different target).
 - **Settings UI — Sources (2026-10-15):** `/settings` landing page + `/settings/sources` token list,
-  `/settings/sources/token` (POST, create), `/settings/sources/<id>/revoke` (POST, revoke)
+  `/settings/sources/token` (POST, create), `/settings/sources/<id>` (GET detail + POST mapping save),
+  `/settings/sources/<id>/revoke` (POST, revoke)
   (`ui/views.py`; guarded by `_require_admin_ui`, accessible to `admin` and `superAdmin`).
   `admin` users see only their own organisation's tokens; `superAdmin` sees all organisations'
   tokens and must select an organisation when creating. The feed is named, not picked: the typed
@@ -72,6 +73,12 @@
   reuses that mapping profile (ADR-008). Token plaintext is shown **exactly once**
   at creation via a show-once modal; `secret_hash` is never rendered. Revocation sets
   `revoked_at` and is audited. The `,` keyboard shortcut now targets `/settings`.
+- **Settings UI — source mapping editor (2026-10-16):** `/settings/sources/<id>` renders the feed's
+  identity, its `mapping_config` as an editable rule table (one row per target: paths, transform,
+  default), its tokens, and the raw stored config in an advanced JSON box. Both forms POST to the same
+  URL with `form=table|json`; a rejected save is a **200 that echoes the input** (never a redirect that
+  discards a typed JSONPath) and an unchanged save is a no-op — no write, no `updated_at` bump, no
+  audit (AC12). The write is gated exactly like the read (ADR-006 role + ADR-009 org, uniform 404).
 
 ## Ingestion tokens
 
@@ -99,8 +106,10 @@ an unknown prefix and a wrong secret are one and the same answer ⇒ **401**
   Columns: Source, Organisation (superAdmin only), Name, Prefix, Created, Last used, Issued by,
   Status/Action. Empty state and webhook endpoint/header hint included.
 - **Create** (`POST /settings/sources/token`): admin → own org; superAdmin → required org select.
-  Validates `source_name` (free text; slugified, row provisioned on demand), `name`. Calls
-  `IngestionToken.create_token(..., created_by=request.user)`.
+  Validates `source_name` (free text; slugified, row provisioned on demand **inside the token's
+  organisation** — the same name in two orgs is two feeds, ADR-009), `name`. Calls
+  `IngestionToken.create_token(..., created_by=request.user)`, which refuses any pair whose
+  organisations disagree (ADR-009).
   On success: **renders** (200) a show-once modal with the plaintext. Bounded retry on `prefix`
   collision (`unique=True`). Audit: `ingestion_token.created`, plus `ingestion_source.created` when
   the typed name had to provision a new profile.
@@ -111,7 +120,12 @@ an unknown prefix and a wrong secret are one and the same answer ⇒ **401**
 `{"ingestion_token.created", "ingestion_token.revoked"}`, `target_type="IngestionToken"`,
 `target_id=<uuid>`, `target_org=<token.organisation>`, `actor`, `actor_org`, `ip`. No secret material.
 Provisioning a feed writes `record_ingestion_source_created` (`action="ingestion_source.created"`,
-`target_type="IngestionSource"`, `target_org=None` — a source is not org-owned).
+`target_type="IngestionSource"`, `target_org=<source.organisation>` — since ADR-009 the feed is
+org-owned, so the row is attributed to the tenant that owns it rather than to no tenant). Editing a
+feed's mapping writes `record_ingestion_source_updated`
+(`action="ingestion_source.updated"`, same target fields, `details={"changed": [...]}` = the dot-paths
+whose value changed, never the values) — a `superAdmin` edit of a foreign feed is therefore visible as
+`actor_org` ≠ `target_org`; a no-op save writes nothing at all (AC12).
 
 **End-to-end:** A token minted in the UI works immediately for `POST /api/v1/alerts/webhook/`
 with `X-Webhook-Secret`; a revoked token returns **401**.

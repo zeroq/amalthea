@@ -6,6 +6,7 @@ from argon2 import PasswordHasher
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.models import UserManager as DjangoUserManager
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from core.enums import API_KEY_SCOPES, USER_ROLE_CHOICES, USER_ROLE_VALUES, in_values
@@ -162,12 +163,28 @@ def _verify_secret(hash_: str, plaintext: str) -> bool:
         return constant_time_compare(plaintext.encode("utf-8"), hash_.encode("utf-8"))
 
 
-class IngestionToken(UUIDModel, TimeStampedModel):
-    """A per-org webhook ingestion token (ADR-004 Q6).
+def _source_org_id(source_id: object) -> object:
+    """The organisation PK of the source `source_id` names, or `None` if it is gone.
 
-    Binds an `IngestionSource` to exactly one `Organisation`. The same source can
-    route to different tenants by issuing distinct tokens. The secret is stored
-    as an Argon2 hash; plaintext is shown once at creation.
+    Imported lazily: `ingest.models` carries the FK back to this app, so a module-level import here
+    would make the two apps import each other (ADR-009 records the migration-ordering consequence).
+    """
+    from ingest.models import IngestionSource
+
+    return (
+        IngestionSource.objects.filter(pk=source_id)
+        .values_list("organisation_id", flat=True)
+        .first()
+    )
+
+
+class IngestionToken(UUIDModel, TimeStampedModel):
+    """A per-org webhook ingestion token (ADR-004 Q6, ADR-009).
+
+    Binds an `IngestionSource` to the `Organisation` that owns it. Since ADR-009 the source is itself
+    org-owned, so there is exactly one organisation a token for a given source can name — the
+    receiver's "token identifies the feed *and* the tenant" premise depends on it. The secret is
+    stored as an Argon2 hash; plaintext is shown once at creation.
     """
 
     source = models.ForeignKey(
@@ -206,6 +223,45 @@ class IngestionToken(UUIDModel, TimeStampedModel):
     def __str__(self) -> str:
         return f"IngestionToken({self.name}) for {self.organisation}"
 
+    def org_mismatch_message(self) -> str | None:
+        """The refusal message if this token's org is not its source's org, else `None`.
+
+        A cross-table CHECK constraint cannot express this pair, so the check lives here (and in
+        `create_token`, and in the Settings form — one test per path, per plan AC9). It is worth the
+        extra read: a token that names the wrong tenant is a **cross-tenant ingest**, which writes
+        another org's alerts and rules with this org's credential.
+        """
+        if not self.source_id or not self.organisation_id:
+            return None  # nothing to compare yet; required fields are validated elsewhere
+        source_org_id = (
+            self.source.organisation_id
+            if "source" in self._state.fields_cache
+            else _source_org_id(self.source_id)
+        )
+        if source_org_id is None or source_org_id == self.organisation_id:
+            return None
+        return (
+            f"Ingestion token belongs to organisation {self.organisation_id} but its source "
+            f"belongs to {source_org_id} — a token must name the organisation that owns its source "
+            "(ADR-009)"
+        )
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Refuse to persist a token whose organisation is not the source's (ADR-009).
+
+        Enforced here rather than only in `create_token` because every writer must be covered: the
+        form, `create_token`, a fixture, a shell, a future data migration. `full_clean()` is not
+        called by `save()`, so this is the only place a raw write can be caught.
+        """
+        if self.source_id and self.organisation_id:
+            source_org_id = _source_org_id(self.source_id)
+            if source_org_id is not None and source_org_id != self.organisation_id:
+                raise ValidationError(
+                    "An ingestion token must belong to the same organisation as its source "
+                    f"(source: {source_org_id}, token: {self.organisation_id}). See ADR-009."
+                )
+        super().save(*args, **kwargs)
+
     @classmethod
     def create_token(
         cls,
@@ -219,7 +275,16 @@ class IngestionToken(UUIDModel, TimeStampedModel):
         Create a new token, returning `(token, plaintext)`.
 
         Plaintext is returned **once** — the caller must display/save it immediately.
+
+        Refuses a pair whose organisations disagree (ADR-009) *before* hashing, so a caller that
+        catches the error has not written a row or burned a prefix.
         """
+        if source.organisation_id != organisation.id:
+            raise ValidationError(
+                f"{source.slug!r} belongs to {source.organisation.name!r}, so it cannot have a "
+                f"token for {organisation.name!r} (ADR-009)."
+            )
+
         import secrets
 
         plaintext = secrets.token_urlsafe(32)
@@ -244,7 +309,7 @@ class IngestionToken(UUIDModel, TimeStampedModel):
 class AuditLog(UUIDModel):
     """Immutable audit trail for cross-tenant and administrative actions (ADR-004 Q5).
 
-    Records break-glass superAdmin reads, role/org/share/token changes, and other
+    Records break-glass superAdmin reads, role/org/share/token changes, mapping edits and other
     security-relevant events. `actor`/`actor_org`/`target_org` are SET_NULL so the
     log survives account/org deletion.
     """
@@ -277,6 +342,16 @@ class AuditLog(UUIDModel):
     action = models.CharField(max_length=100)
     target_type = models.CharField(max_length=100)
     target_id = models.CharField(max_length=100)
+    details = models.JSONField(
+        default=dict,
+        blank=True,
+        # The columns above answer "who did what, to which object, when". They cannot answer *what
+        # changed* — the first question asked when a feed's mapping moved under an analyst. An
+        # additive, non-secret bag is deliberately preferred to a column per audit kind: the audit
+        # table stays one shape, and a new audited action needs no migration.
+        # **Never** put a secret here: `AuditLog` rows outlive the thing they describe.
+        help_text="Non-secret structured detail, e.g. {'changed': ['fields.title']}.",
+    )
     ip = models.GenericIPAddressField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 

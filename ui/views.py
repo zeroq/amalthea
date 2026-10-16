@@ -24,6 +24,7 @@ Three choices worth stating, because each is a deviation from "just render the A
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import uuid
 from collections.abc import Callable
@@ -1483,6 +1484,7 @@ def sources_list(request: HttpRequest) -> HttpResponse:
     from django.db.models import Exists, OuterRef, Q
 
     from identity.models import IngestionToken
+    from identity.scoping import org_q
 
     user_org_id = getattr(request.user, "org_id", None)
     if user_org_id is None:
@@ -1498,15 +1500,41 @@ def sources_list(request: HttpRequest) -> HttpResponse:
         revoked_at__isnull=True,
     )
 
+    from ingest.mapping import read_rules
+
+    sources = list(
+        # ADR-009: org-owned, so the list is scoped like every other tenant row (superAdmin: all).
+        IngestionSource.objects.filter(org_q("organisation", request.user))
+        .annotate(
+            alert_count=Count("alerts", filter=alert_filter),
+            has_token=Exists(token_subquery),
+        )
+        .order_by("slug")
+    )
+    for source in sources:
+        # Display-only attributes: "7 rules · severity←severity_name" (§7). The count is the honest
+        # "how much is configured", and the severity rule is the one an analyst checks first.
+        rules = read_rules(source.mapping_config)
+        source.rule_count = len(rules)  # type: ignore[attr-defined]
+        severity_rule = rules.get("severity") or {}
+        source.severity_rule = (
+            severity_rule.get("transform")
+            or (  # type: ignore[attr-defined]
+                (severity_rule.get("paths") or [None])[0]
+            )
+        )
+
+    from identity.scoping import is_admin
+
     return render(
         request,
         "ui/sources_list.html",
         _base_context(
             request,
-            sources=IngestionSource.objects.annotate(
-                alert_count=Count("alerts", filter=alert_filter),
-                has_token=Exists(token_subquery),
-            ).order_by("slug"),
+            sources=sources,
+            # The detail page is admin-only, so a viewer/analyst gets plain text rather than a link
+            # that would 404 (§7: "admin for own-org sources, everyone else never").
+            can_open_source_page=is_admin(request.user),
         ),
     )
 
@@ -3481,6 +3509,7 @@ def _org_blockers_text(org: object) -> str:
         (getattr(org, "alerts_count", 0), "alert"),
         (getattr(org, "observables_count", 0), "observable"),
         (getattr(org, "tokens_count", 0), "ingestion token"),
+        (getattr(org, "sources_count", 0), "ingestion source"),
     ):
         if count:
             parts.append(f"{count} {singular}{'' if count == 1 else 's'}")
@@ -3532,6 +3561,8 @@ def settings_organisations(request: HttpRequest) -> HttpResponse:
             alerts_count=Count("alerts", distinct=True),
             observables_count=Count("observables", distinct=True),
             tokens_count=Count("ingestion_tokens", distinct=True),
+            # ADR-009: an owned IngestionSource PROTECTs its org.
+            sources_count=Count("ingestion_sources", distinct=True),
         ).order_by("name")
     )
     for org in orgs:
@@ -3918,17 +3949,201 @@ def _settings_sources_context(request: HttpRequest) -> dict:
     if not is_superadmin:
         qs = qs.filter(organisation_id=request.user.org_id)
 
+    from identity.scoping import org_q
     from ingest.models import IngestionSource
 
     return {
         "tokens": list(qs),
         "show_org_column": is_superadmin,
-        "sources": IngestionSource.objects.order_by("name"),
+        # ADR-009: only the org's own feeds are nameable here (a superAdmin sees all and picks the
+        # org, which is then the org the source is provisioned in).
+        "sources": IngestionSource.objects.filter(org_q("organisation", request.user)).order_by(
+            "name"
+        ),
         "organisations": Organisation.objects.order_by("name") if is_superadmin else None,
         "is_superadmin": is_superadmin,
         # The endpoint is source-less: every feed posts to the same URL and the token does the routing.
         "webhook_path": "/api/v1/alerts/webhook/",
     }
+
+
+@not_viewer
+@login_required
+@require_http_methods(["GET", "POST"])
+def settings_source_detail(request: HttpRequest, source_id) -> HttpResponse:
+    """One feed: identity, its editable rules, and the stored config (§7, P2 shell + P3 editor).
+
+    P2 landed the read-only half — identity, rule summary, tokens, stored JSON — so the tenancy gate
+    (role **and** org) was tested before a write path existed. P3 adds the two writers over the same
+    object: the table (one row per target) and the advanced JSON box, which is the only place
+    `value_maps` is edited (plan Q3). Neither writes anything else: every other top-level key survives
+    a save verbatim (`ingest/editor.py` rule 1).
+
+    Uniform 404 for "no such source" and "another org's source" (`resolve_ingestion_source`), and the
+    cross-org *read* by a superAdmin is audited (ADR-004 Q5) — a mapping is a tenant's data, so
+    peeking at another tenant's rules is a break-glass read, not a routine one. A superAdmin's
+    cross-org *write* is not a separate action: the `ingestion_source.updated` row already carries both
+    `actor_org` and `target_org`, so the crossover is visible where the change is recorded.
+    """
+    guard = _require_admin_ui(request)
+    if guard:
+        return guard
+
+    from identity.scoping import resolve_ingestion_source
+
+    # `write=True` on POST layers the viewer deny over the role gate above (ADR-006 Layer 1/2); the
+    # page itself is already unreachable for a viewer, so this is depth, not the boundary.
+    source = resolve_ingestion_source(request.user, source_id, write=request.method == "POST")
+    if source is None:
+        return render(request, "ui/404.html", status=404)
+
+    if request.method == "POST":
+        return _save_source_mapping(request, source)
+
+    from identity.audit import maybe_record_cross_org_read
+
+    maybe_record_cross_org_read(
+        request,
+        actor=request.user,
+        target_obj=source,
+        target_type="IngestionSource",
+        target_id=source.id,
+        target_org_field="organisation",
+    )
+
+    return render(
+        request,
+        "ui/source_detail.html",
+        _base_context(request, **_source_detail_context(request, source)),
+    )
+
+
+def _source_detail_context(
+    request: HttpRequest,
+    source,
+    *,
+    submitted: dict[str, dict[str, str]] | None = None,
+    errors: dict[str, tuple[str, ...]] | None = None,
+    failed_form: str = "",
+    json_text: str | None = None,
+) -> dict:
+    """Everything the source page renders, for both the GET and a rejected POST.
+
+    One builder for both, so a form that re-renders after an error cannot drift from the page the
+    operator was looking at: `submitted` replaces the stored config in the table's rows and `errors`
+    lands on the row that caused it (`ingest/editor.py`).
+    """
+    from ingest.editor import editor_rows, transforms_for_editor
+    from ingest.mapping import config_shape, read_rules
+
+    errors = errors or {}
+    return {
+        "source": source,
+        # `legacy` is the one shape the page must explain rather than silently upgrade (§7 rule 4).
+        "config_shape": config_shape(source.mapping_config),
+        "editor_rows": editor_rows(source.mapping_config, submitted=submitted, errors=errors),
+        "editor_errors": errors,
+        # The whole-config messages of whichever form was submitted: `validate_config` has no row to
+        # attach `value_maps` (or a JSON parse failure) to, so they are shown above it.
+        "config_errors": errors.get("", ()),
+        "failed_form": failed_form,
+        "mapping_json_text": (
+            json_text
+            if json_text is not None
+            else json.dumps(source.mapping_config or {}, indent=2, sort_keys=True)
+        ),
+        "transforms": transforms_for_editor(),
+        "rule_count": len(read_rules(source.mapping_config)),
+        "tokens": source.tokens.select_related("organisation", "created_by")
+        .defer("secret_hash")
+        .order_by("-created_at"),
+        "alert_count": Alert.objects.filter(ingestion_source=source).count(),
+        "is_superadmin": request.user.role == "superAdmin",
+    }
+
+
+def _source_mapping_rows(request: HttpRequest) -> dict[str, dict[str, str]]:
+    """The table's submission as `{target: {paths, transform, default}}` (`ingest/editor.py`)."""
+    from ingest.mapping import TARGETS
+
+    return {
+        target: {
+            "paths": request.POST.get(f"paths__{target}", ""),
+            "transform": request.POST.get(f"transform__{target}", ""),
+            "default": request.POST.get(f"default__{target}", ""),
+        }
+        for target in TARGETS
+    }
+
+
+def _save_source_mapping(request: HttpRequest, source) -> HttpResponse:
+    """Persist one edit of a feed's `mapping_config` (P3, AC11-AC14).
+
+    Two writers, one object: the table and the advanced JSON box are separate `<form>`s, so a request
+    carries exactly one of them (`form=table|json`) and the other half of the page keeps rendering the
+    stored config — "one storage object, two views of it, never two writers" (plan §7.4).
+
+    A rejected save is a **200 that echoes the input**, not a redirect: a redirect would discard what
+    the operator typed, which is the whole value of per-row errors. Success is PRG, and an unchanged
+    submission is a no-op: no row write, no `updated_at` bump, no audit (AC12).
+    """
+    from django.db import transaction
+
+    from identity.audit import record_ingestion_source_updated
+    from ingest.editor import (
+        build_table_config,
+        changed_keys,
+        is_noop_save,
+        parse_json_config,
+    )
+
+    before = source.mapping_config or {}
+    which = "json" if request.POST.get("form") == "json" else "table"
+    submitted = None if which == "json" else _source_mapping_rows(request)
+    if which == "json":
+        result = parse_json_config(request.POST.get("mapping_json"))
+    else:
+        result = build_table_config(before, submitted)
+
+    if not result.ok:
+        return render(
+            request,
+            "ui/source_detail.html",
+            _base_context(
+                request,
+                **_source_detail_context(
+                    request,
+                    source,
+                    submitted=submitted,
+                    errors=result.errors,
+                    failed_form=which,
+                    json_text=request.POST.get("mapping_json") if which == "json" else None,
+                ),
+            ),
+        )
+
+    if is_noop_save(before, result.config):
+        messages.info(request, "No changes to save.")
+        return redirect("ui-settings-source-detail", source_id=source.id)
+
+    with transaction.atomic():
+        source.mapping_config = result.config
+        # `updated_at` is `auto_now`: its value is set on save, but an `update_fields` UPDATE writes
+        # only the columns it names, so the timestamp has to be named (AC12 reads it).
+        source.save(update_fields=["mapping_config", "updated_at"])
+        record_ingestion_source_updated(
+            request,
+            actor=request.user,
+            source=source,
+            changed_keys=changed_keys(before, result.config),
+        )
+
+    rules = len(result.config.get("fields") or {}) if isinstance(result.config, dict) else 0
+    if rules:
+        messages.success(request, f"Mapping saved — {rules} rule{'' if rules == 1 else 's'}.")
+    else:
+        messages.success(request, "Mapping saved — no rules; payload literal keys are used.")
+    return redirect("ui-settings-source-detail", source_id=source.id)
 
 
 @not_viewer
@@ -3986,11 +4201,14 @@ def settings_token_create(request: HttpRequest) -> HttpResponse:
         messages.error(request, "Name must be 200 characters or fewer.")
         return redirect("ui-settings-sources")
 
-    # Resolve the source by *name*. The webhook URL is source-less, so the source is no longer a
-    # routing key — it is the reusable mapping profile this token points at. A name is therefore all
-    # the operator supplies, and the row is provisioned on demand. `slugify` gives it a stable key,
-    # so typing an existing name reuses that profile (the ADR-004 Q6 multi-tenant pattern: one
-    # profile, one token per organisation).
+    # Resolve the source by *name*, within the token's organisation. The webhook URL is source-less,
+    # so the source is not a routing key — it is the org-owned mapping profile this token points at
+    # (ADR-009, which reverses ADR-008 §4's fleet-global profile). A name is therefore all the
+    # operator supplies, and the row is provisioned on demand in **their** org: `slugify` gives it a
+    # stable key, so an existing name in the same org reuses that profile, while the same name in
+    # another org is that org's own feed with its own rules (AC10). Scoping the lookup by org is also
+    # what keeps the pair legal: an unscoped lookup would hand back another tenant's source and the
+    # token would then be refused by the ADR-009 invariant.
     from django.db import IntegrityError
     from django.utils.text import slugify
 
@@ -4011,11 +4229,25 @@ def settings_token_create(request: HttpRequest) -> HttpResponse:
 
     try:
         source, source_created = IngestionSource.objects.get_or_create(
-            slug=source_slug, defaults={"name": source_name}
+            organisation=organisation,
+            slug=source_slug,
+            defaults={"name": source_name},
         )
     except IntegrityError:
         # Lost a race with a concurrent create — the row exists now, so just bind to it.
-        source, source_created = IngestionSource.objects.get(slug=source_slug), False
+        source, source_created = (
+            IngestionSource.objects.get(organisation=organisation, slug=source_slug),
+            False,
+        )
+
+    if source.organisation_id != organisation.id:
+        # Unreachable while the lookup above is org-scoped (the ADR-009 invariant would raise first);
+        # kept as the explicit refusal so a future refactor fails with a message, not a 500.
+        messages.error(
+            request,
+            f"'{source.slug}' belongs to another organisation, so it cannot be used for this token.",
+        )
+        return redirect("ui-settings-sources")
 
     if source_created:
         from identity.audit import record_ingestion_source_created

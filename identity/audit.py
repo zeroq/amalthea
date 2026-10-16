@@ -238,17 +238,45 @@ def record_ingestion_source_created(
     """
     Record the on-demand creation of an `IngestionSource` from Settings → Sources.
 
-    An `IngestionSource` is *global* configuration (it has no `Organisation`), so `target_org` is
-    `None` — but provisioning one is a fleet-level act, and who did it is worth a row.
+    Since ADR-009 the source is org-owned, so `target_org` is the org that now owns it: the tenant
+    column is what makes "who configured which tenant's feed, and when" answerable after the fact.
     """
     from identity.models import AuditLog
 
     AuditLog.objects.create(
         actor=actor,
         actor_org=getattr(actor, "org", None),
-        target_org=None,
+        target_org=source.organisation,
         action="ingestion_source.created",
         target_type="IngestionSource",
         target_id=str(source.id),
+        ip=_get_client_ip(request),
+    )
+
+
+def record_ingestion_source_updated(
+    request: HttpRequest,
+    *,
+    actor: User,
+    source: IngestionSource,
+    changed_keys: list[str],
+) -> None:
+    """Record a mapping edit on one feed (PLAN-2026-10-16 §8 P3, AC13).
+
+    `changed_keys` is the *point* of the row: "somebody edited crowdstrike-edr" is not actionable, but
+    "titles stopped being read from `$.display_name`" is — the question an operator asks when alert
+    titles change under them. Dot-paths into the config (`fields.title.paths`, `value_maps`), never
+    values: an audit row outlives the config and must not become a copy of it.
+    """
+    from identity.models import AuditLog
+
+    AuditLog.objects.create(
+        actor=actor,
+        actor_org=getattr(actor, "org", None),
+        target_org=source.organisation,
+        action="ingestion_source.updated",
+        target_type="IngestionSource",
+        target_id=str(source.id),
+        details={"changed": list(changed_keys)},
         ip=_get_client_ip(request),
     )

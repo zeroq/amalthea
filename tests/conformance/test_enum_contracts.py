@@ -306,8 +306,8 @@ _SAMPLE_ROW_BUILDERS: dict[str, Callable[[User, Any], Any]] = {
         idempotency_key="enum-probe",
         case=_SAMPLE_ROW_BUILDERS["case_record"](analyst, default_org),
     ),
-    "ingestion_source": lambda *_: IngestionSource.objects.create(
-        slug="enum-probe", name="enum probe"
+    "ingestion_source": lambda _user, org: IngestionSource.objects.create(
+        slug="enum-probe", name="enum probe", organisation=org
     ),
     "custom_field": lambda *_: CustomField.objects.create(name="enum-probe", type="string"),
     "case_template": lambda *_: CaseTemplate.objects.create(name="enum-probe"),

@@ -39,6 +39,7 @@ import re
 from pathlib import Path
 
 import pytest
+from django.conf import settings
 from django.core.cache import cache
 from django.test import Client
 from django.urls import reverse
@@ -91,8 +92,19 @@ def _ui_client(user: User) -> Client:
     return client
 
 
-def _mk_source(slug: str = "src", name: str = "Source") -> IngestionSource:
-    return IngestionSource.objects.create(slug=slug, name=name)
+def _mk_source(
+    slug: str = "src", name: str = "Source", *, organisation: Organisation | None = None
+) -> IngestionSource:
+    """Create a feed. ADR-009 made `IngestionSource` org-owned, so it needs an owner.
+
+    Defaults to the default organisation for the (many) callers that only care that *a* feed exists;
+    the ones that care about the tenant pass one explicitly.
+    """
+    if organisation is None:
+        organisation = Organisation.objects.get_or_create(
+            name=getattr(settings, "AMALTHEA_DEFAULT_ORG_NAME", "Default")
+        )[0]
+    return IngestionSource.objects.create(slug=slug, name=name, organisation=organisation)
 
 
 def _create_token_via_ui(
@@ -166,7 +178,7 @@ class TestHashSecrecy:
         org = _mk_org("Org1")
         admin = _mk_user("admin", org, role="admin")
         client = _ui_client(admin)
-        source = _mk_source()
+        source = _mk_source(organisation=org)
         token, _ = IngestionToken.create_token(source=source, organisation=org, name="prod")
 
         body = client.get(reverse("ui-settings-sources")).content.decode()
@@ -182,12 +194,18 @@ class TestCrossOrgIsolation:
         org_a = _mk_org("Org A")
         org_b = _mk_org("Org B")
         admin_a = _mk_user("admin-a", org_a, role="admin")
-        source = _mk_source()
+        # ADR-009: a feed belongs to one org, so the two tenants have one each.
+        _mine, _ = IngestionToken.create_token(
+            source=_mk_source(organisation=org_a), organisation=org_a, name="org-a-token"
+        )
         other, _ = IngestionToken.create_token(
-            source=source, organisation=org_b, name="org-b-only-token"
+            source=_mk_source(slug="src-b", organisation=org_b),
+            organisation=org_b,
+            name="org-b-only-token",
         )
 
         body = _ui_client(admin_a).get(reverse("ui-settings-sources")).content.decode()
+        assert "org-a-token" in body, "the non-vacuous half: A's own token is on the page"
         assert "org-b-only-token" not in body
         assert other.prefix not in body
         assert "Org B" not in body
@@ -196,8 +214,9 @@ class TestCrossOrgIsolation:
         org_a = _mk_org("Org A")
         org_b = _mk_org("Org B")
         admin_a = _mk_user("admin-a", org_a, role="admin")
-        source = _mk_source()
-        other, _ = IngestionToken.create_token(source=source, organisation=org_b, name="theirs")
+        other, _ = IngestionToken.create_token(
+            source=_mk_source(slug="src-b", organisation=org_b), organisation=org_b, name="theirs"
+        )
 
         resp = _ui_client(admin_a).post(
             reverse("ui-settings-token-revoke", kwargs={"token_id": other.id})
@@ -215,11 +234,18 @@ class TestRoleGates:
         org = _mk_org("Org1")
         user = _mk_user(f"user-{role}", org, role=role)
         client = _ui_client(user)
-        source = _mk_source()
+        source = _mk_source(organisation=org)
         token, _ = IngestionToken.create_token(source=source, organisation=org, name="existing")
 
         assert client.get(reverse("ui-settings")).status_code == 404
         assert client.get(reverse("ui-settings-sources")).status_code == 404
+        # ADR-009: the source page is behind the same gate (admin + superAdmin only).
+        assert (
+            client.get(
+                reverse("ui-settings-source-detail", kwargs={"source_id": source.id})
+            ).status_code
+            == 404
+        )
         assert (
             client.post(
                 reverse("ui-settings-token-create"),
@@ -297,9 +323,12 @@ class TestSuperadminOrgHandling:
         org_a = _mk_org("Org A")
         org_b = _mk_org("Org B")
         superadmin = _mk_user("super", org_a, role="superAdmin")
-        source = _mk_source()
-        IngestionToken.create_token(source=source, organisation=org_a, name="token-a")
-        IngestionToken.create_token(source=source, organisation=org_b, name="token-b")
+        IngestionToken.create_token(
+            source=_mk_source(organisation=org_a), organisation=org_a, name="token-a"
+        )
+        IngestionToken.create_token(
+            source=_mk_source(slug="src-b", organisation=org_b), organisation=org_b, name="token-b"
+        )
 
         body = _ui_client(superadmin).get(reverse("ui-settings-sources")).content.decode()
         assert "token-a" in body
@@ -381,8 +410,13 @@ class TestSourceProvisioning:
         # Provisioning global configuration is audited.
         assert AuditLog.objects.filter(action="ingestion_source.created").count() == 1
 
-    def test_the_same_name_reuses_the_profile_across_organisations(self, db: None) -> None:
-        """One profile, one token per tenant — the ADR-004 Q6 pattern, now by name."""
+    def test_the_same_name_in_two_orgs_is_two_feeds(self, db: None) -> None:
+        """ADR-009: a feed is org-owned, so "Microsoft 365" is A's feed and B's feed.
+
+        This is the behaviour ADR-009 deliberately changed (it used to be one shared profile, ADR-004
+        Q6). The audit row is per creation, so two tenants naming the same tool is two rows — that is
+        how "who configured which tenant's feed" stays answerable.
+        """
         org_a, org_b = _mk_org("Org A"), _mk_org("Org B")
         client = _ui_client(_mk_user("super", org_a, role="superAdmin"))
 
@@ -397,9 +431,18 @@ class TestSourceProvisioning:
             )
             assert resp.status_code == 200, resp.content
 
-        assert IngestionSource.objects.count() == 1, "the second token did not reuse the profile"
+        # ADR-009 (reversing ADR-008 §4): the same vendor name in two orgs is two feeds — one each,
+        # same slug, each carrying only its own org's rules. Sharing one profile is no longer a
+        # thing, which is what "an admin edits only his org's mapping" requires.
+        assert IngestionSource.objects.count() == 2, (
+            "one profile per tenant, not one shared profile"
+        )
+        assert {s.slug for s in IngestionSource.objects.all()} == {"microsoft-365"}
+        assert {s.organisation_id for s in IngestionSource.objects.all()} == {org_a.id, org_b.id}
+        for token in IngestionToken.objects.select_related("source"):
+            assert token.source.organisation_id == token.organisation_id
         assert {t.organisation_id for t in IngestionToken.objects.all()} == {org_a.id, org_b.id}
-        assert AuditLog.objects.filter(action="ingestion_source.created").count() == 1
+        assert AuditLog.objects.filter(action="ingestion_source.created").count() == 2
 
     def test_a_name_with_nothing_slugable_is_rejected(self, db: None) -> None:
         """A name that slugifies to nothing would collide with every other one, so it is refused."""

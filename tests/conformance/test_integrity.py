@@ -180,23 +180,33 @@ def test_h3_automation_run_idempotency_key_is_unique(case: Case) -> None:
 
 
 @pytest.mark.django_db
-def test_h4_ingestion_source_slug_is_unique() -> None:
-    """REVIEW-2026-10-04 round-2 **H-4**: `slug` is the key a typed source name resolves to.
+def test_h4_ingestion_source_slug_is_unique_per_organisation() -> None:
+    """REVIEW-2026-10-04 round-2 **H-4** + ADR-009: `slug` is unique *within an organisation*.
 
-    `slug` is no longer part of the webhook URL (the route is source-less since 2026-10-15), but it
-    is still how Settings → Sources turns a typed name into a mapping profile. Two sources sharing
-    one would make that resolution non-deterministic, so the key stays unique.
+    `slug` is not part of the webhook URL (the route is source-less since 2026-10-15), but it is how
+    Settings → Sources turns a typed name into a mapping profile. Two sources sharing one *in the same
+    org* would make that resolution non-deterministic, so that pair is refused; two orgs may each have
+    a `splunk` with their own rules (ADR-009 reversed ADR-008 §4's fleet-global profile).
     """
+    from identity.models import Organisation
     from ingest.models import IngestionSource
 
     from ._schema import unique_keys
 
+    org_a, org_b = (
+        Organisation.objects.create(name="Integrity A"),
+        Organisation.objects.create(name="Integrity B"),
+    )
+
     with transaction.atomic():
-        IngestionSource.objects.create(slug="splunk", name="Splunk")
+        IngestionSource.objects.create(organisation=org_a, slug="splunk", name="Splunk")
         with pytest.raises(IntegrityError), transaction.atomic():
-            IngestionSource.objects.create(slug="splunk", name="Splunk (copy)")
+            IngestionSource.objects.create(organisation=org_a, slug="splunk", name="Splunk (copy)")
+        # …but the same slug in another organisation is that tenant's own feed.
+        IngestionSource.objects.create(organisation=org_b, slug="splunk", name="Splunk (B)")
         transaction.set_rollback(True)
-    assert ("slug",) in unique_keys("ingestion_source")
+    # `unique_keys` reports database columns, hence `organisation_id`.
+    assert ("organisation_id", "slug") in unique_keys("ingestion_source")
     assert not IngestionSource.objects.filter(slug="splunk").exists(), (
         "the rolled-back block left a row behind"
     )

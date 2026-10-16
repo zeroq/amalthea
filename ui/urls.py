@@ -187,6 +187,12 @@ urlpatterns = [
     path("settings", views.settings_home, name="ui-settings"),
     path("settings/sources", views.settings_sources, name="ui-settings-sources"),
     path("settings/sources/token", views.settings_token_create, name="ui-settings-token-create"),
+    # ADR-009: a source is org-owned, so this route is gated by role *and* org (404, not 403).
+    path(
+        "settings/sources/<uuid:source_id>",
+        views.settings_source_detail,
+        name="ui-settings-source-detail",
+    ),
     path(
         "settings/sources/<uuid:token_id>/revoke",
         views.settings_token_revoke,

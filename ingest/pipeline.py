@@ -26,10 +26,12 @@ from alerts.models import Alert, AlertStatus
 from identity.models import Organisation
 from ingest.models import IngestionSource
 
-from .mapping import extract_correlation_key
+from .mapping import FieldWarning, extract_correlation_key
 from .references import resolve_source_ref
 
-#: Severity an unmapped alert gets, with a warning (plan §14 Q1, provisional).
+#: Severity an unmapped alert gets, with a warning (plan §14 Q1). Still the floor for callers that
+#: pass no severity at all; the ingest path now threads `IngestionSource.default_severity` through
+#: `default_severity=` instead, so a source that declares its own floor gets it (plan §5.3 step 3).
 DEFAULT_SEVERITY = 2
 DEFAULT_ALERT_STATUS = "New"
 
@@ -70,10 +72,14 @@ def store_ingested_alert(
     mapped_source_ref: str | None = None,
     severity: int | None = None,
     date: datetime | None = None,
+    description: str | None = None,
+    summary: str | None = None,
+    default_severity: int = DEFAULT_SEVERITY,
     correlation_key: str = "",
     ingestion_source: IngestionSource | None = None,
     owner_org: Organisation,
     extra_warnings: tuple[str, ...] = (),
+    mapping_warnings: tuple[FieldWarning, ...] = (),
 ) -> StoredAlert:
     """Persist one alert, or recognise `payload` as a replay of one already stored.
 
@@ -87,8 +93,8 @@ def store_ingested_alert(
     warnings: list[str] = list(extra_warnings)
 
     if severity is None:
-        severity = DEFAULT_SEVERITY
-        warnings.append(f"severity_defaulted: no severity mapping; defaulted to {DEFAULT_SEVERITY}")
+        severity = default_severity
+        warnings.append(f"severity_defaulted: no severity mapping; defaulted to {default_severity}")
 
     source_ref, ref_warning = resolve_source_ref(mapped_source_ref, payload)
     if ref_warning:
@@ -115,6 +121,8 @@ def store_ingested_alert(
             source_ref=source_ref,
             defaults={
                 "title": title,
+                "description": description or "",
+                "summary": summary or "",
                 "severity": severity,
                 "status": status,
                 "date": date or timezone.now(),
@@ -122,7 +130,12 @@ def store_ingested_alert(
                 "correlation_key": correlation_key,
                 "ingestion_source": ingestion_source,
                 "owner_org": owner_org,
-                "ingestion_warnings": {"warnings": warnings},
+                "ingestion_warnings": {
+                    "warnings": warnings,
+                    # The structured half of the same story: which rule paths failed, for the UI to
+                    # render next to the value rather than in a paragraph (plan §5.2, P4).
+                    "mapping": [warning.as_dict() for warning in mapping_warnings],
+                },
             },
         )
 

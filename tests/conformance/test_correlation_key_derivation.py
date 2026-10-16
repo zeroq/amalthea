@@ -21,6 +21,7 @@ def default_org(db):
 @pytest.mark.django_db
 def test_correlation_key_derived_from_mapping_config_nested(default_org):
     source = IngestionSource.objects.create(
+        organisation=default_org,
         slug="test-source",
         name="Test Source",
         mapping_config={"correlation_key": "$.event.correlationId"},
@@ -43,6 +44,7 @@ def test_correlation_key_derived_from_mapping_config_nested(default_org):
 @pytest.mark.django_db
 def test_correlation_key_derived_from_mapping_config_flat(default_org):
     source = IngestionSource.objects.create(
+        organisation=default_org,
         slug="flat-source",
         name="Flat Source",
         mapping_config={"correlation_key": "$.correlation_key"},
@@ -64,6 +66,7 @@ def test_correlation_key_derived_from_mapping_config_flat(default_org):
 @pytest.mark.django_db
 def test_correlation_key_falls_back_to_empty_when_no_mapping(default_org):
     source = IngestionSource.objects.create(
+        organisation=default_org,
         slug="no-map",
         name="No Map",
         mapping_config={},
@@ -85,6 +88,7 @@ def test_correlation_key_falls_back_to_empty_when_no_mapping(default_org):
 @pytest.mark.django_db
 def test_correlation_key_respects_explicit_parameter(default_org):
     source = IngestionSource.objects.create(
+        organisation=default_org,
         slug="override",
         name="Override",
         mapping_config={"correlation_key": "$.event.id"},

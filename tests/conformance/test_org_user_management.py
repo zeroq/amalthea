@@ -319,11 +319,22 @@ class TestOrgDeletionO2:
         assert resp.json()["blockers"]["observables"] == 1
 
     def test_delete_blocked_when_owns_ingestion_tokens(self) -> None:
-        source = IngestionSource.objects.create(slug="src1", name="Source 1")
+        source = IngestionSource.objects.create(
+            organisation=self.org2, slug="src1", name="Source 1"
+        )
         IngestionToken.create_token(source=source, organisation=self.org2, name="token1")
         resp = self.super_client.delete(f"/api/v1/organisation/{self.org2.id}")
         assert resp.status_code == 409
         assert resp.json()["blockers"]["ingestionTokens"] == 1
+
+    def test_delete_blocked_when_owns_ingestion_sources(self) -> None:
+        """ADR-009: the feed itself is now org-owned, so it blocks deletion on its own — with no
+        token and no alert in sight. The blocker is reported by name rather than as a bare
+        ProtectedError, which is the whole reason `organisation_blockers` grew a key."""
+        IngestionSource.objects.create(organisation=self.org2, slug="src-no-token", name="Source 2")
+        resp = self.super_client.delete(f"/api/v1/organisation/{self.org2.id}")
+        assert resp.status_code == 409
+        assert resp.json()["blockers"]["ingestionSources"] == 1
 
     def test_delete_blocked_member_options_do_not_override(self) -> None:
         _mk_case("Case1", self.org2)

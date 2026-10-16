@@ -299,8 +299,9 @@ ADR-008: the path names no source. The credential is the only routing fact — i
 - `organisation_detail` (`GET|PATCH|DELETE /api/v1/organisation/{idOrName}`) — non-superAdmin:
   own org only (GET/PATCH as before). SuperAdmin: any org. GET returns counts. PATCH updates
   `name`/`description`; audits `organisation.updated`. DELETE (superAdmin only): guarded deletion.
-  Pre-flight checks for tenant data (cases/alerts/observables/ingestionTokens) → **409** with
-  blockers. If members exist: requires `members=reassign&target_org=<idOrName>` or `members=delete`.
+  Pre-flight checks for tenant data (cases/alerts/observables/ingestionTokens/ingestionSources) →
+  **409** with blockers (`ingestionSources` added by ADR-009: the feed itself is tenant-owned, so it
+  blocks too). If members exist: requires `members=reassign&target_org=<idOrName>` or `members=delete`.
   All operations atomic; audits `organisation.deleted`.
 
 ## Observable types — `observable/type` (T2/Phase P1)

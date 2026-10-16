@@ -1,0 +1,204 @@
+{% extends "ui/base.html" %}
+{% load ui_tags %}
+{% block title %}{{ source.name }} · Sources · Amalthea{% endblock %}
+{% block heading %}{{ source.name }}{% endblock %}
+
+{% block content %}
+{# The Sources tab stays highlighted: this page is a detail view *of* Sources, not a sibling section. #}
+{% include "ui/_settings_nav.html" with active_tab="ui-settings-sources" %}
+
+{% if is_superadmin and source.organisation.id != request.user.org_id %}
+  <p class="hint">
+    This feed belongs to <strong>{{ source.organisation.name }}</strong>, not your own organisation.
+    You can see it as a superAdmin, and this read is recorded in the audit log.
+  </p>
+{% endif %}
+
+<div class="card">
+  <h2>Identity</h2>
+  <dl class="meta">
+    <dt>Slug</dt><dd class="mono">{{ source.slug }}</dd>
+    <dt>Name</dt><dd>{{ source.name }}</dd>
+    <dt>Organisation</dt><dd>{{ source.organisation.name }}</dd>
+    <dt>Default severity</dt>
+    <dd>
+      <span class="sev sev-{{ source.default_severity|sev_class }}">{{ source.default_severity|sev_label }}</span>
+      <span class="mono dim">({{ source.default_severity }})</span>
+    </dd>
+    <dt>Correlation</dt><dd>{{ source.correlation_enabled|yesno:"on,off" }}</dd>
+    <dt>Alerts</dt><dd>{{ alert_count }}</dd>
+    <dt>Tokens</dt><dd>{{ tokens|length }}</dd>
+    <dt>Created</dt><dd class="mono dim">{{ source.created_at|date:"Y-m-d H:i" }}</dd>
+    <dt>Mapping last saved</dt><dd class="mono dim">{{ source.updated_at|date:"Y-m-d H:i" }}</dd>
+  </dl>
+</div>
+
+<div class="card">
+  <h2>Mapping rules</h2>
+
+  {% if config_shape == 'legacy' %}
+    <p class="hint">
+      <strong>This feed still stores the older flat form.</strong> Saving the table below rewrites it in
+      the current form, and that is not a no-op: once a target has a rule, its paths are the <em>whole</em>
+      candidate list — the payload's own literal keys stop being tried after them.
+    </p>
+  {% endif %}
+
+  {% if failed_form == 'table' %}
+    {% for message in config_errors %}<p class="msg msg-error">{{ message }}</p>{% endfor %}
+  {% endif %}
+
+  <form method="post" action="{% url 'ui-settings-source-detail' source.id %}">
+    {% csrf_token %}
+    <input type="hidden" name="form" value="table" />
+    <div class="table-wrap">
+      <table class="data-table">
+        <caption class="sr-only">Mapping rules for {{ source.name }}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Target</th>
+            <th scope="col">Paths</th>
+            <th scope="col">Transform</th>
+            <th scope="col">Default</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in editor_rows %}
+            <tr>
+              <td>
+                {{ row.label }}<br />
+                <span class="mono dim">{{ row.target }}</span>
+                <p class="hint">
+                  Empty ⇒ the payload's own
+                  <span class="mono">{{ row.literal_keys|join:" / " }}</span>.
+                </p>
+                {% for message in row.errors %}<p class="field-error">{{ message }}</p>{% endfor %}
+              </td>
+              <td>
+                <label class="sr-only" for="paths__{{ row.target }}">{{ row.label }} paths</label>
+                <textarea id="paths__{{ row.target }}" name="paths__{{ row.target }}" rows="3"
+                          class="mono" spellcheck="false"
+                          placeholder="{{ row.literal_keys|join:', ' }}">{{ row.paths }}</textarea>
+                <p class="hint">One JSONPath per line; the first path that yields a value wins.</p>
+              </td>
+              <td>
+                <label class="sr-only" for="transform__{{ row.target }}">{{ row.label }} transform</label>
+                <select id="transform__{{ row.target }}" name="transform__{{ row.target }}">
+                  {% for name, help in transforms %}
+                    <option value="{{ name }}"{% if name == row.transform %} selected{% endif %}>{{ name }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td>
+                <label class="sr-only" for="default__{{ row.target }}">{{ row.label }} default</label>
+                <input type="text" id="default__{{ row.target }}" name="default__{{ row.target }}"
+                       value="{{ row.default }}" class="mono" />
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="case-actions">
+      <button class="btn btn-primary" type="submit">Save mapping</button>
+      <span class="hint">
+        {{ rule_count }} rule{{ rule_count|pluralize }} stored. An empty row removes that rule; a
+        completely empty table clears the mapping and restores the literal-key fallback.
+      </span>
+    </div>
+  </form>
+
+  <details>
+    <summary>What the transforms do</summary>
+    <dl class="meta">
+      {% for name, help in transforms %}
+        <dt class="mono">{{ name }}</dt><dd>{{ help }}</dd>
+      {% endfor %}
+    </dl>
+  </details>
+</div>
+
+<div class="card">
+  <h2>Tokens</h2>
+  {% if tokens %}
+    <div class="table-wrap">
+      <table class="data-table">
+        <caption class="sr-only">Ingestion tokens for {{ source.name }}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Organisation</th>
+            <th scope="col">Prefix</th>
+            <th scope="col">Created</th>
+            <th scope="col">Last used</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for token in tokens %}
+            <tr>
+              <td>{{ token.name }}</td>
+              <td>{{ token.organisation.name }}</td>
+              <td class="mono">{{ token.prefix }}</td>
+              <td class="mono dim">{{ token.created_at|date:"Y-m-d H:i" }}</td>
+              <td class="mono dim">{{ token.last_used_at|date:"Y-m-d H:i"|default:"never" }}</td>
+              <td>
+                {% if token.revoked_at %}
+                  <span class="pill pill-off">Revoked</span>
+                  <span class="mono dim">{{ token.revoked_at|date:"Y-m-d H:i" }}</span>
+                {% else %}
+                  <span class="pill pill-on">Active</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">
+      A token is bound to one organisation, and it is the only routing fact: the same feed can only
+      receive alerts for the organisation that owns it.
+    </p>
+  {% else %}
+    <p class="empty">No tokens — nothing can post to this feed yet.</p>
+    <p class="hint">Mint one from <a href="{% url 'ui-settings-sources' %}">Settings → Sources</a>.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Advanced — stored configuration</h2>
+  <p class="hint">
+    The whole storage object, exactly as the engine reads it. <code>value_maps</code> (extra severity
+    names) is edited here, because it is not a field of the table above.
+  </p>
+  {% if failed_form == 'json' %}
+    {% comment %}
+    Every message, not just the page-level ones: a JSON config can fail on one rule, and an error the
+    operator cannot see is an error they cannot fix.
+    {% endcomment %}
+    {% for target, row_errors in editor_errors.items %}
+      {% for message in row_errors %}<p class="msg msg-error">{{ message }}</p>{% endfor %}
+    {% endfor %}
+  {% endif %}
+  <form method="post" action="{% url 'ui-settings-source-detail' source.id %}">
+    {% csrf_token %}
+    <input type="hidden" name="form" value="json" />
+    <label for="mapping_json">mapping_config</label>
+    <textarea id="mapping_json" name="mapping_json" rows="16" class="mono" spellcheck="false"
+              aria-describedby="mapping-json-hint">{{ mapping_json_text }}</textarea>
+    <div class="case-actions">
+      <button class="btn btn-primary" type="submit">Save JSON</button>
+      <span class="hint" id="mapping-json-hint">
+        Use <span class="mono">{}</span> to clear the mapping. One object, two views: saving here is the
+        same store the table above writes.
+      </span>
+    </div>
+  </form>
+  <p class="hint">
+    The endpoint is source-less: every sender posts to
+    <code>POST /api/v1/alerts/webhook/</code> with <code>X-Webhook-Secret</code>
+    (or <code>Authorization: Bearer</code>) and the token decides the mapping and the organisation.
+  </p>
+</div>
+{% endblock %}

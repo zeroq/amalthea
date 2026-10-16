@@ -180,6 +180,7 @@ def test_the_same_ref_from_a_different_source_stays_separate(default_org) -> Non
 def test_the_wire_source_and_the_ingestion_source_are_recorded_separately(default_org) -> None:
     """REVIEW M2/M3: the caller's verbatim string and our own feed record are distinct."""
     source = IngestionSource.objects.create(
+        organisation=default_org,
         slug="office365-hook",
         name="Office 365",
         default_severity=2,

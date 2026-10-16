@@ -34,6 +34,7 @@ PHISHING = {
 @pytest.fixture
 def source(db: None, default_org: Organisation) -> IngestionSource:
     return IngestionSource.objects.create(
+        organisation=default_org,
         slug="o365",
         name="Microsoft 365 hook",
         mapping_config={
@@ -59,6 +60,7 @@ def source_token(source: IngestionSource, default_org: Organisation) -> str:
 @pytest.fixture
 def locked_source(db: None, default_org: Organisation) -> IngestionSource:
     src = IngestionSource.objects.create(
+        organisation=default_org,
         slug="locked",
         name="Secret-protected feed",
         mapping_config={},
@@ -137,7 +139,9 @@ def test_the_mapping_config_wins_over_a_literal_key(
 def test_a_source_without_a_mapping_still_works_via_literal_keys(
     db: None, default_org: Organisation
 ) -> None:
-    src = IngestionSource.objects.create(slug="bare", name="Bare", mapping_config={})
+    src = IngestionSource.objects.create(
+        organisation=default_org, slug="bare", name="Bare", mapping_config={}
+    )
     IngestionToken.create_token(source=src, organisation=default_org, name="bare token")
     token = IngestionToken.objects.get(source=src)
     token.delete()
@@ -180,7 +184,10 @@ def test_a_valid_token_is_accepted(source: IngestionSource, source_token: str) -
 def test_a_legacy_plaintext_secret_still_verifies(db: None, default_org: Organisation) -> None:
     """Rows created before hashing existed hold the secret verbatim; they must keep working."""
     src = IngestionSource.objects.create(
-        slug="legacy", name="Legacy", webhook_secret_hash="plain-secret"
+        organisation=default_org,
+        slug="legacy",
+        name="Legacy",
+        webhook_secret_hash="plain-secret",
     )
     # Migrate the legacy secret to a token
     IngestionToken.objects.create(
@@ -416,7 +423,9 @@ def test_throttling_is_per_source_not_global(
     from django.core.cache import cache
 
     cache.clear()
-    src2 = IngestionSource.objects.create(slug="quiet", name="Quiet", mapping_config={})
+    src2 = IngestionSource.objects.create(
+        organisation=default_org, slug="quiet", name="Quiet", mapping_config={}
+    )
     IngestionToken.create_token(source=src2, organisation=default_org, name="quiet token")
     token2 = IngestionToken.objects.get(source=src2)
     token2.delete()

@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from alerts.models import Alert
     from cases.models import Case, Task
     from identity.models import User
+    from ingest.models import IngestionSource
     from observables.models import Observable
 
 
@@ -189,6 +190,36 @@ def resolve_case(user: User | None, identifier: str, *, write: bool = False) -> 
     return case if shares.exists() else None
 
 
+def resolve_ingestion_source(
+    user: User | None, source_id: str, *, write: bool = False
+) -> IngestionSource | None:
+    """Resolve an ingestion source the caller may reach (org-owned since ADR-009).
+
+    An `admin` reaches own-org sources, a `superAdmin` any, everyone else none. Uniform `None` for
+    "not found" and "another tenant's" alike — a 403 would confirm that a source exists (ADR-006's
+    `write=True` denial of viewers applies here too). A non-UUID id is a uniform 404, not a 500.
+    """
+    from ingest.models import IngestionSource
+
+    if write and is_viewer(user):
+        return None
+
+    if _is_superadmin(user):
+        try:
+            return IngestionSource.objects.get(pk=source_id)
+        except (IngestionSource.DoesNotExist, ValidationError, ValueError, TypeError):
+            return None
+
+    org_id = _user_org_id(user)
+    if org_id is None:
+        return None
+
+    try:
+        return IngestionSource.objects.get(pk=source_id, organisation_id=org_id)
+    except (IngestionSource.DoesNotExist, ValidationError, ValueError, TypeError):
+        return None
+
+
 def resolve_alert(user: User | None, alert_id: str, *, write: bool = False) -> Alert | None:
     """Resolve an alert the caller may reach (direct org ownership).
 
@@ -314,6 +345,7 @@ __all__ = [
     "org_q",
     "resolve_alert",
     "resolve_case",
+    "resolve_ingestion_source",
     "resolve_observable",
     "resolve_task",
 ]

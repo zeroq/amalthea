@@ -186,6 +186,9 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     # CASCADE, deliberately not SET_NULL: a bearer token whose owner no longer exists is a
     # credential nobody can revoke.
     ("identity", "ApiKey", "user"): models.CASCADE,
+    # IngestionSource is itself tenant data (ADR-009): PROTECT, so a tenant that owns a feed
+    # cannot be deleted out from under it — reported by `organisation_blockers`, not raised bare.
+    ("ingest", "IngestionSource", "organisation"): models.PROTECT,
     # IngestionToken: binds a source to an org; PROTECT on org so a tenant with tokens
     # cannot be deleted, CASCADE on source so retiring the source removes its tokens.
     ("identity", "IngestionToken", "organisation"): models.PROTECT,
@@ -249,10 +252,10 @@ def test_fk_audit_covers_the_whole_model_inventory() -> None:
         f"stale={sorted(set(EXPECTED_ON_DELETE) - set(actual))}"
     )
     # 59 = 57 + TaskNote x2 (task, created_by).
-    # 60 = 59 + IngestionToken.created_by. Kept as a literal on purpose: it is a tripwire
-    # for a model silently dropping out of `OWN_APPS`, and `EXPECTED_ON_DELETE` already pins the
-    # exact set, so a bump here is always a real change.
-    assert len(actual) == 60, f"expected the full FK set, found only {len(actual)}"
+    # 61 = 60 + IngestionSource.organisation (ADR-009: the feed became tenant data). Kept as a
+    # literal on purpose: it is a tripwire for a model silently dropping out of `OWN_APPS`, and
+    # `EXPECTED_ON_DELETE` already pins the exact set, so a bump here is always a real change.
+    assert len(actual) == 61, f"expected the full FK set, found only {len(actual)}"
 
 
 @pytest.mark.django_db
@@ -587,7 +590,7 @@ def test_delete_semantics_deleting_an_organisation_or_feed_unlinks(vocab) -> Non
     org = Organisation.objects.get_or_create(name="acme")[0]
     member = User.objects.create(username="bob", org=org)
     case = Case.objects.create(title="c", status=vocab["case_status"], owner_org=org)
-    source = IngestionSource.objects.create(slug="splunk", name="Splunk")
+    source = IngestionSource.objects.create(organisation=org, slug="splunk", name="Splunk")
     alert = Alert.objects.create(
         type="t",
         source="s",

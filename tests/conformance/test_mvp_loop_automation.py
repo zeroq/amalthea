@@ -73,6 +73,7 @@ def anonymous_api() -> object:
 @pytest.fixture
 def source(db: None, analyst: User) -> IngestionSource:
     source = IngestionSource.objects.create(
+        organisation=analyst.org,
         slug="o365",
         name="Microsoft 365 hook",
         mapping_config={

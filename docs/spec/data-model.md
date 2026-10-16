@@ -35,10 +35,17 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
   `secret_hash` (argon2, plaintext shown once) · `revoked_at`/`last_used_at` nullable.
 - Index `ingest_token_src_revoked_idx ("source","revoked_at")`. Binds a source to exactly one org;
   the webhook's `owner_org` comes from the token, never the body.
+- **Invariant (ADR-009):** `organisation` must be the organisation that owns `source`. A cross-table
+  CHECK cannot express it, so it is enforced in `IngestionToken.save()` and `create_token()`
+  (`ValidationError`) — a mismatch is a cross-tenant ingest: another org's alerts written through this
+  org's credential against the other org's mapping.
 
 ### AuditLog (`identity_auditlog`, extends `UUIDModel`) — ADR-004 Q5
 - `actor` — FK → `User`, `SET_NULL`, `db_index=False` · `actor_org`/`target_org` — FK →
   `Organisation`, `SET_NULL` · `action`, `target_type`, `target_id` (CharFields) ·
+  `details` — JSONB, `default=dict` (added 2026-10-16, deviation **MAP-7**; non-secret structured
+  detail, today `{"changed": ["fields.title.paths", …]}` for a mapping edit — dot-paths into the
+  changed object, **never values**) ·
   `ip` (GenericIPAddressField, nullable) · `created_at` (`auto_now_add`, indexed).
 - Indexes `auditlog_actor_created_idx ("actor","-created_at")`,
   `auditlog_tgt_org_created_idx ("target_org","-created_at")`,
@@ -55,17 +62,23 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 
 ## ingest
 
-### IngestionSource (`ingestion_source`, extends `UUIDModel` + `TimeStampedModel`)
-- `slug` — **unique** · `name` · `mapping_config` — JSONB (the JSON-path mapping table).
+### IngestionSource (`ingestion_source`, extends `UUIDModel` + `TimeStampedModel`) — org-owned (ADR-009)
+- `organisation` — FK → `Organisation`, `PROTECT`, `related_name="ingestion_sources"`, **NOT NULL**.
+  The feed is tenant data (ADR-009 reverses ADR-008 §4), so an org that still owns one cannot be
+  deleted, and `organisation_blockers` reports it as `ingestionSources` (the FK is the only
+  DB-enforced half; the refusal is what makes it *explicable*).
+- `slug` — **unique per organisation** (`ingestion_source_org_slug_uniq (organisation, slug)`) ·
+  `name` · `mapping_config` — JSONB (the JSON-path mapping table, v1 flat or v2 `fields`).
 - The slug left the webhook URL on 2026-10-15 (ADR-008): the route is `/api/v1/alerts/webhook/`
   and the token does the routing. `slug` is what a name typed in Settings → Sources resolves to
-  (`slugify`, get-or-create), and `webhook_secret_hash` is the legacy route a secret was presented
-  on directly.
+  (`slugify`, get-or-create **within the token's organisation**, ADR-009), and `webhook_secret_hash`
+  is the legacy route a secret was presented on directly.
 - `default_severity` — SmallInteger, default 2, choices `SEVERITY_CHOICES` 1..4.
-- `correlation_enabled` — BooleanField, default True.
-- `webhook_secret_hash` — CharField(255), blank; hasher-backed secret (argon2; legacy plaintext
-  compare supported in `ingest/views.py::_authenticate`).
+- `correlation_enabled` — BooleanField, default true.
 - Constraint: `ingestion_source_severity_range`.
+- Read/write UI: `GET /settings/sources/<uuid>` (`ui-settings-source-detail`) — `admin` for its own
+  organisation's feeds, `superAdmin` for any (audited `cross_org_read`), everyone else a uniform 404
+  (ADR-006 gate before the ADR-009 org gate).
 
 ## alerts
 

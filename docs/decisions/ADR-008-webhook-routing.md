@@ -3,6 +3,9 @@
 **Status:** Accepted (2026-10-15) — implemented
 **Date:** 2026-10-15
 **Owner:** planner
+**Amended:** decision 4 by **ADR-009** (2026-10-16): `IngestionSource` is org-owned — a token's source
+must belong to the token's organisation, `slug` is unique *per organisation*, and the feed gained a
+gated UI. Decisions 1–3 and 5 stand unchanged.
 **Extends:** ADR-004 decision 6 (ingest is token-routed) and ADR-004 Q6 (`IngestionToken`)
 **Supersedes:** the `{source_id}` path segment in AGENTS.md §2 Module A and ADR-002 §D9 (as amended
 2026-10-15)
@@ -50,7 +53,10 @@ org stamp.
 4. **`IngestionSource` survives as a reusable mapping profile**, not as a route segment: `mapping_config`,
    `default_severity`, `correlation_enabled` stay keyed by a unique, global `slug`, and many tokens (one
    per org) may reference one profile. Its read-only `/sources` view does not grant a new project-wide
-   invariant — sources are **not** org-owned and are still not CRUD-managed in the UI.
+   invariant — sources are **not** org-owned and are still not CRUD-managed in the UI. *(Decision 4's
+   "not org-owned" clause was reversed by **ADR-009**, 2026-10-16, once `mapping_config` gained a real
+   language and an editor; the rest of decision 4 — the source survives as a mapping profile keyed by
+   `slug` — is unchanged, except that `slug` is now unique per organisation.)*
 5. **A source name provisions a profile on demand.** The Settings → Sources create form takes a free-text
    *source name* instead of a picker; it is `slugify`-ed and `get_or_create`-d (`IntegrityError` → refetch),
    which is the first UI writer for the previously write-less table. Provisioning a new profile writes

@@ -415,6 +415,75 @@ Evidence: `PLAN-2026-10-16-token-created-modal.md` §6/§10 — AC1–AC8, 8 ren
 cases; full suite 1918 passed / 3 skipped (109 s), `ruff` clean, `make css-check` clean.
 
 
+## Wave 2026-10-16 — the per-source field mapping engine (P1)
+
+Plan: `docs/planning/PLAN-2026-10-16-source-field-mapping.md` §8 P1. Scope of this wave: the pure
+engine (`ingest/mapping.py`), the receiver and pipeline wiring, and its tests. The editor, the org
+gate (ADR-009) and the preview dialog are P2—P4 and are not in this diff.
+
+| ID | Plan / AGENTS.md says | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **MAP-1** | AC4: a legacy flat `mapping_config` ingests "exactly as it did" | **A legacy severity is no longer `int()`-truncated** | `_coerce_severity` did `int(value)`, so `90` → rejected but `3.7` → **3** and `True` → 1. The replacement (`_severity_from_int`) accepts only integers, integral floats and numeric strings. A vendor sending `3.7` has not told us "High", and rounding a triage field down silently is the failure this wave exists to remove. `ingest/mapping.py`. |
+| **MAP-2** | AC4.3: an unconfigured source ingests "without error" | **A rule that matched nothing now also emits a warning** (the old reader was silent when a configured JSONPath missed) | AC7 asks that every tolerance be recorded; the old silence was only "safe" because nothing was configurable. Silent when *no* rule exists, which is the honest case: an unconfigured feed never expected that field. `ingest/mapping.py::apply_mapping`. |
+| **MAP-2a** | The pipeline's `severity_defaulted: …` text | **The engine now emits that same prefix, with the reason appended** | `severity` is the one target whose fallback is always reported, and `test_ingest_pipeline.py` pins the prefix. Text is now `severity_defaulted: $.severity, $.severityLevel; defaulted to 2` (was `…no severity mapping; defaulted to 2`). The pipeline branch is unchanged and still fires for callers that pass no severity. |
+| **MAP-2b** | `ingestion_warnings` was `{"warnings": [...]}` | **Gains a `"mapping"` key**: `[{"field", "reason", "paths"?, "value_preview"?}]` | The string list is for humans and is pinned by tests; the structured list is what P4's editor and the alert view can render per field. Additive, so `ingestion_warnings["warnings"]` is untouched. `ingest/pipeline.py`, `ingest/mapping.py::FieldWarning`. |
+| **MAP-3** | The legacy reader returned the first *non-`None`* match | **An empty/whitespace-only string is now "no answer"** | `""` is a payload that did not fill the field, so the next candidate path (or the literal key) gets a turn — which is the entire purpose of a candidate list. `mapping.py`. |
+| **MAP-3a** | The legacy reader took `int` for severity from the first candidate that answered at all | **A candidate that cannot become a severity no longer stops the search** | `{"severity": "$.severity"}` against a 0–100 score of `90` used to end the search at the first key and default; it now tries `severityLevel`/literal keys too, then defaults with a warning that names the paths. `mapping.py`. |
+| **MAP-4** | (no plan statement) | **Compiled JSONPath expressions are cached process-wide** | Measured: `jsonpath_ng.parse` costs ~1.8 ms, and a configured source walks up to 7 targets x 8 paths per webhook — i.e. tens of ms of Lark per alert, re-parsing strings that have not changed since the source was saved. Cache keyed by the source string, bounded at 512 entries, deliberately caching a `None` (bad path) result. 1.8 ms → 1.0 µs. `ingest/mapping.py::_compile`. |
+
+**Confirmed by this wave, not new deviations.** `IngestionSource.default_severity` was written by no
+code and read by no reader (`ingest/pipeline.py` used the module constant `DEFAULT_SEVERITY`); the
+engine now threads it through `default_severity=`, with the constant as the floor for direct pipeline
+callers (`test_ingest_pipeline.py` passes no severity, so that branch stays live). `_verify_secret`
+in `ingest/views.py` remains dead code (pre-existing, unchanged by this wave; `TODO.md`).
+
+Evidence: `test_mapping_engine.py` — 184 cases (AC1 purity via a cursor tripwire, AC2 = the synonym
+table + score bands, AC3 = the stored CrowdStrike payload end to end through `/api/v1/alerts/webhook/`,
+AC4/AC5 = legacy shapes and 132 no-raise combinations of malformed config × non-object payload, AC6 =
+`default_severity`, AC7 = the structured warnings); the five pre-existing flat-`mapping_config` fixture
+files pass unchanged (86 tests); full suite 2181 passed / 3 skipped (113 s), `ruff` clean.
+
+
+## Wave 2026-10-16 — the org-owned source and the mapping editor (P2 + P3)
+
+Plan: `docs/planning/PLAN-2026-10-16-source-field-mapping.md` §8 P2/P3. P2 (`IngestionSource` becomes
+org-owned, ADR-009) has no *behavioural* deviation beyond the ADR itself; P3 is the mapping editor
+(`ingest/editor.py` + `ui/views.py::_save_source_mapping` + the rewritten
+`ui/templates/ui/source_detail.html`) and the four rows below.
+
+| ID | Plan says | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **MAP-5** | §7.3: "per-field errors via a Django `Form`" | **Hand-parsed POST with per-row errors** (no `Form`, no `ModelForm`) | The repo contains no Django `Form` anywhere; every POST view parses `request.POST` by hand and re-renders with the input kept (`settings_token_create` is the model). Introducing the first `Form` here would make this the one page that behaves differently on a validation failure — and the schema it would validate against (`validate_config`) is not a form. `ingest/editor.py` · `test_mapping_editor.py` (66 cases), `test_settings_source_mapping.py` (AC11: a bad path is a 200 that echoes `name</textarea>` and writes nothing). |
+| **MAP-6** | §7.2: "one path per line" (unspecified separator) | **Newline only** — never a comma | A JSONPath may legitimately contain a comma (`$['a','b']` union, `$.x[1,2]`, a filter's `?(@.n == 'a,b')`), so a comma separator would silently split valid paths into garbage. `ingest/editor.py::parse_paths` · `test_mapping_editor.py::TestPathsAreNewlineSeparatedOnly`. |
+| **MAP-7** | §6: the audit row carries the changed keys | **`identity.models.AuditLog.details` is new** (`JSONField(default=dict, blank=True)`) | There was no structured detail column, and the alternative — stuffing `['fields.title.paths', …]` into `message` — would make the changed keys unqueryable and unrendered forever. `details={"changed": [...]}` holds dot-paths into the config, **never values**: an audit row outlives the config and must not become a copy of it. `identity/audit.py::record_ingestion_source_updated` · `test_mapping_editor.py::TestTheEditorChangedKeys`, `test_settings_source_mapping.py` (`"$.name" not in str(log.details)`). |
+| **MAP-8** | §5.1 rule schema lists a `required` per field | **No `required` key, and no "required" column in the table** | The v2 schema has no `required`: absence is already covered by a rule's own `default` and by `on_missing`, and a "required" flag would only be a promise the ingest path cannot keep (a webhook may legitimately lack the field — `apply_mapping` never raises, by design). Adding a column with no reader is how a schema grows a lie. `ingest/mapping.py` (`_normalize` reads `paths`/`transform`/`default`/`max_length`/`bands`/`severity_default`) · `test_mapping_engine.py` (config validation), `test_schema_mutation_guards.py`. |
+
+**Behaviour found and pinned while implementing P3 (not deviations, but worth naming).**
+
+* **An empty row deletes the rule**, which is the only delete control the table has — and a preserved
+  `bands`/`max_length` may **not** resurrect it. A v2 rule with no `paths` and no `default` answers
+  *nothing* while still shadowing the literal-key fallback, so "clearing" a row would have silently
+  stopped that field from being read at all. `ingest/editor.py::build_table_config` ·
+  `test_mapping_editor.py::test_a_preserved_bands_list_cannot_resurrect_a_cleared_rule`.
+* **AC12 is measured against the table's own rendering**, not against the raw column: the table omits
+  `transform: "str"` (the engine's default), so a config that spells it out is canonicalised rather
+  than reported as changed on every save — while a **legacy** config is deliberately *not* normalised,
+  because converting the shape is a real change (the literal keys stop being fallbacks).
+  `ingest/editor.py::is_noop_save` · `test_settings_source_mapping.py::TestTheNoOpSave`.
+* **`validate_config`'s shape branch now matches `_normalize`'s** (`version != 2 and fields is not a
+  dict`): `{"version": 2}` was validated as *legacy* while being read as v2-with-no-rules, i.e. a
+  config that validated and then did something else. `ingest/mapping.py` ·
+  `test_mapping_editor.py::test_a_v2_config_without_fields_is_valid`.
+* **A legacy config's `value_maps` is not validated** (the legacy branch returns before it) and is
+  preserved verbatim by a table save, so it becomes *live* — and validated — on the first save that
+  converts the config. Pinned so the surprise is documented rather than discovered.
+
+Evidence: `test_mapping_editor.py` (66 cases, pure — including an import-level guard that the editor
+never imports Django, and a cursor tripwire); `test_settings_source_mapping.py` 16 → 34 cases (AC11–AC14
+added: write+audit, echo-on-error, no-op, JSON box, and the analyst/foreign-admin 404 with the
+cross-org superAdmin write audited on both organisations).
+
+
 ## Evidence index
 
 - `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §13 — full P7/P8/P10/P11 records
