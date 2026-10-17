@@ -87,6 +87,29 @@ class MarkdownRenderingTests(TestCase):
         self.assertIn('href="mailto:test@example.com"', out)
         self.assertIn("noopener", out)
 
+    def test_protocol_relative_link_is_neutralised(self) -> None:
+        """TODO §11.3: `//host` carries no scheme for the allow-list to see, so the href is dropped.
+
+        Not XSS — a same-scheme link to an arbitrary host is a phishing aid. The link text stays
+        readable, but there is no navigable target left behind.
+        """
+        out = render_markdown("[click me](//evil.example)")
+        self.assertNotIn("href", out)
+        self.assertIn("click me", out)
+
+    def test_protocol_relative_link_with_port_and_path_is_neutralised(self) -> None:
+        """The neutralisation keys on the `//` prefix, not on the shape of the host that follows."""
+        out = render_markdown("[x](//evil.example:8080/path)")
+        self.assertNotIn("href", out)
+        self.assertIn("x", out)
+
+    def test_scheme_bearing_and_root_relative_links_survive(self) -> None:
+        """Regression guard against over-stripping: only protocol-relative targets are affected."""
+        out = render_markdown("[a](https://example.com) [b](/path) [c](mailto:a@b.c)")
+        self.assertIn('href="https://example.com"', out)
+        self.assertIn('href="/path"', out)
+        self.assertIn('href="mailto:a@b.c"', out)
+
     def test_nested_emphasis_renders(self) -> None:
         out = render_markdown("**bold _italic_**")
         self.assertIn("<strong>", out)

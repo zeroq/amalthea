@@ -86,7 +86,7 @@ hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the
 | **13** | **Orphaned routes** | `ui-case-attachment-list` (+ its now-dead `ui/case_attachments.html`) and `ui-case-attachment-detail` (405) are reachable by URL only — the case page renders its own attachment table. `ui-case-export` / `ui-taxonomy` are now wired (P1), so this row supersedes the old claim. | **Low** — dead surface; delete or build an entry point. |
 | **14** | **§12.6 — Taxonomy: three cards break the mono convention for their values — SHIPPED 2026-10-17** | `ui/templates/ui/taxonomy.html` now renders the **Case Statuses**, **Alert Statuses** and **Observable Types** value / name cells as `<td class="mono">`, matching the four code cards (**Case Scope**, **Case Phase**, **Case Type**, **Data Classification**). | **Done** — visual consistency on the Taxonomy page; display-only, no behaviour change. |
 | **15** | **§12.7 — Cases list: make the case title clickable — SHIPPED 2026-10-17** | `ui/templates/ui/case_list.html` now links the **case title** to `ui-case-detail` (same URL as the **case number**); it is a real `<a>`, so keyboard access needs no JS. | **Done** — small UX improvement. |
-| **16** | **§12.8 — Case Details (General) + verdict taxonomy + close flow — SHIPPED 2026-10-17** | Code shipped (`PLAN-2026-10-17-case-verdict-close-flow.md`, `2476edb`); **verified inline 2026-10-17 at 18/18 ACs — provisional** (`docs/verification/VERIFY-2026-10-17-case-verdict-close-flow.md`; awaiting an independent `verifier` re-run). Inline metadata edits, Tags row, Verdict on Case + Alert + Taxonomy, enforced close (Verdict + closing comment) and close-propagation to linked alerts. | **Done** — pending independent verification. |
+| **16** | **§12.8 — Case Details (General) + verdict taxonomy + close flow — SHIPPED 2026-10-17** | Code shipped (`PLAN-2026-10-17-case-verdict-close-flow.md`, `2476edb`); **independently verified 2026-10-17 at 18/18 ACs** (`docs/verification/VERIFY-2026-10-17-case-verdict-close-flow.md`, re-issued in `554bb0d`; one new low deviation **D-N1** → §12.8-fu3). Inline metadata edits, Tags row, Verdict on Case + Alert + Taxonomy, enforced close (Verdict + closing comment) and close-propagation to linked alerts. | **Done** — pending the security pass (§12.8-fu2) before `[x]`. |
 | **17** | **§12.9 — UI layout/style standardization** | Establish and apply a small set of UI/layout rules across the UI: (1) Input field height must match the button height next to it. (2) For action columns in tables, prefer compact icon-only actions with accessible names (not full text buttons) where space-limited and common. (3) Standardize table markup/styles: the table lives inside a `.card`, and filters go in a separate card above the table (use **Observables List View** as the reference). Codify in a short "UI Layout Guidelines" note (e.g. in `ui/README.md` or `docs/spec/ui-style.md`) and apply to affected views (e.g. Cases, Alerts, Tasks, Users, Tokens) to avoid drift. | **Low** — global consistency; reduces CSS/markup churn. |
 
 
@@ -487,10 +487,14 @@ semantics, so they need a policy call before a fix.
   placeholder; (3) minimum: gate the GET views to `analyst`+ **and** mask header values. Note (3)
   conflicts with the D1 AC "round-trips headers", so the D1 test must change with it. Add a test asserting
   a viewer (and cross-tenant) GET never returns raw header values.
-- [ ] **11.3 — L1: protocol-relative `href` survives the sanitizer.** `[x](//evil.example)` renders as
-  `<a href="//evil.example">` (`ui/markdown.py`; `_ALLOWED_URL_SCHEMES` only sees the inherited scheme).
-  Not XSS — a same-scheme link to an arbitrary host (phishing aid). Accept as low, or post-filter `href`
-  values whose `urlsplit()` yields an empty scheme **and** a `//` prefix.
+- [x] **11.3 — L1: protocol-relative `href` survives the sanitizer — FIXED 2026-10-17.** `ui/markdown.py`
+  registers a `markdown-it` core rule (`_strip_protocol_relative_links`, after the `inline` pass) that
+  drops the `href` of any link whose target has an empty `urlsplit()` scheme **and** a `//` prefix: the
+  link text stays readable but is inert. Root-relative (`/path`) and scheme-bearing (`https:`, `mailto:`)
+  links are untouched, and `nh3` remains the single trusted boundary (the filter runs *before* it, adding
+  no new trusted code). Guards: `test_ui_markdown.py::test_protocol_relative_link_is_neutralised`,
+  `::test_protocol_relative_link_with_port_and_path_is_neutralised`,
+  `::test_scheme_bearing_and_root_relative_links_survive`.
 
 ### 11.4 — P3 (procedures/TTP UI) review follow-ups (2026-10-12)
 
@@ -661,11 +665,19 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
   status), **V-3** (UI timeline kind is now `status-changed`). Tests:
   `tests/conformance/test_case_verdict_close.py`, `test_ui_case_verdict.py` (27) plus updated
   `test_ui_loop.py` / `test_realtime.py` / `test_viewer_readonly_ui.py` / `test_tenant_scoping.py`.
-- [ ] **12.8-fu1 — Independent verification re-run of §12.8 (case verdict + enforced close flow).**
-  The inline pass at 18/18 ACs in `docs/verification/VERIFY-2026-10-17-case-verdict-close-flow.md` is
-  **provisional** — the `verifier` subagent was unreachable (503) throughout. Re-run it once the service
-  recovers, re-issue the report, then flip §12.8 to `[x]` and add it to `COMPLETED.md`. Source: §12.8
-  verification report; user request 2026-10-17. **Blocks:** §12.8 → `[x]` / `COMPLETED.md`.
+- [x] **12.8-fu1 — Independent verification re-run of §12.8 — DISCHARGED 2026-10-17.** Re-run at `79793f5`
+  by the `qa-tester` subagent standing in for the `verifier` (still 503 then, so the substitution is
+  recorded in the report's provenance): **18/18 ACs Met**, 0 Not Met, 0 Deviated; report re-issued in
+  `554bb0d`. The re-run added one low deviation (**D-N1** — a refused close flashes + redirects but does
+  not re-open the dialog, contrary to plan §9.3, tracked under §12.8-fu3 below), corrected two citation
+  drifts in the superseded report, and **withdrew** its non-reproducible "pre-existing failure" claim
+  (old O5). **§12.8 still awaits the security pass (§12.8-fu2) before it can flip to `[x]`.**
+- [ ] **12.8-fu3 — Resolve deviation D-N1 (open; no decision taken yet).** Plan §9.3 promises the close
+  dialog is "re-rendered open" on refusal; the shipped behaviour is `messages.error` + redirect, which is
+  the same affordance every other inline-edit failure uses. Either implement the re-open (and add a test
+  asserting the error is re-rendered) **or** amend the plan prose to match what shipped — the independent
+  re-run (`VERIFY-2026-10-17-case-verdict-close-flow.md`, D-N1) leans toward the amendment for
+  consistency, but that is a recommendation, not a decision. Source: independent re-run 2026-10-17.
 - [ ] **12.8-fu2 — Security review of the §12.8 surface** (verdict model, close rule, General-tab inline
   edits, Tags row, close/field/tag modals). No `security-auditor` pass has run on this scope (also 503).
   Focus: org scoping + role gating (`@not_viewer`, `require_POST`) on `ui-case-close` /

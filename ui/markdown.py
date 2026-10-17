@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import functools
 from typing import Final
+from urllib.parse import urlsplit
 
 import nh3
 from django.utils.html import escape
 from markdown_it import MarkdownIt
+from markdown_it.rules_core.state_core import StateCore
 
 # CommonMark parser with raw HTML disabled (html=False means HTML in source is escaped as text).
 _MD: Final = MarkdownIt("commonmark", {"html": False})
@@ -52,6 +54,29 @@ _ALLOWED_ATTRIBUTES: Final = {
 
 # Only these URL schemes are permitted in href/src attributes.
 _ALLOWED_URL_SCHEMES: Final = frozenset({"http", "https", "mailto"})
+
+
+def _strip_protocol_relative_links(state: StateCore) -> None:
+    """Drop the `href` of a protocol-relative link (`//host/path`), keeping its text.
+
+    CommonMark accepts `[x](//evil.example)`, and such a target carries **no scheme** for
+    `_ALLOWED_URL_SCHEMES` to inspect -- it inherits the page's, so the link becomes a
+    same-scheme pointer at an arbitrary host (a phishing aid, not XSS; TODO §11.3). The
+    href is removed rather than rewritten, so the text stays readable but is inert.
+    Root-relative (`/path`) and scheme-bearing (`https:`, `mailto:`) links are untouched.
+    """
+    for token in state.tokens:
+        for candidate in [token, *(token.children or [])]:
+            if candidate.type != "link_open":
+                continue
+            href = candidate.attrGet("href")
+            if href and href.startswith("//") and not urlsplit(href).scheme:
+                if candidate.attrs is not None:
+                    candidate.attrs.pop("href", None)
+
+
+# Runs after CommonMark's inline pass, i.e. once link tokens exist, and before `text_join`.
+_MD.core.ruler.after("inline", "strip_protocol_relative_links", _strip_protocol_relative_links)
 
 
 @functools.lru_cache(maxsize=512)
