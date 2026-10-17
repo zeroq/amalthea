@@ -12,9 +12,11 @@ field-mapping wave shipped** — the mapping engine, the
 re-map control and the P5 health card; §6.17 retro-mapping done, §6.18 dead code removed 2026-10-17 —
 `PLAN-2026-10-16-source-field-mapping.md`). Earlier: **case pages are authorable in the UI** — §12.5 code shipped
 (`PLAN-2026-10-14-case-pages-ui.md`): `ui-case-page-create/-edit/-delete`, a `can_mutate`-gated Pages card,
-modal create/edit/delete, Markdown-rendered content, `live.js` re-fetch; **verification pending**, and five
+modal create/edit/delete, Markdown-rendered content, `live.js` re-fetch; **verified 2026-10-17 at 14/14 ACs
+(provisional, planner-authored inline — awaiting an independent `verifier` re-run;
+`docs/verification/VERIFY-2026-10-17-case-pages-ui.md`), one new low-severity modal-id finding V1**, and five
 shared-layer defects found and fixed on the way through the modal-contract + tab stylesheet — see the plan
-§11 and `docs/spec/deviations.md` W10.4). Earlier: **cases view fixes** — `GET /cases/` no longer 404s (new trailing-slash
+§11 and `docs/spec/deviations.md` Wave 10.4). Earlier: **cases view fixes** — `GET /cases/` no longer 404s (new trailing-slash
 middleware, 301/308) and **New case moved off the left rail into a modal** on the cases list
 (`PLAN-2026-10-13-cases-view-fixes.md`; independently verified **Pass** 16/16 ACs + security-reviewed
 0 Critical / 0 High / 0 Medium; `make check` 1689 passed / 3 skipped). Earlier: **§10.2 manual case
@@ -56,7 +58,7 @@ hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the
 | **4** | **§12.2 — The observables-list filter does nothing — SHIPPED 2026-10-15** | `observable_list` now reads `q`/`type` from `request.GET`, passes `observable_types` (the dropdown is no longer empty), stays org-scoped, and tolerates a malformed `type` id. The pager + honest empty state remain §12.1. | **Done** — the control no longer lies; the §12.1 truncation caveat still applies. |
 | **5** | **§12.4 — No bulk actions in the UI** | `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk` (PATCH) exist in the API with per-item isolation; the UI stub was deleted (Q2) and not replaced. | **Medium-High** — a 200-alert morning is single-item work. |
 | **6** | **§10.3–10.6 — Case scope / type / data-classification / phase — SHIPPED 2026-10-15** | `PLAN-2026-10-14-case-classification-fields.md`, commit `822d050`, verified 21/21 ACs. `data_classification` is admin-only and audited; `phase` is a separate field from `CaseStatus` (Q-D2). | **Done** — follow-up is §10.9 (status labels). |
-| **7** | **§12.5 — Case pages: renderable, not authorable** | **Code shipped 2026-10-14, verification pending** (create/edit/delete modal on the General tab). | **Medium** — a documentation surface the analyst can see but never contribute to. |
+| **7** | **§12.5 — Case pages: renderable, not authorable** | **Code shipped 2026-10-14** (`ecbcef6`); **verified 2026-10-17 at 14/14 ACs — provisional** (`docs/verification/VERIFY-2026-10-17-case-pages-ui.md`; inline, awaiting an independent `verifier` re-run). One new low-severity finding (V1, duplicate modal id). | **Medium** — a documentation surface the analyst can see but never contribute to. |
 | **8** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; the ledger already syncs on the case page. |
 | **9** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — an ops/onboarding concern, not triage. |
 | **10** | **§6.13 / §6.16 P4 — Settings: ingestion tokens + audit-log viewer** | Per-org webhook tokens (create/revoke, show-once) + read-only `AuditLog` viewer; also retires the stale webhook copy (§10.8). | **Medium** — self-serve ingestion; the audit viewer is the accountability half. |
@@ -576,13 +578,23 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
   calls the same service, keyboard-reachable, `<dialog>` confirmation (ADR-003: no native `confirm()`), and a
   per-item result summary so partial failures are visible. Source: audit 2026-10-12.
 - [~] **  12.5 — Case pages are renderable but not authorable in the UI.** **Code shipped 2026-10-14**
-  (`PLAN-2026-10-14-case-pages-ui.md`): `ui-case-page-create/-edit/-delete` (all `@not_viewer`
+  (`PLAN-2026-10-14-case-pages-ui.md`, commit `ecbcef6`): `ui-case-page-create/-edit/-delete` (all `@not_viewer`
   `@require_POST`), a `can_mutate`-gated Pages card with modal create/edit/delete, Markdown rendering, and
-  `live.js` re-fetching `#case-pages` on a `page` frame. **Awaiting independent verification** — until that
-  lands this stays open and `COMPLETED.md` must not list it. Two gaps recorded in the plan (§11 `W104-5`,
-  `W104-8`): a page edit/delete writes **no `AuditLog`** row (invisible in the case Audit tab, like
-  tags/tasks), and a **delete publishes no WebSocket frame** (API parity — another analyst sees it only on
-  their next load). Source: audit 2026-10-12; plan 2026-10-14.
+  `live.js` re-fetching `#case-pages` on a `page` frame. **Verified 2026-10-17, 14/14 ACs + 7 supporting
+  checks — provisional** (`docs/verification/VERIFY-2026-10-17-case-pages-ui.md`): all five documented
+  shared-layer defects (F11–F15) confirmed present in current code, and a 20-check behavioural harness
+  (outside the repo) passed with two discriminating mutations. The report is **planner-authored inline**
+  because the `verifier` subagent returned 503 — it is **not independent**, so the `[~]` stays until an
+  independent re-run. One **new, low-severity finding (V1)**: `_modal.html` gives the dialog heading
+  `id="{{ modal_id }}-title"` and `_page_form.html` gives the Title input the same id, so the `<label for>`
+  resolves to the non-labelable `<h2>` and the input loses its accessible name (the same collision already
+  exists in `_task_form_modal_body.html`, so it is a replicated pre-existing smell, not introduced here).
+  Two gaps recorded in the plan (§11 `W104-5`, `W104-8`): a page edit/delete writes **no `AuditLog`** row
+  (invisible in the case Audit tab, like tags/tasks), and a **delete publishes no WebSocket frame** (API
+  parity — another analyst sees it only on their next load). Also: cross-tenant 404s for the three UI
+  routes are enforced by the shared `resolve_case(write=True)` guard but **not enumerated** by any
+  committed test (the write-route sweeps filter to API-only) — observation O1. Source: audit 2026-10-12;
+  plan 2026-10-14; verification 2026-10-17.
 - [x] **12.6 — Taxonomy: three cards break the monospace convention for their values — FIXED 2026-10-17.** `ui/templates/ui/taxonomy.html`
   renders the four code-valued cards — **Case Scope**, **Case Phase**, **Case Type** and **Data
   Classification** — with `<td class="mono">` for the code column, but the three list cards rendered
@@ -643,7 +655,7 @@ search) are the two biggest *feature* gaps and both want a decision first. Ranke
    related-cases panel (the Module B/C differentiator, currently business-card-only).
 3. **§6.16 P6** — global search over cases/alerts/observables (after §12.1/12.2 so it does not search a
    truncated corpus).
-4. **§12.4 / §6.16 P7** — bulk triage, realtime breadth (§12.5 shipped 2026-10-14, verification pending).
+4. **§12.4 / §6.16 P7** — bulk triage, realtime breadth (§12.5 shipped 2026-10-14, verified 2026-10-17 — provisional).
 5. **Security, unchanged** — **§11.2 (M3)** playbook secrets, then **S3** (per-account lockout on the API
    login; wire `identity/ratelimit.py` into `compat/views.py::api_login`, return **429** + `Retry-After`,
    derive the client IP from the proxy chain instead of the client-supplied `X-Forwarded-For`) and **S5**
