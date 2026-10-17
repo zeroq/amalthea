@@ -24,7 +24,7 @@
   src: url("../webfonts/fa-brands-400.woff2") format("woff2");
 }
 
-.fa, .fas, .far, .fab {
+.fa, .fas, .far, .fab, .fa-solid, .fa-regular, .fa-brands {
   font-family: var(--fa-font, "Font Awesome 6 Free");
   font-weight: var(--fa-weight, 900);
   display: inline-block;
@@ -164,4 +164,7 @@
 .fa-calendar-day::before { content: "\f783"; }
 .fa-calendar-week::before { content: "\f784"; }
 .fa-calendar-month::before { content: "\f678"; }
-.fa-calendar-year::before { content: "\f679"; .fa-comments::before{content:"\f086"}.fa-list-check::before{content:"\f0ae"}.fa-paperclip::before{content:"\f0c6"}}
+.fa-calendar-year::before { content: "\f679"; }
+.fa-comments::before { content: "\f086"; }
+.fa-list-check::before { content: "\f0ae"; }
+.fa-paperclip::before { content: "\f0c6"; }

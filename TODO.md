@@ -1,7 +1,12 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-17 (**htmx CSP violation fixed** — `ui/templates/ui/base.html` now declares
+Last updated: 2026-10-17 (**UI icons fixed** — the Font Awesome subset stylesheet never set
+`font-family` on `.fa-solid`, the class every template icon uses, so the codepoints rendered as
+`.notdef` tofu boxes (most visible in Safari); a malformed last line also swallowed
+`.fa-comments`/`.fa-list-check`/`.fa-paperclip`. Both fixed in
+`ui/static/vendor/fontawesome/css/fontawesome-subset.min.css`, guarded by
+`tests/conformance/test_ui_icon_font.py`). Earlier: **htmx CSP violation fixed** — `ui/templates/ui/base.html` now declares
 `<meta name="htmx-config" content='{"includeIndicatorStyles": false}'>`, so htmx stops injecting an
 indicator `<style>` into `<head>` that our `style-src 'self'` refused; guarded by
 `tests/conformance/test_ui_inline_assets.py` (source pin) + a rendered-response check in
