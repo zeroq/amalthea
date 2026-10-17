@@ -428,7 +428,8 @@ observation" named above, only half holds: `ingest/views.py:105::_verify_secret`
 dead (the live verifier is `identity/models.py:156`, called at `:309`), while `canonical_payload` is not
 in `ingest/views.py` at all — it lives at `ingest/references.py:44` and is live (the synthetic
 `source_ref` path via `payload_digest`, and `tests/conformance/test_ingest_pipeline.py:52`), so it must
-not be deleted. The cleanup is recorded at `TODO.md` §6.18.
+not be deleted. The cleanup is recorded at `TODO.md` §6.18, and landed 2026-10-17 (with the
+module-docstring bullet that described the receiver's long-retired legacy plaintext fallback).
 
 Evidence: `tests/conformance/test_mapping_remap.py` gains `TestTheMappingHealth` (7 cases) and
 `test_settings_source_mapping.py` gains `TestTheMappingHealthCard` (5 cases); collected counts after the

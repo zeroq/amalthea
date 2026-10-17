@@ -5,7 +5,7 @@ Last updated: 2026-10-17 (**ingestion-token lifecycle shipped** — Settings →
 (deactivate) and resume (activate) an ingestion token, and delete an inactive one; §10a/§10b done,
 guarded by `tests/conformance/test_settings_ingestion_tokens.py`). Earlier: **the per-source
 field-mapping wave shipped** — the mapping engine, the
-re-map control and the P5 health card; §6.17 retro-mapping done, §6.18 dead-code observation open —
+re-map control and the P5 health card; §6.17 retro-mapping done, §6.18 dead code removed 2026-10-17 —
 `PLAN-2026-10-16-source-field-mapping.md`). Earlier: **case pages are authorable in the UI** — §12.5 code shipped
 (`PLAN-2026-10-14-case-pages-ui.md`): `ui-case-page-create/-edit/-delete`, a `can_mutate`-gated Pages card,
 modal create/edit/delete, Markdown-rendered content, `live.js` re-fetch; **verification pending**, and five
@@ -253,15 +253,24 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
   `docs/planning/PLAN-2026-10-16-source-field-mapping.md` §8 P7/P7.1; deviations **MAP-9…MAP-12** in
   `docs/spec/deviations.md`. Evidence: `tests/conformance/test_mapping_remap.py` (32 cases) +
   `tests/conformance/test_settings_source_mapping.py` (53 cases).
-- [ ] **6.18 — Dead-code observation from the field-mapping plan (P5): `ingest/views.py::_verify_secret`.**
-  Verified 2026-10-16: `ingest/views.py:105` defines `_verify_secret` and it has **no callers** (the webhook
-  token path is `_authenticate_token` → `IngestionToken`), so that copy is **dead** — the live verifier is
-  `identity/models.py:156` (called at `:309`). The plan's companion `canonical_payload` is **not** in
-  `ingest/views.py`: it lives in `ingest/references.py:44` and is **live** (`payload_digest` →
-  `resolve_source_ref` → `ingest/pipeline.py:99`; also `tests/conformance/test_ingest_pipeline.py:52`), so
-  it must not be deleted — only the plan's file pointer is stale. Action: drop the dead
-  `ingest/views.py::_verify_secret` (with its now-unused `_ph`, `constant_time_compare` and
-  `PasswordHasher` imports, used nowhere else in the file) or annotate why it is kept.
+- [x] **6.18 — Dead-code observation from the field-mapping plan (P5): `ingest/views.py::_verify_secret` — DONE 2026-10-17.**
+  Verified 2026-10-16: `ingest/views.py` defined `_verify_secret` (was `:105`) and it had **no callers** (the
+  webhook token path is `_authenticate_token` → `IngestionToken`), so that copy was **dead** — the live
+  verifier is `identity/models.py::_verify_secret` (called from `IngestionToken.verify`). The plan's
+  companion `canonical_payload` is **not** in `ingest/views.py`: it lives in `ingest/references.py` and is
+  **live** (`payload_digest` → `resolve_source_ref` → `ingest/pipeline.py`; also
+  `tests/conformance/test_ingest_pipeline.py`), so it must not be deleted — only the plan's file pointer is
+  stale. **Fixed 2026-10-17:** the dead function is gone, along with its unused `_ph`,
+  `argon2.PasswordHasher` and `constant_time_compare` imports, and the module docstring bullet that
+  described a legacy plaintext fallback the receiver no longer has (that path was retired when migration
+  `identity.0006_create_default_org` adopted `IngestionSource.webhook_secret_hash` rows as hashed
+  `IngestionToken`s). **Drift found on the way:** commit `0d1d541` carried this removal in its *message*
+  but its diff never touched `ingest/views.py` — the file was unchanged until the follow-up commit, so both
+  this item and `docs/spec/deviations.md` asserted a removal that had not happened. Two dated 2026-10-10
+  artifacts (`docs/planning/VERIFY-2026-10-10-tenant-isolation-P1P2.md`,
+  `docs/reviews/SECURITY-2026-10-10-tenant-isolation.md`) cite `ingest/views.py` as the verifier that kept
+  migrated plaintext secrets authenticating; the mechanism was real but lived in `identity/models.py` —
+  those are point-in-time snapshots and are left as they are.
 
 ---
 

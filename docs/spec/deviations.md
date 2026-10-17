@@ -435,8 +435,17 @@ gate (ADR-009) and the preview dialog are P2—P4 and are not in this diff.
 code and read by no reader (`ingest/pipeline.py` used the module constant `DEFAULT_SEVERITY`); the
 engine now threads it through `default_severity=`, with the constant as the floor for direct pipeline
 callers (`test_ingest_pipeline.py` passes no severity, so that branch stays live). `_verify_secret`
-in `ingest/views.py` was dead code and has been removed (along with its now-unused imports); the live
-verifier is `identity.models.py::_verify_secret` (called from `IngestionToken.verify`).
+in `ingest/views.py` was dead code — the live verifier is `identity.models.py::_verify_secret`
+(called from `IngestionToken.verify`) — and is now removed, together with its unused `_ph`,
+`argon2.PasswordHasher` and `constant_time_compare` imports. The module docstring bullet that
+described a legacy plaintext fallback in the receiver went with it: that path was retired when
+migration `identity.0006_create_default_org` adopted `IngestionSource.webhook_secret_hash` rows as
+hashed `IngestionToken`s, so the receiver never had such a branch to fall back to.
+
+**Correction (2026-10-17):** this paragraph originally asserted the removal on the strength of commit
+`0d1d541`, whose message claimed it but whose diff for `ingest/views.py` was empty — the file was
+unchanged, so the claim was false for the whole interval between that commit and the follow-up that
+actually removed the code. The text above now describes the file as it is.
 
 Evidence: `test_mapping_engine.py` — 184 cases (AC1 purity via a cursor tripwire, AC2 = the synonym
 table + score bands, AC3 = the stored CrowdStrike payload end to end through `/api/v1/alerts/webhook/`,

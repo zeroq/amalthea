@@ -132,9 +132,10 @@ reused here, see §10). New modal bodies: `_settings_token_deactivate_form.html`
 - **Not done, called out:** `IngestionTokenAdmin.list_display` still omits `deactivated_at` (Django
   admin only, low value). `TODO.md` §12.6/§12.7 file-path drift (`ui/cases.html` vs the real
   `ui/templates/ui/case_list.html`) was corrected for §12.7 while editing that file's row.
-- **Separate, still open:** `ingest/views.py` still carries the dead `_verify_secret` + argon2
-  imports that commit `0d1d541`'s message claimed to remove (its diff for that file is empty), and
-  `docs/spec/deviations.md` / `TODO.md` §6.18 assert the removal. Needs its own corrective commit.
+- **Separate, follow-up commit:** `ingest/views.py` carried the dead `_verify_secret` + argon2 imports
+  that commit `0d1d541`'s message claimed to remove (its diff for that file is empty), and
+  `docs/spec/deviations.md` / `TODO.md` §6.18 asserted the removal. Removed in the follow-up commit
+  that carried this note.
 
 ## 11. Files touched
 
