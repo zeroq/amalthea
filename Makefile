@@ -15,7 +15,7 @@ PIP := .venv/bin/pip
 RUFF := .venv/bin/ruff
 MYPY := .venv/bin/mypy
 PYTEST := .venv/bin/pytest
-TAILWIND := scripts/tailwindcss
+TAILWIND ?= scripts/tailwindcss
 export DJANGO_SETTINGS_MODULE := amalthea.settings.test
 
 .DEFAULT_GOAL := help
@@ -92,9 +92,13 @@ hooks: ## Install the pre-commit + pre-push git hooks
 css: ## Compile Tailwind CSS to ui/static/ui/app.css
 	@$(TAILWIND) -i ui/static/ui/app.css -o ui/static/ui/app.css --minify
 
-css-check: ## Compile-check the Tailwind input — NOT a drift check (input and output are the same file)
-	@$(TAILWIND) -i ui/static/ui/app.css -o /dev/null --minify
-	@echo "✓ Tailwind input compiles (compile check only — this does NOT detect drift)"
+css-check: ## Compile-check the Tailwind input — skips if the bundled binary can't run on this host
+	@if "$(TAILWIND)" --help >/dev/null 2>&1; then \
+	  $(TAILWIND) -i ui/static/ui/app.css -o /dev/null --minify; \
+	  echo "✓ Tailwind input compiles (compile check only — this does NOT detect drift)"; \
+	else \
+	  echo "⚠ css-check SKIPPED: $(TAILWIND) cannot run on this host ($(shell uname -sm)) (this is expected on Intel macOS/Linux if using the bundled arm64-macOS binary; override with TAILWIND=/path/to/tailwindcss)"; \
+	fi
 
 ## ---------------------------------------------------------------------------------------------
 
