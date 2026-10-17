@@ -1,13 +1,22 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-17 (**the per-source field-mapping wave shipped** — the mapping engine, the
-re-map control and the P5 health card; §6.17 retro-mapping done, §6.18 dead-code observation open —
+Last updated: 2026-10-17 (**ingestion-token lifecycle shipped** — Settings → Sources can now pause
+(deactivate) and resume (activate) an ingestion token, and delete an inactive one; deleting a feed's
+last token now deletes the feed too, and the stale "open accepts unauthenticated posts" copy is gone
+(§10a/§10b/§10c, §10.8a; guarded by `tests/conformance/test_settings_ingestion_tokens.py`). **ACs verified 22/22** in
+[`docs/verification/VERIFY-2026-10-17-ingestion-token-lifecycle.md`](./docs/verification/VERIFY-2026-10-17-ingestion-token-lifecycle.md) —
+**provisional**: the `verifier` subagent was down (503), so the pass was run inline by the planner and still needs an
+independent re-run + a `security-auditor` pass on this scope. Earlier: **the per-source
+field-mapping wave shipped** — the mapping engine, the
+re-map control and the P5 health card; §6.17 retro-mapping done, §6.18 dead code removed 2026-10-17 —
 `PLAN-2026-10-16-source-field-mapping.md`). Earlier: **case pages are authorable in the UI** — §12.5 code shipped
 (`PLAN-2026-10-14-case-pages-ui.md`): `ui-case-page-create/-edit/-delete`, a `can_mutate`-gated Pages card,
-modal create/edit/delete, Markdown-rendered content, `live.js` re-fetch; **verification pending**, and five
+modal create/edit/delete, Markdown-rendered content, `live.js` re-fetch; **verified 2026-10-17 at 14/14 ACs
+(provisional, planner-authored inline — awaiting an independent `verifier` re-run;
+`docs/verification/VERIFY-2026-10-17-case-pages-ui.md`), one new low-severity modal-id finding V1**, and five
 shared-layer defects found and fixed on the way through the modal-contract + tab stylesheet — see the plan
-§11 and `docs/spec/deviations.md` W10.4). Earlier: **cases view fixes** — `GET /cases/` no longer 404s (new trailing-slash
+§11 and `docs/spec/deviations.md` Wave 10.4). Earlier: **cases view fixes** — `GET /cases/` no longer 404s (new trailing-slash
 middleware, 301/308) and **New case moved off the left rail into a modal** on the cases list
 (`PLAN-2026-10-13-cases-view-fixes.md`; independently verified **Pass** 16/16 ACs + security-reviewed
 0 Critical / 0 High / 0 Medium; `make check` 1689 passed / 3 skipped). Earlier: **§10.2 manual case
@@ -49,17 +58,18 @@ hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the
 | **4** | **§12.2 — The observables-list filter does nothing — SHIPPED 2026-10-15** | `observable_list` now reads `q`/`type` from `request.GET`, passes `observable_types` (the dropdown is no longer empty), stays org-scoped, and tolerates a malformed `type` id. The pager + honest empty state remain §12.1. | **Done** — the control no longer lies; the §12.1 truncation caveat still applies. |
 | **5** | **§12.4 — No bulk actions in the UI** | `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk` (PATCH) exist in the API with per-item isolation; the UI stub was deleted (Q2) and not replaced. | **Medium-High** — a 200-alert morning is single-item work. |
 | **6** | **§10.3–10.6 — Case scope / type / data-classification / phase — SHIPPED 2026-10-15** | `PLAN-2026-10-14-case-classification-fields.md`, commit `822d050`, verified 21/21 ACs. `data_classification` is admin-only and audited; `phase` is a separate field from `CaseStatus` (Q-D2). | **Done** — follow-up is §10.9 (status labels). |
-| **7** | **§12.5 — Case pages: renderable, not authorable** | **Code shipped 2026-10-14, verification pending** (create/edit/delete modal on the General tab). | **Medium** — a documentation surface the analyst can see but never contribute to. |
+| **7** | **§12.5 — Case pages: renderable, not authorable** | **Code shipped 2026-10-14** (`ecbcef6`); **verified 2026-10-17 at 14/14 ACs — provisional** (`docs/verification/VERIFY-2026-10-17-case-pages-ui.md`; inline, awaiting an independent `verifier` re-run). One new low-severity finding (V1, duplicate modal id). | **Medium** — a documentation surface the analyst can see but never contribute to. |
 | **8** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; the ledger already syncs on the case page. |
 | **9** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — an ops/onboarding concern, not triage. |
 | **10** | **§6.13 / §6.16 P4 — Settings: ingestion tokens + audit-log viewer** | Per-org webhook tokens (create/revoke, show-once) + read-only `AuditLog` viewer; also retires the stale webhook copy (§10.8). | **Medium** — self-serve ingestion; the audit viewer is the accountability half. |
-| **10a** | **§6.13 / §6.16 P4b — Settings: Sources → token activate/deactivate** | In Settings → Sources, add an **Action** button to deactivate an active token and activate an inactive token. Only an `admin` for that org’s tokens, or a `superAdmin`, may change state. | **Medium** — token lifecycle management (pause/reuse) without revoking and recreating. |
-| **10b** | **§6.13 / §6.16 P4c — Settings: Sources → delete inactive token** | In Settings → Sources, add an **Action** button to delete an **inactive** token. Only an `admin` for that org’s tokens, or a `superAdmin`, may delete; active tokens must be deactivated before deletion. | **Medium** — removes stale credentials and keeps the token list tidy. |
+| **10a** | **§6.13 / §6.16 P4b — Settings: Sources → token activate/deactivate — SHIPPED 2026-10-17** | In Settings → Sources, a token row now offers **Deactivate** (active → modal) and **Activate** (deactivated → direct POST). Only an `admin` for that org’s tokens, or a `superAdmin`, may change state. A new reversible `IngestionToken.deactivated_at` (migration `0012_ingestiontoken_deactivated_at`) keeps the pause distinct from the terminal `revoked_at`; the webhook lookup and `IngestionToken.verify()` both refuse a paused token (401), and a *revoked* token can never be re-activated. | **Done** — pause/resume without revoking and recreating. Guards: `TestTokenActivationLifecycle`, `TestTokenLifecycleIsolation`. |
+| **10b** | **§6.13 / §6.16 P4c — Settings: Sources → delete inactive token — SHIPPED 2026-10-17** | In Settings → Sources, an inactive row (revoked **or** deactivated) now offers **Delete** behind a confirm modal; an active token is refused until it is deactivated. Only an `admin` for that org’s tokens, or a `superAdmin`, may delete. The `ingestion_token.deleted` audit row is written *before* the row is removed, in the same transaction, so the trail keeps the token id and owning org. | **Done** — removes stale credentials and keeps the token list tidy. |
+| **10c** | **§6.13 / §6.16 P4d — Settings: Sources → deleting a feed's last token deletes the feed — SHIPPED 2026-10-17** | Deleting a token that is a feed's **last** credential now also deletes the feed and its mapping profile, so the **Sources** list stops advertising a feed that can never receive anything. The feed's alerts are kept (`Alert.ingestion_source` is `SET_NULL` — evidence outlives the profile); the confirm modal states the consequence before the click; `ingestion_source.deleted` is audited. Also fixes two false UI claims found on the way: the source page rendered a *deactivated* token as **Active**, and `sources_list.html` said an open feed "accepts unauthenticated posts" (false since strict token auth) — closes §10.8(a). | **Done** — tidies the Sources list without losing evidence. Guards: `TestFeedReapedWithLastToken`, `TestSourceDetailTokenStatus`. |
 | **11** | **Security: §11.2 (M3) + S3 + S5** | **M3** playbook secrets are global + cleartext to any authenticated user of any org. **S3** per-account lockout on the **API** login; stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. | **Medium (security)** — M3 blocks multi-tenant trust; S5's caps are the analyst-facing half (upload robustness). |
 | **12** | **§2.6 + §2.7 (test hardening) + §7.1–7.4 + §8.5/§8.7 + §11.3/§11.4-L1/§11.5** | Coverage back ≥ 80% (79% since the tenant wave) + the Phase-12/T2 QA list; Tailwind source/artifact split; mutation coverage; timestamp wording; protocol-relative `href`; unaudited procedure attaches; Django admin outside the role model; `django.request` log forging. | **None** — engineering hygiene + accepted Low/Info follow-ups. |
 | **13** | **Orphaned routes** | `ui-case-attachment-list` (+ its now-dead `ui/case_attachments.html`) and `ui-case-attachment-detail` (405) are reachable by URL only — the case page renders its own attachment table. `ui-case-export` / `ui-taxonomy` are now wired (P1), so this row supersedes the old claim. | **Low** — dead surface; delete or build an entry point. |
 | **14** | **§12.6 — Taxonomy: three cards break the mono convention for their values — SHIPPED 2026-10-17** | `ui/templates/ui/taxonomy.html` now renders the **Case Statuses**, **Alert Statuses** and **Observable Types** value / name cells as `<td class="mono">`, matching the four code cards (**Case Scope**, **Case Phase**, **Case Type**, **Data Classification**). | **Done** — visual consistency on the Taxonomy page; display-only, no behaviour change. |
-| **15** | **§12.7 — Cases list: make the case title clickable** | In `ui/cases.html` (Cases List), make the **case title** clickable (same linking behaviour as the **case number**) to navigate to the Case Details view. If title can be long/truncate, preserve `title` tooltip and maintain keyboard accessibility (link, not just JS). | **Low** — small UX improvement. |
+| **15** | **§12.7 — Cases list: make the case title clickable — SHIPPED 2026-10-17** | `ui/templates/ui/case_list.html` now links the **case title** to `ui-case-detail` (same URL as the **case number**); it is a real `<a>`, so keyboard access needs no JS. | **Done** — small UX improvement. |
 | **16** | **§12.8 — Case Details (General) + verdict taxonomy + close flow — CODE SHIPPED 2026-10-17, verification pending** | Code shipped (`PLAN-2026-10-17-case-verdict-close-flow.md`): inline metadata edits, Tags row, Verdict on Case + Alert + Taxonomy, enforced close (Verdict + closing comment) and close-propagation to linked alerts. | **Code done** — verdict model/taxonomy, inline field edits, Tags row, enforced close flow; independent verification pending. |
 | **17** | **§12.9 — UI layout/style standardization** | Establish and apply a small set of UI/layout rules across the UI: (1) Input field height must match the button height next to it. (2) For action columns in tables, prefer compact icon-only actions with accessible names (not full text buttons) where space-limited and common. (3) Standardize table markup/styles: the table lives inside a `.card`, and filters go in a separate card above the table (use **Observables List View** as the reference). Codify in a short "UI Layout Guidelines" note (e.g. in `ui/README.md` or `docs/spec/ui-style.md`) and apply to affected views (e.g. Cases, Alerts, Tasks, Users, Tokens) to avoid drift. | **Low** — global consistency; reduces CSS/markup churn. |
 
@@ -250,15 +260,24 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
   `docs/planning/PLAN-2026-10-16-source-field-mapping.md` §8 P7/P7.1; deviations **MAP-9…MAP-12** in
   `docs/spec/deviations.md`. Evidence: `tests/conformance/test_mapping_remap.py` (32 cases) +
   `tests/conformance/test_settings_source_mapping.py` (53 cases).
-- [ ] **6.18 — Dead-code observation from the field-mapping plan (P5): `ingest/views.py::_verify_secret`.**
-  Verified 2026-10-16: `ingest/views.py:105` defines `_verify_secret` and it has **no callers** (the webhook
-  token path is `_authenticate_token` → `IngestionToken`), so that copy is **dead** — the live verifier is
-  `identity/models.py:156` (called at `:309`). The plan's companion `canonical_payload` is **not** in
-  `ingest/views.py`: it lives in `ingest/references.py:44` and is **live** (`payload_digest` →
-  `resolve_source_ref` → `ingest/pipeline.py:99`; also `tests/conformance/test_ingest_pipeline.py:52`), so
-  it must not be deleted — only the plan's file pointer is stale. Action: drop the dead
-  `ingest/views.py::_verify_secret` (with its now-unused `_ph`, `constant_time_compare` and
-  `PasswordHasher` imports, used nowhere else in the file) or annotate why it is kept.
+- [x] **6.18 — Dead-code observation from the field-mapping plan (P5): `ingest/views.py::_verify_secret` — DONE 2026-10-17.**
+  Verified 2026-10-16: `ingest/views.py` defined `_verify_secret` (was `:105`) and it had **no callers** (the
+  webhook token path is `_authenticate_token` → `IngestionToken`), so that copy was **dead** — the live
+  verifier is `identity/models.py::_verify_secret` (called from `IngestionToken.verify`). The plan's
+  companion `canonical_payload` is **not** in `ingest/views.py`: it lives in `ingest/references.py` and is
+  **live** (`payload_digest` → `resolve_source_ref` → `ingest/pipeline.py`; also
+  `tests/conformance/test_ingest_pipeline.py`), so it must not be deleted — only the plan's file pointer is
+  stale. **Fixed 2026-10-17:** the dead function is gone, along with its unused `_ph`,
+  `argon2.PasswordHasher` and `constant_time_compare` imports, and the module docstring bullet that
+  described a legacy plaintext fallback the receiver no longer has (that path was retired when migration
+  `identity.0006_create_default_org` adopted `IngestionSource.webhook_secret_hash` rows as hashed
+  `IngestionToken`s). **Drift found on the way:** commit `0d1d541` carried this removal in its *message*
+  but its diff never touched `ingest/views.py` — the file was unchanged until the follow-up commit, so both
+  this item and `docs/spec/deviations.md` asserted a removal that had not happened. Two dated 2026-10-10
+  artifacts (`docs/planning/VERIFY-2026-10-10-tenant-isolation-P1P2.md`,
+  `docs/reviews/SECURITY-2026-10-10-tenant-isolation.md`) cite `ingest/views.py` as the verifier that kept
+  migrated plaintext secrets authenticating; the mechanism was real but lived in `identity/models.py` —
+  those are point-in-time snapshots and are left as they are.
 
 ---
 
@@ -363,14 +382,17 @@ backlog once the analyst-visible classification fields (10.3–10.6) are designe
   **Similar** = the §2-Module-C cross-case observable linking — **now tracked as §12.3** (with the missing
   auto-bundle consumer; decide Q-D4 there, not here); **Audit** = the read-only `AuditLog` viewer
   (pull forward §6.13/P4).
-- [ ] **10.8 — Ingestion-token surface + stale webhook copy (mostly absorbed by §6.16 P4).** *(Partly
-  done 2026-10-15.)* (a) The `sources_list.html` URL copy is **fixed** — it now shows the source-less
-  `POST /api/v1/alerts/webhook/` (ADR-008) — but the page still carries the `open` / `required` pills
-  and the sentence *"A source marked open accepts unauthenticated posts"*, which has been factually
-  wrong since strict token auth (2026-10-10) and is now doubly wrong. That stale security claim is
-  pinned by `test_ui_loop.py:520-537`, so fix copy **and** test together. (b) **Done**: the **Ingestion
-  tokens** section exists in `docs/spec/identity-auth.md` (create/verify/revoke, prefix lookup, Argon2,
-  legacy plaintext fallback) and the README cross-references Settings → Sources.
+- [x] **10.8 — Ingestion-token surface + stale webhook copy (mostly absorbed by §6.16 P4).** *(DONE
+  2026-10-17.)* (a) **Done, both parts.** The `sources_list.html` URL copy already showed the
+  source-less `POST /api/v1/alerts/webhook/` (ADR-008); the remaining debt — the `open` / `required`
+  pills and the sentence *"A source marked open accepts unauthenticated posts"*, false since strict
+  token auth (2026-10-10) — is fixed: the pill is now three credential states, `required` / `paused` /
+  `none` (a token is usable only while neither revoked nor deactivated, §10a), and the false security
+  claim is gone. Copy **and** the pinning test
+  (`test_ui_loop.py::test_the_sources_page_shows_whether_a_secret_is_required`) were changed together
+  (WTR-2 resolved). (b) **Done**: the **Ingestion tokens** section of `docs/spec/identity-auth.md`
+  exists and was extended for the §10a/§10b lifecycle (deactivate/activate/delete, the feed reap on the
+  last token, `ingestion_source.deleted`); `docs/spec/data-model.md` gained `deactivated_at`.
 - [ ] **10.10 — No pre-auth per-IP throttle on the webhook (requested 2026-10-15, ADR-008).** The
   per-IP bucket (`wh:ip:{ip}`) is consulted only **after** the token verifies, so an unauthenticated
   flood still costs one indexed token lookup + one Argon2 attempt per request. Add a cheap pre-auth
@@ -556,13 +578,23 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
   calls the same service, keyboard-reachable, `<dialog>` confirmation (ADR-003: no native `confirm()`), and a
   per-item result summary so partial failures are visible. Source: audit 2026-10-12.
 - [~] **  12.5 — Case pages are renderable but not authorable in the UI.** **Code shipped 2026-10-14**
-  (`PLAN-2026-10-14-case-pages-ui.md`): `ui-case-page-create/-edit/-delete` (all `@not_viewer`
+  (`PLAN-2026-10-14-case-pages-ui.md`, commit `ecbcef6`): `ui-case-page-create/-edit/-delete` (all `@not_viewer`
   `@require_POST`), a `can_mutate`-gated Pages card with modal create/edit/delete, Markdown rendering, and
-  `live.js` re-fetching `#case-pages` on a `page` frame. **Awaiting independent verification** — until that
-  lands this stays open and `COMPLETED.md` must not list it. Two gaps recorded in the plan (§11 `W104-5`,
-  `W104-8`): a page edit/delete writes **no `AuditLog`** row (invisible in the case Audit tab, like
-  tags/tasks), and a **delete publishes no WebSocket frame** (API parity — another analyst sees it only on
-  their next load). Source: audit 2026-10-12; plan 2026-10-14.
+  `live.js` re-fetching `#case-pages` on a `page` frame. **Verified 2026-10-17, 14/14 ACs + 7 supporting
+  checks — provisional** (`docs/verification/VERIFY-2026-10-17-case-pages-ui.md`): all five documented
+  shared-layer defects (F11–F15) confirmed present in current code, and a 20-check behavioural harness
+  (outside the repo) passed with two discriminating mutations. The report is **planner-authored inline**
+  because the `verifier` subagent returned 503 — it is **not independent**, so the `[~]` stays until an
+  independent re-run. One **new, low-severity finding (V1)**: `_modal.html` gives the dialog heading
+  `id="{{ modal_id }}-title"` and `_page_form.html` gives the Title input the same id, so the `<label for>`
+  resolves to the non-labelable `<h2>` and the input loses its accessible name (the same collision already
+  exists in `_task_form_modal_body.html`, so it is a replicated pre-existing smell, not introduced here).
+  Two gaps recorded in the plan (§11 `W104-5`, `W104-8`): a page edit/delete writes **no `AuditLog`** row
+  (invisible in the case Audit tab, like tags/tasks), and a **delete publishes no WebSocket frame** (API
+  parity — another analyst sees it only on their next load). Also: cross-tenant 404s for the three UI
+  routes are enforced by the shared `resolve_case(write=True)` guard but **not enumerated** by any
+  committed test (the write-route sweeps filter to API-only) — observation O1. Source: audit 2026-10-12;
+  plan 2026-10-14; verification 2026-10-17.
 - [x] **12.6 — Taxonomy: three cards break the monospace convention for their values — FIXED 2026-10-17.** `ui/templates/ui/taxonomy.html`
   renders the four code-valued cards — **Case Scope**, **Case Phase**, **Case Type** and **Data
   Classification** — with `<td class="mono">` for the code column, but the three list cards rendered
@@ -572,11 +604,11 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
   `tests/conformance/test_ui_p2_wiring.py::test_taxonomy_page_renders_code_valued_cells_in_mono`
   (asserts the seeded status values and observable-type names render with the mono class).
   Source: user request 2026-10-17.
-- [ ] **12.7 — Cases list: make the case title clickable.** In `ui/templates/ui/cases.html`, the table row for
+- [x] **12.7 — Cases list: make the case title clickable.** In `ui/templates/ui/case_list.html` (the item originally cited `ui/cases.html`), the table row for
   each case currently links the **case number** to the Case Details view (`ui-case-detail` / `case_id`).
   Make the **case title** (the human-readable title column) a link to the same destination, reusing the
   same URL and link text logic, preserving truncation and an accessible link name (e.g. "Open case
-  <number> <title>" if present). Source: user request 2026-10-17.
+  <number> <title>" if present). Source: user request 2026-10-17. (Done 2026-10-17)
 - [~] **12.8 — Case Details (General): inline edits, Tags, Verdict, and enforced close flow — CODE SHIPPED 2026-10-17, verification pending.**
   (1) **Inline metadata edits** on the General tab (`ui-case-detail`): add edit icons next to **Severity**,
       **Scope**, **Type**, **Classification** and **Phase**; each opens a dedicated `<dialog>` modal populated
@@ -615,7 +647,10 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
       table lives inside a `.card`, and filtering options live in a separate card above the table (reference:
       **Observables List View**). Capture these as reusable guidelines (e.g. `docs/spec/ui-style.md` or
       `ui/README.md`) and apply to existing/new views (Cases, Alerts, Tasks, Users, Sources/Tokens) to avoid
-      regressions. Source: user request 2026-10-17.
+      regressions. **Note (2026-10-17):** the aligned-action-row pattern already exists as `.case-actions`
+      (`app.css`: `margin-top:0`, centred, 34px equal-height controls) and is now reused outside Case
+      templates (`source_detail.html`, and the Settings → Sources token row) — generalize/rename it as part
+      of this item rather than inventing a second utility. Source: user request 2026-10-17.
 
 ---
 
@@ -632,7 +667,7 @@ search) are the two biggest *feature* gaps and both want a decision first. Ranke
    related-cases panel (the Module B/C differentiator, currently business-card-only).
 3. **§6.16 P6** — global search over cases/alerts/observables (after §12.1/12.2 so it does not search a
    truncated corpus).
-4. **§12.4 / §6.16 P7** — bulk triage, realtime breadth (§12.5 shipped 2026-10-14, verification pending).
+4. **§12.4 / §6.16 P7** — bulk triage, realtime breadth (§12.5 shipped 2026-10-14, verified 2026-10-17 — provisional).
 5. **Security, unchanged** — **§11.2 (M3)** playbook secrets, then **S3** (per-account lockout on the API
    login; wire `identity/ratelimit.py` into `compat/views.py::api_login`, return **429** + `Retry-After`,
    derive the client IP from the proxy chain instead of the client-supplied `X-Forwarded-For`) and **S5**

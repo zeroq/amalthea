@@ -43,6 +43,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
 from alerts.models import Alert
 from identity.models import AuditLog, IngestionToken, Organisation, User
@@ -387,10 +388,383 @@ class TestEndToEnd:
         assert rejected.json()["type"] == "unauthorized"
 
 
-class TestSourceProvisioning:
-    """The feed is *named*, not picked: the webhook URL is source-less, so the token points at a
-    mapping profile and the operator supplies a name rather than choosing from a list."""
+class TestTokenActivationLifecycle:
+    """TODO §10a/§10b — deactivate (reversible pause), activate (resume), delete (inactive only).
 
+    The point of the split: `revoke` is terminal, so pausing a credential used to mean losing it.
+    `deactivated_at` adds a pause that a feed can come back from, and a delete that only ever
+    touches a token nobody is presenting any more.
+    """
+
+    def _mint(self, org: Organisation, admin: User, *, slug: str, name: str = "prod"):
+        """Mint through the UI and return `(client, token, plaintext)`."""
+        client = _ui_client(admin)
+        resp = _create_token_via_ui(
+            client, source=_mk_source(slug=slug, organisation=org), name=name
+        )
+        assert resp.status_code == 200
+        return client, IngestionToken.objects.get(name=name), _plaintext_from(resp)
+
+    def test_deactivate_pauses_the_token_and_the_webhook_turns_401(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, plaintext = self._mint(org, admin, slug="pause-src")
+
+        assert _localhost_webhook(client, plaintext, source_ref="before").status_code == 201
+
+        resp = client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": token.id}))
+        assert resp.status_code == 302
+        token.refresh_from_db()
+        assert token.deactivated_at is not None
+        assert token.revoked_at is None, "deactivation must not revoke"
+        assert AuditLog.objects.filter(action="ingestion_token.deactivated").exists()
+
+        paused = _localhost_webhook(client, plaintext, source_ref="while-paused")
+        assert paused.status_code == 401, paused.content
+        assert paused.json()["type"] == "unauthorized"
+
+    def test_the_token_is_rejected_at_the_model_layer_too(self, db: None) -> None:
+        """The queryset filter is the fast path; `verify()` is the last line of defence."""
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        _client, token, plaintext = self._mint(org, admin, slug="verify-src")
+        token.deactivated_at = timezone.now()
+        token.save(update_fields=["deactivated_at"])
+        assert token.verify(plaintext) is False
+
+    def test_activate_resumes_the_token_and_the_webhook_accepts_again(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, plaintext = self._mint(org, admin, slug="resume-src")
+        client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": token.id}))
+
+        resp = client.post(reverse("ui-settings-token-activate", kwargs={"token_id": token.id}))
+        assert resp.status_code == 302
+        token.refresh_from_db()
+        assert token.deactivated_at is None
+        assert AuditLog.objects.filter(action="ingestion_token.activated").exists()
+
+        accepted = _localhost_webhook(client, plaintext, source_ref="after-resume")
+        assert accepted.status_code == 201, accepted.content
+
+    def test_activate_refuses_a_revoked_token(self, db: None) -> None:
+        """Revocation is terminal: a revoked credential can never come back."""
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, plaintext = self._mint(org, admin, slug="revoked-stays-src")
+        client.post(reverse("ui-settings-token-revoke", kwargs={"token_id": token.id}))
+
+        resp = client.post(reverse("ui-settings-token-activate", kwargs={"token_id": token.id}))
+        assert resp.status_code == 302
+        token.refresh_from_db()
+        assert token.revoked_at is not None
+        assert token.deactivated_at is None
+        assert not AuditLog.objects.filter(action="ingestion_token.activated").exists()
+        assert _localhost_webhook(client, plaintext, source_ref="still-dead").status_code == 401
+
+    def test_deactivate_refuses_a_revoked_token(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, _plaintext = self._mint(org, admin, slug="revoked-no-pause-src")
+        client.post(reverse("ui-settings-token-revoke", kwargs={"token_id": token.id}))
+
+        resp = client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": token.id}))
+        assert resp.status_code == 302
+        token.refresh_from_db()
+        assert token.deactivated_at is None, "a revoked token has nothing left to pause"
+
+    def test_delete_refuses_an_active_token(self, db: None) -> None:
+        """An active credential a live feed presents must be deactivated first."""
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, _plaintext = self._mint(org, admin, slug="active-delete-src")
+
+        resp = client.post(reverse("ui-settings-token-delete", kwargs={"token_id": token.id}))
+        assert resp.status_code == 302
+        assert IngestionToken.objects.filter(pk=token.pk).exists()
+        assert not AuditLog.objects.filter(action="ingestion_token.deleted").exists()
+
+    def test_delete_removes_a_deactivated_token_and_audits_before_the_row_goes(
+        self, db: None
+    ) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, plaintext = self._mint(org, admin, slug="paused-delete-src")
+        token_id = token.id
+        client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": token_id}))
+
+        resp = client.post(reverse("ui-settings-token-delete", kwargs={"token_id": token_id}))
+        assert resp.status_code == 302
+        assert not IngestionToken.objects.filter(pk=token_id).exists()
+
+        deleted = AuditLog.objects.get(action="ingestion_token.deleted")
+        assert deleted.actor_id == admin.id
+        assert deleted.target_type == "IngestionToken"
+        # The id survives the row: the audit is written before `delete()`, not after.
+        assert deleted.target_id == str(token_id)
+        assert deleted.target_org_id == org.id
+        assert plaintext not in str(deleted.__dict__)
+
+    def test_delete_removes_a_revoked_token(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, _plaintext = self._mint(org, admin, slug="revoked-delete-src")
+        token_id = token.id
+        client.post(reverse("ui-settings-token-revoke", kwargs={"token_id": token_id}))
+
+        resp = client.post(reverse("ui-settings-token-delete", kwargs={"token_id": token_id}))
+        assert resp.status_code == 302
+        assert not IngestionToken.objects.filter(pk=token_id).exists()
+
+    def test_the_status_cell_offers_the_right_control_for_each_state(self, db: None) -> None:
+        """The row must not offer an action its state forbids (template/§10a contract)."""
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, _plaintext = self._mint(org, admin, slug="markup-src")
+
+        active = client.get(reverse("ui-settings-sources")).content.decode()
+        assert 'data-modal-open="deactivate-token-' in active
+        assert 'data-modal-open="delete-token-' not in active, "an active token is not deletable"
+
+        client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": token.id}))
+        paused = client.get(reverse("ui-settings-sources")).content.decode()
+        assert "Deactivated" in paused
+        assert reverse("ui-settings-token-activate", kwargs={"token_id": token.id}) in paused
+        assert 'data-modal-open="delete-token-' in paused
+        assert 'data-modal-open="deactivate-token-' not in paused
+
+        client.post(reverse("ui-settings-token-revoke", kwargs={"token_id": token.id}))
+        revoked = client.get(reverse("ui-settings-sources")).content.decode()
+        assert "Revoked" in revoked
+        assert 'data-modal-open="delete-token-' in revoked
+        assert reverse("ui-settings-token-activate", kwargs={"token_id": token.id}) not in revoked
+
+
+class TestTokenLifecycleIsolation:
+    """§10a/§10b cross-org and role boundaries, mirroring `TestCrossOrgIsolation`/`TestRoleGates`."""
+
+    @pytest.mark.parametrize("action", ["deactivate", "activate", "delete"])
+    def test_cross_org_actions_are_404_and_inert(self, db: None, action: str) -> None:
+        org_a = _mk_org("Org A")
+        org_b = _mk_org("Org B")
+        admin_a = _mk_user("admin-a", org_a, role="admin")
+        other, _ = IngestionToken.create_token(
+            source=_mk_source(slug="src-b", organisation=org_b), organisation=org_b, name="theirs"
+        )
+
+        resp = _ui_client(admin_a).post(
+            reverse(f"ui-settings-token-{action}", kwargs={"token_id": other.id})
+        )
+        assert resp.status_code == 404
+        other.refresh_from_db()
+        assert other.revoked_at is None and other.deactivated_at is None
+        assert IngestionToken.objects.filter(pk=other.pk).exists(), f"cross-org {action} deleted it"
+
+    @pytest.mark.parametrize("role", ["analyst", "viewer"])
+    @pytest.mark.parametrize("action", ["deactivate", "activate", "delete"])
+    def test_non_admin_roles_are_locked_out(self, db: None, role: str, action: str) -> None:
+        org = _mk_org("Org1")
+        user = _mk_user(f"user-{role}", org, role=role)
+        source = _mk_source(organisation=org)
+        token, _ = IngestionToken.create_token(source=source, organisation=org, name="existing")
+        token.deactivated_at = timezone.now()
+        token.save(update_fields=["deactivated_at"])
+
+        resp = _ui_client(user).post(
+            reverse(f"ui-settings-token-{action}", kwargs={"token_id": token.id})
+        )
+        assert resp.status_code == 404
+        token.refresh_from_db()
+        assert token.deactivated_at is not None
+        assert token.revoked_at is None
+
+    def test_superadmin_can_pause_and_delete_another_orgs_token(self, db: None) -> None:
+        org_a = _mk_org("Org A")
+        org_b = _mk_org("Org B")
+        superadmin = _mk_user("super", org_a, role="superAdmin")
+        client = _ui_client(superadmin)
+        token, _ = IngestionToken.create_token(
+            source=_mk_source(slug="src-b", organisation=org_b), organisation=org_b, name="theirs"
+        )
+
+        assert (
+            client.post(
+                reverse("ui-settings-token-deactivate", kwargs={"token_id": token.id})
+            ).status_code
+            == 302
+        )
+        token.refresh_from_db()
+        assert token.deactivated_at is not None
+
+        assert (
+            client.post(
+                reverse("ui-settings-token-delete", kwargs={"token_id": token.id})
+            ).status_code
+            == 302
+        )
+        assert not IngestionToken.objects.filter(pk=token.pk).exists()
+        # It was the feed's only token, so the feed is reaped too — and the row is audited against
+        # org B, the feed's tenant, not the actor's own org.
+        assert not IngestionSource.objects.filter(slug="src-b").exists()
+        assert AuditLog.objects.get(action="ingestion_source.deleted").target_org_id == org_b.id
+
+
+class TestFeedReapedWithLastToken:
+    """§10b follow-up — deleting a feed's last token deletes the feed, and never its alerts.
+
+    A feed exists only to carry credentials. Before this, deleting the final token left an
+    `IngestionSource` row that could never receive anything, still advertised on the Sources page.
+    The feed now goes with the token whose deletion emptied it; its alerts are kept
+    (`Alert.ingestion_source` is `SET_NULL`), so this is not a data-loss action for the evidence a
+    feed produced.
+    """
+
+    def _mint(self, org: Organisation, admin: User, *, slug: str, name: str = "prod"):
+        """Mint through the UI and return `(client, token, plaintext)`.
+
+        The feed is named after its slug on purpose: the create form reuses an existing profile by
+        `slugify(source_name)`, so a feed whose name does not slugify back to its slug would be
+        shadowed by a second, freshly-provisioned one — and the delete would then reap *that* feed.
+        """
+        client = _ui_client(admin)
+        resp = _create_token_via_ui(
+            client, source=_mk_source(slug=slug, name=slug, organisation=org), name=name
+        )
+        assert resp.status_code == 200
+        return client, IngestionToken.objects.get(name=name), _plaintext_from(resp)
+
+    def test_deleting_the_last_token_deletes_the_feed(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, _plaintext = self._mint(org, admin, slug="reap-src")
+        source_id = token.source_id
+        client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": token.id}))
+
+        resp = client.post(reverse("ui-settings-token-delete", kwargs={"token_id": token.id}))
+        assert resp.status_code == 302
+        assert not IngestionSource.objects.filter(pk=source_id).exists(), (
+            "the feed outlived its last token"
+        )
+        # The stated goal: gone from the Sources list, not merely unlinked. Asserted on the row's
+        # link — the reaping is announced in a flash message that names the feed on the same page.
+        detail_url = reverse("ui-settings-source-detail", kwargs={"source_id": source_id})
+        list_body = client.get(reverse("ui-sources-list")).content.decode()
+        assert f'href="{detail_url}"' not in list_body, (
+            "the feed is still listed on the Sources page"
+        )
+
+        reaped = AuditLog.objects.get(action="ingestion_source.deleted")
+        assert reaped.actor_id == admin.id
+        assert reaped.target_type == "IngestionSource"
+        assert reaped.target_id == str(source_id)
+        assert reaped.target_org_id == org.id
+
+    def test_deleting_a_non_last_token_keeps_the_feed(self, db: None) -> None:
+        """A feed with another token is still needed — only the credential goes."""
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, first, _plaintext = self._mint(org, admin, slug="keep-src", name="first")
+        second, _ = IngestionToken.create_token(
+            source=first.source, organisation=org, name="second"
+        )
+        client.post(reverse("ui-settings-token-revoke", kwargs={"token_id": first.id}))
+
+        resp = client.post(reverse("ui-settings-token-delete", kwargs={"token_id": first.id}))
+        assert resp.status_code == 302
+        assert IngestionSource.objects.filter(pk=first.source_id).exists(), (
+            "the feed still had a token"
+        )
+        assert not AuditLog.objects.filter(action="ingestion_source.deleted").exists()
+        assert IngestionToken.objects.filter(pk=second.pk).exists()
+
+    def test_a_revoked_sibling_still_keeps_the_feed(self, db: None) -> None:
+        """The rule is "last row", not "last usable token" — a revoked sibling is still a row."""
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, live, _plaintext = self._mint(org, admin, slug="sibling-src")
+        revoked, _ = IngestionToken.create_token(
+            source=live.source, organisation=org, name="revoked-sibling"
+        )
+        revoked.revoked_at = timezone.now()
+        revoked.save(update_fields=["revoked_at"])
+        client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": live.id}))
+
+        client.post(reverse("ui-settings-token-delete", kwargs={"token_id": live.id}))
+        assert IngestionSource.objects.filter(pk=live.source_id).exists()
+
+    def test_the_feeds_alerts_survive_without_a_feed_link(self, db: None) -> None:
+        """The evidence outlives the profile: `SET_NULL` keeps the alert and its raw payload."""
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, plaintext = self._mint(org, admin, slug="alerts-src")
+        source_id = token.source_id
+
+        accepted = _localhost_webhook(client, plaintext, source_ref="alerts-1")
+        assert accepted.status_code == 201, accepted.content
+        alert_id = accepted.json()["_id"]
+        assert Alert.objects.get(pk=alert_id).ingestion_source_id == source_id
+
+        client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": token.id}))
+        client.post(reverse("ui-settings-token-delete", kwargs={"token_id": token.id}))
+        assert not IngestionSource.objects.filter(pk=source_id).exists()
+
+        alert = Alert.objects.get(pk=alert_id)
+        assert alert.ingestion_source_id is None, "the alert lost its feed link"
+        assert alert.raw_payload, "the alert's raw payload must survive the feed"
+
+    def test_the_delete_modal_warns_only_when_it_is_the_last_token(self, db: None) -> None:
+        """The consequence must be visible *before* the confirm click, and only when it is real."""
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, first, _plaintext = self._mint(org, admin, slug="warn-src", name="first")
+        IngestionToken.create_token(source=first.source, organisation=org, name="second")
+        client.post(reverse("ui-settings-token-revoke", kwargs={"token_id": first.id}))
+
+        body = client.get(reverse("ui-settings-sources")).content.decode()
+        assert "This is the last token for feed" not in body, (
+            "a feed with another token must not warn about deletion"
+        )
+
+        # Remove the sibling: `first` is now the feed's last token, so the warning appears.
+        IngestionToken.objects.filter(name="second").delete()
+        body = client.get(reverse("ui-settings-sources")).content.decode()
+        assert "This is the last token for feed" in body
+        assert "warn-src" in body
+
+
+class TestSourceDetailTokenStatus:
+    """§10a regression — the source page's token table shows all three states, not just Active/Revoked."""
+
+    def _details(self, admin: User, source: IngestionSource) -> str:
+        return (
+            _ui_client(admin)
+            .get(reverse("ui-settings-source-detail", kwargs={"source_id": source.id}))
+            .content.decode()
+        )
+
+    def test_a_deactivated_token_is_not_shown_as_active(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        source = _mk_source(slug="detail-src", organisation=org)
+        token, _ = IngestionToken.create_token(source=source, organisation=org, name="prod")
+
+        assert '<span class="pill pill-on">Active</span>' in self._details(admin, source)
+
+        token.deactivated_at = timezone.now()
+        token.save(update_fields=["deactivated_at"])
+        paused = self._details(admin, source)
+        assert '<span class="pill pill-pending">Deactivated</span>' in paused
+        assert '<span class="pill pill-on">Active</span>' not in paused
+
+        token.revoked_at = timezone.now()
+        token.save(update_fields=["revoked_at"])
+        revoked = self._details(admin, source)
+        assert '<span class="pill pill-off">Revoked</span>' in revoked
+        # Revoked supersedes the pause, exactly as on the Settings → Sources page.
+        assert '<span class="pill pill-pending">Deactivated</span>' not in revoked
+
+
+class TestSourceProvisioning:
     def test_a_new_name_provisions_a_profile_with_a_slugified_key(self, db: None) -> None:
         org = _mk_org("Org1")
         client = _ui_client(_mk_user("admin", org, role="admin"))

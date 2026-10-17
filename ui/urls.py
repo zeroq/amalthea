@@ -202,6 +202,21 @@ urlpatterns = [
         views.settings_token_revoke,
         name="ui-settings-token-revoke",
     ),
+    path(
+        "settings/sources/<uuid:token_id>/deactivate",
+        views.settings_token_deactivate,
+        name="ui-settings-token-deactivate",
+    ),
+    path(
+        "settings/sources/<uuid:token_id>/activate",
+        views.settings_token_activate,
+        name="ui-settings-token-activate",
+    ),
+    path(
+        "settings/sources/<uuid:token_id>/delete",
+        views.settings_token_delete,
+        name="ui-settings-token-delete",
+    ),
     path("settings/organisations", views.settings_organisations, name="ui-settings-organisations"),
     path(
         "settings/organisations/<uuid:org_id>/edit",

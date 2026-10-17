@@ -390,7 +390,7 @@ Plans: `docs/planning/PLAN-2026-10-15-token-only-webhook-routing.md` (routes, AD
 | ID | Plan / AGENTS.md says | Implemented | Why · Code pointer · Evidence |
 |---|---|---|---|
 | **WTR-1** | `PLAN-2026-10-15-settings-sources-ingestion-tokens` non-goal **N1**: "No source CRUD…" | **`IngestionSource` is now provisionable by name from the token form** | That plan shipped a create form whose source list had no writer in the product (`IngestionSource.objects.order_by("name")` had no write path). Sources stay global and gain no editor. `ui/views.py::settings_token_create`. |
-| **WTR-2** | `sources_list.html` describes sources as `open`/`required` and says an open source "accepts unauthenticated posts" | **Stale copy left in place** (only the URL sentence was fixed) | The claim has been false since strict token auth (2026-10-10) and is pinned by `test_ui_loop.py:520-537`; copy-and-pin is its own change. `TODO.md` §10.8. |
+| **WTR-2** | `sources_list.html` describes sources as `open`/`required` and says an open source "accepts unauthenticated posts" | **Fixed 2026-10-17** — pills are `required`/`paused`/`none` and the false claim is gone | Left stale when token-only routing landed (the claim has been false since strict token auth, 2026-10-10). Corrected with the §10b feed-reap change; the pinning test `test_ui_loop.py::test_the_sources_page_shows_whether_a_secret_is_required` was rewritten to assert the three states and the claim's absence. `TODO.md` §10.8(a). |
 | **WTC-1** | §6 prefers progressive enhancement; a fragment view was fine | **`_modal.html` gains `show_cancel`, `close_url`, `modal_static`** | All three are opt-in, so every existing dialog renders unchanged (`test_settings_ingestion_tokens.py`). |
 | **WTC-2** | `data-modal-static` documented as "backdrop-click only" | **Esc now respects it too** | A static dialog whose purpose is to hold a one-time secret must not be dismissible with a single key; no dialog carried the attribute before, so no behaviour changed. `ui/static/ui/modal.js`. |
 | **WTC-3** | `[data-modal-close]` was button-only | **`preventDefault()` for the anchor form of the closer** | The only way to provide a JS-less exit from a static dialog is a real `<a>`; with JS it must close in place, not navigate. Buttons have no default action, so their path is untouched. `ui/static/ui/modal.js`. |
@@ -435,8 +435,17 @@ gate (ADR-009) and the preview dialog are P2—P4 and are not in this diff.
 code and read by no reader (`ingest/pipeline.py` used the module constant `DEFAULT_SEVERITY`); the
 engine now threads it through `default_severity=`, with the constant as the floor for direct pipeline
 callers (`test_ingest_pipeline.py` passes no severity, so that branch stays live). `_verify_secret`
-in `ingest/views.py` was dead code and has been removed (along with its now-unused imports); the live
-verifier is `identity.models.py::_verify_secret` (called from `IngestionToken.verify`).
+in `ingest/views.py` was dead code — the live verifier is `identity.models.py::_verify_secret`
+(called from `IngestionToken.verify`) — and is now removed, together with its unused `_ph`,
+`argon2.PasswordHasher` and `constant_time_compare` imports. The module docstring bullet that
+described a legacy plaintext fallback in the receiver went with it: that path was retired when
+migration `identity.0006_create_default_org` adopted `IngestionSource.webhook_secret_hash` rows as
+hashed `IngestionToken`s, so the receiver never had such a branch to fall back to.
+
+**Correction (2026-10-17):** this paragraph originally asserted the removal on the strength of commit
+`0d1d541`, whose message claimed it but whose diff for `ingest/views.py` was empty — the file was
+unchanged, so the claim was false for the whole interval between that commit and the follow-up that
+actually removed the code. The text above now describes the file as it is.
 
 Evidence: `test_mapping_engine.py` — 184 cases (AC1 purity via a cursor tripwire, AC2 = the synonym
 table + score bands, AC3 = the stored CrowdStrike payload end to end through `/api/v1/alerts/webhook/`,

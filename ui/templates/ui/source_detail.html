@@ -202,9 +202,13 @@
               <td class="mono dim">{{ token.created_at|date:"Y-m-d H:i" }}</td>
               <td class="mono dim">{{ token.last_used_at|date:"Y-m-d H:i"|default:"never" }}</td>
               <td>
-                {% if token.revoked_at %}
+                {# Revoked supersedes a pause, matching the Settings → Sources table (§10a). #}
+                {% if token.is_revoked %}
                   <span class="pill pill-off">Revoked</span>
                   <span class="mono dim">{{ token.revoked_at|date:"Y-m-d H:i" }}</span>
+                {% elif token.is_deactivated %}
+                  <span class="pill pill-pending">Deactivated</span>
+                  <span class="mono dim">{{ token.deactivated_at|date:"Y-m-d H:i" }}</span>
                 {% else %}
                   <span class="pill pill-on">Active</span>
                 {% endif %}

@@ -71,6 +71,10 @@ The one new write path is `IngestionSource.objects.get_or_create(slug=slugify(na
   they have been wrong since strict token auth (2026-10-10) and are pinned by
   `test_ui_loop.py:520-537`. Splitting copy-and-pin into its own change keeps this one small; tracked in
   `TODO.md` §10.8.
+  **Corrected 2026-10-17 (§10c):** both were done together — the pills are now `required` / `paused` /
+  `none` and the false claim is gone, with the pin test rewritten to match
+  (`test_ui_loop.py::test_the_sources_page_shows_whether_a_secret_is_required`). `TODO.md` §10.8(a) and
+  `docs/spec/deviations.md` WTR-2 closed.
 
 ## 7. Testing
 

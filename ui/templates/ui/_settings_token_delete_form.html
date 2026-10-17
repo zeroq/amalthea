@@ -1,0 +1,28 @@
+{% comment %}
+Server-rendered body for the "Delete token" confirmation modal.
+
+Only reached for an inactive token (revoked or deactivated); the view refuses an active one before
+this dialog is ever built. Deletion is permanent, so the wording says so and names the token.
+
+`token.source_token_count` is annotated by `_settings_sources_context`. When it is 1 this is the
+feed's last credential, so the delete also reaps the feed and its mapping profile — a consequence the
+operator must see *before* confirming, not discover afterwards. The feed's alerts are kept (the FK is
+SET_NULL), so the count only warns that they stop naming a feed.
+{% endcomment %}
+<p class="modal-body-text">
+  Delete token <strong>{{ token.name }}</strong> (prefix <code>{{ token.prefix }}</code>)?
+  This is permanent — the record is removed for good. Revoked and deactivated tokens can be deleted;
+  only an active token must be deactivated first.
+</p>
+{% if token.source_token_count == 1 %}
+<p class="modal-body-text">
+  <strong>This is the last token for feed <code>{{ token.source.slug }}</code>.</strong>
+  Deleting it also deletes that feed and its mapping rules — a feed exists only to carry tokens, and
+  this one will have none left.
+  {% if token.source_alert_count %}
+    Its {{ token.source_alert_count }} existing alert{{ token.source_alert_count|pluralize }}
+    {{ token.source_alert_count|pluralize:"is,are" }} kept, but will no longer name the feed.
+  {% endif %}
+</p>
+{% endif %}
+<input type="hidden" name="token_id" value="{{ token.id }}" form="{{ form_id }}">

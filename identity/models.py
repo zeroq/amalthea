@@ -208,6 +208,9 @@ class IngestionToken(UUIDModel, TimeStampedModel):
     prefix = models.CharField(max_length=12, unique=True, db_index=True)
     secret_hash = models.CharField(max_length=255)
     revoked_at = models.DateTimeField(null=True, blank=True)
+    # Reversible pause, distinct from the terminal `revoked_at`: a deactivated token stops accepting
+    # webhooks but can be activated again (Settings → Sources, §10a). Revocation stays permanent.
+    deactivated_at = models.DateTimeField(null=True, blank=True)
     last_used_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
         User,
@@ -225,6 +228,24 @@ class IngestionToken(UUIDModel, TimeStampedModel):
 
     def __str__(self) -> str:
         return f"IngestionToken({self.name}) for {self.organisation}"
+
+    @property
+    def is_revoked(self) -> bool:
+        return self.revoked_at is not None
+
+    @property
+    def is_deactivated(self) -> bool:
+        return self.deactivated_at is not None
+
+    @property
+    def is_active(self) -> bool:
+        """A token accepts webhooks only while neither paused nor revoked (§10a/§10b).
+
+        This is the single definition of "inactive" the Settings actions share: a revoked *or*
+        deactivated token is inactive and therefore deletable; only an active token can be
+        deactivated, and only a deactivated token can be activated.
+        """
+        return not (self.is_revoked or self.is_deactivated)
 
     def org_mismatch_message(self) -> str | None:
         """The refusal message if this token's org is not its source's org, else `None`.
@@ -303,8 +324,13 @@ class IngestionToken(UUIDModel, TimeStampedModel):
         return token, plaintext
 
     def verify(self, presented: str) -> bool:
-        """Constant-time verification of a presented secret."""
-        if self.revoked_at is not None:
+        """Constant-time verification of a presented secret.
+
+        A revoked token never verifies (terminal). A deactivated token also refuses here, so the
+        model is the last line of defence even if a caller forgets to filter on `deactivated_at`
+        (the webhook lookup filters both — one uniform 401 for unknown, revoked and paused secrets).
+        """
+        if self.revoked_at is not None or self.deactivated_at is not None:
             return False
         return _verify_secret(self.secret_hash, presented)
 

@@ -11,13 +11,14 @@ mode, not because the code is shaped that way:
 * **The body must be a JSON *object*.** `[1, 2]` and `"a string"` are valid JSON, but an alert has
   fields, and a `payload.get(...)` on them raises `AttributeError` — a 500 for what is really a bad
   request from an untrusted sender. The receiver refuses non-objects up front.
-* **The secret is verified with a password hasher.** `IngestionToken.secret_hash` stores a hash, so
-  comparing the presented secret against the column with `constant_time_compare` would compare a
-  plaintext against a digest and *never* match. `check_password` is the only correct comparison, and
-  it is timing-safe. Legacy rows holding a plaintext secret in `IngestionSource.webhook_secret_hash`
-  are still accepted (via constant-time compare) so an operator can migrate without a coordinated
-  flag day; the branch is commented because it is a deliberate, temporary affordance and not an
-  oversight.
+* **The secret is verified with a password hasher.** `IngestionToken.secret_hash` stores an Argon2
+  hash, so comparing the presented secret against the column with `constant_time_compare` would
+  compare a plaintext against a digest and *never* match. `IngestionToken.verify()` is the only
+  correct comparison, and it is timing-safe. The receiver does **not** verify secrets itself: the
+  hasher and the comparison live on the model, next to the column they protect, so a second
+  implementation here could only drift. (The pre-token `IngestionSource.webhook_secret_hash`
+  plaintext path was retired — migration `identity.0006_create_default_org` adopts those rows as
+  `IngestionToken`s, hashed.)
 * **Depth and size limits are enforced before the mapping engine walks the document.** The mapping
   engine recurses through the raw payload, so an unbounded nesting depth is a stack-depth hazard
   coming from the network.
@@ -39,12 +40,10 @@ import logging
 import time
 from typing import Any
 
-from argon2 import PasswordHasher
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.utils.crypto import constant_time_compare
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
@@ -60,9 +59,6 @@ _JSON_CONTENT_TYPES = (
     "application/cloudevents+json",
     "application/problem+json",
 )
-
-# Module-level hasher (same pattern as compat/auth.py and identity.models)
-_ph = PasswordHasher()
 
 
 def _error(
@@ -102,21 +98,6 @@ def _depth_exceeds(value: Any, limit: int, depth: int = 1) -> bool:
     return False
 
 
-def _verify_secret(stored_hash: str, presented: str) -> bool:
-    """Verify a presented secret against a stored Argon2 hash.
-
-    Falls back to constant-time compare for legacy plaintext values (pre-hash migration).
-    Uses Argon2 PasswordHasher directly (like compat.auth) since Django's check_password
-    doesn't know about Argon2 unless PASSWORD_HASHERS is configured.
-    """
-    try:
-        _ph.verify(stored_hash, presented)
-        return True
-    except Exception:
-        # Legacy plaintext secret — constant-time compare
-        return constant_time_compare(presented.encode("utf-8"), stored_hash.encode("utf-8"))
-
-
 def _authenticate_token(request: HttpRequest) -> tuple[IngestionToken | None, HttpResponse | None]:
     """
     Resolve the presented secret to its `IngestionToken`.
@@ -137,12 +118,12 @@ def _authenticate_token(request: HttpRequest) -> tuple[IngestionToken | None, Ht
 
     token = (
         IngestionToken.objects.select_related("source", "organisation")
-        .filter(prefix=presented[:12], revoked_at__isnull=True)
+        .filter(prefix=presented[:12], revoked_at__isnull=True, deactivated_at__isnull=True)
         .first()
     )
-    # Revoked tokens are excluded by the queryset, so a revoked secret, an unknown prefix and a wrong
-    # secret are one and the same answer — the caller learns nothing about which tokens exist.
-    # `verify` only runs on a prefix hit, so a flood of junk secrets costs one indexed SELECT each.
+    # Revoked and deactivated tokens are excluded by the queryset, so any of them, an unknown prefix
+    # and a wrong secret are one and the same answer — the caller learns nothing about which tokens
+    # exist. `verify` only runs on a prefix hit, so a flood of junk secrets costs one indexed SELECT each.
     if token is None or not token.verify(presented):
         return None, _error(401, "Unauthorized: invalid token", type_="unauthorized")
 
