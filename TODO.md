@@ -1,7 +1,10 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-17 (**the per-source field-mapping wave shipped** — the mapping engine, the
+Last updated: 2026-10-17 (**ingestion-token lifecycle shipped** — Settings → Sources can now pause
+(deactivate) and resume (activate) an ingestion token, and delete an inactive one; §10a/§10b done,
+guarded by `tests/conformance/test_settings_ingestion_tokens.py`). Earlier: **the per-source
+field-mapping wave shipped** — the mapping engine, the
 re-map control and the P5 health card; §6.17 retro-mapping done, §6.18 dead-code observation open —
 `PLAN-2026-10-16-source-field-mapping.md`). Earlier: **case pages are authorable in the UI** — §12.5 code shipped
 (`PLAN-2026-10-14-case-pages-ui.md`): `ui-case-page-create/-edit/-delete`, a `can_mutate`-gated Pages card,
@@ -53,13 +56,13 @@ hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the
 | **8** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; the ledger already syncs on the case page. |
 | **9** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — an ops/onboarding concern, not triage. |
 | **10** | **§6.13 / §6.16 P4 — Settings: ingestion tokens + audit-log viewer** | Per-org webhook tokens (create/revoke, show-once) + read-only `AuditLog` viewer; also retires the stale webhook copy (§10.8). | **Medium** — self-serve ingestion; the audit viewer is the accountability half. |
-| **10a** | **§6.13 / §6.16 P4b — Settings: Sources → token activate/deactivate** | In Settings → Sources, add an **Action** button to deactivate an active token and activate an inactive token. Only an `admin` for that org’s tokens, or a `superAdmin`, may change state. | **Medium** — token lifecycle management (pause/reuse) without revoking and recreating. |
-| **10b** | **§6.13 / §6.16 P4c — Settings: Sources → delete inactive token** | In Settings → Sources, add an **Action** button to delete an **inactive** token. Only an `admin` for that org’s tokens, or a `superAdmin`, may delete; active tokens must be deactivated before deletion. | **Medium** — removes stale credentials and keeps the token list tidy. |
+| **10a** | **§6.13 / §6.16 P4b — Settings: Sources → token activate/deactivate — SHIPPED 2026-10-17** | In Settings → Sources, a token row now offers **Deactivate** (active → modal) and **Activate** (deactivated → direct POST). Only an `admin` for that org’s tokens, or a `superAdmin`, may change state. A new reversible `IngestionToken.deactivated_at` (migration `0012_ingestiontoken_deactivated_at`) keeps the pause distinct from the terminal `revoked_at`; the webhook lookup and `IngestionToken.verify()` both refuse a paused token (401), and a *revoked* token can never be re-activated. | **Done** — pause/resume without revoking and recreating. Guards: `TestTokenActivationLifecycle`, `TestTokenLifecycleIsolation`. |
+| **10b** | **§6.13 / §6.16 P4c — Settings: Sources → delete inactive token — SHIPPED 2026-10-17** | In Settings → Sources, an inactive row (revoked **or** deactivated) now offers **Delete** behind a confirm modal; an active token is refused until it is deactivated. Only an `admin` for that org’s tokens, or a `superAdmin`, may delete. The `ingestion_token.deleted` audit row is written *before* the row is removed, in the same transaction, so the trail keeps the token id and owning org. | **Done** — removes stale credentials and keeps the token list tidy. |
 | **11** | **Security: §11.2 (M3) + S3 + S5** | **M3** playbook secrets are global + cleartext to any authenticated user of any org. **S3** per-account lockout on the **API** login; stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. | **Medium (security)** — M3 blocks multi-tenant trust; S5's caps are the analyst-facing half (upload robustness). |
 | **12** | **§2.6 + §2.7 (test hardening) + §7.1–7.4 + §8.5/§8.7 + §11.3/§11.4-L1/§11.5** | Coverage back ≥ 80% (79% since the tenant wave) + the Phase-12/T2 QA list; Tailwind source/artifact split; mutation coverage; timestamp wording; protocol-relative `href`; unaudited procedure attaches; Django admin outside the role model; `django.request` log forging. | **None** — engineering hygiene + accepted Low/Info follow-ups. |
 | **13** | **Orphaned routes** | `ui-case-attachment-list` (+ its now-dead `ui/case_attachments.html`) and `ui-case-attachment-detail` (405) are reachable by URL only — the case page renders its own attachment table. `ui-case-export` / `ui-taxonomy` are now wired (P1), so this row supersedes the old claim. | **Low** — dead surface; delete or build an entry point. |
 | **14** | **§12.6 — Taxonomy: three cards break the mono convention for their values — SHIPPED 2026-10-17** | `ui/templates/ui/taxonomy.html` now renders the **Case Statuses**, **Alert Statuses** and **Observable Types** value / name cells as `<td class="mono">`, matching the four code cards (**Case Scope**, **Case Phase**, **Case Type**, **Data Classification**). | **Done** — visual consistency on the Taxonomy page; display-only, no behaviour change. |
-| **15** | **§12.7 — Cases list: make the case title clickable** | In `ui/cases.html` (Cases List), make the **case title** clickable (same linking behaviour as the **case number**) to navigate to the Case Details view. If title can be long/truncate, preserve `title` tooltip and maintain keyboard accessibility (link, not just JS). | **Low** — small UX improvement. |
+| **15** | **§12.7 — Cases list: make the case title clickable — SHIPPED 2026-10-17** | `ui/templates/ui/case_list.html` now links the **case title** to `ui-case-detail` (same URL as the **case number**); it is a real `<a>`, so keyboard access needs no JS. | **Done** — small UX improvement. |
 | **16** | **§12.8 — Case Details (General) + verdict taxonomy + close flow** | (1) On Case Details General tab, add edit icons next to **Severity**, **Scope**, **Type**, **Classification**, and **Phase**; each opens a modal to change that field to values defined in **Taxonomy**. (2) Add a Tags row above the description showing assigned tags + **Add Tag** modal to assign existing tags. (3) Add **Verdict** to **Case** (`Undefined` default; `True Positive`, `False Positive`) and add a **Verdict** card to **Taxonomy**. (4) When setting status to **Closed**, show a modal requiring **Verdict** and a closing comment. (5) When closing a case, close all linked **Alerts** and set each alert's **Verdict** to the case's **Verdict**. All modals use `<dialog>` (no native `confirm/alert/prompt`). Requires role checks consistent with existing mutation rules. | **Medium** — improves case closure quality and inline editing; affects data model + UI + close workflow. |
 | **17** | **§12.9 — UI layout/style standardization** | Establish and apply a small set of UI/layout rules across the UI: (1) Input field height must match the button height next to it. (2) For action columns in tables, prefer compact icon-only actions with accessible names (not full text buttons) where space-limited and common. (3) Standardize table markup/styles: the table lives inside a `.card`, and filters go in a separate card above the table (use **Observables List View** as the reference). Codify in a short "UI Layout Guidelines" note (e.g. in `ui/README.md` or `docs/spec/ui-style.md`) and apply to affected views (e.g. Cases, Alerts, Tasks, Users, Tokens) to avoid drift. | **Low** — global consistency; reduces CSS/markup churn. |
 
@@ -572,7 +575,7 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
   `tests/conformance/test_ui_p2_wiring.py::test_taxonomy_page_renders_code_valued_cells_in_mono`
   (asserts the seeded status values and observable-type names render with the mono class).
   Source: user request 2026-10-17.
-- [x] **12.7 — Cases list: make the case title clickable.** In `ui/templates/ui/cases.html`, the table row for
+- [x] **12.7 — Cases list: make the case title clickable.** In `ui/templates/ui/case_list.html` (the item originally cited `ui/cases.html`), the table row for
   each case currently links the **case number** to the Case Details view (`ui-case-detail` / `case_id`).
   Make the **case title** (the human-readable title column) a link to the same destination, reusing the
   same URL and link text logic, preserving truncation and an accessible link name (e.g. "Open case
@@ -603,7 +606,10 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
       table lives inside a `.card`, and filtering options live in a separate card above the table (reference:
       **Observables List View**). Capture these as reusable guidelines (e.g. `docs/spec/ui-style.md` or
       `ui/README.md`) and apply to existing/new views (Cases, Alerts, Tasks, Users, Sources/Tokens) to avoid
-      regressions. Source: user request 2026-10-17.
+      regressions. **Note (2026-10-17):** the aligned-action-row pattern already exists as `.case-actions`
+      (`app.css`: `margin-top:0`, centred, 34px equal-height controls) and is now reused outside Case
+      templates (`source_detail.html`, and the Settings → Sources token row) — generalize/rename it as part
+      of this item rather than inventing a second utility. Source: user request 2026-10-17.
 
 ---
 

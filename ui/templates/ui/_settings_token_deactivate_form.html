@@ -1,0 +1,12 @@
+{% comment %}
+Server-rendered body for the "Deactivate token" confirmation modal.
+
+Deactivation is reversible (it only pauses the credential), so the wording states that plainly and
+points at the Activate control on the same row. The token is named, never its secret.
+{% endcomment %}
+<p class="modal-body-text">
+  Deactivate token <strong>{{ token.name }}</strong> (prefix <code>{{ token.prefix }}</code>)?
+  It will stop accepting webhooks until you activate it again. Nothing is destroyed —
+  you can re-activate it from this row at any time.
+</p>
+<input type="hidden" name="token_id" value="{{ token.id }}" form="{{ form_id }}">

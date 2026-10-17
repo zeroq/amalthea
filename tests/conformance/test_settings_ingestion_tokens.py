@@ -43,6 +43,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
 from alerts.models import Alert
 from identity.models import AuditLog, IngestionToken, Organisation, User
@@ -387,10 +388,224 @@ class TestEndToEnd:
         assert rejected.json()["type"] == "unauthorized"
 
 
-class TestSourceProvisioning:
-    """The feed is *named*, not picked: the webhook URL is source-less, so the token points at a
-    mapping profile and the operator supplies a name rather than choosing from a list."""
+class TestTokenActivationLifecycle:
+    """TODO §10a/§10b — deactivate (reversible pause), activate (resume), delete (inactive only).
 
+    The point of the split: `revoke` is terminal, so pausing a credential used to mean losing it.
+    `deactivated_at` adds a pause that a feed can come back from, and a delete that only ever
+    touches a token nobody is presenting any more.
+    """
+
+    def _mint(self, org: Organisation, admin: User, *, slug: str, name: str = "prod"):
+        """Mint through the UI and return `(client, token, plaintext)`."""
+        client = _ui_client(admin)
+        resp = _create_token_via_ui(
+            client, source=_mk_source(slug=slug, organisation=org), name=name
+        )
+        assert resp.status_code == 200
+        return client, IngestionToken.objects.get(name=name), _plaintext_from(resp)
+
+    def test_deactivate_pauses_the_token_and_the_webhook_turns_401(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, plaintext = self._mint(org, admin, slug="pause-src")
+
+        assert _localhost_webhook(client, plaintext, source_ref="before").status_code == 201
+
+        resp = client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": token.id}))
+        assert resp.status_code == 302
+        token.refresh_from_db()
+        assert token.deactivated_at is not None
+        assert token.revoked_at is None, "deactivation must not revoke"
+        assert AuditLog.objects.filter(action="ingestion_token.deactivated").exists()
+
+        paused = _localhost_webhook(client, plaintext, source_ref="while-paused")
+        assert paused.status_code == 401, paused.content
+        assert paused.json()["type"] == "unauthorized"
+
+    def test_the_token_is_rejected_at_the_model_layer_too(self, db: None) -> None:
+        """The queryset filter is the fast path; `verify()` is the last line of defence."""
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        _client, token, plaintext = self._mint(org, admin, slug="verify-src")
+        token.deactivated_at = timezone.now()
+        token.save(update_fields=["deactivated_at"])
+        assert token.verify(plaintext) is False
+
+    def test_activate_resumes_the_token_and_the_webhook_accepts_again(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, plaintext = self._mint(org, admin, slug="resume-src")
+        client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": token.id}))
+
+        resp = client.post(reverse("ui-settings-token-activate", kwargs={"token_id": token.id}))
+        assert resp.status_code == 302
+        token.refresh_from_db()
+        assert token.deactivated_at is None
+        assert AuditLog.objects.filter(action="ingestion_token.activated").exists()
+
+        accepted = _localhost_webhook(client, plaintext, source_ref="after-resume")
+        assert accepted.status_code == 201, accepted.content
+
+    def test_activate_refuses_a_revoked_token(self, db: None) -> None:
+        """Revocation is terminal: a revoked credential can never come back."""
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, plaintext = self._mint(org, admin, slug="revoked-stays-src")
+        client.post(reverse("ui-settings-token-revoke", kwargs={"token_id": token.id}))
+
+        resp = client.post(reverse("ui-settings-token-activate", kwargs={"token_id": token.id}))
+        assert resp.status_code == 302
+        token.refresh_from_db()
+        assert token.revoked_at is not None
+        assert token.deactivated_at is None
+        assert not AuditLog.objects.filter(action="ingestion_token.activated").exists()
+        assert _localhost_webhook(client, plaintext, source_ref="still-dead").status_code == 401
+
+    def test_deactivate_refuses_a_revoked_token(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, _plaintext = self._mint(org, admin, slug="revoked-no-pause-src")
+        client.post(reverse("ui-settings-token-revoke", kwargs={"token_id": token.id}))
+
+        resp = client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": token.id}))
+        assert resp.status_code == 302
+        token.refresh_from_db()
+        assert token.deactivated_at is None, "a revoked token has nothing left to pause"
+
+    def test_delete_refuses_an_active_token(self, db: None) -> None:
+        """An active credential a live feed presents must be deactivated first."""
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, _plaintext = self._mint(org, admin, slug="active-delete-src")
+
+        resp = client.post(reverse("ui-settings-token-delete", kwargs={"token_id": token.id}))
+        assert resp.status_code == 302
+        assert IngestionToken.objects.filter(pk=token.pk).exists()
+        assert not AuditLog.objects.filter(action="ingestion_token.deleted").exists()
+
+    def test_delete_removes_a_deactivated_token_and_audits_before_the_row_goes(
+        self, db: None
+    ) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, plaintext = self._mint(org, admin, slug="paused-delete-src")
+        token_id = token.id
+        client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": token_id}))
+
+        resp = client.post(reverse("ui-settings-token-delete", kwargs={"token_id": token_id}))
+        assert resp.status_code == 302
+        assert not IngestionToken.objects.filter(pk=token_id).exists()
+
+        deleted = AuditLog.objects.get(action="ingestion_token.deleted")
+        assert deleted.actor_id == admin.id
+        assert deleted.target_type == "IngestionToken"
+        # The id survives the row: the audit is written before `delete()`, not after.
+        assert deleted.target_id == str(token_id)
+        assert deleted.target_org_id == org.id
+        assert plaintext not in str(deleted.__dict__)
+
+    def test_delete_removes_a_revoked_token(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, _plaintext = self._mint(org, admin, slug="revoked-delete-src")
+        token_id = token.id
+        client.post(reverse("ui-settings-token-revoke", kwargs={"token_id": token_id}))
+
+        resp = client.post(reverse("ui-settings-token-delete", kwargs={"token_id": token_id}))
+        assert resp.status_code == 302
+        assert not IngestionToken.objects.filter(pk=token_id).exists()
+
+    def test_the_status_cell_offers_the_right_control_for_each_state(self, db: None) -> None:
+        """The row must not offer an action its state forbids (template/§10a contract)."""
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, _plaintext = self._mint(org, admin, slug="markup-src")
+
+        active = client.get(reverse("ui-settings-sources")).content.decode()
+        assert 'data-modal-open="deactivate-token-' in active
+        assert 'data-modal-open="delete-token-' not in active, "an active token is not deletable"
+
+        client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": token.id}))
+        paused = client.get(reverse("ui-settings-sources")).content.decode()
+        assert "Deactivated" in paused
+        assert reverse("ui-settings-token-activate", kwargs={"token_id": token.id}) in paused
+        assert 'data-modal-open="delete-token-' in paused
+        assert 'data-modal-open="deactivate-token-' not in paused
+
+        client.post(reverse("ui-settings-token-revoke", kwargs={"token_id": token.id}))
+        revoked = client.get(reverse("ui-settings-sources")).content.decode()
+        assert "Revoked" in revoked
+        assert 'data-modal-open="delete-token-' in revoked
+        assert reverse("ui-settings-token-activate", kwargs={"token_id": token.id}) not in revoked
+
+
+class TestTokenLifecycleIsolation:
+    """§10a/§10b cross-org and role boundaries, mirroring `TestCrossOrgIsolation`/`TestRoleGates`."""
+
+    @pytest.mark.parametrize("action", ["deactivate", "activate", "delete"])
+    def test_cross_org_actions_are_404_and_inert(self, db: None, action: str) -> None:
+        org_a = _mk_org("Org A")
+        org_b = _mk_org("Org B")
+        admin_a = _mk_user("admin-a", org_a, role="admin")
+        other, _ = IngestionToken.create_token(
+            source=_mk_source(slug="src-b", organisation=org_b), organisation=org_b, name="theirs"
+        )
+
+        resp = _ui_client(admin_a).post(
+            reverse(f"ui-settings-token-{action}", kwargs={"token_id": other.id})
+        )
+        assert resp.status_code == 404
+        other.refresh_from_db()
+        assert other.revoked_at is None and other.deactivated_at is None
+        assert IngestionToken.objects.filter(pk=other.pk).exists(), f"cross-org {action} deleted it"
+
+    @pytest.mark.parametrize("role", ["analyst", "viewer"])
+    @pytest.mark.parametrize("action", ["deactivate", "activate", "delete"])
+    def test_non_admin_roles_are_locked_out(self, db: None, role: str, action: str) -> None:
+        org = _mk_org("Org1")
+        user = _mk_user(f"user-{role}", org, role=role)
+        source = _mk_source(organisation=org)
+        token, _ = IngestionToken.create_token(source=source, organisation=org, name="existing")
+        token.deactivated_at = timezone.now()
+        token.save(update_fields=["deactivated_at"])
+
+        resp = _ui_client(user).post(
+            reverse(f"ui-settings-token-{action}", kwargs={"token_id": token.id})
+        )
+        assert resp.status_code == 404
+        token.refresh_from_db()
+        assert token.deactivated_at is not None
+        assert token.revoked_at is None
+
+    def test_superadmin_can_pause_and_delete_another_orgs_token(self, db: None) -> None:
+        org_a = _mk_org("Org A")
+        org_b = _mk_org("Org B")
+        superadmin = _mk_user("super", org_a, role="superAdmin")
+        client = _ui_client(superadmin)
+        token, _ = IngestionToken.create_token(
+            source=_mk_source(slug="src-b", organisation=org_b), organisation=org_b, name="theirs"
+        )
+
+        assert (
+            client.post(
+                reverse("ui-settings-token-deactivate", kwargs={"token_id": token.id})
+            ).status_code
+            == 302
+        )
+        token.refresh_from_db()
+        assert token.deactivated_at is not None
+
+        assert (
+            client.post(
+                reverse("ui-settings-token-delete", kwargs={"token_id": token.id})
+            ).status_code
+            == 302
+        )
+        assert not IngestionToken.objects.filter(pk=token.pk).exists()
+
+
+class TestSourceProvisioning:
     def test_a_new_name_provisions_a_profile_with_a_slugified_key(self, db: None) -> None:
         org = _mk_org("Org1")
         client = _ui_client(_mk_user("admin", org, role="admin"))

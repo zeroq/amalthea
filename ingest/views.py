@@ -137,12 +137,12 @@ def _authenticate_token(request: HttpRequest) -> tuple[IngestionToken | None, Ht
 
     token = (
         IngestionToken.objects.select_related("source", "organisation")
-        .filter(prefix=presented[:12], revoked_at__isnull=True)
+        .filter(prefix=presented[:12], revoked_at__isnull=True, deactivated_at__isnull=True)
         .first()
     )
-    # Revoked tokens are excluded by the queryset, so a revoked secret, an unknown prefix and a wrong
-    # secret are one and the same answer — the caller learns nothing about which tokens exist.
-    # `verify` only runs on a prefix hit, so a flood of junk secrets costs one indexed SELECT each.
+    # Revoked and deactivated tokens are excluded by the queryset, so any of them, an unknown prefix
+    # and a wrong secret are one and the same answer — the caller learns nothing about which tokens
+    # exist. `verify` only runs on a prefix hit, so a flood of junk secrets costs one indexed SELECT each.
     if token is None or not token.verify(presented):
         return None, _error(401, "Unauthorized: invalid token", type_="unauthorized")
 

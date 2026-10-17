@@ -207,13 +207,19 @@ def record_ingestion_token_change(
     token: IngestionToken,
 ) -> None:
     """
-    Record an ingestion token create/revoke.
+    Record an ingestion token lifecycle change.
 
     Args:
         request: The HTTP request (for IP extraction).
         actor: The user performing the action (admin or superAdmin).
-        action: One of "ingestion_token.created", "ingestion_token.revoked".
-        token: The IngestionToken instance.
+        action: One of "ingestion_token.created", "ingestion_token.revoked",
+            "ingestion_token.deactivated", "ingestion_token.activated",
+            "ingestion_token.deleted".
+        token: The IngestionToken instance. For a deletion pass the instance **before**
+            `delete()` — Django clears the pk afterwards, so `token.id` would be lost.
+
+    A deletion is recorded *before* the row goes, in the same transaction, so the audit
+    trail keeps the token's id and owning org after the credential itself is gone.
     """
     from identity.models import AuditLog
 
