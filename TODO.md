@@ -53,9 +53,15 @@ hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the
 | **8** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; the ledger already syncs on the case page. |
 | **9** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — an ops/onboarding concern, not triage. |
 | **10** | **§6.13 / §6.16 P4 — Settings: ingestion tokens + audit-log viewer** | Per-org webhook tokens (create/revoke, show-once) + read-only `AuditLog` viewer; also retires the stale webhook copy (§10.8). | **Medium** — self-serve ingestion; the audit viewer is the accountability half. |
+| **10a** | **§6.13 / §6.16 P4b — Settings: Sources → token activate/deactivate** | In Settings → Sources, add an **Action** button to deactivate an active token and activate an inactive token. Only an `admin` for that org’s tokens, or a `superAdmin`, may change state. | **Medium** — token lifecycle management (pause/reuse) without revoking and recreating. |
+| **10b** | **§6.13 / §6.16 P4c — Settings: Sources → delete inactive token** | In Settings → Sources, add an **Action** button to delete an **inactive** token. Only an `admin` for that org’s tokens, or a `superAdmin`, may delete; active tokens must be deactivated before deletion. | **Medium** — removes stale credentials and keeps the token list tidy. |
 | **11** | **Security: §11.2 (M3) + S3 + S5** | **M3** playbook secrets are global + cleartext to any authenticated user of any org. **S3** per-account lockout on the **API** login; stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. | **Medium (security)** — M3 blocks multi-tenant trust; S5's caps are the analyst-facing half (upload robustness). |
 | **12** | **§2.6 + §2.7 (test hardening) + §7.1–7.4 + §8.5/§8.7 + §11.3/§11.4-L1/§11.5** | Coverage back ≥ 80% (79% since the tenant wave) + the Phase-12/T2 QA list; Tailwind source/artifact split; mutation coverage; timestamp wording; protocol-relative `href`; unaudited procedure attaches; Django admin outside the role model; `django.request` log forging. | **None** — engineering hygiene + accepted Low/Info follow-ups. |
 | **13** | **Orphaned routes** | `ui-case-attachment-list` (+ its now-dead `ui/case_attachments.html`) and `ui-case-attachment-detail` (405) are reachable by URL only — the case page renders its own attachment table. `ui-case-export` / `ui-taxonomy` are now wired (P1), so this row supersedes the old claim. | **Low** — dead surface; delete or build an entry point. |
+| **14** | **§12.6 — Taxonomy: three cards break the mono convention for their values** | In `ui/templates/ui/taxonomy.html` the **Case Statuses** (`:21`), **Alert Statuses** (`:47`) and **Observable Types** (`:75`) cards render their value / name cell as a plain `<td>`, while **Case Scope** (`:100`), **Case Phase** (`:117`), **Case Type** (`:134`) and **Data Classification** (`:151`) render theirs as `<td class="mono">`. Make the three use `class="mono"` too. | **Low** — visual consistency on the Taxonomy page; no behaviour change. |
+| **15** | **§12.7 — Cases list: make the case title clickable** | In `ui/cases.html` (Cases List), make the **case title** clickable (same linking behaviour as the **case number**) to navigate to the Case Details view. If title can be long/truncate, preserve `title` tooltip and maintain keyboard accessibility (link, not just JS). | **Low** — small UX improvement. |
+| **16** | **§12.8 — Case Details (General) + verdict taxonomy + close flow** | (1) On Case Details General tab, add edit icons next to **Severity**, **Scope**, **Type**, **Classification**, and **Phase**; each opens a modal to change that field to values defined in **Taxonomy**. (2) Add a Tags row above the description showing assigned tags + **Add Tag** modal to assign existing tags. (3) Add **Verdict** to **Case** (`Undefined` default; `True Positive`, `False Positive`) and add a **Verdict** card to **Taxonomy**. (4) When setting status to **Closed**, show a modal requiring **Verdict** and a closing comment. (5) When closing a case, close all linked **Alerts** and set each alert's **Verdict** to the case's **Verdict**. All modals use `<dialog>` (no native `confirm/alert/prompt`). Requires role checks consistent with existing mutation rules. | **Medium** — improves case closure quality and inline editing; affects data model + UI + close workflow. |
+| **17** | **§12.9 — UI layout/style standardization** | Establish and apply a small set of UI/layout rules across the UI: (1) Input field height must match the button height next to it. (2) For action columns in tables, prefer compact icon-only actions with accessible names (not full text buttons) where space-limited and common. (3) Standardize table markup/styles: the table lives inside a `.card`, and filters go in a separate card above the table (use **Observables List View** as the reference). Codify in a short "UI Layout Guidelines" note (e.g. in `ui/README.md` or `docs/spec/ui-style.md`) and apply to affected views (e.g. Cases, Alerts, Tasks, Users, Tokens) to avoid drift. | **Low** — global consistency; reduces CSS/markup churn. |
 
 
 ---
@@ -549,7 +555,7 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
   200-alert morning is single-item work. Fix: selection-based bulk triage (status / assignee / dismiss) that
   calls the same service, keyboard-reachable, `<dialog>` confirmation (ADR-003: no native `confirm()`), and a
   per-item result summary so partial failures are visible. Source: audit 2026-10-12.
-- [~] **12.5 — Case pages are renderable but not authorable in the UI.** **Code shipped 2026-10-14**
+- [~] **  12.5 — Case pages are renderable but not authorable in the UI.** **Code shipped 2026-10-14**
   (`PLAN-2026-10-14-case-pages-ui.md`): `ui-case-page-create/-edit/-delete` (all `@not_viewer`
   `@require_POST`), a `can_mutate`-gated Pages card with modal create/edit/delete, Markdown rendering, and
   `live.js` re-fetching `#case-pages` on a `page` frame. **Awaiting independent verification** — until that
@@ -557,6 +563,44 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
   `W104-8`): a page edit/delete writes **no `AuditLog`** row (invisible in the case Audit tab, like
   tags/tasks), and a **delete publishes no WebSocket frame** (API parity — another analyst sees it only on
   their next load). Source: audit 2026-10-12; plan 2026-10-14.
+- [ ] **12.6 — Taxonomy: three cards break the monospace convention for their values.** `ui/templates/ui/taxonomy.html`
+  renders the four code-valued cards — **Case Scope** (`:100`), **Case Phase** (`:117`), **Case Type**
+  (`:134`) and **Data Classification** (`:151`) — with `<td class="mono">` for the code column, but the
+  three list cards render theirs plain: **Case Statuses** (`:21`, "Value"), **Alert Statuses** (`:47`,
+  "Value") and **Observable Types** (`:75`, "Name"). Fix: add `class="mono"` to those three cells
+  (display-only; no behaviour, model or API change). Source: user request 2026-10-17.
+- [ ] **12.7 — Cases list: make the case title clickable.** In `ui/templates/ui/cases.html`, the table row for
+  each case currently links the **case number** to the Case Details view (`ui-case-detail` / `case_id`).
+  Make the **case title** (the human-readable title column) a link to the same destination, reusing the
+  same URL and link text logic, preserving truncation and an accessible link name (e.g. "Open case
+  <number> <title>" if present). Source: user request 2026-10-17.
+- [ ] **12.8 — Case Details (General): inline edits, Tags, Verdict, and enforced close flow.** 
+  (1) **Inline metadata edits** on the General tab (`ui-case-detail`): add edit icons next to **Severity**,
+      **Scope**, **Type**, **Classification** and **Phase**; each opens a dedicated `<dialog>` modal populated
+      with allowed values from Taxonomy (no free text). Mutations must be org-scoped and respect role rules
+      (`@not_viewer`, `require_POST`), emit `AuditLog` entries and relevant WebSocket updates. 
+  (2) **Tags row** above the description: display assigned tags (with removal if applicable) and an **Add Tag**
+      button opening a `<dialog>` to select from existing tags to assign to the case (create-on-assign only if
+      already supported; otherwise select from existing). 
+  (3) **Verdict model + taxonomy**: add `verdict` to **Case** with choices `Undefined`, `True Positive`,
+      `False Positive` and default `Undefined`; expose **Verdict** as a card on the **Taxonomy** page. Add
+      `verdict` to **Alert** (same choices/default) so linked alerts can carry the case’s verdict. 
+  (4) **Close requires Verdict + comment**: when setting a case status to `Closed`, intercept the transition
+      in the UI and show a `<dialog>` modal requiring the **Case Verdict** (dropdown, non-`Undefined`) and a
+      mandatory **closing comment** (Markdown allowed, stored in case timeline/ledger or as a closing note per
+      existing conventions). Block closure until valid. 
+  (5) **Close propagates to linked alerts**: on a successful case closure, close all linked **Alerts** and set
+      each alert’s `verdict` to the case’s `verdict`; record these actions in `AuditLog` and emit events so
+      the UI updates. Use `<dialog>` for all modals (no native `confirm/alert/prompt`), preserve keyboard
+      accessibility and org scoping. Source: user request 2026-10-17.
+- [ ] **12.9 — UI layout/style standardization (global).** (1) **Input/button height alignment:** inputs must
+      match button height next to them (form control sizing). (2) **Action columns use fitting icons:** prefer
+      compact icon-only actions with accessible names (aria-label/title), not full text buttons in tight action
+      columns; keep text buttons for primary standalone actions. (3) **Consistent table layout:** every list
+      table lives inside a `.card`, and filtering options live in a separate card above the table (reference:
+      **Observables List View**). Capture these as reusable guidelines (e.g. `docs/spec/ui-style.md` or
+      `ui/README.md`) and apply to existing/new views (Cases, Alerts, Tasks, Users, Sources/Tokens) to avoid
+      regressions. Source: user request 2026-10-17.
 
 ---
 
