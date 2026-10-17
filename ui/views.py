@@ -1492,12 +1492,22 @@ def sources_list(request: HttpRequest) -> HttpResponse:
     else:
         alert_filter = Q(alerts__owner_org_id=user_org_id)
 
-    # A source is "protected" if it has at least one non-revoked IngestionToken.
-    # This replaces the legacy webhook_secret_hash check, since the receiver
-    # now authenticates via IngestionToken rows.
-    token_subquery = IngestionToken.objects.filter(
+    # Whether a feed can receive alerts is not a boolean (§10a): a token is usable only while it is
+    # neither revoked nor deactivated, and a deactivated one can come back. So three states:
+    #   active — a usable token exists                    → "required"
+    #   paused — no usable token, but one could resume     → "paused"
+    #   none   — no token at all, or only revoked ones     → "none"
+    # This replaces the legacy `webhook_secret_hash` check: the receiver authenticates via
+    # `IngestionToken` rows, so "can this feed receive anything?" is a question about tokens.
+    active_token_subquery = IngestionToken.objects.filter(
         source=OuterRef("pk"),
         revoked_at__isnull=True,
+        deactivated_at__isnull=True,
+    )
+    paused_token_subquery = IngestionToken.objects.filter(
+        source=OuterRef("pk"),
+        revoked_at__isnull=True,
+        deactivated_at__isnull=False,
     )
 
     from ingest.mapping import read_rules
@@ -1507,7 +1517,8 @@ def sources_list(request: HttpRequest) -> HttpResponse:
         IngestionSource.objects.filter(org_q("organisation", request.user))
         .annotate(
             alert_count=Count("alerts", filter=alert_filter),
-            has_token=Exists(token_subquery),
+            has_active_token=Exists(active_token_subquery),
+            has_paused_token=Exists(paused_token_subquery),
         )
         .order_by("slug")
     )
@@ -3952,8 +3963,19 @@ def _settings_sources_context(request: HttpRequest) -> dict:
     from identity.scoping import org_q
     from ingest.models import IngestionSource
 
+    # `source_token_count` is what lets the delete modal say "this is the feed's last token" — the one
+    # fact that decides whether deleting the token also reaps the feed (§10b). `source_alert_count` is
+    # the blast radius the modal warns about. `distinct=True` on both: two aggregate joins over the
+    # same base rows would otherwise cross-multiply.
+    tokens = list(
+        qs.annotate(
+            source_token_count=Count("source__tokens", distinct=True),
+            source_alert_count=Count("source__alerts", distinct=True),
+        )
+    )
+
     return {
-        "tokens": list(qs),
+        "tokens": tokens,
         "show_org_column": is_superadmin,
         # ADR-009: only the org's own feeds are nameable here (a superAdmin sees all and picks the
         # org, which is then the org the source is provisioned in).
@@ -4540,7 +4562,9 @@ def _org_scoped_token(
     ADR-009: an admin reaches only their own org's tokens; a superAdmin reaches all. A token outside
     the caller's scope is indistinguishable from one that does not exist — no existence oracle.
     """
-    qs = IngestionToken.objects.select_related("organisation")
+    # `source__organisation` rides along for `settings_token_delete`, which audits the *feed's* org
+    # when it reaps a source whose last token just went.
+    qs = IngestionToken.objects.select_related("organisation", "source", "source__organisation")
     if request.user.role != "superAdmin":
         qs = qs.filter(organisation_id=request.user.org_id)
     try:
@@ -4667,12 +4691,19 @@ def settings_token_activate(request: HttpRequest, token_id: str) -> HttpResponse
 @login_required
 @require_POST
 def settings_token_delete(request: HttpRequest, token_id: str) -> HttpResponse:
-    """Delete an inactive token (§10b).
+    """Delete an inactive token (§10b), reaping its feed when it was the feed's last credential.
 
     Only an inactive token (revoked or deactivated) can be deleted: an active credential must be
     deactivated first, so a secret a live feed still presents cannot be destroyed from under it. The
     audit row is written before the delete, in the same transaction, so the trail keeps the id and
     the owning org after the row is gone (`record_ingestion_token_change` reads `token.id`).
+
+    A feed exists only to carry credentials, so deleting its **last** token also deletes the feed and
+    its mapping profile — otherwise Settings → Sources would keep a configured feed that can never
+    receive anything, and the Sources list would keep advertising it. The feed's alerts are **kept**
+    (`Alert.ingestion_source` is `SET_NULL`): they lose the link to which profile accepted them, but
+    their `raw_payload` and verbatim wire `source` survive. Emptiness is evaluated *after* the token
+    delete, so a feed that still has a credential is never reaped.
     """
     guard = _require_admin_ui(request)
     if guard:
@@ -4688,9 +4719,12 @@ def settings_token_delete(request: HttpRequest, token_id: str) -> HttpResponse:
 
     from django.db import transaction
 
-    from identity.audit import record_ingestion_token_change
+    from identity.audit import record_ingestion_source_deleted, record_ingestion_token_change
 
     name = token.name
+    source = token.source
+    source_slug = source.slug
+
     with transaction.atomic():
         record_ingestion_token_change(
             request,
@@ -4699,8 +4733,21 @@ def settings_token_delete(request: HttpRequest, token_id: str) -> HttpResponse:
             token=token,
         )
         token.delete()
+        # After the token is gone: a feed with no tokens left has nothing to do and goes with it.
+        # Audited first, in the same transaction, so the feed's id and org survive the row.
+        source_reaped = not source.tokens.exists()
+        if source_reaped:
+            record_ingestion_source_deleted(request, actor=request.user, source=source)
+            source.delete()
 
-    messages.success(request, f"Token '{name}' deleted.")
+    if source_reaped:
+        messages.success(
+            request,
+            f"Token '{name}' deleted. Feed '{source_slug}' had no tokens left, so it and its "
+            "mapping profile were deleted too — its existing alerts are kept, but no longer name a feed.",
+        )
+    else:
+        messages.success(request, f"Token '{name}' deleted.")
     return redirect("ui-settings-sources")
 
 

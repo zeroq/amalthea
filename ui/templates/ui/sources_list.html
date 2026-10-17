@@ -32,10 +32,12 @@
           <td>{{ source.name }}</td>
           <td class="mono">{{ source.alert_count }}</td>
           <td>
-            {% if source.has_token %}
+            {% if source.has_active_token %}
               <span class="pill pill-on">required</span>
+            {% elif source.has_paused_token %}
+              <span class="pill pill-pending">paused</span>
             {% else %}
-              <span class="pill pill-off">open</span>
+              <span class="pill pill-off">none</span>
             {% endif %}
           </td>
           <td>{{ source.correlation_enabled|yesno:"on,off" }}</td>
@@ -51,8 +53,12 @@
   </div>
 
   <p class="hint">
-    A source marked <em>open</em> accepts unauthenticated posts. That is fine for a local trial and
-    wrong for anything reachable from the internet.
+    Every post is authenticated by an ingestion token, so a feed marked <em>none</em> (no token) or
+    <em>paused</em> (its tokens are all deactivated) accepts nothing at all — not anonymous posts,
+    just nothing. Mint or activate a token in
+    <a href="{% url 'ui-settings-sources' %}">Settings → Sources</a> to open a feed.
+    Deleting a feed's last token deletes the feed too, so a feed only stays here while it has a
+    credential.
   </p>
 {% else %}
   <p class="empty">No ingestion sources configured.</p>

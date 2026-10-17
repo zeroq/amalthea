@@ -32,7 +32,8 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 - `source` — FK → `ingest.IngestionSource`, `CASCADE`, `db_index=False`, `related_name="tokens"`.
 - `organisation` — FK → `Organisation`, `PROTECT`, `related_name="ingestion_tokens"`.
 - `name`(200) · `prefix` (CharField(12), **unique**, first 12 chars of the raw token) ·
-  `secret_hash` (argon2, plaintext shown once) · `revoked_at`/`last_used_at` nullable.
+  `secret_hash` (argon2, plaintext shown once) · `revoked_at` (terminal) / `deactivated_at`
+  (reversible pause, TODO §10a) / `last_used_at` — all nullable.
 - Index `ingest_token_src_revoked_idx ("source","revoked_at")`. Binds a source to exactly one org;
   the webhook's `owner_org` comes from the token, never the body.
 - **Invariant (ADR-009):** `organisation` must be the organisation that owns `source`. A cross-table

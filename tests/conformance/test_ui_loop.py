@@ -518,24 +518,39 @@ def test_the_automation_page_shows_runs_and_their_errors(
 def test_the_sources_page_shows_whether_a_secret_is_required(
     browser: Client, source: IngestionSource
 ) -> None:
-    """An "open" feed is a deployment mistake; the page should make it visible.
+    """The page must state a feed's credential state — and never claim any feed is open to anyone.
 
-    A source is protected if it has a non-revoked IngestionToken (not the legacy
-    webhook_secret_hash). This test verifies the token-driven behaviour.
+    A token is usable only while it is neither revoked nor deactivated (TODO §10a), so the column has
+    three states, `required` / `paused` / `none`, not the old `required` / `open`. The claim that a
+    source "marked open accepts unauthenticated posts" has been false since strict token auth landed
+    (2026-10-10); it is corrected here and pinned gone (WTR-2 / TODO §10.8).
     """
-    from identity.models import IngestionToken, Organisation
+    from identity.models import IngestionToken
 
-    # Source with NO token → "open"
+    # No token at all → "none": nothing can post to this feed.
     body = browser.get(reverse("ui-sources-list")).content.decode()
-    assert "open" in body
-    assert "required" not in body.split("Alerts")[0], "an unprotected source renders as required"
+    assert '<span class="pill pill-off">none</span>' in body
+    assert '<span class="pill pill-on">required</span>' not in body
+    assert "unauthenticated" not in body, (
+        "the false 'open accepts unauthenticated posts' claim is back"
+    )
 
-    # Source WITH a non-revoked token → "required"
-    org = Organisation.objects.first()
-    IngestionToken.create_token(source=source, organisation=org, name="test-token")
+    # A usable (non-revoked, non-deactivated) token → "required".
+    token, _ = IngestionToken.create_token(
+        source=source, organisation=source.organisation, name="live-token"
+    )
     body = browser.get(reverse("ui-sources-list")).content.decode()
-    assert "required" in body
-    assert "open" not in body.split("Alerts")[0], "a token-protected source still renders as open"
+    assert '<span class="pill pill-on">required</span>' in body
+    assert '<span class="pill pill-off">none</span>' not in body
+
+    # Only a deactivated token left → "paused": resumable, but accepts nothing right now.
+    from django.utils import timezone
+
+    token.deactivated_at = timezone.now()
+    token.save(update_fields=["deactivated_at"])
+    body = browser.get(reverse("ui-sources-list")).content.decode()
+    assert '<span class="pill pill-pending">paused</span>' in body
+    assert '<span class="pill pill-on">required</span>' not in body
 
 
 def test_an_artifact_seen_in_two_cases_shows_its_case_count(browser: Client) -> None:

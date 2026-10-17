@@ -260,6 +260,36 @@ def record_ingestion_source_created(
     )
 
 
+def record_ingestion_source_deleted(
+    request: HttpRequest,
+    *,
+    actor: User,
+    source: IngestionSource,
+) -> None:
+    """Record the deletion of a feed whose last token was just deleted (§10c, ADR-009).
+
+    A feed exists to carry credentials, so deleting its final token leaves the row with nothing to
+    do and it goes too (`ui.views.settings_token_delete`). Written **before** `source.delete()` in the
+    same transaction — Django clears the pk afterwards, so `target_id` and `target_org` on this row
+    are all that outlives the feed. It is the other end of `ingestion_source.created`.
+
+    No `details` payload: the mapping rules are gone, so recording them (or their dot-paths) would make
+    the audit row a stale copy of a deleted config. The row answers "which feed, which tenant, by whom,
+    when" — which is what an operator asks after a feed has quietly stopped existing.
+    """
+    from identity.models import AuditLog
+
+    AuditLog.objects.create(
+        actor=actor,
+        actor_org=getattr(actor, "org", None),
+        target_org=source.organisation,
+        action="ingestion_source.deleted",
+        target_type="IngestionSource",
+        target_id=str(source.id),
+        ip=_get_client_ip(request),
+    )
+
+
 def record_ingestion_source_updated(
     request: HttpRequest,
     *,

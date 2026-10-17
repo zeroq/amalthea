@@ -129,6 +129,12 @@ reused here, see §10). New modal bodies: `_settings_token_deactivate_form.html`
   `revoked_at__isnull=True`): a paused token can be resumed, so its source is still "protected". A
   revoked-and-then-deleted token's source becomes unprotected again — acceptable, the source is
   re-tokenable.
+  **Superseded 2026-10-17 (§10c)** — see `PLAN-2026-10-17-feed-reap-on-last-token.md`. The boolean
+  `has_token` was replaced by `has_active_token` / `has_paused_token` (three states, because a token is
+  usable only while neither revoked nor deactivated), and a source with **no** token is not "unprotected"
+  but *accepts nothing* — the "open" framing it sat next to was false from strict token auth onward.
+  The re-tokening fallback also changed: deleting a feed's **last** token now deletes the feed, so the
+  "source is re-tokenable after a revoke+delete" case only survives while a sibling token exists.
 - **Not done, called out:** `IngestionTokenAdmin.list_display` still omits `deactivated_at` (Django
   admin only, low value). `TODO.md` §12.6/§12.7 file-path drift (`ui/cases.html` vs the real
   `ui/templates/ui/case_list.html`) was corrected for §12.7 while editing that file's row.

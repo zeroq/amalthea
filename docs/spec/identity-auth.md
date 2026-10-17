@@ -86,25 +86,30 @@
 to exactly one `Organisation`. The secret is stored as an Argon2 hash (`secret_hash`); the
 plaintext is shown **once** at creation and is never recoverable. The token carries a 12-char
 unique `prefix` for O(1) lookup, a `name` (≤200 chars), optional `created_by` (FK to `User`,
-nullable, `SET_NULL`), and `revoked_at` for soft-revocation.
+nullable, `SET_NULL`), and two independent lifecycle timestamps: `revoked_at` (**terminal**
+revocation) and `deactivated_at` (a **reversible** pause). A token accepts webhooks only while both
+are `NULL` (`is_active`); `revoked_at` is never cleared, so revocation cannot be undone.
 
 **Auth flow:** `ingest/views.py::_authenticate_token` reads the secret from `X-Webhook-Secret`,
 `X-Api-Key`, or `Authorization: Bearer` and resolves it to a *single* token with no prior context —
 there is no source in the URL (ADR-008). It matches by `prefix` (one indexed query), then verifies
-with Argon2. Revoked tokens (`revoked_at IS NOT NULL`) are rejected. The token's `organisation` —
+with Argon2. Revoked **and deactivated** tokens are rejected. The token's `organisation` —
 never the request body — stamps the alert's `owner_org`.
 
 **Authentication (ADR-008).** The webhook route carries no source, so there is no "unknown source"
 case: the presented secret is looked up by its unique 12-char `prefix` (one indexed query) and
-verified against the Argon2 hash. Revoked tokens are excluded by the queryset, so a revoked secret,
-an unknown prefix and a wrong secret are one and the same answer ⇒ **401**
-`unauthorized`. A source with no active tokens therefore also rejects every post. The token's
+verified against the Argon2 hash. Revoked and deactivated tokens are excluded by the queryset, so such
+a secret, an unknown prefix and a wrong secret are one and the same answer ⇒ **401**
+`unauthorized`. A source with no usable tokens therefore also rejects every post. The token's
 `organisation` — never the request body — stamps the alert's `owner_org`.
 
 **Management UI (Settings → Sources):**
 - **List** (`GET /settings/sources`): tokens scoped to caller's org (admin) or all orgs (superAdmin).
   Columns: Source, Organisation (superAdmin only), Name, Prefix, Created, Last used, Issued by,
-  Status/Action. Empty state and webhook endpoint/header hint included.
+  Status/Action. The status cell offers only the actions its state permits — an active token can be
+  **Deactivated** (reversible) or **Revoked** (terminal); a deactivated one can be **Activated** or
+  **Deleted**; a revoked one can only be **Deleted**. `revoked_at` supersedes `deactivated_at`. Empty
+  state and webhook endpoint/header hint included.
 - **Create** (`POST /settings/sources/token`): admin → own org; superAdmin → required org select.
   Validates `source_name` (free text; slugified, row provisioned on demand **inside the token's
   organisation** — the same name in two orgs is two feeds, ADR-009), `name`. Calls
@@ -113,15 +118,31 @@ an unknown prefix and a wrong secret are one and the same answer ⇒ **401**
   On success: **renders** (200) a show-once modal with the plaintext. Bounded retry on `prefix`
   collision (`unique=True`). Audit: `ingestion_token.created`, plus `ingestion_source.created` when
   the typed name had to provision a new profile.
-- **Revoke** (`POST /settings/sources/<id>/revoke`): sets `revoked_at=now()`. Scoped lookup
+- **Revoke** (`POST /settings/sources/<id>/revoke`): sets `revoked_at=now()` — terminal. Scoped lookup
   (admin → own org; superAdmin → any). Uniform 404 for cross-org access. Audit: `ingestion_token.revoked`.
+- **Deactivate / Activate** (`POST .../deactivate`, `.../activate`): pause and resume via
+  `deactivated_at`. Deactivating a revoked token and activating a revoked token are both refused
+  (revocation is terminal). Audit: `ingestion_token.deactivated` / `ingestion_token.activated`.
+- **Delete** (`POST .../delete`): only an **inactive** token (revoked or deactivated) may be deleted —
+  an active credential a live feed still presents must be deactivated first. Deleting a feed's **last**
+  token also deletes the feed and its mapping profile (a feed exists only to carry credentials; leaving
+  it would keep a feed that can never receive anything listed on Sources). The feed's alerts are **kept**
+  (`Alert.ingestion_source` is `SET_NULL`, so they keep their `raw_payload` and verbatim wire `source`
+  and merely stop naming a feed). Emptiness is evaluated *after* the token delete, so a feed with any
+  remaining token — including a revoked one — survives. Audit: `ingestion_token.deleted`, plus
+  `ingestion_source.deleted` when the feed was reaped.
 
 **Audit:** `record_ingestion_token_change` writes `AuditLog` rows with `action` ∈
-`{"ingestion_token.created", "ingestion_token.revoked"}`, `target_type="IngestionToken"`,
+`{"ingestion_token.created", "ingestion_token.revoked", "ingestion_token.deactivated",
+"ingestion_token.activated", "ingestion_token.deleted"}`, `target_type="IngestionToken"`,
 `target_id=<uuid>`, `target_org=<token.organisation>`, `actor`, `actor_org`, `ip`. No secret material.
+A deletion row is written **before** `token.delete()` in the same transaction, so `target_id` and
+`target_org` survive the row.
 Provisioning a feed writes `record_ingestion_source_created` (`action="ingestion_source.created"`,
 `target_type="IngestionSource"`, `target_org=<source.organisation>` — since ADR-009 the feed is
-org-owned, so the row is attributed to the tenant that owns it rather than to no tenant). Editing a
+org-owned, so the row is attributed to the tenant that owns it rather than to no tenant), and reaping
+one writes `record_ingestion_source_deleted` (`action="ingestion_source.deleted"`, same target fields,
+no `details` — the config is gone, so recording it would make the row a stale copy). Editing a
 feed's mapping writes `record_ingestion_source_updated`
 (`action="ingestion_source.updated"`, same target fields, `details={"changed": [...]}` = the dot-paths
 whose value changed, never the values) — a `superAdmin` edit of a foreign feed is therefore visible as

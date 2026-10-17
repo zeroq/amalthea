@@ -2,8 +2,9 @@
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
 Last updated: 2026-10-17 (**ingestion-token lifecycle shipped** — Settings → Sources can now pause
-(deactivate) and resume (activate) an ingestion token, and delete an inactive one; §10a/§10b done,
-guarded by `tests/conformance/test_settings_ingestion_tokens.py`). Earlier: **the per-source
+(deactivate) and resume (activate) an ingestion token, and delete an inactive one; deleting a feed's
+last token now deletes the feed too, and the stale "open accepts unauthenticated posts" copy is gone
+(§10a/§10b/§10c, §10.8a; guarded by `tests/conformance/test_settings_ingestion_tokens.py`). Earlier: **the per-source
 field-mapping wave shipped** — the mapping engine, the
 re-map control and the P5 health card; §6.17 retro-mapping done, §6.18 dead code removed 2026-10-17 —
 `PLAN-2026-10-16-source-field-mapping.md`). Earlier: **case pages are authorable in the UI** — §12.5 code shipped
@@ -58,6 +59,7 @@ hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the
 | **10** | **§6.13 / §6.16 P4 — Settings: ingestion tokens + audit-log viewer** | Per-org webhook tokens (create/revoke, show-once) + read-only `AuditLog` viewer; also retires the stale webhook copy (§10.8). | **Medium** — self-serve ingestion; the audit viewer is the accountability half. |
 | **10a** | **§6.13 / §6.16 P4b — Settings: Sources → token activate/deactivate — SHIPPED 2026-10-17** | In Settings → Sources, a token row now offers **Deactivate** (active → modal) and **Activate** (deactivated → direct POST). Only an `admin` for that org’s tokens, or a `superAdmin`, may change state. A new reversible `IngestionToken.deactivated_at` (migration `0012_ingestiontoken_deactivated_at`) keeps the pause distinct from the terminal `revoked_at`; the webhook lookup and `IngestionToken.verify()` both refuse a paused token (401), and a *revoked* token can never be re-activated. | **Done** — pause/resume without revoking and recreating. Guards: `TestTokenActivationLifecycle`, `TestTokenLifecycleIsolation`. |
 | **10b** | **§6.13 / §6.16 P4c — Settings: Sources → delete inactive token — SHIPPED 2026-10-17** | In Settings → Sources, an inactive row (revoked **or** deactivated) now offers **Delete** behind a confirm modal; an active token is refused until it is deactivated. Only an `admin` for that org’s tokens, or a `superAdmin`, may delete. The `ingestion_token.deleted` audit row is written *before* the row is removed, in the same transaction, so the trail keeps the token id and owning org. | **Done** — removes stale credentials and keeps the token list tidy. |
+| **10c** | **§6.13 / §6.16 P4d — Settings: Sources → deleting a feed's last token deletes the feed — SHIPPED 2026-10-17** | Deleting a token that is a feed's **last** credential now also deletes the feed and its mapping profile, so the **Sources** list stops advertising a feed that can never receive anything. The feed's alerts are kept (`Alert.ingestion_source` is `SET_NULL` — evidence outlives the profile); the confirm modal states the consequence before the click; `ingestion_source.deleted` is audited. Also fixes two false UI claims found on the way: the source page rendered a *deactivated* token as **Active**, and `sources_list.html` said an open feed "accepts unauthenticated posts" (false since strict token auth) — closes §10.8(a). | **Done** — tidies the Sources list without losing evidence. Guards: `TestFeedReapedWithLastToken`, `TestSourceDetailTokenStatus`. |
 | **11** | **Security: §11.2 (M3) + S3 + S5** | **M3** playbook secrets are global + cleartext to any authenticated user of any org. **S3** per-account lockout on the **API** login; stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. | **Medium (security)** — M3 blocks multi-tenant trust; S5's caps are the analyst-facing half (upload robustness). |
 | **12** | **§2.6 + §2.7 (test hardening) + §7.1–7.4 + §8.5/§8.7 + §11.3/§11.4-L1/§11.5** | Coverage back ≥ 80% (79% since the tenant wave) + the Phase-12/T2 QA list; Tailwind source/artifact split; mutation coverage; timestamp wording; protocol-relative `href`; unaudited procedure attaches; Django admin outside the role model; `django.request` log forging. | **None** — engineering hygiene + accepted Low/Info follow-ups. |
 | **13** | **Orphaned routes** | `ui-case-attachment-list` (+ its now-dead `ui/case_attachments.html`) and `ui-case-attachment-detail` (405) are reachable by URL only — the case page renders its own attachment table. `ui-case-export` / `ui-taxonomy` are now wired (P1), so this row supersedes the old claim. | **Low** — dead surface; delete or build an entry point. |
@@ -375,14 +377,17 @@ backlog once the analyst-visible classification fields (10.3–10.6) are designe
   **Similar** = the §2-Module-C cross-case observable linking — **now tracked as §12.3** (with the missing
   auto-bundle consumer; decide Q-D4 there, not here); **Audit** = the read-only `AuditLog` viewer
   (pull forward §6.13/P4).
-- [ ] **10.8 — Ingestion-token surface + stale webhook copy (mostly absorbed by §6.16 P4).** *(Partly
-  done 2026-10-15.)* (a) The `sources_list.html` URL copy is **fixed** — it now shows the source-less
-  `POST /api/v1/alerts/webhook/` (ADR-008) — but the page still carries the `open` / `required` pills
-  and the sentence *"A source marked open accepts unauthenticated posts"*, which has been factually
-  wrong since strict token auth (2026-10-10) and is now doubly wrong. That stale security claim is
-  pinned by `test_ui_loop.py:520-537`, so fix copy **and** test together. (b) **Done**: the **Ingestion
-  tokens** section exists in `docs/spec/identity-auth.md` (create/verify/revoke, prefix lookup, Argon2,
-  legacy plaintext fallback) and the README cross-references Settings → Sources.
+- [x] **10.8 — Ingestion-token surface + stale webhook copy (mostly absorbed by §6.16 P4).** *(DONE
+  2026-10-17.)* (a) **Done, both parts.** The `sources_list.html` URL copy already showed the
+  source-less `POST /api/v1/alerts/webhook/` (ADR-008); the remaining debt — the `open` / `required`
+  pills and the sentence *"A source marked open accepts unauthenticated posts"*, false since strict
+  token auth (2026-10-10) — is fixed: the pill is now three credential states, `required` / `paused` /
+  `none` (a token is usable only while neither revoked nor deactivated, §10a), and the false security
+  claim is gone. Copy **and** the pinning test
+  (`test_ui_loop.py::test_the_sources_page_shows_whether_a_secret_is_required`) were changed together
+  (WTR-2 resolved). (b) **Done**: the **Ingestion tokens** section of `docs/spec/identity-auth.md`
+  exists and was extended for the §10a/§10b lifecycle (deactivate/activate/delete, the feed reap on the
+  last token, `ingestion_source.deleted`); `docs/spec/data-model.md` gained `deactivated_at`.
 - [ ] **10.10 — No pre-auth per-IP throttle on the webhook (requested 2026-10-15, ADR-008).** The
   per-IP bucket (`wh:ip:{ip}`) is consulted only **after** the token verifies, so an unauthenticated
   flood still costs one indexed token lookup + one Argon2 attempt per request. Add a cheap pre-auth
