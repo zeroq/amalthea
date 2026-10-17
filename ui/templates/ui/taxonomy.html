@@ -18,7 +18,7 @@
         <tbody>
           {% for s in case_statuses %}
           <tr>
-            <td>{{ s.value }}</td>
+            <td class="mono">{{ s.value }}</td>
             <td>{{ s.stage }}</td>
             <td>{{ s.order }}</td>
             <td>{{ s.hidden|yesno:"Yes,No" }}</td>
@@ -44,7 +44,7 @@
         <tbody>
           {% for s in alert_statuses %}
           <tr>
-            <td>{{ s.value }}</td>
+            <td class="mono">{{ s.value }}</td>
             <td>{{ s.stage }}</td>
             <td>{{ s.order }}</td>
             <td>{{ s.hidden|yesno:"Yes,No" }}</td>
@@ -72,7 +72,7 @@
         <tbody>
           {% for t in observable_types %}
           <tr>
-            <td>{{ t.name }}</td>
+            <td class="mono">{{ t.name }}</td>
             <td>{{ t.is_case_sensitive|yesno:"Yes,No" }}</td>
             <td>{{ t.is_attachment|yesno:"Yes,No" }}</td>
           </tr>

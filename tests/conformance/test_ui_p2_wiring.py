@@ -769,3 +769,27 @@ def test_taxonomy_page_renders_every_vocabulary_card(browser: Client) -> None:
         "Data Classification",
     ):
         assert heading in body
+
+
+def test_taxonomy_page_renders_code_valued_cells_in_mono(browser: Client) -> None:
+    """Every code-valued taxonomy cell carries ``class="mono"`` (TODO §12.6).
+
+    The four code cards (Case Scope/Phase/Type/Data Classification) already render their
+    value column as ``<td class="mono">``; the Case Statuses / Alert Statuses / Observable
+    Types cards rendered the same *kind* of token as a plain ``<td>``, so one page spelled
+    the same convention two ways. Guard it: the seeded status values and observable-type
+    names must carry the mono class. Before the fix each assertion below failed (those
+    cards emitted ``<td>New</td>`` / ``<td>ip</td>``), so this is a real regression guard.
+    """
+    ObservableType.objects.get_or_create(name="ip", defaults={"is_case_sensitive": False})
+
+    body = browser.get(reverse("ui-taxonomy")).content.decode()
+
+    # Seeded case statuses (cases/migrations/0003_seed.py).
+    for value in ("New", "InProgress", "Contained", "Closed"):
+        assert f'<td class="mono">{value}</td>' in body, value
+    # Seeded alert statuses (alerts/migrations/0003_seed.py).
+    for value in ("New", "Triaged", "Dismissed", "Imported"):
+        assert f'<td class="mono">{value}</td>' in body, value
+    # Seeded observable types (observables/migrations/0002_seed.py).
+    assert '<td class="mono">ip</td>' in body
