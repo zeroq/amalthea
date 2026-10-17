@@ -18,6 +18,8 @@ each other and only the HTML binds them:
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from django.test import Client
 from django.urls import reverse
@@ -224,10 +226,15 @@ def test_general_tab_shows_human_labels(analyst_user: User, org: Organisation, c
     resp = _login(analyst_user).get(reverse("ui-case-detail", kwargs={"case_id": case.number}))
     assert resp.status_code == 200
     body = resp.content.decode()
-    assert "<dt>Scope</dt><dd>Single Department</dd>" in body
-    assert "<dt>Type</dt><dd>Phishing</dd>" in body
-    assert "<dt>Classification</dt><dd>Personal Data (PII)</dd>" in body
-    assert "<dt>Phase</dt><dd>Analysis</dd>" in body
+    # Each <dd> now carries an inline edit affordance after the value (§12.8), so pin the
+    # contract as "label → value, value first inside the <dd>" rather than a literal string.
+    for label, value in (
+        ("Scope", "Single Department"),
+        ("Type", "Phishing"),
+        ("Classification", "Personal Data (PII)"),
+        ("Phase", "Analysis"),
+    ):
+        assert re.search(rf"<dt>{label}</dt>\s*<dd>\s*{re.escape(value)}", body), label
 
 
 @pytest.mark.django_db
@@ -336,7 +343,7 @@ def test_viewer_sees_classification_on_general_tab(
     resp = _login(viewer_user).get(reverse("ui-case-detail", kwargs={"case_id": case.number}))
     assert resp.status_code == 200
     body = resp.content.decode()
-    assert "<dt>Classification</dt><dd>Personal Data (PII)</dd>" in body
+    assert re.search(r"<dt>Classification</dt>\s*<dd>\s*Personal Data \(PII\)", body)
 
 
 @pytest.mark.django_db

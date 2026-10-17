@@ -8,7 +8,9 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('alerts', '0014_tenant_dedupe_key'),
-        ('cases', '0017_case_classification'),
+        # No cases edge: these operations touch only alerts.alert (AddField + AddConstraint),
+        # and a cases edge at 0017 would chain a cases/0003_seed rollback into alerts
+        # (guard: tests/conformance/test_seed_migrations.py::test_rollback_to_seed_stays_in_app).
         ('identity', '0011_auditlog_details'),
         ('ingest', '0003_ingestion_source_organisation'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
