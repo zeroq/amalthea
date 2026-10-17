@@ -609,7 +609,10 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
   (invisible in the case Audit tab, like tags/tasks), and a **delete publishes no WebSocket frame** (API
   parity — another analyst sees it only on their next load). Also: cross-tenant 404s for the three UI
   routes are enforced by the shared `resolve_case(write=True)` guard but **not enumerated** by any
-  committed test (the write-route sweeps filter to API-only) — observation O1. Source: audit 2026-10-12;
+  committed test (the write-route sweeps filter to API-only) — observation O1. **Post-merge note:** §12.8
+  (merged as `1f718e5`) replaced the standalone Tags card with an inline `.case-tags` row, so AC 2.1's
+  *Tags* parenthetical is superseded (Pages is unaffected); the report carries a dated post-merge note.
+  Source: audit 2026-10-12;
   plan 2026-10-14; verification 2026-10-17.
 - [x] **12.6 — Taxonomy: three cards break the monospace convention for their values — FIXED 2026-10-17.** `ui/templates/ui/taxonomy.html`
   renders the four code-valued cards — **Case Scope**, **Case Phase**, **Case Type** and **Data

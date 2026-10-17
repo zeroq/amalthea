@@ -16,6 +16,28 @@ Status: **Pass — provisional** (18/18 checked criteria Met, 1 new finding reco
 
 ---
 
+## Post-merge note — 2026-10-17, at `1f718e5` (after `git pull --ff-only`)
+
+The §12.8 wave (`PLAN-2026-10-17-case-verdict-close-flow.md`, merged as `2476edb..1f718e5`) landed
+**after** this verification and touches `ui/templates/ui/_tab_general.html`. Re-running the harness
+against the merged tree gives **19/20** — every **Pages** assertion still holds; the single failure is
+the harness's Tags assertion, because §12.8 deliberately **replaced the standalone Tags card with an
+inline `.case-tags` row inside the meta card**, above the description
+(`ui/templates/ui/_tab_general.html:78-105`, citing *"PLAN-2026-10-17 §12.8(2)"*). The General tab is
+now **two** top-level `section.card`s — meta (heading at `:3`, the tags row at `:82`) and Pages
+(`:123`, `#h-pages` at `:125`, `#case-pages` at `:138`, create modal at `:146`) — where this report
+verified three at `ecbcef6` (`:3`/`:62`/`:91`).
+
+**Impact on this report:** AC **2.1**'s Pages claim (Pages is its own card, not nested in the meta
+card) is **unchanged and still Met**. Only its parenthetical about Tags is **superseded** — the Tags
+card is gone by design, not by regression. All other ACs are unaffected (Pages card, modals, routes,
+views, CSS, live frame). The committed guards passed on the merged tree:
+`test_ui_loop.py`, `test_viewer_readonly_ui.py`, `test_ui_case_verdict.py`, `test_ui_icon_font.py`,
+`test_ui_inline_assets.py`, `test_ui_urls_smoke.py`, `test_realtime.py` — **398 passed**. This note
+does not re-open §12.5; it records that one of its structural observations was overtaken by §12.8.
+
+---
+
 ## Summary
 
 | Category | Count |
@@ -54,7 +76,7 @@ defects the plan records (F11–F15) are present and correct in the current code
 
 | AC | Description | Status | Evidence |
 |----|-------------|--------|----------|
-| **2.1** | Un-nest Pages (and Tags) into sibling cards; `#case-pages` not inside the `#h-meta` card; `test_ui_loop.py:404-405` unaffected | **Met** | `ui/templates/ui/_tab_general.html` has three sibling `<section class="card">` at `:3` (meta+description), `:62` (Pages), `:91` (Tags). Harness (parsed DOM): `ul#case-pages` (`:77`) is a direct child of the Pages `<section class="card">`, which contains `#h-pages`; **no ancestor of that card is another card**; the `aria-labelledby="h-meta"` card is a distinct sibling (both are direct children of the same tab container); the Tags card is a sibling too, not nested. Committed `tests/conformance/test_ui_loop.py:396-408` still passes (`#case-pages`, `data-page-id`, title, content). |
+| **2.1** | Un-nest Pages (and Tags) into sibling cards; `#case-pages` not inside the `#h-meta` card; `test_ui_loop.py:404-405` unaffected | **Met** | `ui/templates/ui/_tab_general.html` has three sibling `<section class="card">` at `:3` (meta+description), `:62` (Pages), `:91` (Tags) **— as of `ecbcef6`; the Tags card was later replaced by an inline row — see the post-merge note**. Harness (parsed DOM): `ul#case-pages` (`:77`) is a direct child of the Pages `<section class="card">`, which contains `#h-pages`; **no ancestor of that card is another card**; the `aria-labelledby="h-meta"` card is a distinct sibling (both are direct children of the same tab container); the Tags card is a sibling too, not nested. Committed `tests/conformance/test_ui_loop.py:396-408` still passes (`#case-pages`, `data-page-id`, title, content). |
 | **2.2** | Create modal + header button, `can_mutate` only; modal opens with focus in Title | **Met** | `_tab_general.html:65-68` the "New page" button is wrapped in `{% if can_mutate %}`; `:85` the create modal (also gated). `_page_form.html:21` the Title input carries `autofocus` (and `required`, `maxlength="500"`), which `modal.js` focuses on open; the dialog is `<dialog class="modal modal--lg">` (`_modal.html:70`). Harness (parsed DOM): button present for an analyst, dialog + `form#page-create-form` present with `action`/`method` = the create route; **viewer** page has no modal and no button. |
 | **2.3** | `_page_entry.html` — Markdown body + Edit/Delete + extended meta; `data-page-id` preserved | **Met** | `_page_entry.html:15` `data-page-id="{{ page.id }}"`; `:18-27` `can_mutate`-gated Edit/Delete buttons opening the per-page edit/delete modals; `:29` `{{ page.content|markdown }}` inside `<div class="body md">`; `:30-35` meta = `category · created · author · edited by`. Harness: `data-page-id` present; `**bold**` renders to `<strong>`; `category`/created timestamp in the meta; "edited by analyst" appears once `updated_by` is set; both per-page modals and their openers exist. |
 | **2.4** | `_page_form.html` shared by create and edit; edit modal prefilled; both submit to their own route with `tab=general` | **Met** | One template serves both paths (`_page_form.html:4-7` explains the `{{ page.… }}` prefill); `_page_entry.html:38` hosts the edit modal with `form_id="page-edit-form-<id>"` and `:39` the delete modal. Every control carries `form="{{ form_id }}"` (`:17/21/26/31`) because the footer form owns the submit (`_modal.html:88-98`). Harness: create modal's hidden `tab` and Title input both target `page-create-form` and carry `value="general"`; the edit modal exists per page with its own form id. |
@@ -161,7 +183,8 @@ all satisfied.
 
 1. **Re-run `verifier`** against `PLAN-2026-10-14-case-pages-ui.md` when the service recovers, to
    replace this provisional report with an independent one. (The same applies to the still-provisional
-   §10a–§10c report.)
+   §10a–§10c report.) Re-run it **at the merged HEAD** (`1f718e5`), where the Tags card has been
+   superseded by §12.8 — see the post-merge note.
 2. **`security-auditor` pass** on §12.5 (authz/CSRF/XSS on the three routes) and, overdue, on §10a–§10c.
 3. **Fix V1** — de-collide modal body-field ids (`_page_form.html`, `_task_form_modal_body.html`) and
    add a one-id-per-element guard test.
