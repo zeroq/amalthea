@@ -1,7 +1,14 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-17 (**ingestion-token lifecycle shipped** — Settings → Sources can now pause
+Last updated: 2026-10-17 (**case verdict + enforced close flow shipped** — §12.8: `Case.verdict` +
+`Alert.verdict` (snake_case tokens), a Verdict card on the Taxonomy page, General-tab inline edit
+icons, a Tags row, and a close rule that requires a non-`undefined` verdict + a closing comment and
+propagates closure to every linked alert; guarded by `tests/conformance/test_case_verdict_close.py`,
+`test_ui_case_verdict.py`). **ACs verified 18/18** in
+[`docs/verification/VERIFY-2026-10-17-case-verdict-close-flow.md`](./docs/verification/VERIFY-2026-10-17-case-verdict-close-flow.md) —
+**provisional**: the `verifier` subagent was down (503), so the pass was run inline by the planner and still needs an
+independent re-run + a `security-auditor` pass on this scope. Earlier: **ingestion-token lifecycle shipped** — Settings → Sources can now pause
 (deactivate) and resume (activate) an ingestion token, and delete an inactive one; deleting a feed's
 last token now deletes the feed too, and the stale "open accepts unauthenticated posts" copy is gone
 (§10a/§10b/§10c, §10.8a; guarded by `tests/conformance/test_settings_ingestion_tokens.py`). **ACs verified 22/22** in
@@ -70,7 +77,7 @@ hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the
 | **13** | **Orphaned routes** | `ui-case-attachment-list` (+ its now-dead `ui/case_attachments.html`) and `ui-case-attachment-detail` (405) are reachable by URL only — the case page renders its own attachment table. `ui-case-export` / `ui-taxonomy` are now wired (P1), so this row supersedes the old claim. | **Low** — dead surface; delete or build an entry point. |
 | **14** | **§12.6 — Taxonomy: three cards break the mono convention for their values — SHIPPED 2026-10-17** | `ui/templates/ui/taxonomy.html` now renders the **Case Statuses**, **Alert Statuses** and **Observable Types** value / name cells as `<td class="mono">`, matching the four code cards (**Case Scope**, **Case Phase**, **Case Type**, **Data Classification**). | **Done** — visual consistency on the Taxonomy page; display-only, no behaviour change. |
 | **15** | **§12.7 — Cases list: make the case title clickable — SHIPPED 2026-10-17** | `ui/templates/ui/case_list.html` now links the **case title** to `ui-case-detail` (same URL as the **case number**); it is a real `<a>`, so keyboard access needs no JS. | **Done** — small UX improvement. |
-| **16** | **§12.8 — Case Details (General) + verdict taxonomy + close flow — CODE SHIPPED 2026-10-17, verification pending** | Code shipped (`PLAN-2026-10-17-case-verdict-close-flow.md`): inline metadata edits, Tags row, Verdict on Case + Alert + Taxonomy, enforced close (Verdict + closing comment) and close-propagation to linked alerts. | **Code done** — verdict model/taxonomy, inline field edits, Tags row, enforced close flow; independent verification pending. |
+| **16** | **§12.8 — Case Details (General) + verdict taxonomy + close flow — SHIPPED 2026-10-17** | Code shipped (`PLAN-2026-10-17-case-verdict-close-flow.md`, `2476edb`); **verified inline 2026-10-17 at 18/18 ACs — provisional** (`docs/verification/VERIFY-2026-10-17-case-verdict-close-flow.md`; awaiting an independent `verifier` re-run). Inline metadata edits, Tags row, Verdict on Case + Alert + Taxonomy, enforced close (Verdict + closing comment) and close-propagation to linked alerts. | **Done** — pending independent verification. |
 | **17** | **§12.9 — UI layout/style standardization** | Establish and apply a small set of UI/layout rules across the UI: (1) Input field height must match the button height next to it. (2) For action columns in tables, prefer compact icon-only actions with accessible names (not full text buttons) where space-limited and common. (3) Standardize table markup/styles: the table lives inside a `.card`, and filters go in a separate card above the table (use **Observables List View** as the reference). Codify in a short "UI Layout Guidelines" note (e.g. in `ui/README.md` or `docs/spec/ui-style.md`) and apply to affected views (e.g. Cases, Alerts, Tasks, Users, Tokens) to avoid drift. | **Low** — global consistency; reduces CSS/markup churn. |
 
 
@@ -609,7 +616,7 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
   Make the **case title** (the human-readable title column) a link to the same destination, reusing the
   same URL and link text logic, preserving truncation and an accessible link name (e.g. "Open case
   <number> <title>" if present). Source: user request 2026-10-17. (Done 2026-10-17)
-- [~] **12.8 — Case Details (General): inline edits, Tags, Verdict, and enforced close flow — CODE SHIPPED 2026-10-17, verification pending.**
+- [~] **12.8 — Case Details (General): inline edits, Tags, Verdict, and enforced close flow — CODE SHIPPED 2026-10-17; verified inline at 18/18 ACs, provisional.**
   (1) **Inline metadata edits** on the General tab (`ui-case-detail`): add edit icons next to **Severity**,
       **Scope**, **Type**, **Classification** and **Phase**; each opens a dedicated `<dialog>` modal populated
       with allowed values from Taxonomy (no free text). Mutations must be org-scoped and respect role rules
@@ -628,8 +635,10 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
       each alert’s `verdict` to the case’s `verdict`; record these actions in `AuditLog` and emit events so
       the UI updates. Use `<dialog>` for all modals (no native `confirm/alert/prompt`), preserve keyboard
       accessibility and org scoping. Source: user request 2026-10-17.
-  **Code shipped 2026-10-17 — awaiting independent verification** (until that lands this stays open and
-  `COMPLETED.md` must not list it). Per `docs/planning/PLAN-2026-10-17-case-verdict-close-flow.md`: `Case.verdict` + `Alert.verdict`
+  **Code shipped 2026-10-17; verified inline the same day at 18/18 ACs — provisional, awaiting an
+  independent `verifier` re-run** (until that lands this stays open and `COMPLETED.md` must not list it).
+  Report: `docs/verification/VERIFY-2026-10-17-case-verdict-close-flow.md`. Per
+  `docs/planning/PLAN-2026-10-17-case-verdict-close-flow.md`: `Case.verdict` + `Alert.verdict`
   (snake_case tokens `undefined`/`true_positive`/`false_positive`, migration `cases/0018`, `alerts/0015`) with DB
   `in_values` constraints; a seeded `Closed` `AlertStatus` (`alerts/0016`); the close rule enforced once in
   `cases/update.py::enforce_close_rule` (called from `apply_case_update` **and** `case_bulk_update`) with

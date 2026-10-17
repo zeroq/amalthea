@@ -336,6 +336,10 @@ None blocking. Recorded for later:
 
 **Not done here (out of scope, unchanged):** `Tag` org-scoping (§9 caveat); the new tracked-change kinds (`classification-changed`, `severity-changed`, `verdict-changed`, `tags-changed`, `alerts-closed`) render the default grey timeline dot (only the status dot is keyed to a colour).
 
-**Independent verification is pending** — no `verifier` / `security-auditor` pass has run (the subagent pool returned 503 throughout), so §12.8 stays `[~]` in TODO.md and out of `COMPLETED.md`.
+**Inline verification done 2026-10-17 (18/18 ACs) — provisional.** No *independent* `verifier` /
+`security-auditor` pass has run (the subagent pool returned 503 throughout), so §12.8 stays `[~]` in
+TODO.md and out of `COMPLETED.md`. Report:
+`docs/verification/VERIFY-2026-10-17-case-verdict-close-flow.md` — re-run the `verifier` (and a
+`security-auditor` on the §12.8 surface) when the service recovers and re-issue that file.
 
 **Open follow-up:** `make css` cannot run locally (arm64 `scripts/tailwindcss`), so the §F5 `app.css` additions (`.meta-edit`, `.case-tags`, `.case-tags-label`, `.tag-list`, `.field`, `.tl-status-changed:before`) were hand-written into the file's existing commented component section and are **not** re-minified into the compiled block; a maintainer on a supported platform should run `make css` before release.
