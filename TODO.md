@@ -572,11 +572,11 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
   `tests/conformance/test_ui_p2_wiring.py::test_taxonomy_page_renders_code_valued_cells_in_mono`
   (asserts the seeded status values and observable-type names render with the mono class).
   Source: user request 2026-10-17.
-- [ ] **12.7 — Cases list: make the case title clickable.** In `ui/templates/ui/cases.html`, the table row for
+- [x] **12.7 — Cases list: make the case title clickable.** In `ui/templates/ui/cases.html`, the table row for
   each case currently links the **case number** to the Case Details view (`ui-case-detail` / `case_id`).
   Make the **case title** (the human-readable title column) a link to the same destination, reusing the
   same URL and link text logic, preserving truncation and an accessible link name (e.g. "Open case
-  <number> <title>" if present). Source: user request 2026-10-17.
+  <number> <title>" if present). Source: user request 2026-10-17. (Done 2026-10-17)
 - [ ] **12.8 — Case Details (General): inline edits, Tags, Verdict, and enforced close flow.** 
   (1) **Inline metadata edits** on the General tab (`ui-case-detail`): add edit icons next to **Severity**,
       **Scope**, **Type**, **Classification** and **Phase**; each opens a dedicated `<dialog>` modal populated
