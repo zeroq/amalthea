@@ -1,7 +1,11 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-17 (**case verdict + enforced close flow shipped** — §12.8: `Case.verdict` +
+Last updated: 2026-10-17 (**htmx CSP violation fixed** — `ui/templates/ui/base.html` now declares
+`<meta name="htmx-config" content='{"includeIndicatorStyles": false}'>`, so htmx stops injecting an
+indicator `<style>` into `<head>` that our `style-src 'self'` refused; guarded by
+`tests/conformance/test_ui_inline_assets.py` (source pin) + a rendered-response check in
+`test_ui_urls_smoke.py`). Earlier: **case verdict + enforced close flow shipped** — §12.8: `Case.verdict` +
 `Alert.verdict` (snake_case tokens), a Verdict card on the Taxonomy page, General-tab inline edit
 icons, a Tags row, and a close rule that requires a non-`undefined` verdict + a closing comment and
 propagates closure to every linked alert; guarded by `tests/conformance/test_case_verdict_close.py`,
@@ -649,6 +653,17 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
   status), **V-3** (UI timeline kind is now `status-changed`). Tests:
   `tests/conformance/test_case_verdict_close.py`, `test_ui_case_verdict.py` (27) plus updated
   `test_ui_loop.py` / `test_realtime.py` / `test_viewer_readonly_ui.py` / `test_tenant_scoping.py`.
+- [ ] **12.8-fu1 — Independent verification re-run of §12.8 (case verdict + enforced close flow).**
+  The inline pass at 18/18 ACs in `docs/verification/VERIFY-2026-10-17-case-verdict-close-flow.md` is
+  **provisional** — the `verifier` subagent was unreachable (503) throughout. Re-run it once the service
+  recovers, re-issue the report, then flip §12.8 to `[x]` and add it to `COMPLETED.md`. Source: §12.8
+  verification report; user request 2026-10-17. **Blocks:** §12.8 → `[x]` / `COMPLETED.md`.
+- [ ] **12.8-fu2 — Security review of the §12.8 surface** (verdict model, close rule, General-tab inline
+  edits, Tags row, close/field/tag modals). No `security-auditor` pass has run on this scope (also 503).
+  Focus: org scoping + role gating (`@not_viewer`, `require_POST`) on `ui-case-close` /
+  `ui-case-field-edit` / `ui-case-tag-add` / `ui-case-tag-remove`, the close-propagation write path
+  (`cases/update.py::propagate_close_to_alerts`) and `AuditLog` coverage. Source: planned security review;
+  user request 2026-10-17.
 - [ ] **12.9 — UI layout/style standardization (global).** (1) **Input/button height alignment:** inputs must
       match button height next to them (form control sizing). (2) **Action columns use fitting icons:** prefer
       compact icon-only actions with accessible names (aria-label/title), not full text buttons in tight action
