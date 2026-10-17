@@ -103,6 +103,34 @@ def test_no_inline_event_handler(path: Path) -> None:
     )
 
 
+def test_htmx_indicator_styles_are_disabled() -> None:
+    # htmx (v2) injects a `<style>` block into <head> at load when `includeIndicatorStyles`
+    # is left at its default of true. That block is blocked by our `style-src 'self'` and shows
+    # up as a console CSP violation. The declarative meta below (no JS, no nonce) turns it off;
+    # the templates use no `hx-indicator`, so nothing is lost. Removing the meta silently
+    # re-introduces the violation, so it is pinned here.
+    html = TEMPLATE_DIR.joinpath("base.html").read_text(encoding="utf-8")
+    assert re.search(r'<meta\s+name="htmx-config"', html), (
+        'base.html must carry a <meta name="htmx-config"> so htmx does not inject an '
+        "indicator <style> that our CSP blocks"
+    )
+    assert re.search(r'"includeIndicatorStyles"\s*:\s*false', html), (
+        "the htmx-config meta must set includeIndicatorStyles to false — otherwise htmx "
+        "injects a <style> at load which CSP (style-src 'self') refuses"
+    )
+
+
+def test_only_base_template_loads_htmx() -> None:
+    # The htmx-config pin above guards base.html; if another template ever loads htmx it would
+    # bypass that guard, so the single-loader assumption is itself asserted.
+    loaders = [
+        path.name
+        for path in _templates()
+        if "htmx.min.js" in _strip_comments(path.read_text(encoding="utf-8"))
+    ]
+    assert loaders == ["base.html"], f"htmx is loaded by {loaders}; extend the guard to all"
+
+
 def test_no_template_renders_json_via_json_script() -> None:
     # `json_script` emits an inline `<script type="application/json">`, which our CSP
     # blocks; config blobs are formatted server-side by the `prettyjson` filter instead.

@@ -209,3 +209,22 @@ def test_deleting_an_attachment_removes_the_row_and_blob(browser: Client, case: 
     assert response.status_code == 302
     assert not Attachment.objects.filter(pk=attachment.id).exists()
     assert not default_storage.exists(path), "the blob outlived its row"
+
+
+# --- 4. the served page carries the CSP-safe htmx config ------------------
+
+
+def test_dashboard_declares_htmx_config_that_avoids_a_csp_blocked_style(
+    browser: Client, case: Case
+) -> None:
+    # htmx injects an indicator <style> into <head> at load unless the `htmx-config` meta turns
+    # it off; our CSP (`style-src 'self'`, no nonce) then refuses it and the browser logs a
+    # violation. The source-level pin lives in test_ui_inline_assets.py; this asserts the tag
+    # actually survives into a rendered response (it must not sit inside a template comment).
+    response = browser.get(reverse("ui-dashboard"))
+    assert response.status_code == 200
+    html = response.content.decode()
+    assert 'name="htmx-config"' in html, "the served page is missing the htmx-config meta"
+    assert '"includeIndicatorStyles": false' in html.replace("'", '"'), (
+        "htmx-config must disable includeIndicatorStyles or htmx re-injects a CSP-blocked style"
+    )

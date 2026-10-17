@@ -17,6 +17,10 @@ Accessibility notes that are not optional:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Amalthea{% endblock %}</title>
+  <!-- htmx injects an indicator stylesheet into <head> at load unless told not to; our CSP
+       (script-src/style-src 'self', no nonce, no 'unsafe-inline') blocks it. No template uses
+       hx-indicator, so disabling the injection is free. Do not remove without an alternative. -->
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false}'>
   <link rel="stylesheet" href="{% static 'vendor/fontawesome/css/fontawesome-subset.min.css' %}">
   <link rel="stylesheet" href="{% static 'ui/app.css' %}">
   <link rel="stylesheet" href="{% static 'ui/modal.css' %}">
