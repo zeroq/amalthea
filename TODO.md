@@ -4,7 +4,10 @@ Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
 Last updated: 2026-10-17 (**ingestion-token lifecycle shipped** — Settings → Sources can now pause
 (deactivate) and resume (activate) an ingestion token, and delete an inactive one; deleting a feed's
 last token now deletes the feed too, and the stale "open accepts unauthenticated posts" copy is gone
-(§10a/§10b/§10c, §10.8a; guarded by `tests/conformance/test_settings_ingestion_tokens.py`). Earlier: **the per-source
+(§10a/§10b/§10c, §10.8a; guarded by `tests/conformance/test_settings_ingestion_tokens.py`). **ACs verified 22/22** in
+[`docs/verification/VERIFY-2026-10-17-ingestion-token-lifecycle.md`](./docs/verification/VERIFY-2026-10-17-ingestion-token-lifecycle.md) —
+**provisional**: the `verifier` subagent was down (503), so the pass was run inline by the planner and still needs an
+independent re-run + a `security-auditor` pass on this scope. Earlier: **the per-source
 field-mapping wave shipped** — the mapping engine, the
 re-map control and the P5 health card; §6.17 retro-mapping done, §6.18 dead code removed 2026-10-17 —
 `PLAN-2026-10-16-source-field-mapping.md`). Earlier: **case pages are authorable in the UI** — §12.5 code shipped
