@@ -435,7 +435,8 @@ gate (ADR-009) and the preview dialog are P2—P4 and are not in this diff.
 code and read by no reader (`ingest/pipeline.py` used the module constant `DEFAULT_SEVERITY`); the
 engine now threads it through `default_severity=`, with the constant as the floor for direct pipeline
 callers (`test_ingest_pipeline.py` passes no severity, so that branch stays live). `_verify_secret`
-in `ingest/views.py` remains dead code (pre-existing, unchanged by this wave; `TODO.md`).
+in `ingest/views.py` was dead code and has been removed (along with its now-unused imports); the live
+verifier is `identity.models.py::_verify_secret` (called from `IngestionToken.verify`).
 
 Evidence: `test_mapping_engine.py` — 184 cases (AC1 purity via a cursor tripwire, AC2 = the synonym
 table + score bands, AC3 = the stored CrowdStrike payload end to end through `/api/v1/alerts/webhook/`,

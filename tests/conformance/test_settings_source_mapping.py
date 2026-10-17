@@ -769,12 +769,20 @@ APPLY_MAPPING = {
 
 
 def _mk_open_alert(
-    source: IngestionSource, *, source_ref: str, title: str = "Before", severity: int = 2
+    source: IngestionSource,
+    *,
+    source_ref: str,
+    title: str = "Before",
+    severity: int = 2,
+    warnings: dict | None = None,
 ):
     """One *unlinked open* alert of a feed — the input a re-map is allowed to rewrite.
 
     Built through the ORM so these tests do not depend on the webhook, and so the candidate predicate
     is the only thing under test here (its exclusions are covered in `test_mapping_remap.py`).
+
+    `warnings` is the stored `ingestion_warnings` column, which the P5 health card reads its `mapping`
+    record out of — set to the shape ingest writes rather than produced by running a pass.
     """
     from alerts.models import AlertStatus
 
@@ -790,6 +798,7 @@ def _mk_open_alert(
         status=status,
         raw_payload={"name": "Renamed by the new rules"},
         ingestion_source=source,
+        ingestion_warnings={} if warnings is None else warnings,
         owner_org=source.organisation,
     )
 
@@ -1145,3 +1154,90 @@ class TestApplyingTheMappingToExistingAlerts(_FeedFixture):
         assert "these are the alert's identity" in body
         # The rule is real and the operator must be able to see what it was, not just that it was skipped.
         assert "$.falcon_host_link" in body
+
+
+#: The stored record `UNREADABLE_SEVERITY` leaves: a rule that ran, produced `"70"`, and could not be
+#: read as a severity. Copied from what `ingest/pipeline.py` writes (`FieldWarning.as_dict`).
+UNRESOLVED_SEVERITY_RECORD: dict = {
+    "mapping": [
+        {
+            "field": "severity",
+            "reason": "bad_type",
+            "paths": ["$.severity"],
+            "value_preview": "70",
+        }
+    ]
+}
+
+
+class TestTheMappingHealthCard(_FeedFixture):
+    """P5 — the feed page summarises the records its alerts already carry.
+
+    The alert page shows one row's mapping record (P7.1); this is the same record aggregated, so
+    "19 of 19 alerts have a severity rule that produced nothing" is visible on the feed page instead of
+    inside nineteen rows. It reads the *stored* record, so it can never disagree with the row it sends
+    you to — and the confirm dialog stays the thing that previews a fresh pass.
+    """
+
+    def _client(self, feed):
+        _, admin, source = feed
+        return _ui_client(admin), source
+
+    def test_a_clean_feed_says_so(self, feed) -> None:
+        client, source = self._client(feed)
+        _mk_open_alert(source, source_ref="fine")
+
+        body = client.get(self._url(source)).content.decode()
+
+        assert "Mapping health" in body
+        assert "no rule in the stored mapping records is unresolved" in body
+
+    def test_it_names_the_field_the_reason_and_the_count(self, feed) -> None:
+        client, source = self._client(feed)
+        for ref in ("a", "b"):
+            _mk_open_alert(source, source_ref=ref, warnings=UNRESOLVED_SEVERITY_RECORD)
+        _mk_open_alert(source, source_ref="fine")
+
+        body = client.get(self._url(source)).content.decode()
+
+        assert "<strong>2</strong> of 3 unlinked open" in body
+        assert "severity" in body
+        # Both halves: the sentence an operator reads, and the stable token the engine stores.
+        assert "a value of the wrong type" in body
+        assert "bad_type" in body
+
+    def test_it_points_at_the_control_that_repairs_it(self, feed) -> None:
+        client, source = self._client(feed)
+        _mk_open_alert(source, source_ref="broken", warnings=UNRESOLVED_SEVERITY_RECORD)
+
+        body = client.get(self._url(source)).content.decode()
+
+        assert "Apply to unlinked alerts" in body
+        assert "previews the result per field" in body
+
+    def test_an_empty_feed_does_not_claim_health(self, feed) -> None:
+        """Nothing to read is not the same as "everything is fine" — the card says which it is."""
+        client, source = self._client(feed)
+
+        body = client.get(self._url(source)).content.decode()
+
+        assert "Mapping health" in body
+        assert "No unlinked open alerts from this feed" in body
+
+    def test_an_alert_this_card_cannot_count_is_not_counted(self, feed) -> None:
+        """A linked alert keeps its record and its own page shows it — but a pass would not touch it."""
+        from cases.models import Case, CaseStatus
+
+        client, source = self._client(feed)
+        status, _ = CaseStatus.objects.get_or_create(
+            value="New", defaults={"stage": "New", "order": 1}
+        )
+        case = Case.objects.create(title="Escalated", status=status, owner_org=source.organisation)
+        alert = _mk_open_alert(source, source_ref="linked", warnings=UNRESOLVED_SEVERITY_RECORD)
+        alert.case = case
+        alert.save(update_fields=["case"])
+
+        body = client.get(self._url(source)).content.decode()
+
+        assert "No unlinked open alerts from this feed" in body
+        assert "rule that produced no value" not in body

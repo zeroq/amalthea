@@ -1,7 +1,9 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-14 (**case pages are authorable in the UI** — §12.5 code shipped
+Last updated: 2026-10-17 (**the per-source field-mapping wave shipped** — the mapping engine, the
+re-map control and the P5 health card; §6.17 retro-mapping done, §6.18 dead-code observation open —
+`PLAN-2026-10-16-source-field-mapping.md`). Earlier: **case pages are authorable in the UI** — §12.5 code shipped
 (`PLAN-2026-10-14-case-pages-ui.md`): `ui-case-page-create/-edit/-delete`, a `can_mutate`-gated Pages card,
 modal create/edit/delete, Markdown-rendered content, `live.js` re-fetch; **verification pending**, and five
 shared-layer defects found and fixed on the way through the modal-contract + tab stylesheet — see the plan
@@ -223,6 +225,34 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
     decided by the plan's recommendations (Q2 = stub deleted, Q3 = HTMX scope, Q4 = audit viewer
     read-only, Q5 = search over cases/alerts/observables).
 - [x] **6.15 — Wave 6.3B: repo-wide ADR-003 compliance (externalise all inline scripts/styles)** Scope **(B)**, follow-up to §6.14: audit the whole `ui/templates/` tree and externalise **every** remaining inline `<script>`/`<style>`/`style="…"`/`on*=` so `script-src 'self'`/`style-src 'self'` hold without `unsafe-inline`. Plan §13B. **DONE 2026-10-11**: removed all inline `<script>` from `playbook_form.html`, `playbook_detail.html`, `observable_detail.html`, `case_template_form.html`, `case_template_detail.html`; added `prettyjson` filter (server-side JSON pretty-printing replaces 4 `json_script`-plus-inline-`<script>` pairs, one of which was invalid HTML inside a `<textarea>`); new external `ui/static/ui/playbook_form.js` (no `innerHTML` — clones a `<template>`) replacing inline handlers; removed every `style="…"` from `404.html`, `case_tags.html`, `observable_list.html`, `playbook_form.html`; added component classes to `app.css`. Fixed a latent bug: the playbook header rows were rendered from a broken `{% for i in "1234" %}`-less block so **no** header row was ever submitted without JS — now four indexed, server-rendered rows. New CI guard `tests/conformance/test_ui_inline_assets.py` (116 cases) fails on any future inline asset. Plan §13B.
+
+- [x] **6.17 — Retro-mapping: re-apply a feed's field mapping to its existing alerts.** Plan §8 P7/P7.1
+  (the **§11 Q7** deferral). **DONE 2026-10-16** — requested directly, so it landed out of order as P7 +
+  P7.1 instead of staying deferred. The **"Apply to unlinked alerts…"** control on the Settings → Sources
+  detail page (beside "Save mapping") is a **validate-and-count** step (`intent=apply` writes nothing;
+  renders the exact counts, the field list and the per-target dry run) then a **confirm** step
+  (`intent=apply_confirmed`) that saves the rules and re-maps **inside one transaction** (audit
+  `ingestion_source.mapping_applied`; `ingestion_source.updated` only when the config changed). Re-mapped:
+  `title`/`description`/`summary`/`severity`/`date`, equal to what ingest would produce today.
+  **The safety shape a future reader must not undo:** the candidate predicate is exactly *this feed*
+  (`ingestion_source=source`) **and** `case IS NULL` **and** `status.stage in (New, InProgress)`;
+  `type`/`source_ref` are the dedupe+replay key and are **never** rewritten (**MAP-9**); a text field the
+  mapping cannot answer keeps its stored value (**MAP-10**); `MAX_REMAP_ALERTS = 5000` per request with a
+  **refusal rather than a silent half-apply** (over it, neither the config nor the alerts are written)
+  (**MAP-11**); a field-less but record-changing pass is reported as `refreshed` (**MAP-12**). **Still NOT
+  done:** a feed over `MAX_REMAP_ALERTS` has no background-task path (it needs a status surface). Plan:
+  `docs/planning/PLAN-2026-10-16-source-field-mapping.md` §8 P7/P7.1; deviations **MAP-9…MAP-12** in
+  `docs/spec/deviations.md`. Evidence: `tests/conformance/test_mapping_remap.py` (32 cases) +
+  `tests/conformance/test_settings_source_mapping.py` (53 cases).
+- [ ] **6.18 — Dead-code observation from the field-mapping plan (P5): `ingest/views.py::_verify_secret`.**
+  Verified 2026-10-16: `ingest/views.py:105` defines `_verify_secret` and it has **no callers** (the webhook
+  token path is `_authenticate_token` → `IngestionToken`), so that copy is **dead** — the live verifier is
+  `identity/models.py:156` (called at `:309`). The plan's companion `canonical_payload` is **not** in
+  `ingest/views.py`: it lives in `ingest/references.py:44` and is **live** (`payload_digest` →
+  `resolve_source_ref` → `ingest/pipeline.py:99`; also `tests/conformance/test_ingest_pipeline.py:52`), so
+  it must not be deleted — only the plan's file pointer is stale. Action: drop the dead
+  `ingest/views.py::_verify_secret` (with its now-unused `_ph`, `constant_time_compare` and
+  `PasswordHasher` imports, used nowhere else in the file) or annotate why it is kept.
 
 ---
 

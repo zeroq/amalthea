@@ -121,6 +121,63 @@
 </div>
 
 <div class="card">
+  <h2>Mapping health</h2>
+  {% if not mapping_health.total %}
+    <p class="hint">
+      No unlinked open alerts from this feed, so there is nothing to summarise. Linked and closed alerts
+      are never re-mapped — a case file is human-authored evidence (MAP-9) — so they are not counted here.
+    </p>
+  {% else %}
+    {% if mapping_health.clean %}
+      <p>
+        {{ mapping_health.scanned }} unlinked open alert{{ mapping_health.scanned|pluralize }} from this
+        feed — no rule in the stored mapping records is unresolved.
+      </p>
+    {% else %}
+      <p>
+        <strong>{{ mapping_health.affected }}</strong> of {{ mapping_health.scanned }} unlinked open
+        alert{{ mapping_health.scanned|pluralize }} {{ mapping_health.affected|pluralize:"has,have" }} a
+        rule that produced no value:
+      </p>
+      <div class="table-wrap">
+        <table class="data-table data-table-tight">
+          <caption class="sr-only">Unresolved mapping rules on this feed's stored alerts</caption>
+          <thead>
+            <tr>
+              <th scope="col">Field</th>
+              <th scope="col">Reason</th>
+              <th scope="col">Alerts</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for target, by_reason in mapping_health.unresolved.items %}
+              {% for reason, count in by_reason.items %}
+                <tr>
+                  <td class="mono">{{ target }}</td>
+                  <td>{{ reason|reason_label }} <span class="dim mono">{{ reason }}</span></td>
+                  <td>{{ count }}</td>
+                </tr>
+              {% endfor %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">
+        Fix the rule above, then <strong>Apply to unlinked alerts…</strong> — the confirmation dialog
+        previews the result per field before anything is written. These are the records stored on the
+        alerts, so a fix appears here once the re-map writes them.
+      </p>
+    {% endif %}
+    {% if not mapping_health.complete %}
+      <p class="hint">
+        Read from the first {{ mapping_health.scanned }} of {{ mapping_health.total }} unlinked open
+        alerts.
+      </p>
+    {% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
   <h2>Tokens</h2>
   {% if tokens %}
     <div class="table-wrap">

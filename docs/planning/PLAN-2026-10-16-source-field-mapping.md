@@ -1,7 +1,8 @@
 # PLAN 2026-10-16 — Per-source field mapping (JSON → Alert)
 
-**Status: APPROVED 2026-10-16 — P1, P2, P3, P7 and P7.1 IMPLEMENTED 2026-10-16** (records in §8 P1, §8 P2,
-§8 P3, §8 P7, §8 P7.1); P4 (sample preview) and P5 (health & docs) are the next phases, and P3's
+**Status: APPROVED 2026-10-16 — P1, P2, P3, P7 and P7.1 IMPLEMENTED 2026-10-16, P5 IMPLEMENTED
+2026-10-17** (records in §8 P1, §8 P2, §8 P3, §8 P5, §8 P7, §8 P7.1); P4 (sample preview) is the next
+phase, and P3's
 `ingest/editor.py` is what P4's dialog reuses. P7 is the §11 Q7 retro-mapping item, requested directly and
 landed out of order (its ACs are 17–23; P4's 15/16 stay reserved, and P7.1's report-of-the-report ACs are
 24–26). All eight questions answered (§11 Decisions); the Q5 consequence is recorded in §6.1 and
@@ -112,13 +113,17 @@ Rules:
 - **`transform`** — one name from a **closed set** (§5.2). Unknown transform = form error at save
   time, never an ingest-time surprise.
 - **`default`** — per-rule. Precedence: match → `default` → field-specific source default
-  (`default_severity` for `severity`) → model default + warning.
+  (`default_severity` for `severity`) → model default + warning. Tolerated alias, not a feature:
+  `severity_default` is read as `default` by `_normalize` (`raw.get("severity_default",
+  raw.get("default"))`), but the editor writes `default` only and no other producer exists.
 - **`max_length`** — applied to `str`; a mapping must not be able to write an unbounded title
   (`Alert.title` is 500, today the view truncates at 200).
 - **`value_maps`** — operator-supplied name→int entries, merged *over* the built-in vocabulary.
   Edited in the **advanced JSON view** (Q3), not as a form row.
 - **`on_missing`** — `warn` (the only shipped behaviour, Q4). The key is reserved so a later
   `"reject"` does not have to be invented; nothing reads it as `reject` today.
+- **`timezone` is not implemented** — it appears in the `date` example above, but the engine never reads
+  the key; `_as_datetime` treats a naive, timezone-less timestamp as UTC (`ingest/mapping.py`).
 - **`correlation_key` is deliberately not a v2 field** (Q8). `extract_correlation_key` keeps its
   current spelling list (`correlation_key`, `correlationKey`, `…`) so the existing behaviour is
   untouched; folding it into `fields` is a follow-up, not a silent extension.
@@ -137,6 +142,14 @@ Rules:
 | `list` | scalar, array, array-of-objects path | `list[str]` | `$.mitre_attack[*].technique_id` → `["T1003"]` |
 | `list_join` | list | string | tags where the model takes a scalar |
 | `strip` / `lower` | string | string | vendor whitespace/casing |
+
+**Implemented set — drift note, recorded 2026-10-17.** The table above is design intent, not the
+contract; `ingest/mapping.py::TRANSFORMS` is the source of truth. The shipped closed set is exactly its
+11 keys: `str`, `str_lower`, `int`, `severity_name`, `severity_score`, `severity_int`, `datetime`,
+`list`, `json`, `tlp`, `pap`. `strip`, `lower` and `list_join` from the table above were **never
+implemented**: `str_lower` is the shipped `lower`/`strip` job, and the shipped set additionally contains
+`json` (absent from the table above); there is **no** `list_join` — use `list` where the model takes a
+list.
 
 Every transform is **total**: bad input returns `None` (+ a warning), never raises — the same posture
 `extract_by_jsonpath` already documents ("a typo in operator-authored data should produce a warning,
@@ -373,10 +386,57 @@ AC:
 16. The sample is never written to `raw_payload`, the session, or a log line; a body over
     `WEBHOOK_MAX_BODY_SIZE` → 413; a viewer gets the redirect/flash, not the draft.
 
-### P5 — Health & docs
+### P5 — Health & docs — **IMPLEMENTED 2026-10-17**
 `docs/spec/api.md` mapping section, `docs/spec/data-model.md` shape, `sources_list` summary,
 a `mapping_warnings` view on the source page, `TODO.md` gets retro-mapping (Q7) and the deferred
 `canonical_payload`/`_verify_secret` dead-code observation. `ingest/admin.py` stays empty.
+
+**Implemented 2026-10-17.** P5 shipped **no acceptance criteria of its own** — the AC numbers stay where
+§8 P4/P7/P7.1 put them, and P5 reuses none of them (P4's 15/16 remain reserved), so the record below is a
+deliverable list rather than a checklist. The health view named above lands as the **"Mapping health"
+card**. `ingest/remap.py` gains the read-only health reader: `HEALTH_SCAN_LIMIT: Final[int] = 2000` (a
+bound for a *page render* nobody asked for, deliberately smaller than `MAX_REMAP_ALERTS`, which bounds a
+*write* the operator did ask for); the frozen `MappingHealth` (`total` — the re-map's own candidate
+count, `scanned`, `affected` — alerts whose stored record has at least one unresolved field, `unresolved`
+— `target -> reason -> alerts`, plus the derived `complete`/`clean`); `summarise_mapping_records(records)`
+(a pure function over stored `Alert.ingestion_warnings` dicts; reads **only** the structured `"mapping"`
+list, never the append-only `"warnings"` event log, MAP-2b; counts each alert once per `(field, reason)`;
+and counts only reasons in `ingest.mapping.UNRESOLVED_REASONS`, so a benign `truncated` entry is not a
+defect); and `mapping_health(source, *, limit=HEALTH_SCAN_LIMIT)` (read-only, bounded, and built on
+`candidate_alerts(source)` — the same predicate the re-map uses, so the card cannot promise a repair the
+button would refuse, MAP-9). `ui/views.py::_source_detail_context` passes `mapping_health` to the
+template, and `ui/templates/ui/source_detail.html` gains a **"Mapping health" card between "Mapping
+rules" and "Tokens"**: a clean state, or "N of M unlinked open alerts have a rule that produced no value"
+plus a field/reason/count table that reuses the P7.1 `reason_label` filter while keeping the stable
+reason token visible, a pointer to "Apply to unlinked alerts…", and an explicit note when the scan
+stopped at the limit.
+
+**What P5 did not do.** No P4 preview endpoint — the card reads the records *stored* on the alerts rather
+than re-running the rules, so the confirmation dialog remains the only thing that previews a fresh pass
+(a rule fixed but not yet re-applied still shows here, which is the point: it is the evidence that a pass
+is worth running). `ingest/admin.py` deliberately stays empty (0 lines): the feed and its mapping are
+managed through the Settings UI, not Django admin.
+
+**The doc half of P5** (its other deliverable set, landed in parallel in the same change set): the
+`docs/spec/api.md` mapping section, the `docs/spec/data-model.md` shape, the `sources_list` summary, and
+`TODO.md` gaining the Q7 retro-mapping entry plus the deferred `canonical_payload`/`_verify_secret`
+dead-code observation. §13's structured `mapping`/`warnings` split is already recorded as **MAP-2b** in
+`docs/spec/deviations.md`, so P5 adds no deviation entry of its own.
+
+**Correction (2026-10-17).** Of the "deferred `canonical_payload`/`_verify_secret` dead-code
+observation" named above, only half holds: `ingest/views.py:105::_verify_secret` has no callers and is
+dead (the live verifier is `identity/models.py:156`, called at `:309`), while `canonical_payload` is not
+in `ingest/views.py` at all — it lives at `ingest/references.py:44` and is live (the synthetic
+`source_ref` path via `payload_digest`, and `tests/conformance/test_ingest_pipeline.py:52`), so it must
+not be deleted. The cleanup is recorded at `TODO.md` §6.18.
+
+Evidence: `tests/conformance/test_mapping_remap.py` gains `TestTheMappingHealth` (7 cases) and
+`test_settings_source_mapping.py` gains `TestTheMappingHealthCard` (5 cases); collected counts after the
+change are `test_mapping_remap.py` 32, `test_settings_source_mapping.py` 53, `test_mapping_engine.py`
+184 and `test_mapping_editor.py` 66. `make check` green at **2352 passed / 3 skipped** (up from 2340;
+ruff, ruff format, pinned-scope mypy, `manage.py check`, migrations in sync and the css compile check all
+clean). The P5 code lands in one maintainer commit together with the doc updates (recorded without a
+hash).
 
 ### P6 (candidate, not planned here) — observables from the same config
 `"observables": [{"type": "sha256", "paths": ["$.sha256"]}, …]` feeding Module C. Explicitly out of §3

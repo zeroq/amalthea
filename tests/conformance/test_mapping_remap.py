@@ -34,6 +34,7 @@ from ingest.models import IngestionSource
 from ingest.remap import (
     REMAP_FIELDS,
     candidate_alerts,
+    mapping_health,
     preview_alerts,
     remap_alerts,
     summarise_candidates,
@@ -405,6 +406,21 @@ UNREADABLE_SEVERITY: dict = {
     "fields": {"severity": {"paths": ["$.severity"], "transform": "str"}},
 }
 
+#: What `UNREADABLE_SEVERITY` leaves *stored* on an alert: the structured record, in the form a re-map
+#: replaces and the feed page's health card reads. Written by hand rather than by running a pass, so the
+#: health tests assert the reader against the shape ingest actually stores (the field is `field`, not
+#: `target`, and `value_preview` is display-only).
+UNREADABLE_SEVERITY_WARNINGS: dict = {
+    "mapping": [
+        {
+            "field": "severity",
+            "reason": "bad_type",
+            "paths": ["$.severity"],
+            "value_preview": "70",
+        }
+    ]
+}
+
 
 class TestTheRecordRefresh:
     """MAP-12 — a pass that changes no *field* can still be a pass that wrote something.
@@ -631,3 +647,135 @@ class TestThePreview:
         assert preview.candidates == 2
         assert preview.by_status == {"New": 2}
         assert preview.over_cap is True
+
+
+class TestTheMappingHealth:
+    """P5 — the feed page's summary of the records the alerts already carry.
+
+    `mapping_health` is the read-only mirror of a pass: the same predicate and the same
+    `target -> reason -> alerts` shape, but read from what is *stored* rather than from what the rules
+    would produce now. That is the point — the feed page and the alert page then tell one story, and
+    "19 alerts whose severity rule produced nothing" is visible without opening nineteen rows. It also
+    writes nothing and cannot promise a repair the button would refuse, so the predicate is asserted
+    again here by exclusion.
+    """
+
+    def test_a_record_that_resolved_is_not_a_defect(self, feed: IngestionSource) -> None:
+        """`truncated` is a warning, not an unresolved field — the health count uses that distinction."""
+        _mk_alert(
+            feed,
+            source_ref="shortened",
+            warnings={
+                "mapping": [
+                    {"field": "title", "reason": "truncated", "value_preview": "a very long title"},
+                ]
+            },
+        )
+
+        health = mapping_health(feed)
+
+        assert health.total == 1
+        assert health.scanned == 1
+        assert health.affected == 0
+        assert health.unresolved == {}
+        assert health.clean is True
+        assert health.complete is True
+
+    def test_it_counts_alerts_per_field_and_reason(self, feed: IngestionSource) -> None:
+        for ref in ("a", "b", "c"):
+            _mk_alert(
+                feed,
+                source_ref=ref,
+                warnings=UNREADABLE_SEVERITY_WARNINGS,
+            )
+        _mk_alert(feed, source_ref="fine", warnings={"mapping": []})
+
+        health = mapping_health(feed)
+
+        assert health.total == 4
+        assert health.affected == 3
+        assert health.unresolved == {"severity": {"bad_type": 3}}
+        assert health.clean is False
+
+    def test_an_alert_counts_once_however_often_the_record_repeats(
+        self, feed: IngestionSource
+    ) -> None:
+        _mk_alert(
+            feed,
+            source_ref="twice",
+            warnings={
+                "mapping": [
+                    {"field": "severity", "reason": "bad_type"},
+                    {"field": "severity", "reason": "bad_type"},
+                ]
+            },
+        )
+
+        health = mapping_health(feed)
+
+        assert health.affected == 1
+        assert health.unresolved == {"severity": {"bad_type": 1}}
+
+    def test_only_the_alerts_a_pass_could_repair_are_counted(self, org: Organisation) -> None:
+        """The record on a linked or dismissed alert is still shown on that alert — just not here."""
+        feed = _mk_source(org)
+        _mk_alert(feed, source_ref="candidate", warnings=UNREADABLE_SEVERITY_WARNINGS)
+        _mk_alert(
+            feed,
+            source_ref="linked",
+            case=_mk_case(org),
+            warnings=UNREADABLE_SEVERITY_WARNINGS,
+        )
+        _mk_alert(
+            feed,
+            source_ref="dismissed",
+            status=_status("Dismissed", "Closed"),
+            warnings=UNREADABLE_SEVERITY_WARNINGS,
+        )
+
+        health = mapping_health(feed)
+
+        assert health.total == 1
+        assert health.affected == 1
+        assert health.unresolved == {"severity": {"bad_type": 1}}
+
+    def test_it_says_when_it_stopped_reading_early(self, feed: IngestionSource) -> None:
+        for index in range(3):
+            _mk_alert(feed, source_ref=f"row-{index}", warnings=UNREADABLE_SEVERITY_WARNINGS)
+
+        health = mapping_health(feed, limit=2)
+
+        assert health.complete is False
+        assert health.scanned == 2
+        assert health.total == 3
+        # The count is over the rows it read, and says so rather than pretending to be the whole feed.
+        assert health.unresolved == {"severity": {"bad_type": 2}}
+
+    def test_it_reads_the_structured_record_and_not_the_event_log(
+        self, feed: IngestionSource
+    ) -> None:
+        """MAP-2b: `warnings` is append-only, so an ingest-time `severity_defaulted` line is history."""
+        _mk_alert(
+            feed,
+            source_ref="history",
+            warnings={
+                "warnings": ["severity_defaulted: no rule answered, used the feed default (2)"],
+                "mapping": [],
+            },
+        )
+
+        health = mapping_health(feed)
+
+        assert health.clean is True
+        assert health.affected == 0
+
+    def test_it_writes_nothing(self, feed: IngestionSource) -> None:
+        alert = _mk_alert(feed, source_ref="untouched", warnings=UNREADABLE_SEVERITY_WARNINGS)
+        before = _read(alert)
+
+        mapping_health(feed)
+
+        after = _read(alert)
+        assert after.updated_at == before.updated_at
+        assert after.ingestion_warnings == before.ingestion_warnings
+        assert after.severity == before.severity

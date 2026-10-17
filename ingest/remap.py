@@ -34,6 +34,7 @@ without a per-target account of what the mapping answered.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -63,6 +64,12 @@ TITLE_LIMIT: Final[int] = 200
 #: cycle; past a few thousand rows the honest answer is a background task, and a "save & apply" that
 #: silently drops its apply half is worse than a refusal (the view disables its confirm control instead).
 MAX_REMAP_ALERTS: Final[int] = 5000
+
+#: How many stored alerts the source page's health card reads before it says it stopped early (P5).
+#: Deliberately smaller than `MAX_REMAP_ALERTS`: that one bounds a *write* the operator asked for, while
+#: this bounds a page render nobody asked for. The card is a prompt to look, not the pass itself — past
+#: the limit it names the number it read and points at the dialog, which previews a fresh pass anyway.
+HEALTH_SCAN_LIMIT: Final[int] = 2000
 
 
 @dataclass(frozen=True)
@@ -137,6 +144,35 @@ class RemapPreview:
         return self.summary.over_cap
 
 
+@dataclass(frozen=True)
+class MappingHealth:
+    """What the candidate alerts' **stored** mapping records say, for the source page (P5).
+
+    Deliberately not a re-computation. `RemapPreview` asks "what would the rules produce *now*" and may
+    only be answered by running them; this asks "what is recorded on the rows as last written", which is
+    the feed-level view of the same record the alert page renders — so the card and the row it links to
+    cannot disagree. A rule fixed but not yet re-applied therefore still shows here, which is the point:
+    this is the evidence that a pass is worth running.
+    """
+
+    #: Unlinked open alerts from this feed — the re-map's candidate set, not all of its alerts.
+    total: int
+    #: How many of them the card actually read (`HEALTH_SCAN_LIMIT`).
+    scanned: int
+    #: Alerts whose stored record carries at least one unresolved field.
+    affected: int
+    #: `target -> reason -> alerts`, the same shape the re-map reports.
+    unresolved: dict[str, dict[str, int]]
+
+    @property
+    def complete(self) -> bool:
+        return self.scanned >= self.total
+
+    @property
+    def clean(self) -> bool:
+        return self.affected == 0
+
+
 def candidate_alerts(source: IngestionSource) -> QuerySet[Alert]:
     """The alerts one feed's re-map may touch. The only place that predicate is written."""
     return Alert.objects.filter(
@@ -156,6 +192,56 @@ def summarise_candidates(source: IngestionSource) -> RemapSummary:
     )
     by_status = {row["status__value"]: row["count"] for row in rows}
     return RemapSummary(candidates=sum(by_status.values()), by_status=by_status)
+
+
+def summarise_mapping_records(
+    records: Iterable[Mapping[str, Any] | None],
+) -> tuple[int, dict[str, dict[str, int]]]:
+    """Count the unresolved fields in stored `ingestion_warnings` dicts (pure, so it can be tested).
+
+    Returns `(alerts with at least one unresolved field, target -> reason -> alerts)`. Only the
+    structured `"mapping"` list is read: `"warnings"` is the alert's append-only event log, so an
+    ingest-time `severity_defaulted` line would be counted as a live defect forever once a rule is fixed
+    (MAP-2b). Each alert counts once per `(target, reason)`, so a payload warning twice about the same
+    field does not inflate the count.
+    """
+    affected = 0
+    unresolved: dict[str, dict[str, int]] = {}
+    for stored in records:
+        seen: set[tuple[str, str]] = set()
+        for warning in (stored or {}).get("mapping") or []:
+            if not isinstance(warning, Mapping):  # defensive: the column is operator-visible JSONB
+                continue
+            target = str(warning.get("field") or "")
+            reason = str(warning.get("reason") or "")
+            if target and reason in UNRESOLVED_REASONS:
+                seen.add((target, reason))
+        if not seen:
+            continue
+        affected += 1
+        for target, reason in sorted(seen):
+            by_reason = unresolved.setdefault(target, {})
+            by_reason[reason] = by_reason.get(reason, 0) + 1
+    return affected, unresolved
+
+
+def mapping_health(source: IngestionSource, *, limit: int = HEALTH_SCAN_LIMIT) -> MappingHealth:
+    """Read the candidate alerts' stored mapping records for the source page's health card (P5).
+
+    Read-only and bounded: `candidate_alerts` is the re-map's own predicate, so the card counts exactly
+    the rows a pass would repair and cannot promise a fix the button would refuse (MAP-9: a linked or
+    closed alert is never re-mapped, and is therefore never counted here).
+    """
+    candidates = candidate_alerts(source)
+    total = candidates.count()
+    rows = candidates.values_list("ingestion_warnings", flat=True)[:limit]
+    affected, unresolved = summarise_mapping_records(rows)
+    return MappingHealth(
+        total=total,
+        scanned=min(total, limit),
+        affected=affected,
+        unresolved=unresolved,
+    )
 
 
 def remap_alerts(

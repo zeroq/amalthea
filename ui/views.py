@@ -4041,7 +4041,7 @@ def _source_detail_context(
     """
     from ingest.editor import TARGET_LABELS, editor_rows, transforms_for_editor
     from ingest.mapping import config_shape, read_rules
-    from ingest.remap import MAX_REMAP_ALERTS, REMAP_FIELDS
+    from ingest.remap import MAX_REMAP_ALERTS, REMAP_FIELDS, mapping_health
 
     errors = errors or {}
     return {
@@ -4065,6 +4065,8 @@ def _source_detail_context(
         .defer("secret_hash")
         .order_by("-created_at"),
         "alert_count": Alert.objects.filter(ingestion_source=source).count(),
+        # --- P5: what the stored records say, before anyone opens nineteen alerts -------------------
+        "mapping_health": mapping_health(source),
         "is_superadmin": request.user.role == "superAdmin",
         # --- P7: the "apply to existing alerts" confirmation dialog -------------------------------
         "apply_pending": apply_pending,

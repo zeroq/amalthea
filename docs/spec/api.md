@@ -48,8 +48,32 @@ ADR-008: the path names no source. The credential is the only routing fact — i
   `wh:src:{slug}:{window}` + `wh:ip:{ip}:{window}` + `wh:token:{prefix}:{window}`,
   per-source 60/min, per-IP 300/min defaults) → **429**
   `rateLimitExceeded`; then `json.loads` + object check + depth ≤ `WEBHOOK_MAX_DEPTH` (30) → **400**.
-- Mapping: `_mapped(payload, mapping, *keys)` — JSONPath first (`ingest/mapping.py`), literal
-  fallback; severity coerced with the source's `default_severity` as fallback.
+- Mapping (`ingest/mapping.py::apply_mapping` — pure, no ORM/HTTP): one pass over the payload after
+  the guards, before persistence. `IngestionSource.mapping_config` is either **v2** —
+  `{"version": 2, "fields": {<target>: {"paths": [JSONPath…], "transform": <name>, "default"?,
+  "max_length"?, "bands"?}}, "value_maps"?, "on_missing"?}` — or the **legacy** flat
+  `{target: "$.path"}` dict, which still works and is normalised on read (the Settings editor's
+  table only ever writes v2). Targets are the closed set `title, description, summary, severity, date, type,
+  source_ref` (`TARGETS`; `tlp`/`pap`/`tags` are out, and `correlation_key` keeps its own reader).
+  `paths` are ordered candidates and the first non-empty answer wins; a v2 rule's paths are the
+  *whole* candidate list, so the legacy literal-key fallback applies only to unconfigured targets.
+  Transforms are a closed set (`str`, `str_lower`, `int`, `severity_name`, `severity_score`,
+  `severity_int`, `datetime`, `list`, `json`, `tlp`, `pap`) and every one is **total**: bad input
+  yields `None` plus a warning, never an exception. `severity_name` maps a case-insensitive built-in
+  1–4 synonym vocabulary, merged with the operator's `value_maps.severity`; `severity_score` applies
+  score bands (overridable per rule as `bands`; defaults `<20 → 1`, `20–49 → 2`, `50–79 → 3`,
+  `≥80 → 4`). A rule's `default` is used when no path answers; severity then falls back to the
+  source's own `default_severity`, threaded from the token's source at the webhook. `on_missing` is
+  reserved — `warn` is the only shipped behaviour. Configs are validated at **write** time
+  (`validate_config`, via the Settings editor): an unknown target or transform, a non-compiling path
+  or an oversize list is refused before storage, never at ingest.
+- Mapping warnings: nothing silently defaults. `Alert.ingestion_warnings["mapping"]` is a list of
+  `{"field", "reason", "paths"?, "value_preview"?}` entries describing how the **current** fields
+  were resolved — a later mapping pass replaces it — while `ingestion_warnings["warnings"]` is the
+  append-only event log (a re-map appends one `remapped:` line). `reason` is a stable token:
+  `not_found`, `unknown_value`, `bad_type`, `bad_transform`, `truncated`; the first four are
+  `UNRESOLVED_REASONS` = "the rule produced no value". The full split is documented in
+  [`data-model.md`](./data-model.md) (MAP-2b) rather than repeated here.
 - Persistence: `store_ingested_alert` **requires** an `owner_org` (the token's) and dedupes on the
   per-org unique quad `(owner_org, source, type, source_ref)` (ADR-004);
   missing `sourceRef` ⇒ synthesised `sha256:` of the canonical payload (content-based replay dedupe).
@@ -414,6 +438,8 @@ Routes are named `ui-*` in `ui/urls.py`.
 |---|---|---|---|
 | `cases/new` | GET, POST | `case_create` | `ui-case-create` |
 | `cases/<case_id>` | GET | `case_detail` | `ui-case-detail` |
+| `sources` | GET | `sources_list` | `ui-sources-list` |
+| `settings/sources/<uuid:source_id>` | GET, POST | `settings_source_detail` | `ui-settings-source-detail` |
 
 ### `GET|POST /cases/new` (`ui-case-create`)
 
@@ -431,15 +457,57 @@ Routes are named `ui-*` in `ui/urls.py`.
   transaction. Extraction runs unconditionally over title + description.
   CSRF protected: `Client(enforce_csrf_checks=True)` POST without token → 403.
 
+### `GET|POST /settings/sources/<source_id>` (`ui-settings-source-detail`) — the mapping editor
+
+- The `/sources` list (`ui-sources-list`) is org-scoped and shows each feed's alert count and a rule
+  summary (`N rules · severity←<transform or first path>`); the slug links to the detail page for
+  admins only, plain text otherwise.
+- Admin-only and org-scoped (ADR-009): `_require_admin_ui` + `resolve_ingestion_source` — an `admin`
+  reaches own-org sources, a `superAdmin` any, and a viewer/analyst or foreign-org admin gets the
+  same **404** as a nonexistent id, never 403. A superAdmin's cross-org read is audited.
+- The page renders Identity, the **Mapping rules** table (one row per target: newline-separated-only
+  paths, transform select, default; an empty row deletes the rule), Tokens, the **Mapping health**
+  card, and **Advanced — stored configuration** (the JSON box — the only place `value_maps` is
+  edited). One storage object, two views of it; saving a legacy config through the table converts it
+  to v2, announced in words — in v2 a rule's paths are the whole candidate list, so the conversion is
+  not a no-op.
+- POSTs are routed by the `intent` field (`_source_mapping_post`; absent ⇒ `save`):
+  - `save` — exactly one of the two forms (`form=table|json`) is parsed and validated
+    (`ingest/editor.py` → `validate_config`) before storage. A rejection is a **200 echoing the
+    input** with per-row errors and writes nothing; success is PRG; an unchanged submission is a
+    no-op (no write, no audit). Audited as `ingestion_source.updated` with the changed config keys
+    as dot-paths, never values (MAP-7).
+  - `apply` — "Apply to unlinked alerts…": validates the submitted config, runs a read-only dry pass
+    (`preview_alerts`, capped at `MAX_REMAP_ALERTS`) over the candidates and re-renders with the
+    confirmation dialog showing per-target would-change / produced-no-value counts. Writes nothing.
+  - `apply_confirmed` — re-validates the config carried in the hidden `pending_config` field, then
+    in **one transaction** saves the mapping (only when it changed) and re-maps (`remap_alerts`),
+    audited as `ingestion_source.mapping_applied` with candidate/updated/unchanged/refreshed
+    counts. Over `MAX_REMAP_ALERTS` (5000) the dialog's confirm control is disabled and the server
+    re-counts and refuses — **nothing** is saved, the mapping included (MAP-11).
+- Candidates are one predicate (`ingest/remap.py::candidate_alerts`): alerts of *this* feed
+  (`ingestion_source` FK, not the wire `source`) that are unlinked (`case` null) and open
+  (`status.stage` ∈ `New`/`InProgress`). A pass writes only `title`, `description`, `summary`,
+  `severity`, `date` (`REMAP_FIELDS`), and only where the new mapping disagrees — never `type`/
+  `source_ref` (the dedupe/replay identity, MAP-9) and never triage fields; a text field the new
+  mapping cannot answer keeps its stored value (MAP-10), and a pass that changes no field but leaves
+  a stale `mapping` record rewrites just that record (`refreshed`, MAP-12). The **Mapping health**
+  card reads the candidates' stored `ingestion_warnings` records only — never re-runs the rules —
+  bounded by `HEALTH_SCAN_LIMIT` (2000), and says when it stopped early.
+
 ## Evidence
 
-Contract tests (collected counts, 2026-10-10): `tests/conformance/test_t1_surface.py` (56),
-`test_unknown_fields.py` (33), `test_authz.py` (263), `test_thehive_fixtures.py` (13, pinned golden
-fixtures from thehive4py 2.1.0), `test_webhook_hardening.py` (37), `test_t2_p1_surface.py` (19, the T2
-P1 surface: identity, observable types, statuses, tags, describe), `test_t2_p2_surface.py` (12,
+Contract tests (collected counts, 2026-10-10; mapping suites 2026-10-17):
+`tests/conformance/test_t1_surface.py` (56), `test_unknown_fields.py` (33), `test_authz.py` (263),
+`test_thehive_fixtures.py` (13, pinned golden fixtures from thehive4py 2.1.0), `test_webhook_hardening.py`
+(37), `test_t2_p1_surface.py` (19, the T2 P1 surface: identity, observable types, statuses, tags,
+describe), `test_t2_p2_surface.py` (12,
 collaboration), `test_t2_p3_attachments.py` (9, attachments), `test_t2_p4_surface.py` (10, bulk/merge/
 templates/taxonomy), `test_t2_p5_surface.py` (7, export/TTP), `test_playbook_authoring.py` (15,
 Amalthea playbook extension), `test_wire_boundary.py` (3, the one-way literal boundary),
-`test_observable_bulk_guard.py` (4, §6.5 blast radius on `_bulk`). TheHive shape decisions:
+`test_observable_bulk_guard.py` (4, §6.5 blast radius on `_bulk`), `test_mapping_engine.py` (184, the
+v2 mapping engine), `test_mapping_editor.py` (66, the Settings mapping editor), `test_mapping_remap.py`
+(32, re-applying a mapping to existing alerts), `test_settings_source_mapping.py` (53, the source page:
+org gate, editor, apply). TheHive shape decisions:
 `docs/decisions/ADR-002`. Deviations: [`deviations.md`](./deviations.md). Independent verification:
 [`../planning/VERIFY-2026-10-10-t2-and-phase12.md`](../planning/VERIFY-2026-10-10-t2-and-phase12.md).
