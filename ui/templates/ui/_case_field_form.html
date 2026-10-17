@@ -1,0 +1,17 @@
+{% comment %}
+Body of a `case-field-<slug>` dialog (PLAN-2026-10-17 §12.8(1)): one <select> over the field's
+vocabulary with the case's current value preselected. The controls sit in the modal body but
+target the footer form through the HTML `form` attribute (see ui/_modal.html), so the no-JS
+fallback is still a single plain POST. Context comes from the including `_modal.html`, whose
+caller passes `edit_field` / `edit_label` / `edit_choices` / `edit_value`.
+{% endcomment %}
+<input type="hidden" name="field" value="{{ edit_field }}" form="{{ form_id }}">
+<input type="hidden" name="tab" value="general" form="{{ form_id }}">
+<div class="field">
+  <label for="{{ modal_id }}-value">{{ edit_label }}</label>
+  <select id="{{ modal_id }}-value" name="value" form="{{ form_id }}">
+    {% for val, label in edit_choices %}
+    <option value="{{ val }}" {% if val == edit_value %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</div>

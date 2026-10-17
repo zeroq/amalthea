@@ -22,6 +22,8 @@ urlpatterns = [
     path("cases/new", views.case_create, name="ui-case-create"),
     path("cases/<str:case_id>", views.case_detail, name="ui-case-detail"),
     path("cases/<str:case_id>/status", views.case_set_status, name="ui-case-status"),
+    path("cases/<str:case_id>/close", views.case_close, name="ui-case-close"),
+    path("cases/<str:case_id>/field", views.case_field_edit, name="ui-case-field-edit"),
     path("cases/<str:case_id>/comment", views.case_comment, name="ui-case-comment"),
     path("cases/<str:case_id>/extract", views.case_extract_observables, name="ui-case-extract"),
     path("cases/<str:case_id>/task", views.case_task_create, name="ui-case-task-create"),
@@ -40,6 +42,8 @@ urlpatterns = [
     # Case sub-resources (P2-P5 UI)
     path("cases/<str:case_id>/export", views.case_export, name="ui-case-export"),
     path("cases/<str:case_id>/tags", views.case_tags, name="ui-case-tags"),
+    path("cases/<str:case_id>/tags/add", views.case_tag_add, name="ui-case-tag-add"),
+    path("cases/<str:case_id>/tags/remove", views.case_tag_remove, name="ui-case-tag-remove"),
     path(
         "cases/<str:case_id>/tags/<uuid:tag_id>/toggle",
         views.case_tag_toggle,

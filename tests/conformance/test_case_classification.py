@@ -428,9 +428,11 @@ class TestDataClassificationAdminGate:
         assert event.metadata["from"] == "unset"
         assert event.metadata["to"] == "personal_data"
 
-        # AuditLog
+        # AuditLog — target_type is "Case" (the model's human name; the case Audit tab
+        # filters on it). Plan-2026-10-17 D4b: the writer used to emit lowercase "case",
+        # so nothing it wrote was ever visible on the case it described.
         audit = AuditLog.objects.filter(
-            target_type="case", target_id=str(case_id), action="case.data_classification"
+            target_type="Case", target_id=str(case_id), action="case.data_classification"
         )
         assert audit.count() == 1
         assert audit.first().actor_id == admin_user.id

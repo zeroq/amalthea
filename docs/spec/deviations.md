@@ -557,6 +557,55 @@ Evidence: `test_mapping_remap.py` (25 cases, +11), `test_settings_source_mapping
 `test_ui_loop.py`, `test_ui_markdown.py`.
 
 
+## V-1 — verdict tokens are snake_case, not the literal §12.8 spelling (2026-10-17)
+
+TODO.md §12.8(3) spells the case verdict as "Undefined / True Positive / False Positive". Those
+strings are the **labels**. The stored tokens are `undefined` / `true_positive` / `false_positive`
+(`core/enums.py::CASE_VERDICT_CHOICES`), for two reasons that both predate this change:
+
+* The classification vocabularies this field sits beside (`scope`, `case_type`,
+  `data_classification`, `phase`) already store a snake_case token and carry a human label — a
+  fresh case says `unset`, never `"Unset/Unknown"` (`docs/planning/PLAN-2026-10-14-case-classification-fields.md`,
+  Q-D3/Q-D8). A verdict that stored its label would be the only classification field doing so.
+* A stored token is stable against label rewording, so `true_positive` in the database, in a query
+  filter, and in an audit row keeps meaning the same thing if the display string ever changes.
+
+The rule is exercised by `tests/conformance/test_case_verdict_close.py` and the DB constraint
+`case_verdict_valid` / `alert_verdict_valid` (both asserted in `test_enum_contracts.py`).
+
+## V-2 — closing a case closes its linked alerts and copies the verdict (2026-10-17)
+
+TODO.md §12.8(5) requires close-propagation; §12.8's ER diagram (AGENTS.md §3) gives `Alert` a
+`status` and no verdict. Carrying the case's verdict onto each linked alert therefore adds a field
+the original schema sketch did not list. It is recorded here because it widens `alert_json` and the
+query DSL's alert field whitelist. `alerts/models.py::Alert.verdict` ·
+`cases/update.py::propagate_close_to_alerts`.
+
+A new `Closed` `AlertStatus` is seeded (`alerts/0016_seed_closed_alert_status`) rather than reusing
+the pre-existing `Dismissed` (also `stage="Closed"`): `Dismissed` means "reviewed and rejected",
+while closure means "resolved because the case closed". Overloading one row for both would make the
+triage queue misreport why an alert stopped being actionable.
+
+## V-3 — the UI status write emits `status-changed`, not `status-change` (2026-10-17)
+
+Plan §9.3 expected the General-tab status control to keep the timeline/WebSocket kind
+`status-change`. Extending the shared applier (`cases/update.py::apply_case_update` — the same
+surface collapse as **W616P2-2**) to carry status writes makes the kind the applier's own
+`status-changed`, because `append_timeline_event` uses one string for both the stored `kind` and
+the published `event_type` (`cases/ledger.py`). Publishing the old spelling from the UI would
+need a second, applier-external ledger write — exactly the drift the shared applier exists to
+remove.
+
+Consequences, all cosmetic and all handled:
+
+* The API timeline already mapped **both** spellings to the wire value `"custom"`
+  (`cases/views.py`), so the wire did not change.
+* The timeline row class is `tl-<kind|slugify>` (`ui/templates/ui/_timeline_entry.html`) and the
+  amber status dot was keyed on `.tl-status-change`. `app.css` now styles `.tl-status-changed:before`
+  as well, so rows written before and after 2026-10-17 keep the colour.
+* The two UI conformance tests that asserted the old kind (`test_ui_loop.py`, `test_realtime.py`)
+  now assert `status-changed`; `test_ui_case_verdict.py` covers the new close/verdict flow.
+
 ## Evidence index
 
 - `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §13 — full P7/P8/P10/P11 records

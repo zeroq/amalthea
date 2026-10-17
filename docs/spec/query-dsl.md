@@ -92,8 +92,14 @@ Wire name → ORM path:
 | `caseType` | `case_type` | string enum | Values: `unset`, `malware`, `phishing`, `password_leak`, `ransomware`, `bec` |
 | `dataClassification` | `data_classification` | string enum | Values: `unset`, `no_data`, `public_data`, `personal_data`, `sensitive_data` |
 | `phase` | `phase` | string enum | Values: `unset`, `initial_triage`, `containment`, `analysis`, `remediation`, `cleanup`, `close` |
+| `verdict` | `verdict` | string enum | Values: `undefined`, `true_positive`, `false_positive` (PLAN-2026-10-17 §12.8) |
 
-All four support `_eq`, `_ne`, `_in`, `_like`, `_gt`, `_gte`, `_lt`, `_lte`, `_between` and can be used in `sort` steps.
+All five support `_eq`, `_ne`, `_in`, `_like`, `_gt`, `_gte`, `_lt`, `_lte`, `_between` and can be used in `sort` steps.
+
+### Alert fields (filterable + sortable)
+
+`verdict` is also available on the `alert` branch (ORM path `verdict`, same three values) — set by
+close-propagation when a case closes (deviation **V-2**).
 
 ## Deterministic paging & sorting
 

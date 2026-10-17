@@ -90,6 +90,9 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 - `value` — **unique** · `stage` — choices `ALERT_STAGE_CHOICES` (`New/InProgress/Closed/Imported`).
 - `order`, `description`, `hidden`. Constraint: `alert_status_stage_valid`.
 - (Deviations M12 / plan §13: statuses are **DB rows**, not free enums; `Imported` stage exists.)
+  Seeded rows: `New`(1), `Triaged`(InProgress,2), `Dismissed`(Closed,3), `Imported`(4), and
+  `Closed`(Closed,5) added 2026-10-17 (§12.8(5), deviation **V-2**) — case close-propagation
+  targets the dedicated `Closed` row, not `Dismissed`.
 
 ### Alert (`alert`, extends `UUIDModel` + `TimeStampedModel`)
 - `type`(100) · `source`(100) — **untrusted wire string** · `source_ref`(255) · `external_link`(500)
@@ -103,6 +106,9 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 - `correlation_key` — CharField(256), blank.
 - `ingestion_source` — FK → `IngestionSource`, `SET_NULL` — **independent of `source`** (M3).
 - `case` — FK → `cases.Case`, `SET_NULL`, `related_name="alerts"`.
+- `verdict` — CharField(32), choices `CASE_VERDICT_CHOICES` (`undefined`, `true_positive`,
+  `false_positive`), default `undefined`, constraint `alert_verdict_valid`. Set by close-propagation
+  when the alert's case closes (§12.8(5), deviation **V-2**); `undefined` means "not yet decided".
 - `follow` · `ingestion_warnings` — JSONB · `owner_org` — FK → `Organisation`, **`NOT NULL`**,
   `on_delete=PROTECT` (ADR-004; mandatory per-org row).
 - `ingestion_warnings` carries two *differently treated* keys (MAP-2b): `"mapping"` is the structured
@@ -121,7 +127,7 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
   ("correlation_key","date")`, `alert_created_at_idx ("-created_at")`.
 - Constraints: `uniq_alert_source_type_ref (owner_org,source,type,source_ref)` — per-org dedupe
   (was `(source,type,source_ref)` until 2026-10-10), `alert_severity_range`, `alert_tlp_range`,
-  `alert_pap_range`.
+  `alert_pap_range`, `alert_verdict_valid`.
 
 ### AlertCustomFieldValue (`alert_custom_field_value`)
 - `alert` (FK) · `custom_field` → `cases.CustomField` (the FK keeps its implicit index — REVIEW H-5).
@@ -169,15 +175,24 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
   - `phase` — CharField(32), choices `CASE_PHASE_CHOICES` (`unset`, `initial_triage`,
     `containment`, `analysis`, `remediation`, `cleanup`, `close`), default `initial_triage`.
     Constraint `case_phase_valid`.
+  - `verdict` — CharField(32), choices `CASE_VERDICT_CHOICES` (`undefined`, `true_positive`,
+    `false_positive`), default `undefined`. Constraint `case_verdict_valid`. Answers "was this a
+    real incident?"; a case **cannot enter stage `Closed`** while it is `undefined` and the close
+    carries no comment — the rule lives in `cases/update.py::enforce_close_rule` (§12.8(4),
+    deviation **V-1** for the token spelling, **V-2** for close-propagation).
 - `start_date` (default now, NOT NULL) · `end_date` · `closed_date` · `owner_org` — FK →
   `Organisation`, **`NOT NULL`**, `on_delete=PROTECT` (ADR-004) · `ingestion_warnings` — JSONB.
 - Manager: `AllocatingQuerySet.as_manager()` (number allocation covers `save` **and** `bulk_create`).
 - `Case.save()`: allocates `number` on first insert (`ALLOCATED_MARKER`), then
-  `stamp_closed_date()` sets `closed_date` **once**, on entry to stage `Closed`.
+  `stamp_closed_date()` sets `closed_date` **once**, on entry to stage `Closed`. The value is only
+  persisted by callers that include `closed_date` in `update_fields`; `apply_case_update` does so on
+  close (and clears it on reopen) — before 2026-10-17 a close through the API/edit modal left it
+  NULL (defect fixed with PLAN-2026-10-17, §12.8 decision D4a).
 - Indexes: `case_status_start_idx ("status","-start_date")`, `case_severity_idx ("-severity")`,
   `case_created_at_idx ("-created_at")`.
 - Constraints: `case_severity_range`, `case_tlp_range`, `case_pap_range`,
-  `case_scope_valid`, `case_type_valid`, `case_data_classification_valid`, `case_phase_valid`.
+  `case_scope_valid`, `case_type_valid`, `case_data_classification_valid`, `case_phase_valid`,
+  `case_verdict_valid`.
 
 **`Case.status.stage` vs `Case.phase` (Q-D2 / R1 mitigation):** `CaseStatus.stage` is the stable
 3-bucket *openness* axis (`New`, `InProgress`, `Closed`) that automation triggers and `CASE_STAGES`

@@ -359,7 +359,7 @@ class TestBulkClassification:
         assert TimelineEvent.objects.filter(case=case, kind="classification-changed").count() == 1
         assert (
             AuditLog.objects.filter(
-                target_type="case", target_id=str(case.id), action="case.data_classification"
+                target_type="Case", target_id=str(case.id), action="case.data_classification"
             ).count()
             == 1
         )
@@ -598,6 +598,23 @@ def _previous_cases_migration() -> str:
     return "0016_task_note"
 
 
+def _cases_head() -> str:
+    """The current leaf migration of the `cases` app.
+
+    Derived from the migration graph rather than hardcoded: a test that pins the head by name
+    goes stale the moment another `cases` migration lands (Plan-2026-10-17 added `0018`), and
+    then queries the *current* model against a down-levelled schema — which fails on any column
+    the newer migration added, not on the behaviour under test.
+    """
+    from django.db.migrations.loader import MigrationLoader
+
+    leaves = [
+        name for app, name in MigrationLoader(connection).graph.leaf_nodes() if app == "cases"
+    ]
+    assert len(leaves) == 1, f"cases app must have exactly one leaf migration, got {leaves}"
+    return leaves[0]
+
+
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
 def test_migration_backfills_a_preexisting_case_with_defaults() -> None:
     """A row created before 0017 must come out `unset`/`unset`/`unset`/`initial_triage`, not NULL.
@@ -614,6 +631,7 @@ def test_migration_backfills_a_preexisting_case_with_defaults() -> None:
         value="New", defaults={"stage": "New", "order": 1}
     )
 
+    head = _cases_head()
     executor = MigrationExecutor(connection)
     target = [("cases", _previous_cases_migration())]
     executor.migrate(target)
@@ -622,7 +640,9 @@ def test_migration_backfills_a_preexisting_case_with_defaults() -> None:
     old = OldCase.objects.create(title="Legacy", status_id=status_row.id, owner_org_id=org.id)
 
     try:
-        MigrationExecutor(connection).migrate([("cases", "0017_case_classification")])
+        # Forward to the real head: 0017 runs (and with it the backfill under test), and the
+        # schema ends level with the model so the query below can select every current column.
+        MigrationExecutor(connection).migrate([("cases", head)])
         row = Case.objects.get(id=old.id)
         assert row.scope == "unset"
         assert row.case_type == "unset"
@@ -630,4 +650,4 @@ def test_migration_backfills_a_preexisting_case_with_defaults() -> None:
         assert row.phase == "initial_triage"
     finally:
         # Leave the schema at the head for every later test, even on assertion failure.
-        MigrationExecutor(connection).migrate([("cases", "0017_case_classification")])
+        MigrationExecutor(connection).migrate([("cases", head)])

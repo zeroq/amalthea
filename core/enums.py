@@ -187,6 +187,26 @@ CASE_PHASE_CHOICES: Final[tuple[tuple[str, str], ...]] = (
     ("close", "Close"),
 )
 
+# Plan-2026-10-17 case verdict (§12.8(3), decision D3). The verdict answers "was this a real
+# incident?" and is what a case must record *before* it may close.
+#
+# Tokens are snake_case, not the literal §12.8 spelling: house style stores `unset` for the
+# classification vocabularies, and a stored token is stable against label rewording. The
+# §12.8 strings ("Undefined"/"True Positive") are the **labels**, not the tokens. Recorded as
+# deviation V-1 in docs/spec/deviations.md.
+#
+# `undefined` is the default and means "not yet decided" — it is deliberately *not* a valid
+# closing verdict, so a closed case always carries a real answer.
+CASE_VERDICT_CHOICES: Final[tuple[tuple[str, str], ...]] = (
+    ("undefined", "Undefined"),
+    ("true_positive", "True Positive"),
+    ("false_positive", "False Positive"),
+)
+CASE_VERDICT_VALUES: Final[tuple[str, ...]] = tuple(v for v, _ in CASE_VERDICT_CHOICES)
+#: The verdicts a case must already hold before it may enter the Closed stage (decision D1).
+#: `undefined` is excluded by construction: a closed case always has a real answer.
+CASE_CLOSING_VERDICTS: Final[tuple[str, ...]] = ("true_positive", "false_positive")
+
 
 # --- Constraint builders ------------------------------------------------------
 

@@ -115,6 +115,7 @@ def _case_fields() -> dict[str, _FieldSpec]:
         "caseType": _FieldSpec("case_type"),
         "dataClassification": _FieldSpec("data_classification"),
         "phase": _FieldSpec("phase"),
+        "verdict": _FieldSpec("verdict"),
     }
 
 
@@ -141,6 +142,7 @@ def _alert_fields() -> dict[str, _FieldSpec]:
         "assignee": _FieldSpec("assignee__login"),
         "caseId": _FieldSpec("case_id"),
         "correlationKey": _FieldSpec("correlation_key"),
+        "verdict": _FieldSpec("verdict"),
         "ingestionSource": _FieldSpec("ingestion_source_id"),
         "ingestionWarnings": _FieldSpec("ingestion_warnings"),
         "createdAt": _FieldSpec("created_at", is_datetime=True),

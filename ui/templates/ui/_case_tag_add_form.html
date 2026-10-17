@@ -1,0 +1,24 @@
+{% comment %}
+Body of the `case-tag-add` dialog (PLAN-2026-10-17 §12.8(5b)): a checkbox list of tags not yet on
+the case (`available_tags`) plus a create-on-assign text input for brand-new tags. Both merge into
+one `addTags` payload server-side, so a typed tag is attached in the same write as a checked one.
+Controls target the footer form by id.
+{% endcomment %}
+<input type="hidden" name="tab" value="general" form="{{ form_id }}">
+{% if available_tags %}
+<fieldset class="field">
+  <legend>Existing tags</legend>
+  <div class="chips chips-scroll">
+    {% for tag in available_tags %}
+    <label class="chip">
+      <input type="checkbox" name="tags" value="{{ tag.name }}" form="{{ form_id }}"> {{ tag.name }}
+    </label>
+    {% endfor %}
+  </div>
+</fieldset>
+{% endif %}
+<div class="field">
+  <label for="case-tag-add-new">New tags (comma separated)</label>
+  <input id="case-tag-add-new" type="text" name="new_tags" form="{{ form_id }}"
+         placeholder="phishing, urgent">
+</div>

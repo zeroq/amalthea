@@ -38,6 +38,7 @@ from cases.update import (
     CaseUpdateError,
     _apply_case_tags,
     _set_case_fields,
+    enforce_close_rule,
 )
 from identity.models import Organisation, User
 from observables.extractor import extract_into_case
@@ -138,9 +139,20 @@ def create_case(
     # The update surface's applier, not a second copy of it (deviation W616P2-3): severity/TLP/PAP
     # bounds, the tolerant `status` read and the org-scoped `assignee` resolution behave here
     # exactly as they do on a PATCH of the same fields.
+    # A create that lands directly in Closed must carry a verdict and a closing comment too
+    # (Plan-2026-10-17 §12.8(4), decision D1) — otherwise "POST a case already closed" would
+    # sidestep the rule a PATCH obeys.
+    previous_stage = case.status.stage
     _set_case_fields(case, scalars, warnings=warnings, actor=actor)
+    # The rule reads `verdict` (present in both shapes) and `comment` (a create-payload key
+    # `_create_scalars` deliberately does not copy), so it is handed the wire payload.
+    enforce_close_rule(case, payload, previous_stage=previous_stage)
     if warnings:
         case.ingestion_warnings = {"warnings": warnings}
+    # A create that lands directly in Closed gets the same closed_date/end_date pair the update
+    # surface stamps (Case.save() stamps closed_date itself; end_date is set here for parity).
+    if case.status.stage == "Closed" and case.end_date is None:
+        case.end_date = case.closed_date or timezone.now()
     # Saved before the tag links: a `CaseTagLink` needs a pk (the same ordering
     # `apply_case_update` gets for free from the case it is handed).
     case.save()

@@ -13,11 +13,36 @@
       </dl>
       <dl class="meta meta-col" role="listitem">
         <dt>Severity</dt>
-        <dd><span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span></dd>
-        <dt>Scope</dt><dd>{{ case.scope|choice_label:scope_choices }}</dd>
-        <dt>Type</dt><dd>{{ case.case_type|choice_label:case_type_choices }}</dd>
-        <dt>Classification</dt><dd>{{ case.data_classification|choice_label:data_classification_choices }}</dd>
-        <dt>Phase</dt><dd>{{ case.phase|choice_label:phase_choices }}</dd>
+        <dd>
+          <span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span>
+          {% if can_mutate %}<button type="button" class="meta-edit" data-modal-open="case-field-severity" aria-label="Edit severity"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}
+        </dd>
+        <dt>Scope</dt>
+        <dd>
+          {{ case.scope|choice_label:scope_choices }}
+          {% if can_mutate %}<button type="button" class="meta-edit" data-modal-open="case-field-scope" aria-label="Edit scope"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}
+        </dd>
+        <dt>Type</dt>
+        <dd>
+          {{ case.case_type|choice_label:case_type_choices }}
+          {% if can_mutate %}<button type="button" class="meta-edit" data-modal-open="case-field-case_type" aria-label="Edit type"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}
+        </dd>
+        <dt>Classification</dt>
+        <dd>
+          {{ case.data_classification|choice_label:data_classification_choices }}
+          {# Classification is admin-gated in the applier, so the icon is hidden from non-admins. #}
+          {% if can_classify %}<button type="button" class="meta-edit" data-modal-open="case-field-data_classification" aria-label="Edit classification"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}
+        </dd>
+        <dt>Phase</dt>
+        <dd>
+          {{ case.phase|choice_label:phase_choices }}
+          {% if can_mutate %}<button type="button" class="meta-edit" data-modal-open="case-field-phase" aria-label="Edit phase"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}
+        </dd>
+        <dt>Verdict</dt>
+        <dd>
+          {{ case.verdict|choice_label:verdict_choices }}
+          {% if can_mutate %}<button type="button" class="meta-edit" data-modal-open="case-field-verdict" aria-label="Edit verdict"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}
+        </dd>
       </dl>
     </div>
 
@@ -27,10 +52,18 @@
         <input type="hidden" name="tab" value="general">
         <label class="sr-only" for="f-stage">Case status</label>
         <select id="f-stage" name="stage">
-          {% for stage in case_stages %}<option value="{{ stage }}" {% if case.status.stage == stage %}selected{% endif %}>{{ stage }}</option>{% endfor %}
+          {% for stage in case_stages %}{% if stage != "Closed" %}<option value="{{ stage }}" {% if case.status.stage == stage %}selected{% endif %}>{{ stage }}</option>{% endif %}{% endfor %}
         </select>
         <button type="submit" class="btn">Set status</button>
       </form>
+
+      {% comment %}
+        `Closed` is not reachable from the plain status control: entering Closed requires a verdict
+        and a closing comment (PLAN-2026-10-17 §12.8(4)), which the dedicated dialog collects.
+      {% endcomment %}
+      {% if case.status.stage != "Closed" %}
+      <button type="button" class="btn btn-err" data-modal-open="case-close-modal">Close case</button>
+      {% endif %}
 
       <form method="post" action="{% url 'ui-case-extract' case.number %}">{% csrf_token %}
         <input type="hidden" name="tab" value="general">
@@ -39,6 +72,35 @@
         </button>
       </form>
     </div>
+    {% endif %}
+  </div>
+
+  {% comment %}
+    Tags live above the description so the correlation surface is visible before the narrative
+    (PLAN-2026-10-17 §12.8(2)). The row always renders; with no tags it shows an empty-state hint.
+  {% endcomment %}
+  <div class="case-tags">
+    <span class="case-tags-label">Tags</span>
+    <ul class="tag-list">
+      {% for tag in case.tags.all %}
+      <li class="pill">
+        {{ tag.name }}
+        {% if can_mutate %}
+        <form method="post" action="{% url 'ui-case-tag-remove' case.number %}" class="inline-form">{% csrf_token %}
+          <input type="hidden" name="tag" value="{{ tag.name }}">
+          <input type="hidden" name="tab" value="general">
+          <button type="submit" class="chip-x" aria-label="Remove tag {{ tag.name }}">✕</button>
+        </form>
+        {% endif %}
+      </li>
+      {% empty %}
+      <li class="empty">No tags yet.</li>
+      {% endfor %}
+    </ul>
+    {% if can_mutate %}
+    <button type="button" class="btn btn-sm" data-modal-open="case-tag-add-modal">
+      <i class="fa-solid fa-plus" aria-hidden="true"></i> Add tag
+    </button>
     {% endif %}
   </div>
 
@@ -56,8 +118,7 @@
 
 {% comment %}
   Pages — provisional placement per §7.4, but its *own* card since PLAN-2026-10-14: a page is a
-  document the analysts maintain, not part of the case narrative above, so it no longer renders as a
-  card nested inside the description's card. Same for Tags (below).
+  document the analysts maintain, not part of the case narrative above.
 {% endcomment %}
 <section class="card" aria-labelledby="h-pages">
   <div class="page-row">
@@ -86,14 +147,26 @@
   {% endif %}
 </section>
 
-{# Tags + Custom fields — provisional placement per §7.4 (custom fields have no current UI) #}
-{% if case.tags.all %}
-<section class="card" aria-labelledby="h-tags">
-  <h2 id="h-tags">Tags</h2>
-  <ul class="tag-list">
-    {% for tag in case.tags.all %}
-      <li><span class="pill">{{ tag.name }}</span></li>
-    {% endfor %}
-  </ul>
-</section>
+{% comment %}
+  General-tab dialogs (PLAN-2026-10-17 §12.8). Each is a real <form method="post">, so the no-JS
+  fallback is a plain POST; with modal.js the opener/closer attributes drive the same form. One
+  field-edit dialog is generated per entry in `inline_edit_fields`, keyed `case-field-<slug>` to
+  match its edit icon above.
+{% endcomment %}
+{% if can_mutate %}
+  {% for f in inline_edit_fields %}
+    {% if not f.admin_only or can_classify %}
+    {% include "ui/_modal.html" with modal_id="case-field-"|add:f.slug form_id="case-field-"|add:f.slug|add:"-form" body_template="ui/_case_field_form.html" edit_field=f.slug edit_label=f.label edit_choices=f.choices edit_value=f.value title="Edit "|add:f.label confirm_text="Save" form_action=case_field_edit_url size="sm" %}
+    {% endif %}
+  {% endfor %}
+
+  {% comment %}
+    The close dialog is only meaningful while the case is open; rendering it for a closed case
+    would offer a control whose endpoint is a no-op.
+  {% endcomment %}
+  {% if case.status.stage != "Closed" %}
+  {% include "ui/_modal.html" with modal_id="case-close-modal" form_id="case-close-form" body_template="ui/_case_close_form.html" title="Close case" confirm_text="Close case" confirm_class="btn-err" form_action=case_close_url size="md" %}
+  {% endif %}
+
+  {% include "ui/_modal.html" with modal_id="case-tag-add-modal" form_id="case-tag-add-form" body_template="ui/_case_tag_add_form.html" title="Add tags" confirm_text="Add tags" form_action=case_tag_add_url size="md" %}
 {% endif %}

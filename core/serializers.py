@@ -72,6 +72,7 @@ def alert_json(alert: Alert) -> dict[str, Any]:
         "assignee": _username(alert.assignee),
         "caseId": str(alert.case_id) if alert.case_id else None,
         "correlationKey": alert.correlation_key,
+        "verdict": alert.verdict,
         "ingestionSource": str(alert.ingestion_source_id) if alert.ingestion_source_id else None,
         "ingestionWarnings": alert.ingestion_warnings or {},
         "createdAt": _iso(alert.created_at),
@@ -290,6 +291,7 @@ def case_json(
         "caseType": case.case_type,
         "dataClassification": case.data_classification,
         "phase": case.phase,
+        "verdict": case.verdict,
     }
     if detail:
         payload["observables"] = [

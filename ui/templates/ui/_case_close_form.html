@@ -1,0 +1,20 @@
+{% comment %}
+Body of the `case-close` dialog (PLAN-2026-10-17 §12.8(4)). The verdict <select> offers only the
+closing verdicts (`CASE_CLOSING_VERDICTS`, passed as `closing_verdict_choices`); the comment is the
+closing note recorded on the ledger. Both are required by the server-side close rule — the dialog
+is a convenience, never the enforcement point. Controls target the footer form by id.
+{% endcomment %}
+<input type="hidden" name="tab" value="general" form="{{ form_id }}">
+<div class="field">
+  <label for="case-close-verdict">Verdict</label>
+  <select id="case-close-verdict" name="verdict" form="{{ form_id }}" required>
+    {% for val, label in closing_verdict_choices %}
+    <option value="{{ val }}" {% if case.verdict == val %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</div>
+<div class="field">
+  <label for="case-close-comment">Closing comment</label>
+  <textarea id="case-close-comment" name="comment" rows="4" form="{{ form_id }}" required
+            placeholder="Why this case is being closed (Markdown)"></textarea>
+</div>

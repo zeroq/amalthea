@@ -154,5 +154,22 @@
         </table>
       </div>
     </div>
+
+    <div class="card">
+      <h3>Verdict</h3>
+      <div class="table-wrap">
+        <table class="data-table">
+          <caption class="sr-only">Case verdict</caption>
+          <thead>
+            <tr><th scope="col">Code</th><th scope="col">Label</th></tr>
+          </thead>
+          <tbody>
+            {% for val, label in verdict_choices %}
+              <tr><td class="mono">{{ val }}</td><td>{{ label }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 {% endblock %}

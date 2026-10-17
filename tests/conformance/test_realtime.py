@@ -332,7 +332,9 @@ def test_status_changes_and_automation_results_are_published(
         with django_capture_on_commit_callbacks(execute=True):  # type: ignore[operator]
             response = browser.post(
                 reverse("ui-case-status", kwargs={"case_id": case.number}),
-                {"stage": "Closed"},
+                # A close now carries a verdict and a closing comment (PLAN-2026-10-17 §12.8);
+                # without them the applier refuses and no status-change event is published.
+                {"stage": "Closed", "verdict": "true_positive", "comment": "Confirmed."},
             )
         assert response.status_code == 302, response.content
 
@@ -350,8 +352,14 @@ def test_status_changes_and_automation_results_are_published(
 
         await sync_to_async(post_status)()
         status_message = await communicator.receive_json_from(timeout=5)
-        assert status_message["event_type"] == "status-change"
-        assert status_message["payload"]["event"]["metadata"]["stage"] == "Closed"
+        assert status_message["event_type"] == "status-changed"
+        assert status_message["payload"]["event"]["metadata"]["to"] == "Closed"
+
+        # A close carries a verdict, and the applier publishes that change too
+        # (PLAN-2026-10-17 §12.8) — one close, two ledger events.
+        verdict_message = await communicator.receive_json_from(timeout=5)
+        assert verdict_message["event_type"] == "verdict-changed"
+        assert verdict_message["payload"]["event"]["metadata"]["to"] == "true_positive"
 
         await sync_to_async(finish_run)()
         automation_message = await communicator.receive_json_from(timeout=5)

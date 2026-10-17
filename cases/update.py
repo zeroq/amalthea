@@ -17,9 +17,11 @@ from cases.ledger import append_timeline_event
 from cases.models import Case, CaseTagLink, Tag
 from cases.tagging import tag_names_from_payload
 from core.enums import (
+    CASE_CLOSING_VERDICTS,
     CASE_PHASE_CHOICES,
     CASE_SCOPE_CHOICES,
     CASE_TYPE_CHOICES,
+    CASE_VERDICT_VALUES,
     DATA_CLASSIFICATION_CHOICES,
     PAP_MAX,
     PAP_MIN,
@@ -44,6 +46,7 @@ CASE_SCALAR_FIELDS = (
     "case_type",
     "data_classification",
     "phase",
+    "verdict",
 )
 
 #: The three enum scalars carry a DB `CheckConstraint` (core/enums.py). Validating here means an
@@ -63,6 +66,7 @@ _CASE_ENUM_FIELDS: dict[str, tuple[str, ...]] = {
     "case_type": tuple(v for v, _ in CASE_TYPE_CHOICES),
     "data_classification": tuple(v for v, _ in DATA_CLASSIFICATION_CHOICES),
     "phase": tuple(v for v, _ in CASE_PHASE_CHOICES),
+    "verdict": CASE_VERDICT_VALUES,
 }
 
 
@@ -192,29 +196,146 @@ def _apply_case_tags(case: Case, payload: Mapping[str, Any]) -> None:
                 CaseTagLink.objects.filter(case=case, tag__name=name.strip()).delete()
 
 
+def enforce_close_rule(case: Case, payload: Mapping[str, Any], *, previous_stage: str) -> None:
+    """A case may not enter the Closed stage without a recorded verdict and a closing comment.
+
+    Plan-2026-10-17 §12.8(4), decision D1: the rule lives in the service layer so the UI,
+    the single PATCH, the bulk PATCH and create-to-Closed are all blocked identically.
+    Called from `apply_case_update` (the choke point) and `case_bulk_update`, which does
+    not use the applier.
+
+    `previous_stage` is the case's stage *before* the payload was applied. Re-closing an
+    already-closed case is a no-op for this rule (there is nothing left to decide); leaving
+    Closed is always allowed.
+    """
+    new_stage = case.status.stage if case.status_id else ""
+    if previous_stage == "Closed" or new_stage != "Closed":
+        return
+
+    verdict = payload.get("verdict", case.verdict)
+    if verdict not in CASE_CLOSING_VERDICTS:
+        allowed = ", ".join(CASE_CLOSING_VERDICTS)
+        message = f"Closing a case requires a verdict ({allowed})."
+        raise CaseUpdateError("ValidationError", message, {"verdict": [message]})
+
+    comment = str(payload.get("comment") or "").strip()
+    if not comment:
+        message = "Closing a case requires a closing comment."
+        raise CaseUpdateError("ValidationError", message, {"comment": [message]})
+
+
+def resolve_closed_alert_status() -> Any:
+    """The `AlertStatus` that means "closed" (Plan-2026-10-17 §12.8(5), decision D2).
+
+    Prefers the `Closed` status seeded by `alerts/0016_seed_closed_alert_status`; falls back
+    to the lowest-`order` status with `stage="Closed"` (which is `Dismissed` on a database
+    seeded before that migration); auto-creates one as a last resort so a fresh database can
+    never strand a close behind a missing row.
+    """
+    from alerts.models import AlertStatus
+
+    closed_stage = AlertStatus.objects.filter(stage="Closed")
+    preferred = closed_stage.filter(value="Closed").first()
+    if preferred is not None:
+        return preferred
+    fallback = closed_stage.order_by("order", "value").first()
+    if fallback is not None:
+        return fallback
+    status, _created = AlertStatus.objects.get_or_create(
+        value="Closed",
+        defaults={"stage": "Closed", "order": 5, "description": ""},
+    )
+    return status
+
+
+def propagate_close_to_alerts(case: Case, verdict: str, *, actor: Any) -> int:
+    """Close every alert linked to `case` and carry the case's verdict onto each.
+
+    Plan-2026-10-17 §12.8(5). An analyst who closes a case must never see a still-open
+    linked alert in the next render, so this runs synchronously inside the caller's
+    transaction rather than on Celery.
+
+    Uses `QuerySet.update()` — no per-row signals — matching the `merge` helper's recorded
+    convention. The ledger carries one case-level summary event rather than one row per
+    alert, so closing a case with fifty linked alerts does not bury its closing comment.
+    Returns the number of alerts closed.
+    """
+    from alerts.models import Alert
+    from identity.models import AuditLog
+
+    alert_ids = list(Alert.objects.filter(case=case).values_list("id", flat=True))
+    if not alert_ids:
+        return 0
+
+    closed_status = resolve_closed_alert_status()
+    Alert.objects.filter(id__in=alert_ids).update(status=closed_status, verdict=verdict)
+
+    append_timeline_event(
+        case,
+        title=f"Closed {len(alert_ids)} linked alert(s)",
+        kind="alerts-closed",
+        actor=actor,
+        metadata={"count": len(alert_ids), "verdict": verdict},
+    )
+    AuditLog.objects.create(
+        actor=actor,
+        actor_org=getattr(actor, "org", None) if actor else None,
+        target_org=case.owner_org,
+        action="case.alerts_closed",
+        target_type="Case",
+        target_id=str(case.id),
+        ip=None,
+        details={"count": len(alert_ids), "verdict": verdict},
+    )
+    return len(alert_ids)
+
+
 @transaction.atomic
 def apply_case_update(case: Case, payload: Mapping[str, Any], *, actor: Any) -> list[str]:
     """Apply a case update from a plain mapping (API `request.data` or a UI POST dict).
 
     The single source of truth for the updatable field set, tag handling, the timeline events
-    (`status-changed`, `assigned`/`Unassigned`, `classification-changed`) and the "no updatable field" error.
+    (`status-changed`, `assigned`/`Unassigned`, `classification-changed`, `verdict-changed`,
+    `severity-changed`, `tags-changed`) and the "no updatable field" error.
     """
     previous_status = case.status.value if case.status_id else None
+    previous_stage = case.status.stage if case.status_id else ""
     # Captured before the field loop mutates `case`, so the assignment event below can tell an
     # assignee that actually changed from an update that merely restated the same one.
     previous_assignee_id = case.assignee_id
 
-    # Capture previous classification values for change detection (Q-D5 audit + timeline)
-    classification_fields = ("scope", "case_type", "data_classification", "phase")
-    previous_classification = {f: getattr(case, f) for f in classification_fields}
+    # Capture previous classification/verdict/severity values for change detection
+    # (Q-D5 audit + timeline, extended by Plan-2026-10-17 §12.8).
+    tracked_fields = ("scope", "case_type", "data_classification", "phase", "severity", "verdict")
+    previous_values = {f: getattr(case, f) for f in tracked_fields}
 
     fields = _set_case_fields(case, payload, actor=actor)
+    # Enforce the close rule after the payload is applied (so `case.status` is the new stage)
+    # but before anything is written, so a rejected close touches nothing at all.
+    enforce_close_rule(case, payload, previous_stage=previous_stage)
     tags_touched = any(key in payload for key in ("tags", "addTags", "removeTags"))
     if tags_touched:
         _apply_case_tags(case, payload)
 
     if not fields and not tags_touched:
         raise CaseUpdateError("BadRequest", "No updatable field supplied", {})
+
+    closing = previous_stage != "Closed" and case.status.stage == "Closed"
+    reopening = previous_stage == "Closed" and case.status.stage != "Closed"
+    if closing:
+        # `stamp_closed_date()` only ever *sets* closed_date; it never persists it, because
+        # the save below is `update_fields`-scoped and closed_date is not in `fields`
+        # (Plan-2026-10-17 defect D4a — API/edir-modal closes left closed_date NULL).
+        case.stamp_closed_date()
+        if case.end_date is None:
+            case.end_date = case.closed_date
+    elif reopening:
+        # `stamp_closed_date()` never clears it either, so a reopened case kept a stale
+        # closed_date and the open-list filters (`closed_date IS NULL`) hid it.
+        case.closed_date = None
+    if closing or reopening:
+        fields = [f for f in fields if f not in ("closed_date", "end_date")]
+        fields += ["closed_date", "end_date"]
 
     if fields:
         case.save(update_fields=[*fields, "updated_at"])
@@ -240,20 +361,47 @@ def apply_case_update(case: Case, payload: Mapping[str, Any], *, actor: Any) -> 
             metadata={"assignee": login},
         )
 
-    # Classification changes → timeline + audit log (only when value actually changes)
-    _emit_classification_changes(case, previous_classification, actor=actor)
+    # Classification/verdict/severity changes → timeline + audit log (only when value changes)
+    _emit_tracked_changes(case, previous_values, actor=actor)
+
+    if tags_touched:
+        append_timeline_event(
+            case,
+            title="Tags updated",
+            kind="tags-changed",
+            actor=actor,
+            metadata={"tags": list(case.tags.values_list("name", flat=True))},
+        )
+
+    if closing:
+        propagate_close_to_alerts(case, case.verdict, actor=actor)
 
     return fields
 
 
-def _capture_classification_values(case: Case) -> dict[str, str]:
+def _capture_classification_values(case: Case) -> dict[str, Any]:
     """Capture the current classification field values for later change detection."""
-    classification_fields = ("scope", "case_type", "data_classification", "phase")
-    return {f: getattr(case, f) for f in classification_fields}
+    return {
+        f: getattr(case, f)
+        for f in ("scope", "case_type", "data_classification", "phase", "severity", "verdict")
+    }
 
 
-def _emit_classification_changes(case: Case, previous: dict[str, str], *, actor: Any) -> None:
-    """Emit TimelineEvent and AuditLog for any classification fields that changed.
+#: Timeline kinds and audit action prefixes for the tracked scalar/enum fields. `severity` and
+#: `verdict` were added by Plan-2026-10-17 §12.8(1)/(3); the four classification fields are the
+#: pre-existing Q-D5 set.
+_TRACKED_FIELD_KINDS: dict[str, tuple[str, str]] = {
+    "scope": ("classification-changed", "case.scope"),
+    "case_type": ("classification-changed", "case.case_type"),
+    "data_classification": ("classification-changed", "case.data_classification"),
+    "phase": ("classification-changed", "case.phase"),
+    "severity": ("severity-changed", "case.severity"),
+    "verdict": ("verdict-changed", "case.verdict"),
+}
+
+
+def _emit_tracked_changes(case: Case, previous: dict[str, Any], *, actor: Any) -> None:
+    """Emit TimelineEvent and AuditLog for any tracked field that changed.
 
     Called after `case.save()` so `case` has the new values. `previous` is a dict
     mapping field name -> old value, as returned by `_capture_classification_values()`.
@@ -262,20 +410,33 @@ def _emit_classification_changes(case: Case, previous: dict[str, str], *, actor:
 
     for field_name, old_value in previous.items():
         new_value = getattr(case, field_name)
-        if new_value != old_value:
-            append_timeline_event(
-                case,
-                title=f"Classification changed: {field_name}",
-                kind="classification-changed",
-                actor=actor,
-                metadata={"field": field_name, "from": old_value, "to": new_value},
-            )
-            AuditLog.objects.create(
-                actor=actor,
-                actor_org=getattr(actor, "org", None) if actor else None,
-                target_org=case.owner_org,
-                action=f"case.{field_name}",
-                target_type="case",
-                target_id=str(case.id),
-                ip=None,
-            )
+        if new_value == old_value:
+            continue
+        kind, action = _TRACKED_FIELD_KINDS[field_name]
+        title = (
+            f"Verdict set: {old_value} → {new_value}"
+            if field_name == "verdict"
+            else f"Classification changed: {field_name}"
+            if field_name in ("scope", "case_type", "data_classification", "phase")
+            else f"{field_name.capitalize()} changed: {old_value} → {new_value}"
+        )
+        append_timeline_event(
+            case,
+            title=title,
+            kind=kind,
+            actor=actor,
+            metadata={"field": field_name, "from": old_value, "to": new_value},
+        )
+        # `target_type` is "Case" (the model's human name, matching the case Audit tab's
+        # `target_type="Case"` filter). It used to be written lowercase "case", so no
+        # classification audit row was ever visible on the case it described (defect D4b).
+        AuditLog.objects.create(
+            actor=actor,
+            actor_org=getattr(actor, "org", None) if actor else None,
+            target_org=case.owner_org,
+            action=action,
+            target_type="Case",
+            target_id=str(case.id),
+            ip=None,
+            details={"field": field_name, "from": old_value, "to": new_value},
+        )

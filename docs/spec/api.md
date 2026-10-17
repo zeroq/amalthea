@@ -189,7 +189,10 @@ ADR-008: the path names no source. The credential is the only routing fact — i
   `caseType` (enum: `unset`, `malware`, `phishing`, `password_leak`, `ransomware`, `bec`),
   `dataClassification` (enum: `unset`, `no_data`, `public_data`, `personal_data`, `sensitive_data` —
   **admin/superAdmin write only**),
-  `phase` (enum: `unset`, `initial_triage`, `containment`, `analysis`, `remediation`, `cleanup`, `close`).
+  `phase` (enum: `unset`, `initial_triage`, `containment`, `analysis`, `remediation`, `cleanup`, `close`),
+  `verdict` (enum: `undefined`, `true_positive`, `false_positive`; **required non-`undefined`** when
+  `status` names a `Closed`-stage status — see `case_detail` below), `comment` (closing note, **required
+  non-blank** on such a create).
   Extraction is **unconditional** — `extract_into_case` always runs over title and description;
   `extract`/`observables` only add explicit strings. Stricter enum validation: non-integer or
   out-of-range `severity`/`tlp`/`pap` → 400; empty/null enum keeps the model default
@@ -199,8 +202,13 @@ ADR-008: the path names no source. The credential is the only routing fact — i
   `automationRuns[]`, `tasks[]`). DELETE ⇒ **204** — hard delete, children cascade, alerts `SET_NULL`
   (P10-3). PATCH: writes `status-changed`, `assigned` and `classification-changed` ledger events in
   the same transaction. Accepted payload keys include the four classification fields
-  (`scope`, `caseType`, `dataClassification`, `phase`); `dataClassification` is **admin/superAdmin
-  write only**; out-of-vocabulary → 400; empty/null keeps model default.
+  (`scope`, `caseType`, `dataClassification`, `phase`) plus `verdict`; `dataClassification` is
+  **admin/superAdmin write only**; out-of-vocabulary → 400; empty/null keeps model default.
+  **Closing (`status` → a `Closed`-stage status) is refused with 400** unless the payload carries a
+  non-`undefined` `verdict` and a non-blank `comment` (`{"verdict":[…]}` / `{"comment":[…]}`). A
+  successful close stamps `closedDate` + `endDate`, closes every linked alert (copying the verdict
+  onto each, deviation **V-2**) and appends an `alerts-closed` ledger event; reopening clears
+  `closedDate`. The same rule is enforced on `PATCH /api/v1/case/_bulk` per item and on create.
 - `task` POST: 201 `{"_id","id","title","status"}`; default status `"Waiting"`.
 - `task_detail` PATCH ⇒ **204, no body** (no plan number — see [`deviations.md`](./deviations.md));
   `status` validated against

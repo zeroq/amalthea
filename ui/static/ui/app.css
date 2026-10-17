@@ -506,3 +506,107 @@
   font-size: 13px;
   opacity: 0.8;
 }
+
+/* ============================================================================
+   Case General tab — inline field edits, tags row and the close/verdict dialogs
+   (PLAN-2026-10-17-case-verdict-close-flow §12.8). These are the component
+   classes the new markup relies on: ui/_tab_general.html, ui/_case_field_form.html,
+   ui/_case_close_form.html and ui/_case_tag_add_form.html.
+   ============================================================================ */
+
+/* Quiet inline edit affordance beside each meta-grid value. Always visible — never
+   hover-only — so it stays reachable for keyboard and touch users; it brightens on
+   hover and picks up the shared :focus-visible ring when tabbed to. */
+.meta-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 6px;
+  padding: 0;
+  vertical-align: middle;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--color-text-faint);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.meta-edit:hover {
+  color: var(--color-text);
+  border-color: var(--color-line-strong);
+}
+
+/* Tags row above the case description. Always rendered (empty state included) so the
+   correlation surface is visible before the narrative; the Add-tag control trails it. */
+.case-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+.case-tags-label {
+  color: var(--color-text-faint);
+  font-size: 12px;
+}
+.case-tags .btn {
+  margin-top: 0;
+}
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* The pill carries a small remove form; keep the ✕ on the same line as the tag name
+   instead of letting the block-level <form> wrap underneath it. */
+.tag-list .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.tag-list .pill .inline-form {
+  display: inline-flex;
+  margin: 0;
+}
+.tag-list .chip-x {
+  cursor: pointer;
+}
+
+/* Single-column field (label above its control) in the General-tab dialogs. Modelled
+   on the `.form-grid` label treatment but sized for a narrow modal body. */
+.field {
+  margin: 0 0 14px;
+}
+.field:last-child {
+  margin-bottom: 0;
+}
+.field > label,
+.field > legend {
+  margin: 0 0 5px;
+}
+.field > legend {
+  padding: 0;
+}
+/* Checkbox chips in the Add-tag dialog are `<label class="chip">`; cancel the base
+   `label` block layout/margins so they sit inline with their checkbox. */
+.field .chips .chip {
+  margin: 0;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+/* Timeline dot for status transitions. The row class is `tl-<kind|slugify>`, and routing the
+   General-tab write through the shared applier makes the kind `status-changed` (see
+   deviations V-3). Keep the legacy `status-change` selector too so ledger rows written before
+   2026-10-17 keep their colour. Both mean the same thing. */
+.tl-status-changed:before,
+.tl-status-change:before {
+  background: var(--color-sev-3);
+}

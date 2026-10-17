@@ -11,6 +11,8 @@ from core.enums import (
     CASE_SCOPE_CHOICES,
     CASE_STAGES,
     CASE_TYPE_CHOICES,
+    CASE_VERDICT_CHOICES,
+    CASE_VERDICT_VALUES,
     CUSTOM_FIELD_TYPES,
     DATA_CLASSIFICATION_CHOICES,
     PAP_CHOICES,
@@ -123,6 +125,12 @@ class Case(UUIDModel, TimeStampedModel):
     phase = models.CharField(
         max_length=32, choices=list(CASE_PHASE_CHOICES), default="initial_triage"
     )
+    # Plan-2026-10-17 case verdict (§12.8(3), decision D3). Answers "was this a real
+    # incident?" and gates closure: a case may not enter the Closed stage while this is still
+    # `undefined` (see cases/update.py::enforce_close_rule). Tokens, not labels.
+    verdict = models.CharField(
+        max_length=32, choices=list(CASE_VERDICT_CHOICES), default="undefined"
+    )
     summary = models.TextField(blank=True)
     # NOT NULL with a default: on Postgres `ORDER BY start_date DESC` returns NULLs
     # FIRST, so a nullable start_date put undated cases at the top of the queue (L5).
@@ -162,6 +170,7 @@ class Case(UUIDModel, TimeStampedModel):
                 tuple(v for v, _ in DATA_CLASSIFICATION_CHOICES),
             ),
             in_values("case_phase_valid", "phase", tuple(v for v, _ in CASE_PHASE_CHOICES)),
+            in_values("case_verdict_valid", "verdict", CASE_VERDICT_VALUES),
         ]
 
     def __str__(self) -> str:

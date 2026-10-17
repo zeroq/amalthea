@@ -318,25 +318,56 @@ def test_a_nonexistent_case_is_404_not_500(browser: Client) -> None:
 
 
 def test_closing_a_case_stamps_the_closed_date_and_logs_the_transition(browser: Client) -> None:
+    """Closing now needs a verdict and a closing comment (PLAN-2026-10-17 §12.8).
+
+    The UI delegates to `apply_case_update`, so the stage-transition bookkeeping (`closed_date`,
+    `end_date`) and the close rule live in one place; the timeline kind is the applier's
+    `status-changed`, matching the API's own status changes.
+    """
+    from cases.models import CaseStatus
+
     case = _case("To close")
+
+    browser.post(
+        reverse("ui-case-status", kwargs={"case_id": str(case.number)}),
+        {"stage": "Closed", "verdict": "true_positive", "comment": "Confirmed inbox rule."},
+    )
+
+    case.refresh_from_db()
+    assert case.status.stage == "Closed"
+    assert case.status_id == CaseStatus.objects.get(value="Closed").pk
+    assert case.closed_date is not None, (
+        "a closed case with no closed_date vanishes from open lists"
+    )
+    assert case.end_date is not None, "the close stamps both closed_date and end_date"
+    assert case.verdict == "true_positive"
+    assert case.timeline_events.filter(kind="status-changed").count() == 1
+
+
+def test_closing_without_a_verdict_or_comment_is_refused(browser: Client) -> None:
+    """The close rule reaches the UI: a bare `stage=Closed` leaves the case open."""
+    case = _case("Still open")
 
     browser.post(
         reverse("ui-case-status", kwargs={"case_id": str(case.number)}), {"stage": "Closed"}
     )
 
     case.refresh_from_db()
-    assert case.status.stage == "Closed"
-    assert case.closed_date is not None, (
-        "a closed case with no closed_date vanishes from open lists"
-    )
-    assert case.timeline_events.filter(kind="status-change").count() == 1
+    assert case.status.stage != "Closed"
+    assert case.closed_date is None
 
 
 def test_reopening_a_case_clears_the_closed_date(browser: Client) -> None:
     """The inverse must hold too, or "reopen" leaves the case invisible on every open list."""
     from django.utils import timezone
 
+    from cases.models import CaseStatus
+
     case = _case("Reopened", closed_date=timezone.now())
+    # A reopened case starts life in Closed — that is the only way a closed_date is *legitimately*
+    # set, and the applier clears it on the Closed -> open transition.
+    case.status = CaseStatus.objects.get(value="Closed")
+    case.save(update_fields=["status"])
     browser.post(
         reverse("ui-case-status", kwargs={"case_id": str(case.number)}), {"stage": "InProgress"}
     )

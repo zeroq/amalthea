@@ -51,7 +51,6 @@ from rest_framework.response import Response
 from alerts.escalation import (
     import_alert_to_case,
     merge_alert_into_case,
-    resolve_case_status,
 )
 from alerts.models import Alert, AlertStatus
 from automation.dispatcher import TRIGGER_EVENTS
@@ -84,9 +83,11 @@ from cases.views import (
 )
 from core.enums import (
     ALERT_STAGES,
+    CASE_CLOSING_VERDICTS,
     CASE_PHASE_CHOICES,
     CASE_SCOPE_CHOICES,
     CASE_TYPE_CHOICES,
+    CASE_VERDICT_CHOICES,
     DATA_CLASSIFICATION_CHOICES,
     PAP_CHOICES,
     SEVERITY_CHOICES,
@@ -124,6 +125,12 @@ SEVERITY_LABELS = dict(SEVERITY_CHOICES)
 #: in one stylesheet. Mapping the number to a class name in the template would be a fourth spelling.
 SEVERITY_NAMES = {1: "low", 2: "medium", 3: "high", 4: "critical"}
 CASE_STAGE_VALUES = ("New", "InProgress", "Closed")
+#: Fields the General tab's inline edit icons may write (PLAN-2026-10-17 §12.8(1)). A whitelist,
+#: because `ui-case-field-edit` would otherwise hand a form-chosen key straight to the applier's
+#: `setattr` path. Anything outside this set is a 404 — never an unknown-field write.
+CASE_INLINE_EDIT_FIELDS: frozenset[str] = frozenset(
+    {"severity", "scope", "case_type", "data_classification", "phase", "verdict"}
+)
 PAGE_SIZE = 200
 #: Upper bound on outbound HTTP headers per playbook. `header_count` is form-controlled and drives a
 #: CPU-bound `range()`, so it must be capped (see `_parse_playbook_config`) — far above real usage.
@@ -920,6 +927,20 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             can_classify=can_classify,
             case_status_options=case_status_options,
             case_edit_extra_fields={"tab": active_tab},
+            # General-tab inline edits (PLAN-2026-10-17 §12.8): one descriptor per field drives both
+            # the edit icon and its `case-field-<slug>` dialog; the close dialog's verdict select
+            # offers only the closing verdicts; the Add-tag dialog lists tags not yet on the case.
+            inline_edit_fields=_inline_edit_fields(case),
+            verdict_choices=CASE_VERDICT_CHOICES,
+            closing_verdict_choices=[
+                c for c in CASE_VERDICT_CHOICES if c[0] in CASE_CLOSING_VERDICTS
+            ],
+            available_tags=Tag.objects.exclude(
+                id__in=case.tags.values_list("id", flat=True)
+            ).order_by("name"),
+            case_field_edit_url=reverse("ui-case-field-edit", kwargs={"case_id": case.number}),
+            case_close_url=reverse("ui-case-close", kwargs={"case_id": case.number}),
+            case_tag_add_url=reverse("ui-case-tag-add", kwargs={"case_id": case.number}),
             # Observables tab create/edit modals. The per-row Edit gate uses `is_owner` above
             # (`is_case_owner`, so a superAdmin qualifies), matching this view's owner-org check.
             data_type_options=ObservableType.objects.order_by("name"),
@@ -931,37 +952,222 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     )
 
 
+def _case_status_for_stage(case: Case, stage: str) -> CaseStatus | None:
+    """The `CaseStatus` a posted `stage` resolves to, or `None` if the vocabulary lacks one.
+
+    Prefers the case's *current* status when its stage already matches, so re-posting the same
+    stage is an idempotent no-op rather than a silent jump to a different row that shares the
+    stage. Otherwise the lowest-order non-hidden status with that stage wins. A hidden-only
+    vocabulary yields `None` and the caller reports it — the old path auto-created statuses via
+    `resolve_case_status`, which is exactly what a form field must not do.
+    """
+    if case.status_id and case.status.stage == stage:
+        return case.status
+    return CaseStatus.objects.filter(stage=stage, hidden=False).order_by("order", "value").first()
+
+
+def _inline_edit_fields(case: Case) -> list[dict[str, Any]]:
+    """Descriptors for the General tab's inline edit icons and their `case-field-<slug>` dialogs.
+
+    Each entry carries the field name, the label shown on the icon and the dialog title, the
+    option list, and the case's current value — so the template renders the same control set for
+    every field with one loop and no per-field branching. `admin_only` marks the one field the
+    applier gates on `is_admin` (data_classification), so the icon can be hidden rather than
+    rendered and then refused.
+    """
+    return [
+        {
+            "slug": "severity",
+            "label": "Severity",
+            "value": str(case.severity),
+            "choices": [(str(val), label) for val, label in SEVERITY_CHOICES],
+            "admin_only": False,
+        },
+        {
+            "slug": "scope",
+            "label": "Scope",
+            "value": case.scope,
+            "choices": list(CASE_SCOPE_CHOICES),
+            "admin_only": False,
+        },
+        {
+            "slug": "case_type",
+            "label": "Type",
+            "value": case.case_type,
+            "choices": list(CASE_TYPE_CHOICES),
+            "admin_only": False,
+        },
+        {
+            "slug": "data_classification",
+            "label": "Classification",
+            "value": case.data_classification,
+            "choices": list(DATA_CLASSIFICATION_CHOICES),
+            "admin_only": True,
+        },
+        {
+            "slug": "phase",
+            "label": "Phase",
+            "value": case.phase,
+            "choices": list(CASE_PHASE_CHOICES),
+            "admin_only": False,
+        },
+        {
+            "slug": "verdict",
+            "label": "Verdict",
+            "value": case.verdict,
+            "choices": list(CASE_VERDICT_CHOICES),
+            "admin_only": False,
+        },
+    ]
+
+
 @not_viewer
 @login_required
 @require_POST
 def case_set_status(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Move a case between stages, stamping `closed_date` on close.
+    """Move a case between stages by delegating to the shared applier (PLAN-2026-10-17 §12.8, D1).
 
-    `closed_date` is derived rather than left to the analyst: every open-case list filters on
-    `closed_date IS NULL`, so a case marked `Closed` without one would vanish from the "open" list and
-    still appear in the dashboard's open count.
+    Nothing is persisted here: `apply_case_update` owns `status`, `closed_date`, `end_date` and the
+    close rule, so the UI can no longer close a case around it. A `stage=Closed` post closes the
+    case only when a verdict and a closing comment ride along; without them the applier refuses,
+    the case stays open and the analyst gets the applier's message. The plain status control omits
+    `Closed` (the dedicated close dialog supplies the two fields), so an accidental close is not
+    reachable from the form at all.
     """
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
         raise Http404()
-    warnings: list[str] = []
-    stage = resolve_case_status(request.POST.get("stage") or "InProgress", warnings=warnings)
-    case.status = stage
-    if stage.stage == "Closed":
-        case.closed_date = case.closed_date or timezone.now()
-        case.end_date = case.end_date or case.closed_date
-    else:
-        case.closed_date = None
-    case.save(update_fields=["status", "closed_date", "end_date", "updated_at"])
-    append_timeline_event(
-        case,
-        title=f"Status changed to {stage.value}",
-        description="; ".join(warnings),
-        kind="status-change",
-        actor=request.user,
-        metadata={"stage": stage.stage},
-    )
-    messages.success(request, f"Case {case.number} is now {stage.value}.")
+    stage = (request.POST.get("stage") or DEFAULT_CASE_STATUS).strip()
+    if stage not in CASE_STAGE_VALUES:
+        messages.error(request, f"Unknown case stage: {stage}.")
+        return _case_detail_redirect(request, case.number)
+    target = _case_status_for_stage(case, stage)
+    if target is None:
+        messages.error(request, f"No case status is defined for the {stage} stage.")
+        return _case_detail_redirect(request, case.number)
+    payload: dict[str, Any] = {"status": target.value}
+    comment = (request.POST.get("comment") or "").strip()
+    if comment:
+        payload["comment"] = comment
+    verdict = (request.POST.get("verdict") or "").strip()
+    if verdict:
+        payload["verdict"] = verdict
+    try:
+        apply_case_update(case, payload, actor=request.user)
+    except CaseUpdateError as exc:
+        messages.error(request, exc.message)
+        return _case_detail_redirect(request, case.number)
+    case.refresh_from_db()
+    messages.success(request, f"Case {case.number} is now {case.status.value}.")
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_close(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Close a case through the one close rule (PLAN-2026-10-17 §12.8).
+
+    The entry point behind the "Close case" dialog: it resolves the Closed-stage status and posts
+    it through `apply_case_update` together with the verdict and the closing comment the rule
+    requires. A missing verdict or an empty comment is the applier's refusal surfaced as a flash
+    error — the case stays open and nothing is written.
+    """
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        raise Http404()
+    target = _case_status_for_stage(case, "Closed")
+    if target is None:
+        messages.error(request, "No case status is defined for the Closed stage.")
+        return _case_detail_redirect(request, case.number)
+    payload: dict[str, Any] = {
+        "status": target.value,
+        "verdict": (request.POST.get("verdict") or "").strip(),
+        "comment": (request.POST.get("comment") or "").strip(),
+    }
+    try:
+        apply_case_update(case, payload, actor=request.user)
+    except CaseUpdateError as exc:
+        messages.error(request, exc.message)
+        return _case_detail_redirect(request, case.number)
+    case.refresh_from_db()
+    messages.success(request, f"Case {case.number} closed.")
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_field_edit(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Set one inline-editable General-tab field via the shared applier (PLAN-2026-10-17 §12.8).
+
+    `field` is whitelisted against `CASE_INLINE_EDIT_FIELDS`; an unknown key is a 404 and never
+    reaches the applier's `setattr`. The value is validated by the applier against the field's own
+    vocabulary / range, so an out-of-range severity or an unknown verdict is a clean form error,
+    not a 500. Editing the verdict here is how a case can be marked TP/FP before it is closed
+    (plan §14, resolved in favour of editable).
+    """
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        raise Http404()
+    field = (request.POST.get("field") or "").strip()
+    if field not in CASE_INLINE_EDIT_FIELDS:
+        raise Http404()
+    try:
+        apply_case_update(case, {field: request.POST.get("value", "")}, actor=request.user)
+    except CaseUpdateError as exc:
+        messages.error(request, exc.message)
+        return _case_detail_redirect(request, case.number)
+    case.refresh_from_db()
+    messages.success(request, f"Updated {field.replace('_', ' ')}.")
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_tag_add(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Attach existing tags and/or create-on-assign new ones (PLAN-2026-10-17 §12.8(5b)).
+
+    Existing tags arrive as repeated `tags` values; `new_tags` is a comma-separated list typed into
+    the dialog. Both merge into one `addTags` payload written through the applier, so the attach
+    and the `tags-changed` ledger event cannot drift from the API's tag path.
+    """
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        raise Http404()
+    names = [n.strip() for n in request.POST.getlist("tags") if n.strip()]
+    names += [n.strip() for n in (request.POST.get("new_tags") or "").split(",") if n.strip()]
+    if not names:
+        messages.error(request, "Select or type at least one tag.")
+        return _case_detail_redirect(request, case.number)
+    try:
+        apply_case_update(case, {"addTags": names}, actor=request.user)
+    except CaseUpdateError as exc:
+        messages.error(request, exc.message)
+        return _case_detail_redirect(request, case.number)
+    messages.success(request, "Tags added.")
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_tag_remove(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Detach one tag via the shared applier (PLAN-2026-10-17 §12.8)."""
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        raise Http404()
+    name = (request.POST.get("tag") or "").strip()
+    if not name:
+        messages.error(request, "No tag specified.")
+        return _case_detail_redirect(request, case.number)
+    try:
+        apply_case_update(case, {"removeTags": [name]}, actor=request.user)
+    except CaseUpdateError as exc:
+        messages.error(request, exc.message)
+        return _case_detail_redirect(request, case.number)
+    messages.success(request, f"Removed tag '{name}'.")
     return _case_detail_redirect(request, case.number)
 
 
@@ -3150,6 +3356,7 @@ def taxonomy(request: HttpRequest) -> HttpResponse:
         CASE_PHASE_CHOICES,
         CASE_SCOPE_CHOICES,
         CASE_TYPE_CHOICES,
+        CASE_VERDICT_CHOICES,
         DATA_CLASSIFICATION_CHOICES,
     )
     from observables.models import ObservableType
@@ -3167,6 +3374,7 @@ def taxonomy(request: HttpRequest) -> HttpResponse:
             phase_choices=CASE_PHASE_CHOICES,
             case_type_choices=CASE_TYPE_CHOICES,
             data_classification_choices=DATA_CLASSIFICATION_CHOICES,
+            verdict_choices=CASE_VERDICT_CHOICES,
         ),
     )
 

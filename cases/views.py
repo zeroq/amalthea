@@ -63,9 +63,11 @@ from cases.update import (
     CaseUpdateError,
     _apply_case_tags,
     _capture_classification_values,
-    _emit_classification_changes,
+    _emit_tracked_changes,
     _set_case_fields,
     apply_case_update,
+    enforce_close_rule,
+    propagate_close_to_alerts,
 )
 from compat.bulk import bulk_patch
 from compat.procedures import parse_procedure
@@ -1898,9 +1900,14 @@ def case_bulk_update(request: Request) -> Response:
 
         # Capture previous classification values for audit/timeline (S2)
         previous_classification = _capture_classification_values(case)
+        previous_stage = case.status.stage if case.status_id else ""
 
         try:
             fields = _set_case_fields(case, mapped_body, actor=_actor(request))
+            # The bulk path does not use `apply_case_update`, so it must call the close rule
+            # itself or `PATCH /case/_bulk` would close cases the single PATCH refuses
+            # (Plan-2026-10-17 §12.8(4), decision D1).
+            enforce_close_rule(case, mapped_body, previous_stage=previous_stage)
         except CaseUpdateError as exc:
             # Return a DRF Response so bulk_patch reports the correct per-item status
             status_code = (
@@ -1914,16 +1921,30 @@ def case_bulk_update(request: Request) -> Response:
             return None
         if tags_touched:
             _apply_case_tags(case, mapped_body)
+        closing = previous_stage != "Closed" and case.status.stage == "Closed"
+        reopening = previous_stage == "Closed" and case.status.stage != "Closed"
+        if closing:
+            case.stamp_closed_date()
+            if case.end_date is None:
+                case.end_date = case.closed_date
+        elif reopening:
+            case.closed_date = None
+        if closing or reopening:
+            fields = [f for f in fields if f not in ("closed_date", "end_date")]
+            fields += ["closed_date", "end_date"]
         if fields:
             case.save(update_fields=[*fields, "updated_at"])
         case.refresh_from_db()
 
         # Emit classification change events + audit log (S2)
-        _emit_classification_changes(case, previous_classification, actor=_actor(request))
+        _emit_tracked_changes(case, previous_classification, actor=_actor(request))
 
         append_timeline_event(
             case, title="Case updated (bulk)", kind="case-updated", actor=_actor(request)
         )
+        # Same invariant as `apply_case_update`: a closed case leaves no open linked alerts.
+        if closing:
+            propagate_close_to_alerts(case, case.verdict, actor=_actor(request))
         return fields
 
     return bulk_patch(
