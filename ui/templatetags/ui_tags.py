@@ -7,6 +7,10 @@ review rather than quietly in the page.
 
 `sev_label` deliberately returns text alongside the colour: severity is the fastest triage signal in
 the product and must never be conveyed by hue alone (WCAG 1.4.1).
+
+`reason_label`/`is_unresolved` do the same job for `ingest.mapping`'s field warnings: the alert page and
+the re-map dialog both render them, and the wording plus the "produced no value" set live next to the
+engine that emits them rather than in two templates.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from django import template
 from django.utils.safestring import mark_safe
 
 from core.enums import SEVERITY_CHOICES
+from ingest.mapping import REASON_LABELS, UNRESOLVED_REASONS
 from ui.markdown import render_markdown
 
 register = template.Library()
@@ -120,3 +125,25 @@ def choice_name(value: Any, choices: Any) -> str:
         return dict(choices).get(int(value), str(value))
     except (TypeError, ValueError):
         return str(value)
+
+
+@register.filter
+def reason_label(reason: Any) -> str:
+    """Sentence for a `FieldWarning.reason`, e.g. `bad_type` -> "a value of the wrong type".
+
+    The engine's tokens are stored (in `ingestion_warnings["mapping"]`) and asserted by tests, so the
+    wording lives in `ingest.mapping.REASON_LABELS` and reaches templates through here rather than being
+    re-typed in two pages. An unknown reason renders as-written rather than blank: a reason this table
+    has not heard of is still more useful than nothing.
+    """
+    return REASON_LABELS.get(str(reason), str(reason))
+
+
+@register.filter
+def is_unresolved(reason: Any) -> bool:
+    """Whether a `mapping` reason means "no value was produced" (`ingest.mapping.UNRESOLVED_REASONS`).
+
+    The alert page uses it to mark the lines that explain a fallback: `truncated` is also a warning and is
+    *not* one of them, because that row did get a value.
+    """
+    return str(reason) in UNRESOLVED_REASONS

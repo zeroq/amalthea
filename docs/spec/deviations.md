@@ -484,6 +484,78 @@ added: write+audit, echo-on-error, no-op, JSON box, and the analyst/foreign-admi
 cross-org superAdmin write audited on both organisations).
 
 
+## Wave 2026-10-16 — P7: re-applying a mapping to existing alerts
+
+Plan: `docs/planning/PLAN-2026-10-16-source-field-mapping.md` §8 P7 (AC17–AC23). This wave is the §11
+Q8/Q9 follow-on: a second button next to "Save mapping" that repairs the alerts a wrong mapping already
+produced. Three rows, all narrowing what a bulk write may touch.
+
+| ID | Plan says | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **MAP-9** | §8 P7: "re-apply the mapping" (the field set unspecified) | **`title`, `description`, `summary`, `severity`, `date` only** — `type`/`source_ref`/`correlation_key` are never written | `type` and `source_ref` are the dedupe key with `source`/`owner_org` (`uniq_alert_source_type_ref`) *and* the replay key, so rewriting them can collide with a stored row and moves the identity of an alert that already exists; `correlation_key` is not a v2 field (§11 Q8). Everything else on the row is a human/triage decision (`status`, `case`, `tags`, `assignee`, `flag`, `follow`, `tlp`, `pap`), i.e. the mapping's *input*, not its output. `ingest/remap.py::REMAP_FIELDS` · `test_mapping_remap.py::TestWhatItWrites::test_it_leaves_the_identity_fields_alone`. |
+| **MAP-10** | §8 P7: "re-apply … to unlinked open alerts" (whether an unanswered field is filled) | **A text/binary field the new mapping cannot answer keeps its stored value** — only `severity` is always resolved | Ingest fills an unanswered title with the literal `"Alert"` because the alert has none yet; on a *stored* alert that is destructive, so clearing one row in the editor would silently retitle every unlinked open alert of the feed. Leaving the field alone makes the operation non-destructive, and the modal body states it in the operator's own reading of the dialog. `ingest/remap.py::_target_values` · `test_mapping_remap.py::test_a_text_field_the_new_mapping_cannot_answer_keeps_its_value`. |
+| **MAP-11** | §5/§7: the editor's `MAX_BULK_PROCEDURES`-style cap idiom, applied to a re-map | **`MAX_REMAP_ALERTS = 5000` per request; over it the button refuses and (deliberately) saves nothing** | The pass runs in the request/response cycle (no task queue surface this wave). A "save & apply" that silently drops the apply half would be the worse failure, so the two halves are atomic: over the cap, neither the config nor the alerts are written. Past the cap the honest answer is a background task with a status surface, which is a later wave. `ingest/remap.py::MAX_REMAP_ALERTS`, `ui/views.py::_apply_mapping_to_alerts` · `test_settings_source_mapping.py::test_over_the_cap_the_dialog_disables_its_confirm`. |
+| **MAP-12** | §8 P7: "re-applies it to its unlinked open alerts" (what a pass that changes no *field* still writes) | **A no-op pass replaces an out-of-date `mapping` record and appends nothing to the event log** — `refreshed` (a sub-count of `unchanged`) reports it, in the flash message and in the audit row | `ingestion_warnings["mapping"]` describes the alert's *current* fields (it names the rule paths and the values that failed), so a rules change that lands on the same values still leaves a record describing rules the feed has stopped storing — the page would keep saying "severity: nothing at `$.severity`" under a severity that was read fine. Replacing it is a real write, and reporting it as "unchanged" alone is what made a working re-map read as "nothing happened". The log is not touched, because nothing happened to the *alert*. `ingest/remap.py::_refresh_record`, `_record_is_current` · `test_mapping_remap.py::TestTheRecordRefresh`, `test_settings_source_mapping.py::test_the_flash_says_the_record_moved_when_only_the_record_moved`. |
+
+**Behaviour found and pinned while implementing P7 (not deviations).**
+
+* **Two audit rows, not one.** `ingestion_source.mapping_applied` is written even when the config did not
+  change, because "apply again" is a real operation against the alerts; `ingestion_source.updated` stays
+  conditional on a real config edit (AC12). `identity/audit.py` · `test_settings_source_mapping.py`.
+* **`ingestion_warnings["mapping"]` is replaced, `["warnings"]` is appended.** The structured key
+  describes the row's *current* fields, so a stale entry contradicts the row it is attached to ("defaulted
+  to 2" under a severity of 4); the log key is history and keeps its ingest-time lines. Both are asserted
+  with deliberately pre-seeded values. `ingest/remap.py::_refreshed_warnings` ·
+  `test_mapping_remap.py::TestTheWarningsItLeaves`.
+* **The candidate predicate is written once** (`candidate_alerts`) and the counts the dialog shows come
+  from the same function the write path uses (`summarise_candidates`), so a dialog cannot promise one set
+  of rows and write another. A candidate count that *grows* between rendering and confirming is caught
+  again by the over-cap check on the write path. `ingest/remap.py` · `test_mapping_remap.py`.
+
+Evidence: `test_mapping_remap.py` (14 cases — candidate exclusions asserted by leaving rows byte-identical,
+the field set, the destructive-title guard, severity fallback, no-write/dedupe on an unchanged pass,
+warnings, the cap) and `test_settings_source_mapping.py::TestApplyingTheMappingToExistingAlerts` (10
+cases — the extra button on both cards, `intent=apply` writes nothing, the confirmed two-step
+saves+remaps+audits, a tampered `pending_config`, the over-cap refusal saving nothing, the
+unchanged-config apply auditing only `mapping_applied`, zero candidates still saving, and the role/org
+gates on both intents).
+
+
+## P7.1 — "I added a rule and nothing changed" (re-map feedback)
+
+Found by an operator-visible failure rather than by a test: a `severity` rule reading `$.severity` (the
+vendor's 0-100 score) with the engine's default `str` transform runs, produces `"70"`, is rejected as
+`bad_type`, and falls back to the feed's `default_severity` — which is the value it already had. The pass
+wrote nothing, the flash said "0 updated, 1 unchanged", and the alert page kept showing the ingest-time
+`severity_defaulted` line. Every individual piece was working; the *operator* could not tell a working
+rule from an unreadable one. This wave is the feedback, not the engine.
+
+* **The dialog previews the real alerts** (`preview_alerts`) instead of counting them: per target, how
+  many rows the rule would change and how many it produced nothing for, by reason. The dry pass shares
+  `_evaluate` with the writer, so the promise cannot drift from the behaviour; it writes nothing (asserted
+  on `updated_at`, the fields and `ingestion_warnings`). `ingest/remap.py::preview_alerts` ·
+  `test_mapping_remap.py::TestThePreview`.
+* **Unresolved rules are named in the flash**, by target and reason ("severity: the mapping produced no
+  value on 19 of 19 alerts (bad_type)"), because that sentence is the fix: it says *which* rule and *what
+  kind* of failure, neither of which "0 updated" can carry. `ingest.mapping.UNRESOLVED_REASONS` is the
+  single definition of "produced no value" (`truncated` is a warning but not one of them — that row did get
+  a value). `ui/views.py::_unresolved_lines` · `test_settings_source_mapping.py::test_the_flash_names_the_rule_that_produced_no_value`.
+* **The alert and case pages render `ingestion_warnings["mapping"]`** — the live record, with the path and
+  the offending value — above the append-only log. Both are needed and only the pair reads correctly.
+  `ui/templates/ui/_mapping_resolution.html` · `test_ui_loop.py::test_the_alert_page_explains_why_a_mapped_field_fell_back`,
+  `test_ui_markdown.py::MappingResolutionRenderingTests`.
+* **The dialog states what a re-map will never apply** (MAP-9): a `source_ref`/`type` rule is stored, works
+  for new alerts, and is never written to existing ones. The disclosure is read from the *candidate* config,
+  so it fires on the one render where it matters. `ui/views.py::_source_detail_context` ·
+  `test_settings_source_mapping.py::test_the_dialog_names_the_rules_a_remap_never_reapplies`.
+* **The engine's `reason` tokens are user-visible now**, so their wording lives next to the engine
+  (`ingest.mapping.REASON_LABELS`) and reaches templates through `|reason_label`/`|is_unresolved` rather
+  than being re-typed in two pages. `ui/templatetags/ui_tags.py`.
+
+Evidence: `test_mapping_remap.py` (25 cases, +11), `test_settings_source_mapping.py` (48 cases, +4),
+`test_ui_loop.py`, `test_ui_markdown.py`.
+
+
 ## Evidence index
 
 - `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §13 — full P7/P8/P10/P11 records

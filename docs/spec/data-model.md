@@ -79,6 +79,10 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 - Read/write UI: `GET /settings/sources/<uuid>` (`ui-settings-source-detail`) — `admin` for its own
   organisation's feeds, `superAdmin` for any (audited `cross_org_read`), everyone else a uniform 404
   (ADR-006 gate before the ADR-009 org gate).
+- The page has two POST intents that write the *same* field: the two save forms (`form=table|json`) and,
+  beside them, "Apply to unlinked alerts…" (`intent=apply` → `intent=apply_confirmed`), which saves the
+  config and re-maps the feed's own unlinked open alerts in one transaction — `Alerts` is where that
+  lands, not `IngestionSource` (§8 P7 of the plan; MAP-9/MAP-10/MAP-11).
 
 ## alerts
 
@@ -101,6 +105,18 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 - `case` — FK → `cases.Case`, `SET_NULL`, `related_name="alerts"`.
 - `follow` · `ingestion_warnings` — JSONB · `owner_org` — FK → `Organisation`, **`NOT NULL`**,
   `on_delete=PROTECT` (ADR-004; mandatory per-org row).
+- `ingestion_warnings` carries two *differently treated* keys (MAP-2b): `"mapping"` is the structured
+  `FieldWarning` list that describes how the current fields were resolved, so a **re-map replaces** it;
+  `"warnings"` is the alert's event log (a synthesised `source_ref`, `status_created`, a severity
+  fallback), so a re-map **appends** one `remapped:` line and rewrites nothing. A row is only ever
+  written when the re-map changed a mapped field **or** the structured record was out of date — the
+  second case is a write with no field change and no log line, reported as `refreshed` (**MAP-12**).
+  Re-apply lives in `ingest/remap.py` (`REMAP_FIELDS` = title, description, summary, severity, date —
+  see MAP-9/MAP-10) and *does* move `updated_at` (`auto_now` is named in `update_fields`).
+  Each entry is a `FieldWarning` (`{"field", "reason", "paths"?, "value_preview"?}`) whose `reason` is a
+  stable token — `not_found`/`unknown_value`/`bad_type`/`bad_transform`/`truncated` — with the first four
+  meaning "no value was produced" (`ingest.mapping.UNRESOLVED_REASONS`). That distinction is what makes
+  the page and the re-map dialog able to say *why* a field fell back, which the append-only log cannot.
 - Indexes: `alert_status_date_idx ("status","-date")`, `alert_corrkey_date_idx
   ("correlation_key","date")`, `alert_created_at_idx ("-created_at")`.
 - Constraints: `uniq_alert_source_type_ref (owner_org,source,type,source_ref)` — per-org dedupe

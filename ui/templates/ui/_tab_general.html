@@ -44,6 +44,8 @@
 
   {% if case.description %}<div class="body md">{{ case.description|markdown }}</div>{% endif %}
 
+  {% include "ui/_mapping_resolution.html" with mapping=case.ingestion_warnings.mapping %}
+
   {% if case.ingestion_warnings.warnings %}
     <h3>Ingestion warnings</h3>
     <ul class="warns">

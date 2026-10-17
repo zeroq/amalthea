@@ -1,11 +1,12 @@
 # PLAN 2026-10-16 — Per-source field mapping (JSON → Alert)
 
-**Status: APPROVED 2026-10-16 — P1, P2 and P3 IMPLEMENTED 2026-10-16** (records in §8 P1, §8 P2,
-§8 P3); P4 (sample preview) and P5 (health & docs) are the next phases, and P3's `ingest/editor.py` is
-what P4's dialog reuses. All eight questions answered (§11 Decisions); the Q5 consequence is recorded in
-§6.1 and implemented as **ADR-009**. Written by the planner agent; the `django-backend` /
-`django-frontend` / `verifier` subagents were unavailable (504/400), so the planner implemented
-P1–P3 directly.
+**Status: APPROVED 2026-10-16 — P1, P2, P3, P7 and P7.1 IMPLEMENTED 2026-10-16** (records in §8 P1, §8 P2,
+§8 P3, §8 P7, §8 P7.1); P4 (sample preview) and P5 (health & docs) are the next phases, and P3's
+`ingest/editor.py` is what P4's dialog reuses. P7 is the §11 Q7 retro-mapping item, requested directly and
+landed out of order (its ACs are 17–23; P4's 15/16 stay reserved, and P7.1's report-of-the-report ACs are
+24–26). All eight questions answered (§11 Decisions); the Q5 consequence is recorded in §6.1 and
+implemented as **ADR-009**. Written by the planner agent; the `django-backend` / `django-frontend` /
+`verifier` subagents were unavailable (504/400), so the planner implemented P1–P3 and P7 directly.
 
 Related: `AGENTS.md` §2 Module A · `docs/decisions/ADR-008-webhook-routing.md` (the token resolves the
 source) · `docs/planning/PLAN-2026-10-15-token-only-webhook-routing.md` (§6 deviation: "`mapping_config`
@@ -380,6 +381,146 @@ a `mapping_warnings` view on the source page, `TODO.md` gets retro-mapping (Q7) 
 ### P6 (candidate, not planned here) — observables from the same config
 `"observables": [{"type": "sha256", "paths": ["$.sha256"]}, …]` feeding Module C. Explicitly out of §3
 so it cannot creep into P1.
+
+### P7 — Apply a mapping to existing alerts (Q7, user request 2026-10-16) — **IMPLEMENTED 2026-10-16**
+
+§11 Q7 deferred retro-mapping to `TODO.md`; the user asked for it directly, so it lands out of order
+(before P4/P5) as one more control on the source page — **"Apply to unlinked alerts…"** beside "Save
+mapping". P4's AC15/AC16 stay reserved; this phase owns **AC17–AC23**.
+
+**The candidate set is one predicate, not a filter each caller remembers to apply.** An alert is
+re-mapped iff it belongs to *this feed* (`ingestion_source=source`) **and** is unlinked
+(`case__isnull=True`) **and** is open (`status__stage__in=("New", "InProgress")` — the `New`/`Triaged`
+status rows; `Dismissed` is `stage="Closed"` and `Imported` is `stage="Imported"`). Why those three:
+
+- `ingestion_source`, not the wire `source` string: the FK is *our* record of which configured feed
+  accepted the payload (the `Alert` docstring's "treat a mismatch as data"), and two feeds may both send
+  `source: "crowdstrike"`. An alert that arrived over the TheHive-compatible API has no feed and is never
+  a candidate.
+- **unlinked**, per the request: a case file is human-authored evidence, and rewriting an alert *inside* a
+  case changes what an investigator has already read. An escalated alert keeps the values it was escalated
+  with — the alert row is preserved by design (`alerts/escalation.py`).
+- **open**: `New`/`Triaged` are the stages where a wrong severity still misleads triage. Dismissed and
+  imported alerts are terminal decisions, not mapping errors.
+
+**Written: `title`, `description`, `summary`, `severity`, `date`** — the mapping's display/ordering
+outputs, produced by the same `apply_mapping(config, payload, default_severity=source.default_severity)`
+call the receiver makes, with the same `str(… or "Alert")[:200]` title clamp, so a re-mapped alert equals
+what ingest would produce for that payload today. **Deliberately not written** (**MAP-9**): `type` and
+`source_ref` — they are the dedupe key with `source`/`owner_org`, so rewriting them can collide with an
+existing row and moves the replay key under a stored alert; `correlation_key` — not a v2 field at all
+(§11 Q8); and every human/triage field (`status`, `case`, `tags`, `assignee`, `flag`, `follow`, `tlp`,
+`pap`, observables, custom fields).
+
+**Nothing is written unless it changed.** Each draft is compared field-by-field and only rows with a real
+difference are saved (`update_fields=[…changed, "updated_at"]`); the result carries
+`candidates`/`updated`/`unchanged`, so re-applying the same mapping twice is a no-op the second time — the
+AC12 discipline, and the reason the flash names three numbers.
+
+**Two steps, server-confirmed, nothing written on the first.** `intent=apply` validates the submitted
+config and re-renders the page with the confirmation `<dialog>` (autoopen, per the `token-created`
+precedent) carrying the exact counts and the field list; it writes **nothing**. `intent=apply_confirmed`
+carries the validated config in a hidden `pending_config` field, re-validates it, then saves the mapping
+(audit `ingestion_source.updated`, only when it changed) and re-maps **inside one transaction** (audit
+`ingestion_source.mapping_applied`). A rejection at either step is the existing 200-that-echoes-the-input;
+success is PRG. The dialog body is server-rendered (`ui/_source_remap_confirm_body.html`) and reuses
+`_modal.html` — no new CSS class (§ modal blind spot).
+
+**Cap:** `MAX_REMAP_ALERTS = 5000` per request, following the `MAX_BULK_PROCEDURES` idiom in `ui/views.py`.
+Over the cap the dialog still opens but its confirm control is disabled and says why, and **nothing is
+saved**: a "save & apply" that silently drops the apply half is worse than a refusal. A feed beyond that
+needs a background task, which needs a status surface this wave does not have.
+
+**Audit** — `ingestion_source.mapping_applied` with
+`details={"changed": [...], "alerts": {"candidates": n, "updated": m, "unchanged": k}}`: counts, never
+values (MAP-7). **Warnings** — the alert's structured `ingestion_warnings["mapping"]` is *refreshed* (it
+describes the fields, so a stale one is a lie) while one `remapped:` line is *appended* to
+`ingestion_warnings["warnings"]`, whose ingest-time lines (`severity_defaulted`, ref synthesis,
+`status_created`) are history and are never rewritten. Without this, `alert_detail.html` would keep
+showing "severity_defaulted … defaulted to 2" under a severity of 4.
+
+AC:
+17. Candidate set: exactly this feed's unlinked `New`/`Triaged` alerts are re-mapped; a linked alert, a
+    dismissed alert, an imported alert, another feed's alert and another org's alert are all untouched.
+18. Fields: `title`/`description`/`summary`/`severity`/`date` take the new mapping's values (equal to what
+    ingest would produce, title clamped to 200); `type`, `source_ref`, `correlation_key`, `status`, `case`,
+    tags, observables and custom fields are unchanged.
+19. Idempotence: applying the same mapping again reports every candidate `unchanged` and writes nothing
+    (`updated_at` and the audit log untouched).
+20. Confirmation gate: `intent=apply` writes nothing at all (config, alerts, `updated_at`, audit) and
+    renders the dialog with the exact counts and the exact field list; `intent=apply_confirmed` performs
+    it; a config rejected at either step echoes the input and writes nothing.
+21. Permissions: a viewer/analyst reaches neither the button nor the POST; a foreign-org admin gets the
+    uniform 404; a superAdmin's cross-org apply is audited with both `actor_org` and `target_org`.
+22. Audit + warnings: `ingestion_source.mapping_applied` records the three counts and the changed config
+    keys; `ingestion_source.updated` appears only when the config actually changed; the structured
+    `mapping` warnings are refreshed and one `remapped:` line is appended without losing the ingest-time
+    lines.
+23. Boundaries: over `MAX_REMAP_ALERTS` the dialog refuses and nothing is saved; with zero candidates the
+    mapping is still saved and the flash says that nothing was re-mapped.
+
+**Implemented 2026-10-16** — `ingest/remap.py` (candidate predicate, `remap_alerts`, the field set,
+warnings refresh), `identity/audit.py::record_ingestion_source_mapping_applied`,
+`ui/views.py::_source_mapping_post`/`_confirm_mapping_apply`/`_apply_mapping_to_alerts` (plus the
+`_submitted_mapping`/`_reject_mapping`/`_persist_mapping`/`_mapping_saved_message` refactor shared with
+`_save_source_mapping`), the extra button on both cards and
+`ui/templates/ui/_source_remap_confirm_body.html`. Deviations **MAP-9**, **MAP-10** and (the cap)
+**MAP-11** are recorded in `docs/spec/deviations.md`; the audit action and the `ingestion_warnings` split
+are in `docs/spec/identity-auth.md` and `docs/spec/data-model.md`. Evidence:
+`tests/conformance/test_mapping_remap.py` (14 cases), `test_settings_source_mapping.py`
+(`TestApplyingTheMappingToExistingAlerts`, 10 cases) — full suite 2317 passed / 3 skipped,
+`make check` green.
+
+
+### P7.1 — Re-map feedback: "I added a rule and nothing changed" (user report 2026-10-16) — **IMPLEMENTED 2026-10-16**
+
+Reported against a live feed: a `severity` rule reading `$.severity` (the vendor's 0-100 score) with the
+engine's default `str` transform *runs*, produces `"70"`, is refused as `bad_type`, and falls back to the
+feed's `default_severity` — the value it already had. The pass was correct and changed nothing, the flash
+said "0 updated, 1 unchanged", and the alert page still showed the ingest-time `severity_defaulted` line.
+Three feedback defects, all of them "the UI could not distinguish a working rule from an unreadable one":
+
+1. The **dialog** described the candidate *set* (`summarise_candidates`) and the field list, never what
+   the rules would actually produce — so the operator could only accept or cancel blind, and the outcome
+   of a broken rule was indistinguishable from the outcome of a correct one.
+2. The **flash and audit row** had no way to say "a rule produced no value": `updated`/`unchanged` are the
+   only outcomes counted, and both are identical whether the value was read or defaulted.
+3. The **alert/case pages** rendered only `ingestion_warnings["warnings"]` — the append-only log — while
+   the *live* `ingestion_warnings["mapping"]` record (the one that says which rule failed, on which path,
+   and what value it saw) was rendered by no template at all. The log's `severity_defaulted` line was
+   therefore the only visible evidence, and it survives any fix (it was true when written).
+
+Two further things surfaced from the same report and are fixed with it: a pass that changes no *field* but
+replaces a stale `mapping` record now reports that write (`refreshed`, **MAP-12**), and the dialog now
+states which rules a re-map will **never** apply (`type`/`source_ref`, **MAP-9**) — the other reason an
+operator sees "I added a rule and nothing changed". Read from the *candidate* config, since the dialog
+exists for rules that are not saved yet.
+
+AC:
+24. Preview: `intent=apply` renders a per-target dry run from a read of the real candidates (how many rows
+    the rule would change, and how many it produced nothing for, by reason) and writes nothing — no alert
+    field, no `updated_at`, no `ingestion_warnings`; the numbers come from the same decision function the
+    write path uses, so a rerun's counts match what it then writes.
+25. Unreadable rules: a pass whose outcome is "no field changed" names every target whose rule produced no
+    value and the reason, in the flash message; the audit row records the refreshed-count as well.
+26. Never-applied rules: the confirmation dialog names any `type`/`source_ref` rule in the candidate config
+    as one that only applies to newly ingested alerts, before the operator confirms.
+
+**Implemented 2026-10-16** — `ingest/mapping.py` (`UNRESOLVED_REASONS`, `REASON_LABELS`),
+`ingest/remap.py` (`RemapResult.refreshed`/`unresolved`/`touched`, `preview_alerts` + `RemapPreview`,
+`_evaluate` shared by both passes, `_refresh_record`/`_record_is_current`), `ui/views.py`
+(`_unresolved_lines`, the flash/audit half, `apply_ignored_rules` from the candidate config),
+`ui/templatetags/ui_tags.py` (`reason_label`, `is_unresolved`), `ui/templates/ui/_mapping_resolution.html`
++ its two includes, and the extended `_source_remap_confirm_body.html`. Deviation **MAP-12** recorded in
+`docs/spec/deviations.md`. Evidence: `test_mapping_remap.py` (25 cases), `test_settings_source_mapping.py`
+(48 cases), `test_ui_loop.py` (28 cases), `test_ui_markdown.py` (31, incl. `MappingResolutionRenderingTests`)
+— full suite 2340 passed / 3 skipped, `make check` green.
+
+**Not fixed, deliberately:** the rule itself. A `$.severity` path against a 0-100 score needs
+`severity_name` (the vendor's `severity_name` field) or `severity_score` (the numeric bands) — that is a
+config edit for the operator, in the editor this phase now gives feedback in, not a code change. Naming
+the failure is this wave's job; choosing the rule is theirs.
+
 
 ## 9. Security
 

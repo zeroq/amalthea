@@ -1,0 +1,39 @@
+{% comment %}
+The structured half of an alert's (or case's) ingestion warnings: `ingestion_warnings["mapping"]` — one
+entry per rule that failed to produce a value, written by `ingest/pipeline.py` at ingest and *replaced*
+by `ingest/remap.py` on every re-map (P7.1).
+
+Rendered next to the append-only `warnings` log because the two answer different questions and only the
+difference makes them readable:
+
+* this block describes the row **now** — fix the rule and re-apply, and the entry disappears;
+* the log is the row's **history** — the ingest-time `severity_defaulted: no severity mapping …` line
+  stays forever, because it was true when it was written.
+
+Without this block the only visible line was that historical one, so a rule that resolved nothing looked
+exactly like a rule that worked. Callers pass `mapping`:
+  {% include "ui/_mapping_resolution.html" with mapping=alert.ingestion_warnings.mapping %}
+
+No new CSS: `warns` is the list style the plain warnings already use, and the markers are text (`no value`)
+rather than colour alone (WCAG 1.4.1). Contains no inline `<script>`/`<style>` (ADR-003).
+{% endcomment %}
+{% load ui_tags %}
+{% if mapping %}
+  <h3>Mapping resolution</h3>
+  <ul class="warns">
+    {% for warning in mapping %}
+      <li>
+        <span class="mono">{{ warning.field }}</span>:
+        {% if warning.reason|is_unresolved %}<strong>no value</strong>{% endif %}
+        {{ warning.reason|reason_label }}
+        {% if warning.paths %}<span class="mono dim">{{ warning.paths|join:", " }}</span>{% endif %}
+        {% if warning.value_preview %}<span class="mono dim">saw "{{ warning.value_preview }}"</span>{% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+  <p class="hint">
+    Recorded when this record was ingested or last re-mapped by its feed. A line here means the feed's
+    saved rule for that field produced nothing, so the field fell back to its default (or kept its stored
+    value). Fix the rule, save, and use <em>Apply to unlinked alerts…</em> to rewrite the rows it affects.
+  </p>
+{% endif %}

@@ -102,6 +102,7 @@
 
     <div class="case-actions">
       <button class="btn btn-primary" type="submit">Save mapping</button>
+      <button class="btn" type="submit" name="intent" value="apply">Apply to unlinked alerts…</button>
       <span class="hint">
         {{ rule_count }} rule{{ rule_count|pluralize }} stored. An empty row removes that rule; a
         completely empty table clears the mapping and restores the literal-key fallback.
@@ -189,6 +190,7 @@
               aria-describedby="mapping-json-hint">{{ mapping_json_text }}</textarea>
     <div class="case-actions">
       <button class="btn btn-primary" type="submit">Save JSON</button>
+      <button class="btn" type="submit" name="intent" value="apply">Apply to unlinked alerts…</button>
       <span class="hint" id="mapping-json-hint">
         Use <span class="mono">{}</span> to clear the mapping. One object, two views: saving here is the
         same store the table above writes.
@@ -201,4 +203,15 @@
     (or <code>Authorization: Bearer</code>) and the token decides the mapping and the organisation.
   </p>
 </div>
+
+{% comment %}
+The "apply to existing alerts" confirmation. It exists only on the render produced by an `intent=apply`
+POST, so a GET can never present a confirm control for a write nobody asked for, and the dialog is
+autoopened because the operator's click was the request for it (the same shape as the show-once token
+dialog). Writing it as a `<dialog>` rather than a native `confirm()` is the repo rule.
+{% endcomment %}
+{% if apply_pending %}
+  {% url 'ui-settings-source-detail' source.id as apply_confirm_url %}
+  {% include "ui/_modal.html" with modal_id="mapping-apply-modal" body_template="ui/_source_remap_confirm_body.html" title="Apply this mapping to existing alerts?" confirm_text="Save & re-map" confirm_class="btn-primary" cancel_text="Cancel" form_action=apply_confirm_url extra_fields=apply_confirm_fields confirm_disabled=apply_confirm_disabled autoopen=True size="md" %}
+{% endif %}
 {% endblock %}

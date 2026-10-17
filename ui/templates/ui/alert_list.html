@@ -14,10 +14,6 @@
 {% endblock %}
 
 {% block content %}
-<p class="hint">
-  <kbd>a</kbd> alerts · <kbd>c</kbd> cases · <kbd>r</kbd> automation · <kbd>?</kbd> keys
-</p>
-
 {% if alerts %}
   <div class="table-wrap">
   <table class="data-table">
@@ -25,7 +21,7 @@
     <thead>
       <tr>
         <th scope="col">Severity</th><th scope="col">Title</th><th scope="col">Type</th>
-        <th scope="col">Source</th><th scope="col">Ref</th><th scope="col">Seen</th>
+        <th scope="col">Source</th><th scope="col">Seen</th>
         <th scope="col">State</th>
       </tr>
     </thead>
@@ -36,7 +32,6 @@
           <td><a href="{% url 'ui-alert-detail' alert.id %}">{{ alert.title }}</a></td>
           <td class="mono">{{ alert.type }}</td>
           <td class="mono">{{ alert.source }}{% if alert.ingestion_source %} <span class="dim">({{ alert.ingestion_source.slug }})</span>{% endif %}</td>
-          <td class="mono dim">{{ alert.source_ref|default:"—" }}</td>
           <td class="mono dim">{{ alert.date|date:"Y-m-d H:i" }}</td>
           <td>
             {% if alert.case %}

@@ -611,3 +611,37 @@ def _create_alert_directly(org=None) -> Alert:
         raw_payload={"title": "Directly created"},
         owner_org=org,
     )
+
+
+def test_the_alert_page_explains_why_a_mapped_field_fell_back(
+    browser: Client, default_org: Organisation
+) -> None:
+    """P7.1, MAP-12 — the alert page renders the *live* mapping record, not only the event log.
+
+    The state this reproduces is the one that made a re-map look broken: the ingest-time
+    `severity_defaulted` line is in the log forever (it was true when written), and the alert's severity
+    never moved because the feed's rule produced the wrong type. Showing only the log meant the page said
+    the same thing before and after the rule was fixed; showing the record is what makes the difference
+    visible — including the value the transform actually saw.
+    """
+    alert = _create_alert_directly(default_org)
+    alert.ingestion_warnings = {
+        "mapping": [
+            {
+                "field": "severity",
+                "reason": "bad_type",
+                "paths": ["$.severity"],
+                "value_preview": "70",
+            }
+        ],
+        "warnings": ["severity_defaulted: no severity mapping; defaulted to 2"],
+    }
+    alert.save(update_fields=["ingestion_warnings"])
+
+    body = browser.get(reverse("ui-alert-detail", kwargs={"alert_id": alert.id})).content.decode()
+
+    assert "Mapping resolution" in body
+    assert "a value of the wrong type" in body
+    assert "$.severity" in body
+    assert "70" in body
+    assert "severity_defaulted: no severity mapping; defaulted to 2" in body

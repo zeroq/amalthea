@@ -127,6 +127,18 @@ feed's mapping writes `record_ingestion_source_updated`
 whose value changed, never the values) — a `superAdmin` edit of a foreign feed is therefore visible as
 `actor_org` ≠ `target_org`; a no-op save writes nothing at all (AC12).
 
+Re-applying a feed's mapping to its existing alerts ("Save & apply") writes a second, distinct row:
+`record_ingestion_source_mapping_applied` (`action="ingestion_source.mapping_applied"`, same target
+fields, `details={"changed": [...], "alerts": {"candidates": n, "updated": m, "unchanged": k,
+"refreshed": r}}`) — the config half is the same dot-path list, the alert half is counts. Two rows because
+they are two facts: a bulk rewrite of N alerts is not the same blast radius as a rule edit, and the row
+that says `updated` > 0 is the one an operator asks about when a severity moves under them months later.
+`refreshed` is the sub-count of `unchanged` rows whose `mapping` record was still rewritten (**MAP-12**),
+recorded so "0 updated, 19 unchanged" cannot be misread as "nothing happened" when nineteen rows moved.
+Neither row contains a config *value* (MAP-7) nor an alert id — the alerts carry their own outcome in
+`ingestion_warnings`. The edit row is emitted only when the stored config actually changed, so
+"apply again unchanged" is one row, not two.
+
 **End-to-end:** A token minted in the UI works immediately for `POST /api/v1/alerts/webhook/`
 with `X-Webhook-Secret`; a revoked token returns **401**.
 

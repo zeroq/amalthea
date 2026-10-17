@@ -3998,7 +3998,7 @@ def settings_source_detail(request: HttpRequest, source_id) -> HttpResponse:
         return render(request, "ui/404.html", status=404)
 
     if request.method == "POST":
-        return _save_source_mapping(request, source)
+        return _source_mapping_post(request, source)
 
     from identity.audit import maybe_record_cross_org_read
 
@@ -4026,15 +4026,22 @@ def _source_detail_context(
     errors: dict[str, tuple[str, ...]] | None = None,
     failed_form: str = "",
     json_text: str | None = None,
+    apply_pending: object | None = None,
+    pending_config_json: str | None = None,
 ) -> dict:
     """Everything the source page renders, for both the GET and a rejected POST.
 
     One builder for both, so a form that re-renders after an error cannot drift from the page the
     operator was looking at: `submitted` replaces the stored config in the table's rows and `errors`
     lands on the row that caused it (`ingest/editor.py`).
+
+    `apply_pending` (a `RemapSummary`) is the confirmation dialog's half of the same page: it is set by
+    the `intent=apply` POST, which is the only render in which the dialog exists at all — so a page
+    reached by GET can never show a confirm control for a write nobody asked for.
     """
-    from ingest.editor import editor_rows, transforms_for_editor
+    from ingest.editor import TARGET_LABELS, editor_rows, transforms_for_editor
     from ingest.mapping import config_shape, read_rules
+    from ingest.remap import MAX_REMAP_ALERTS, REMAP_FIELDS
 
     errors = errors or {}
     return {
@@ -4059,6 +4066,32 @@ def _source_detail_context(
         .order_by("-created_at"),
         "alert_count": Alert.objects.filter(ingestion_source=source).count(),
         "is_superadmin": request.user.role == "superAdmin",
+        # --- P7: the "apply to existing alerts" confirmation dialog -------------------------------
+        "apply_pending": apply_pending,
+        "apply_confirm_fields": (
+            {"intent": "apply_confirmed", "pending_config": pending_config_json or "{}"}
+            if apply_pending is not None
+            else None
+        ),
+        # Over the cap the dialog still opens — but its confirm control is disabled (server-side) and
+        # nothing is written. A "save & apply" that quietly drops the apply half is the worse failure.
+        "apply_confirm_disabled": bool(apply_pending is not None and apply_pending.over_cap),
+        "apply_fields": [(target, TARGET_LABELS.get(target, target)) for target in REMAP_FIELDS],
+        # Rules for targets a re-map never rewrites (`type`, `source_ref` — MAP-9). The dialog names them,
+        # because "I added a ref mapping and nothing changed" is otherwise a puzzle: the rule is real, and
+        # it only ever applies to alerts ingested *after* it was saved.
+        #
+        # Read from the **candidate** config, not the stored one: the dialog exists precisely for rules
+        # that have not been saved yet, so a disclosure computed from the stored config would never fire
+        # on the one render where it is needed.
+        "apply_ignored_rules": [
+            (target, TARGET_LABELS.get(target, target), tuple(rule.get("paths") or ()))
+            for target, rule in read_rules(
+                json.loads(pending_config_json) if pending_config_json else source.mapping_config
+            ).items()
+            if target not in REMAP_FIELDS
+        ],
+        "remap_cap": MAX_REMAP_ALERTS,
     }
 
 
@@ -4076,6 +4109,93 @@ def _source_mapping_rows(request: HttpRequest) -> dict[str, dict[str, str]]:
     }
 
 
+def _source_mapping_post(request: HttpRequest, source) -> HttpResponse:
+    """Route one POST to the mapping page to the right half of it (P3 save, P7 apply).
+
+    `intent` is the discriminator, and its default is the *old* behaviour: the Save buttons carry no
+    `intent` at all, so every existing submission lands on the save path unchanged.
+    """
+    intent = request.POST.get("intent") or "save"
+    if intent == "apply":
+        # Validates and *counts*, then opens the confirmation dialog. Writes nothing at all.
+        return _confirm_mapping_apply(request, source)
+    if intent == "apply_confirmed":
+        return _apply_mapping_to_alerts(request, source)
+    return _save_source_mapping(request, source)
+
+
+def _submitted_mapping(request: HttpRequest, before: dict) -> tuple[str, dict | None, object]:
+    """Read whichever form was posted into a validated `EditorResult`.
+
+    `form=table|json` says which writer spoke; the table is rebuilt *from* the stored config so an
+    unsubmitted row keeps its rule, and the JSON box is parsed as-is (§7.4).
+    """
+    from ingest.editor import build_table_config, parse_json_config
+
+    which = "json" if request.POST.get("form") == "json" else "table"
+    submitted = None if which == "json" else _source_mapping_rows(request)
+    if which == "json":
+        result = parse_json_config(request.POST.get("mapping_json"))
+    else:
+        result = build_table_config(before, submitted)
+    return which, submitted, result
+
+
+def _reject_mapping(
+    request: HttpRequest,
+    source,
+    *,
+    which: str,
+    submitted: dict | None,
+    result: object,
+    json_text: str | None = None,
+) -> HttpResponse:
+    """The only rejection response: a 200 that re-renders the page *with the operator's input*.
+
+    A redirect would discard what they typed, which is the entire value of per-row errors (AC11/AC20).
+    """
+    return render(
+        request,
+        "ui/source_detail.html",
+        _base_context(
+            request,
+            **_source_detail_context(
+                request,
+                source,
+                submitted=submitted,
+                errors=result.errors,
+                failed_form=which,
+                json_text=json_text,
+            ),
+        ),
+    )
+
+
+def _persist_mapping(request: HttpRequest, source, before: dict, config: dict) -> None:
+    """Write the config and record the edit. The **caller** owns the transaction (P7 shares it)."""
+    from identity.audit import record_ingestion_source_updated
+    from ingest.editor import changed_keys
+
+    source.mapping_config = config
+    # `updated_at` is `auto_now`: its value is set on save, but an `update_fields` UPDATE writes only the
+    # columns it names, so the timestamp has to be named (AC12 reads it).
+    source.save(update_fields=["mapping_config", "updated_at"])
+    record_ingestion_source_updated(
+        request,
+        actor=request.user,
+        source=source,
+        changed_keys=changed_keys(before, config),
+    )
+
+
+def _mapping_saved_message(request: HttpRequest, config: dict) -> None:
+    rules = len(config.get("fields") or {}) if isinstance(config, dict) else 0
+    if rules:
+        messages.success(request, f"Mapping saved — {rules} rule{'' if rules == 1 else 's'}.")
+    else:
+        messages.success(request, "Mapping saved — no rules; payload literal keys are used.")
+
+
 def _save_source_mapping(request: HttpRequest, source) -> HttpResponse:
     """Persist one edit of a feed's `mapping_config` (P3, AC11-AC14).
 
@@ -4083,43 +4203,23 @@ def _save_source_mapping(request: HttpRequest, source) -> HttpResponse:
     carries exactly one of them (`form=table|json`) and the other half of the page keeps rendering the
     stored config — "one storage object, two views of it, never two writers" (plan §7.4).
 
-    A rejected save is a **200 that echoes the input**, not a redirect: a redirect would discard what
-    the operator typed, which is the whole value of per-row errors. Success is PRG, and an unchanged
-    submission is a no-op: no row write, no `updated_at` bump, no audit (AC12).
+    A rejected save is a **200 that echoes the input**; success is PRG; and an unchanged submission is a
+    no-op: no row write, no `updated_at` bump, no audit (AC12).
     """
     from django.db import transaction
 
-    from identity.audit import record_ingestion_source_updated
-    from ingest.editor import (
-        build_table_config,
-        changed_keys,
-        is_noop_save,
-        parse_json_config,
-    )
+    from ingest.editor import is_noop_save
 
     before = source.mapping_config or {}
-    which = "json" if request.POST.get("form") == "json" else "table"
-    submitted = None if which == "json" else _source_mapping_rows(request)
-    if which == "json":
-        result = parse_json_config(request.POST.get("mapping_json"))
-    else:
-        result = build_table_config(before, submitted)
-
+    which, submitted, result = _submitted_mapping(request, before)
     if not result.ok:
-        return render(
+        return _reject_mapping(
             request,
-            "ui/source_detail.html",
-            _base_context(
-                request,
-                **_source_detail_context(
-                    request,
-                    source,
-                    submitted=submitted,
-                    errors=result.errors,
-                    failed_form=which,
-                    json_text=request.POST.get("mapping_json") if which == "json" else None,
-                ),
-            ),
+            source,
+            which=which,
+            submitted=submitted,
+            result=result,
+            json_text=request.POST.get("mapping_json") if which == "json" else None,
         )
 
     if is_noop_save(before, result.config):
@@ -4127,23 +4227,152 @@ def _save_source_mapping(request: HttpRequest, source) -> HttpResponse:
         return redirect("ui-settings-source-detail", source_id=source.id)
 
     with transaction.atomic():
-        source.mapping_config = result.config
-        # `updated_at` is `auto_now`: its value is set on save, but an `update_fields` UPDATE writes
-        # only the columns it names, so the timestamp has to be named (AC12 reads it).
-        source.save(update_fields=["mapping_config", "updated_at"])
-        record_ingestion_source_updated(
+        _persist_mapping(request, source, before, result.config)
+
+    _mapping_saved_message(request, result.config)
+    return redirect("ui-settings-source-detail", source_id=source.id)
+
+
+def _confirm_mapping_apply(request: HttpRequest, source) -> HttpResponse:
+    """`intent=apply` — validate the submitted mapping, count the candidates, open the dialog (P7, AC20).
+
+    The whole point is what this does **not** do: no config write, no alert write, no audit row. The
+    operator asked to apply a mapping; they have not yet agreed to rewrite anything, so the page comes
+    back with the exact numbers and the exact field list and the *confirm* control carries the validated
+    config (a hidden `pending_config`) — not the table, which cannot be re-read across two requests.
+
+    The numbers come from a **dry pass over the real alerts** (`preview_alerts`), not from the rule table:
+    "19 alerts, these fields" is true and useless when a rule cannot read the payload, so each target is
+    reported with what it resolves and what it would change (P7.1, AC24). Reading is the whole cost; the
+    candidates are capped (`MAX_REMAP_ALERTS`), so this cannot walk an unbounded set.
+    """
+    from ingest.remap import preview_alerts
+
+    before = source.mapping_config or {}
+    which, submitted, result = _submitted_mapping(request, before)
+    if not result.ok:
+        return _reject_mapping(
+            request,
+            source,
+            which=which,
+            submitted=submitted,
+            result=result,
+            json_text=request.POST.get("mapping_json") if which == "json" else None,
+        )
+
+    return render(
+        request,
+        "ui/source_detail.html",
+        _base_context(
+            request,
+            **_source_detail_context(
+                request,
+                source,
+                # The page keeps rendering what is *stored* — this POST saved nothing — while the dialog
+                # carries the candidate config. Two different objects, deliberately not conflated.
+                apply_pending=preview_alerts(source, result.config),
+                pending_config_json=json.dumps(result.config, sort_keys=True),
+            ),
+        ),
+    )
+
+
+def _apply_mapping_to_alerts(request: HttpRequest, source) -> HttpResponse:
+    """`intent=apply_confirmed` — save the mapping and re-map the feed's unlinked open alerts (P7).
+
+    One transaction for both halves (AC22): the rules that produced the new values and the values
+    themselves commit together, so a feed can never end up stored one way and applied the other. The
+    config arrives back from the client and is therefore **re-validated** here — the same check the save
+    path runs, so the client cannot smuggle a config past the editor.
+
+    The result is reported in full, because "unchanged" is ambiguous: a row can keep its values and still
+    have needed a write (its `mapping` record was stale), and a *rule* can have produced nothing at all —
+    which is the only honest explanation for an operator whose new severity rule changed no severity
+    (P7.1, AC25).
+    """
+    from django.db import transaction
+
+    from identity.audit import record_ingestion_source_mapping_applied
+    from ingest.editor import changed_keys, is_noop_save, parse_json_config
+    from ingest.remap import MAX_REMAP_ALERTS, remap_alerts, summarise_candidates
+
+    pending = request.POST.get("pending_config")
+    result = parse_json_config(pending)
+    if not result.ok:
+        # Tampered or hand-edited between the two steps: same treatment as any rejected submission.
+        return _reject_mapping(
+            request, source, which="json", submitted=None, result=result, json_text=pending
+        )
+
+    summary = summarise_candidates(source)
+    if summary.over_cap:
+        # Only reachable when the candidate count grew between rendering the dialog and confirming it
+        # (the dialog disables its own confirm control over the cap). Refuse rather than write a partial
+        # pass, and let the operator see the new count by pressing Apply again.
+        messages.error(
+            request,
+            f"Not applied: this feed now has {summary.candidates} unlinked open alerts, over the "
+            f"{MAX_REMAP_ALERTS}-per-request limit. Narrow the feed or use the API.",
+        )
+        return redirect("ui-settings-source-detail", source_id=source.id)
+
+    before = source.mapping_config or {}
+    with transaction.atomic():
+        if not is_noop_save(before, result.config):
+            _persist_mapping(request, source, before, result.config)
+        counts = remap_alerts(source, result.config)
+        record_ingestion_source_mapping_applied(
             request,
             actor=request.user,
             source=source,
             changed_keys=changed_keys(before, result.config),
+            candidates=counts.candidates,
+            updated=counts.updated,
+            unchanged=counts.unchanged,
+            refreshed=counts.refreshed,
         )
 
-    rules = len(result.config.get("fields") or {}) if isinstance(result.config, dict) else 0
-    if rules:
-        messages.success(request, f"Mapping saved — {rules} rule{'' if rules == 1 else 's'}.")
+    _mapping_saved_message(request, result.config)
+    if counts.candidates:
+        messages.success(
+            request,
+            f"Re-applied to {counts.candidates} unlinked open alert"
+            f"{'' if counts.candidates == 1 else 's'}: {counts.updated} updated, "
+            f"{counts.unchanged} unchanged.",
+        )
+        if counts.touched:
+            messages.info(request, f"Fields written: {', '.join(counts.touched)}.")
+        if counts.refreshed:
+            messages.info(
+                request,
+                f"Rule state refreshed on {counts.refreshed} alert"
+                f"{'' if counts.refreshed == 1 else 's'} with no field values changed.",
+            )
+        for line in _unresolved_lines(counts.unresolved, counts.candidates):
+            messages.warning(request, line)
     else:
-        messages.success(request, "Mapping saved — no rules; payload literal keys are used.")
+        messages.info(request, "No unlinked open alerts to re-map.")
     return redirect("ui-settings-source-detail", source_id=source.id)
+
+
+def _unresolved_lines(unresolved: dict[str, dict[str, int]], candidates: int) -> list[str]:
+    """One line per target whose rule produced no value, for the flash message (P7.1, AC25).
+
+    The reason is named rather than counted, because it is the fix: `bad_type` on a 0-100 vendor score
+    means "you need the `severity_score` transform", and that is not something a bare "0 updated" can
+    ever say. Targets are listed in rule order and reasons alphabetically, so the message is stable
+    enough to assert on.
+    """
+    lines = []
+    for target in sorted(unresolved):
+        reasons = unresolved[target]
+        count = max(reasons.values())
+        named = ", ".join(f"{reason}" for reason in sorted(reasons))
+        lines.append(
+            f"{target}: the mapping produced no value on {count} of {candidates} "
+            f"alert{'' if candidates == 1 else 's'} ({named}) — those alerts keep what they have."
+        )
+    return lines
 
 
 @not_viewer

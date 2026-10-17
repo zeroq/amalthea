@@ -341,3 +341,85 @@ class CaseDetailMarkdownIntegrationTests(TestCase):
         self.assertIn("severity_defaulted:3", body)
         # Should be wrapped in .warns list
         self.assertIn('class="warns"', body)
+
+
+class MappingResolutionRenderingTests(TestCase):
+    """P7.1, MAP-12 — the *live* mapping record renders next to the append-only warnings log.
+
+    Two different facts, two different lifetimes, and the page has to show both or neither reads
+    correctly:
+
+    * `ingestion_warnings["mapping"]` describes the row **now** and is *replaced* on every re-map, so
+      fixing a rule and re-applying clears it;
+    * `ingestion_warnings["warnings"]` is the alert's event log and is only appended to, so the
+      ingest-time fallback line stays forever.
+
+    Before this, only the second was rendered — which meant a stale `severity_defaulted` line was the only
+    visible evidence, and it looked identical whether the rule had since been fixed or was still broken.
+    """
+
+    def setUp(self) -> None:
+        self.org = Organisation.objects.create(name="Mapping Org")
+        self.user = User.objects.create(
+            login="mapping-admin", username="mapping-admin", org=self.org, role="admin"
+        )
+        self.case = Case.objects.create(
+            title="Case with a stale mapping",
+            status=CaseStatus.objects.get(value="New"),
+            owner_org=self.org,
+            description="",
+            ingestion_warnings={
+                "mapping": [
+                    {
+                        "field": "severity",
+                        "reason": "bad_type",
+                        "paths": ["$.severity"],
+                        "value_preview": "70",
+                    },
+                    {"field": "title", "reason": "not_found", "paths": ["$.name"]},
+                ],
+                "warnings": ["severity_defaulted: no severity mapping; defaulted to 2"],
+            },
+        )
+
+    def test_the_case_page_renders_the_live_mapping_record(self) -> None:
+        client = self.client_class()
+        client.force_login(self.user)
+
+        body = client.get(
+            reverse("ui-case-detail", kwargs={"case_id": str(self.case.number)})
+        ).content.decode()
+
+        assert "Mapping resolution" in body
+        # The reason is spelled out (the token alone is the engine's vocabulary, not an explanation), and
+        # the path and the offending value are kept: they are what the operator fixes the rule with.
+        assert "severity" in body
+        assert "a value of the wrong type" in body
+        assert "$.severity" in body
+        assert "70" in body
+        assert "nothing at the configured path" in body
+
+    def test_the_historical_log_is_still_rendered_underneath(self) -> None:
+        """Replacing the live record must not hide the log: the ingest-time line is still a fact."""
+        client = self.client_class()
+        client.force_login(self.user)
+
+        body = client.get(
+            reverse("ui-case-detail", kwargs={"case_id": str(self.case.number)})
+        ).content.decode()
+
+        assert "Ingestion warnings" in body
+        assert "severity_defaulted: no severity mapping; defaulted to 2" in body
+
+    def test_a_case_with_no_mapping_record_renders_no_empty_block(self) -> None:
+        self.case.ingestion_warnings = {"warnings": ["source_ref_synthesised: digest"]}
+        self.case.save(update_fields=["ingestion_warnings"])
+        client = self.client_class()
+        client.force_login(self.user)
+
+        body = client.get(
+            reverse("ui-case-detail", kwargs={"case_id": str(self.case.number)})
+        ).content.decode()
+
+        assert "Mapping resolution" not in body
+        assert "severity_defaulted" not in body

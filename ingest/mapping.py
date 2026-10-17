@@ -226,6 +226,29 @@ class FieldWarning:
         return f"{self.target}_{self.reason}: {paths}"
 
 
+#: The reasons that mean "the rule produced **no** value", as opposed to `truncated`, which means it
+#: produced one and shortened it. One set, because two callers count exactly these: the re-map's
+#: result message ("severity produced no value on 19 of 19 alerts") and the alert page's badge.
+#:
+#: `not_found` is the honest "nothing at those paths"; `bad_type`/`unknown_value`/`bad_transform` are
+#: "the value was there but the transform could not read it" — the difference an operator needs, because
+#: only the second group usually means the *transform* is wrong (`severity` given a 0-100 score with no
+#: `severity_score` transform is the one this distinction was added for).
+UNRESOLVED_REASONS: Final[frozenset[str]] = frozenset(
+    {"not_found", "unknown_value", "bad_type", "bad_transform"}
+)
+
+#: Wording per reason, for the UI. The engine keeps its tokens (they are stored and asserted); the
+#: sentence belongs to presentation, and every surface that renders a `mapping` entry wants the same one.
+REASON_LABELS: Final[dict[str, str]] = {
+    "not_found": "nothing at the configured path",
+    "unknown_value": "a value the transform does not recognise",
+    "bad_type": "a value of the wrong type",
+    "bad_transform": "a transform that could not run",
+    "truncated": "a value shortened to fit the column",
+}
+
+
 @dataclass(frozen=True)
 class AlertDraft:
     """What the payload said, resolved against one source's rules. Pure data."""

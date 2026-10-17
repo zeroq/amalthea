@@ -280,3 +280,50 @@ def record_ingestion_source_updated(
         details={"changed": list(changed_keys)},
         ip=_get_client_ip(request),
     )
+
+
+def record_ingestion_source_mapping_applied(
+    request: HttpRequest,
+    *,
+    actor: User,
+    source: IngestionSource,
+    changed_keys: list[str],
+    candidates: int,
+    updated: int,
+    unchanged: int,
+    refreshed: int,
+) -> None:
+    """Record one re-apply of a feed's mapping to its existing alerts (PLAN-2026-10-16 §8 P7, AC22).
+
+    A **bulk write** needs its own row, even when it rides along with a mapping edit: "the rules changed"
+    and "37 alerts were rewritten" are different facts with different blast radii, and the second one is
+    the one an operator asks about when a severity moves under them months later.
+
+    `changed_keys` is the config half (dot-paths into the config, never values — MAP-7); the counts are
+    the alert half. No alert ids: a rewrite of 5000 rows is an operation, not 5000 operations, and the
+    alerts themselves carry the outcome (`ingestion_warnings`).
+
+    `refreshed` is the sub-count of `unchanged` rows that were still written to — values kept, `mapping`
+    record brought up to date (P7.1, MAP-12). It is recorded because "0 updated, 19 unchanged" alone
+    reads as "nothing happened", and 19 rows really moved.
+    """
+    from identity.models import AuditLog
+
+    AuditLog.objects.create(
+        actor=actor,
+        actor_org=getattr(actor, "org", None),
+        target_org=source.organisation,
+        action="ingestion_source.mapping_applied",
+        target_type="IngestionSource",
+        target_id=str(source.id),
+        details={
+            "changed": list(changed_keys),
+            "alerts": {
+                "candidates": candidates,
+                "updated": updated,
+                "unchanged": unchanged,
+                "refreshed": refreshed,
+            },
+        },
+        ip=_get_client_ip(request),
+    )

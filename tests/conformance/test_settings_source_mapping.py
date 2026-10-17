@@ -21,7 +21,9 @@ be deleted, and `organisation_blockers` names the reason instead of leaving a ba
 
 from __future__ import annotations
 
+import html
 import json
+import re
 import uuid
 from types import SimpleNamespace
 
@@ -34,6 +36,7 @@ from django.db.models.deletion import ProtectedError
 from django.test import Client
 from django.urls import reverse
 
+from alerts.models import Alert
 from identity.models import AuditLog, IngestionToken, Organisation, User
 from identity.services import organisation_blockers
 from ingest.models import IngestionSource
@@ -754,3 +757,391 @@ class TestTheEditorGatesHoldOnPost(_FeedFixture):
         log = AuditLog.objects.get(action="ingestion_source.updated")
         assert log.actor_org_id == home.pk
         assert log.target_org_id == source.organisation_id
+
+
+# --- P7: the "apply to unlinked open alerts" button ------------------------------------------
+
+#: The mapping the apply tests save — two rules, so the config diff is visible on both halves.
+APPLY_MAPPING = {
+    "version": 2,
+    "fields": {"title": {"paths": ["$.name"]}},
+}
+
+
+def _mk_open_alert(
+    source: IngestionSource, *, source_ref: str, title: str = "Before", severity: int = 2
+):
+    """One *unlinked open* alert of a feed — the input a re-map is allowed to rewrite.
+
+    Built through the ORM so these tests do not depend on the webhook, and so the candidate predicate
+    is the only thing under test here (its exclusions are covered in `test_mapping_remap.py`).
+    """
+    from alerts.models import AlertStatus
+
+    status, _ = AlertStatus.objects.get_or_create(value="New", defaults={"stage": "New"})
+    return Alert.objects.create(
+        title=title,
+        description="",
+        summary="",
+        severity=severity,
+        type="phishing",
+        source="sender-name",
+        source_ref=source_ref,
+        status=status,
+        raw_payload={"name": "Renamed by the new rules"},
+        ingestion_source=source,
+        owner_org=source.organisation,
+    )
+
+
+def _pending_config(body: str) -> str:
+    """Read the confirm dialog's hidden `pending_config` out of the rendered page.
+
+    The dialog hands the config back through the page rather than through a session (the P3 rule: one
+    storage object, two views of it), so the value really is in the HTML and really is what the second
+    request carries.
+    """
+    match = re.search(r'name="pending_config" value="([^"]*)"', body)
+    assert match, "the confirmation dialog must carry `pending_config`"
+    return html.unescape(match.group(1))
+
+
+class TestApplyingTheMappingToExistingAlerts(_FeedFixture):
+    """P7, AC20-AC23 — "Save & apply" is two steps, and the first step writes nothing."""
+
+    def _client(self, feed):
+        _, admin, source = feed
+        return _ui_client(admin), source
+
+    def test_both_cards_offer_the_apply_button(self, feed) -> None:
+        client, source = feed and self._client(feed)
+
+        body = client.get(self._url(source)).content.decode()
+
+        assert body.count('name="intent" value="apply"') == 2, "one per writer (table, JSON)"
+
+    def test_the_apply_intent_writes_nothing_at_all(self, feed) -> None:
+        """AC20 — the first step validates and *counts*. No mapping, no alerts, no audit."""
+        client, source = self._client(feed)
+        alert = _mk_open_alert(source, source_ref="keep", title="Before")
+        updated_before = source.updated_at
+
+        response = client.post(
+            self._url(source), {**_table_post(title=("$.name", "str", "")), "intent": "apply"}
+        )
+
+        assert response.status_code == 200
+        body = response.content.decode()
+        assert "mapping-apply-modal" in body
+        assert "Apply this mapping to existing alerts?" in body
+        source.refresh_from_db()
+        alert.refresh_from_db()
+        assert source.mapping_config == MAPPING
+        assert source.updated_at == updated_before
+        assert alert.title == "Before"
+        assert not AuditLog.objects.exists()
+
+    def test_the_confirm_step_saves_and_remaps_and_audits(self, feed) -> None:
+        """AC21 — one transaction: the rules that were saved are the rules that were applied."""
+        client, source = self._client(feed)
+        alert = _mk_open_alert(source, source_ref="apply-me", title="Before")
+
+        preview = client.post(
+            self._url(source), {**_table_post(title=("$.name", "str", "")), "intent": "apply"}
+        )
+        assert "1 unlinked open alert" in preview.content.decode()
+
+        response = client.post(
+            self._url(source),
+            {
+                "intent": "apply_confirmed",
+                "pending_config": _pending_config(preview.content.decode()),
+            },
+            follow=True,
+        )
+
+        assert response.status_code == 200
+        source.refresh_from_db()
+        alert.refresh_from_db()
+        assert source.mapping_config == APPLY_MAPPING
+        assert alert.title == "Renamed by the new rules"
+        assert alert.severity == 2, "a field the mapping does not answer is left readable"
+
+        applied = AuditLog.objects.get(action="ingestion_source.mapping_applied")
+        # `refreshed` is a sub-count of `unchanged`: this row's fields changed, so it is 0 here. It is
+        # recorded on every apply because "0 updated, 19 unchanged" alone reads as "nothing happened"
+        # even when 19 records were rewritten (MAP-12).
+        assert applied.details["alerts"] == {
+            "candidates": 1,
+            "updated": 1,
+            "unchanged": 0,
+            "refreshed": 0,
+        }
+        assert applied.details["changed"], "the config half of the row names the changed keys"
+        assert applied.target_id == str(source.id)
+
+    def test_a_tampered_pending_config_is_rejected_like_any_other_bad_config(self, feed) -> None:
+        """The config comes back through the client, so it is validated again — not trusted."""
+        client, source = self._client(feed)
+        alert = _mk_open_alert(source, source_ref="tampered", title="Before")
+
+        response = client.post(
+            self._url(source),
+            {
+                "intent": "apply_confirmed",
+                "pending_config": json.dumps(
+                    {"version": 2, "fields": {"title": {"paths": ["name"]}}}
+                ),
+            },
+        )
+
+        assert response.status_code == 200
+        assert "must start with $" in response.content.decode()
+        source.refresh_from_db()
+        alert.refresh_from_db()
+        assert source.mapping_config == MAPPING
+        assert alert.title == "Before"
+        assert not AuditLog.objects.exists()
+
+    def test_over_the_cap_the_dialog_disables_its_confirm(self, feed, monkeypatch) -> None:
+        """AC21 — a "save & apply" that drops the apply half is worse than a refusal."""
+        from ingest import remap
+
+        client, source = self._client(feed)
+        monkeypatch.setattr(remap, "MAX_REMAP_ALERTS", 1)
+        _mk_open_alert(source, source_ref="one")
+        _mk_open_alert(source, source_ref="two")
+
+        response = client.post(
+            self._url(source), {**_table_post(title=("$.name", "str", "")), "intent": "apply"}
+        )
+
+        body = response.content.decode()
+        assert response.status_code == 200
+        assert "Nothing will be changed" in body or "over the" in body
+        assert "disabled" in body, (
+            "the confirm control must be disabled server-side, not just hidden"
+        )
+
+        follow = client.post(
+            self._url(source),
+            {"intent": "apply_confirmed", "pending_config": _pending_config(body)},
+            follow=True,
+        )
+        assert follow.status_code == 200
+        source.refresh_from_db()
+        assert source.mapping_config == MAPPING, (
+            "nothing is written over the cap, not even the config"
+        )
+        assert not AuditLog.objects.exists()
+
+    def test_an_unchanged_mapping_still_remaps_but_only_audits_the_apply(self, feed) -> None:
+        """AC12 holds under P7: re-posting the stored config is not an edit — yet the alerts move."""
+        client, source = self._client(feed)
+        alert = _mk_open_alert(source, source_ref="already-stored", title="Before")
+        source.mapping_config = APPLY_MAPPING
+        source.save(update_fields=["mapping_config"])
+
+        response = client.post(
+            self._url(source),
+            {
+                "intent": "apply_confirmed",
+                "pending_config": json.dumps(APPLY_MAPPING, sort_keys=True),
+            },
+            follow=True,
+        )
+
+        assert response.status_code == 200
+        alert.refresh_from_db()
+        assert alert.title == "Renamed by the new rules"
+        assert not AuditLog.objects.filter(action="ingestion_source.updated").exists()
+        applied = AuditLog.objects.get(action="ingestion_source.mapping_applied")
+        assert applied.details["changed"] == []
+
+    def test_an_outsider_cannot_apply_across_orgs(self, feed) -> None:
+        """AC23 — the apply path is gated exactly like the read path (ADR-006 + ADR-009)."""
+        _, _, source = feed
+        outsider = _mk_user("apply-outsider", _mk_org("Other Org"), role="admin")
+        alert = _mk_open_alert(source, source_ref="outsider", title="Before")
+
+        response = _ui_client(outsider).post(
+            self._url(source),
+            {"intent": "apply_confirmed", "pending_config": json.dumps(APPLY_MAPPING)},
+        )
+
+        assert response.status_code == 404
+        alert.refresh_from_db()
+        assert alert.title == "Before"
+        assert not AuditLog.objects.exists()
+
+    def test_an_analyst_reaches_neither_the_button_nor_the_post(self, feed) -> None:
+        """AC21 — the button is the same gate as the page: uniform 404, before any config is read."""
+        org, _, source = feed
+        analyst = _mk_user("apply-analyst", org, role="analyst")
+
+        get = _ui_client(analyst).get(self._url(source))
+        post = _ui_client(analyst).post(
+            self._url(source), {**_table_post(title=("$.name", "str", "")), "intent": "apply"}
+        )
+
+        assert get.status_code == 404
+        assert post.status_code == 404
+        source.refresh_from_db()
+        assert source.mapping_config == MAPPING
+        assert not AuditLog.objects.exists()
+
+    def test_a_superadmins_cross_org_apply_is_audited_with_both_orgs(self, feed) -> None:
+        """ADR-004 Q5 — the break-glass path is never silent, on either half of the operation."""
+        _, _, source = feed
+        home = _mk_org("Super Org")
+        superadmin = _mk_user("apply-super", home, role="superAdmin")
+        _mk_open_alert(source, source_ref="super-seen", title="Before")
+
+        preview = _ui_client(superadmin).post(
+            self._url(source), {**_table_post(title=("$.name", "str", "")), "intent": "apply"}
+        )
+        response = _ui_client(superadmin).post(
+            self._url(source),
+            {
+                "intent": "apply_confirmed",
+                "pending_config": _pending_config(preview.content.decode()),
+            },
+            follow=True,
+        )
+
+        assert response.status_code == 200
+        applied = AuditLog.objects.get(action="ingestion_source.mapping_applied")
+        assert applied.actor_org_id == home.pk
+        assert applied.target_org_id == source.organisation_id
+
+    def test_with_no_candidates_the_mapping_is_saved_and_the_flash_says_so(self, feed) -> None:
+        """AC23 — "apply" never means "I refuse to save": zero alerts is a success, not an error."""
+        client, source = self._client(feed)
+
+        preview = client.post(
+            self._url(source), {**_table_post(title=("$.name", "str", "")), "intent": "apply"}
+        )
+        body = preview.content.decode()
+        assert "there is nothing to re-apply it to" in body
+
+        response = client.post(
+            self._url(source),
+            {"intent": "apply_confirmed", "pending_config": _pending_config(body)},
+            follow=True,
+        )
+
+        assert response.status_code == 200
+        source.refresh_from_db()
+        assert source.mapping_config == APPLY_MAPPING
+        assert "No unlinked open alerts to re-map." in response.content.decode()
+
+    # --- P7.1 (MAP-12, AC24/AC25/AC26) — the dialog explains what a pass would do, and what it cannot.
+
+    def test_the_confirm_dialog_shows_a_dry_run_per_field(self, feed) -> None:
+        """AC24 — the numbers come from a read of the real alerts, not from the rule table.
+
+        `_table_post(title=…)` leaves every other row empty, so the field under test is the only one with
+        a rule: `title` would be rewritten and `severity` has no rule at all. Both halves matter, and the
+        one an operator cannot get from "N alerts" is the second.
+        """
+        client, source = self._client(feed)
+        _mk_open_alert(source, source_ref="previewed", title="Before")
+
+        response = client.post(
+            self._url(source), {**_table_post(title=("$.name", "str", "")), "intent": "apply"}
+        )
+
+        body = response.content.decode()
+        assert response.status_code == 200
+        assert "Would change" in body
+        assert "Produced no value" in body
+        # `title`: the payload answers `$.name` and the alert stores "Before", so exactly one row moves.
+        assert "1 of 1" in body
+        # `severity`: no rule, so the engine falls back to the feed default and records why. This is the
+        # line that turns a silent no-op into a diagnosis.
+        assert "nothing at the configured path" in body
+
+    def test_the_flash_names_the_rule_that_produced_no_value(self, feed) -> None:
+        """AC25 — "0 updated, 1 unchanged" is not a result the operator can act on; the reason is."""
+        client, source = self._client(feed)
+        _mk_open_alert(source, source_ref="unreadable", title="Before")
+
+        preview = client.post(
+            self._url(source), {**_table_post(title=("$.name", "str", "")), "intent": "apply"}
+        )
+        response = client.post(
+            self._url(source),
+            {
+                "intent": "apply_confirmed",
+                "pending_config": _pending_config(preview.content.decode()),
+            },
+            follow=True,
+        )
+
+        body = response.content.decode()
+        assert response.status_code == 200
+        assert "severity: the mapping produced no value on 1 of 1 alert (not_found)" in body
+
+    def test_the_flash_says_the_record_moved_when_only_the_record_moved(self, feed) -> None:
+        """MAP-12 — a pass that rewrote the alert's `mapping` record must not be reported as a no-op."""
+        client, source = self._client(feed)
+        alert = _mk_open_alert(source, source_ref="record-only", title="Renamed by the new rules")
+        Alert.objects.filter(pk=alert.pk).update(
+            ingestion_warnings={
+                "mapping": [{"field": "title", "reason": "not_found"}],
+                "warnings": ["severity_defaulted: $.severity → 2"],
+            }
+        )
+
+        preview = client.post(
+            self._url(source), {**_table_post(title=("$.name", "str", "")), "intent": "apply"}
+        )
+        response = client.post(
+            self._url(source),
+            {
+                "intent": "apply_confirmed",
+                "pending_config": _pending_config(preview.content.decode()),
+            },
+            follow=True,
+        )
+
+        body = response.content.decode()
+        alert.refresh_from_db()
+        assert response.status_code == 200
+        assert alert.title == "Renamed by the new rules", "the values were already correct"
+        assert "Re-applied to 1 unlinked open alert: 0 updated, 1 unchanged." in body
+        assert "Rule state refreshed on 1 alert with no field values changed." in body
+        # The stale `title` entry is replaced by the *live* state of this config: it has no severity rule,
+        # so severity is the one thing left unresolved, and saying so is the point of the whole change.
+        assert alert.ingestion_warnings["mapping"] == [{"field": "severity", "reason": "not_found"}]
+        assert alert.ingestion_warnings["warnings"] == ["severity_defaulted: $.severity → 2"]
+        applied = AuditLog.objects.get(action="ingestion_source.mapping_applied")
+        assert applied.details["alerts"]["refreshed"] == 1
+
+    def test_the_dialog_names_the_rules_a_remap_never_reapplies(self, feed) -> None:
+        """AC26 — a `source_ref` rule is stored, works for new alerts, and is never applied to old ones.
+
+        That is a real limitation (MAP-9, the dedupe/replay key), and an operator who adds a reference
+        mapping and sees no change on existing alerts must be told so *before* confirming, not left to
+        infer it from a count.
+        """
+        client, source = self._client(feed)
+        _mk_open_alert(source, source_ref="old-row", title="Before")
+
+        response = client.post(
+            self._url(source),
+            {
+                **_table_post(
+                    title=("$.name", "str", ""),
+                    source_ref=("$.falcon_host_link", "str", ""),
+                ),
+                "intent": "apply",
+            },
+        )
+
+        body = response.content.decode()
+        assert response.status_code == 200
+        assert "Not re-applied at all" in body
+        assert "these are the alert's identity" in body
+        # The rule is real and the operator must be able to see what it was, not just that it was skipped.
+        assert "$.falcon_host_link" in body

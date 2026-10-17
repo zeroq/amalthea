@@ -42,6 +42,8 @@
       <pre class="body">{{ alert.summary|default:alert.description }}</pre>
     {% endif %}
 
+    {% include "ui/_mapping_resolution.html" with mapping=alert.ingestion_warnings.mapping %}
+
     {% if alert.ingestion_warnings.warnings %}
       <h3>Ingestion warnings</h3>
       <ul class="warns">

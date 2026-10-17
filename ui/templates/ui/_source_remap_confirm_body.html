@@ -1,0 +1,102 @@
+{% comment %}
+Body of the "Apply this mapping to existing alerts?" confirmation modal (P7, extended in P7.1).
+
+Server-rendered, and deliberately explicit about both halves of the operation: the mapping is saved
+*and* the alerts are rewritten, the candidate set is stated in numbers rather than as "some alerts", and
+what is left alone is spelled out — an operator cannot make an informed decision about a bulk write they
+cannot see the shape of. Since P7.1 the numbers come from a **dry pass over the real alerts**: per target
+what the mapping would change, and where it produced no value at all — the one thing "0 updated" cannot
+say, and the reason an operator whose severity rule is wrong otherwise ships a silent no-op.
+
+The dialog reuses `ui/_modal.html` (no new CSS class) and carries no inline script or style (ADR-003).
+{% endcomment %}
+{% load ui_tags %}
+<p class="modal-body-text">
+  This saves the mapping
+  {% if apply_pending.candidates %}
+    <strong>and re-applies it</strong> to
+    <strong>{{ apply_pending.candidates }} unlinked open alert{{ apply_pending.candidates|pluralize }}</strong>
+  {% else %}
+    — there is nothing to re-apply it to
+  {% endif %}
+  from <span class="mono">{{ source.slug }}</span>.
+</p>
+
+{% if apply_pending.over_cap %}
+  <p class="msg msg-error">
+    This feed has {{ apply_pending.candidates }} unlinked open alerts, which is over the
+    {{ remap_cap }}-per-request limit for a re-map, so nothing will be changed — the mapping is
+    <strong>not</strong> saved either. Re-map in smaller batches (or through the API) first.
+  </p>
+{% else %}
+  {% if apply_pending.candidates %}
+    <div class="table-wrap">
+      <table class="data-table data-table-tight">
+        <caption class="sr-only">What the new mapping does to the {{ apply_pending.candidates }} alerts</caption>
+        <thead>
+          <tr>
+            <th scope="col">Field</th>
+            <th scope="col">Would change</th>
+            <th scope="col">Produced no value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for target, label in apply_fields %}
+            <tr>
+              <td><span class="mono">{{ target }}</span> <span class="dim">{{ label }}</span></td>
+              <td class="mono">{{ apply_pending.changes|get_item:target|default:"0" }} of {{ apply_pending.candidates }}</td>
+              <td>
+                {% with reasons=apply_pending.unresolved|get_item:target %}
+                  {% if reasons %}
+                    {% for reason, count in reasons.items %}
+                      {{ reason|reason_label }} <span class="mono">×{{ count }}</span>{% if not forloop.last %}, {% endif %}
+                    {% endfor %}
+                  {% else %}
+                    <span class="dim">—</span>
+                  {% endif %}
+                {% endwith %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">
+      A field whose <em>Produced no value</em> column is full is a rule that cannot read these payloads:
+      those alerts keep what they have and the pass writes nothing for them. Check the path and the
+      transform on the rule before confirming.
+    </p>
+  {% endif %}
+
+  <ul class="hint">
+    <li>
+      Rewritten, and only where the new mapping disagrees with what is stored:
+      {% for target, label in apply_fields %}<span class="mono">{{ target }}</span>{% if not forloop.last %}, {% endif %}{% endfor %}.
+    </li>
+    <li>
+      Left alone: the case link, the alert's status, tags, assignee, TLP/PAP, observables — and the
+      dedupe identity (<span class="mono">type</span>, <span class="mono">source_ref</span>), so a
+      re-mapped alert is still the same alert.
+    </li>
+    {% if apply_ignored_rules %}
+      <li>
+        <strong>Not re-applied at all:</strong>
+        {% for target, label, paths in apply_ignored_rules %}<span class="mono">{{ target }}</span>
+          ({{ label }}, from <span class="mono">{{ paths|join:", " }}</span>){% if not forloop.last %}, {% endif %}{% endfor %}
+        — these are the alert's identity, so existing alerts keep the reference they were stored with.
+        Only alerts ingested after this save use the new rule.
+      </li>
+    {% endif %}
+    <li>
+      A field the new mapping does not answer keeps the value it already has, so clearing a rule cannot
+      blank or retitle stored alerts.
+    </li>
+    {% if apply_pending.candidates %}
+      <li>
+        Open by status:
+        {% for value, count in apply_pending.by_status.items %}<span class="mono">{{ value }}</span> {{ count }}{% if not forloop.last %}, {% endif %}{% endfor %}
+        — dismissed, imported and case-linked alerts are never touched.
+      </li>
+    {% endif %}
+  </ul>
+{% endif %}
