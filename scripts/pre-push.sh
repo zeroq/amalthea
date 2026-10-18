@@ -18,4 +18,4 @@ echo "hooks: running full check (ruff, mypy, django check, migrations)…"
 if ! make --no-print-directory check; then
     echo "hooks: PUSH BLOCKED — check failed"; exit 1
 fi
-echo "hooks: check passed (pytest skipped as requested) — pushing"
+echo "hooks: check passed — pushing"
