@@ -36,3 +36,4 @@ docs/perf/
 
 # OS
 .DS_Store
+*.bak
