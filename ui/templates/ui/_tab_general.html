@@ -123,6 +123,9 @@
 <section class="card" aria-labelledby="h-pages">
   <div class="page-row">
     <h2 id="h-pages">Pages <span class="count">{{ pages|length }}</span></h2>
+    {% if pages_total is not None and pages_total > pages|length %}
+      <p class="list-summary dim">Showing latest {{ pages|length }} of {{ pages_total }} pages</p>
+    {% endif %}
     {% if can_mutate %}
     <button type="button" class="btn btn-sm" data-modal-open="page-create-modal">
       <i class="fa-solid fa-plus" aria-hidden="true"></i> New page

@@ -11,52 +11,107 @@
 
 {% block content %}
 <div class="card">
-  <div class="table-wrap">
-  <table class="data-table">
-    <caption class="sr-only">Case templates</caption>
-    <thead>
-      <tr>
-        <th scope="col">Name</th>
-        <th scope="col">Display Name</th>
-        <th scope="col">Severity</th>
-        <th scope="col">TLP</th>
-        <th scope="col">PAP</th>
-        <th scope="col">Flags</th>
-        <th scope="col"></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for t in templates %}
-      <tr>
-        <td>
-          {% if can_mutate %}<a href="{% url 'ui-case-template-detail' t.id %}">{{ t.name }}</a>
-          {% else %}{{ t.name }}{% endif %}
-        </td>
-        <td>{{ t.display_name }}</td>
-        <td><span class="sev sev-{{ t.severity }}">{{ t.get_severity_display }}</span></td>
-        <td>{{ t.tlp|choice_name:tlp_choices }}</td>
-        <td>{{ t.pap|choice_name:pap_choices }}</td>
-        <td>{{ t.flag|default:"—" }}</td>
-        <td>
-          {% if can_mutate %}
-          <a class="btn" href="{% url 'ui-case-template-detail' t.id %}">Edit</a>
-          {% url 'ui-case-template-delete' t.id as delete_url %}
-          {% with modal_id="delete-template-"|add:t.id|stringformat:"s" %}
-          {% include "ui/_modal.html" with modal_id=modal_id title="Delete template?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
-          {% endwith %}
-          <button type="button" class="btn btn-err" data-modal-open="delete-template-{{ t.id }}">Delete</button>
-          {% else %}
-          <span class="dim">—</span>
-          {% endif %}
-        </td>
-      </tr>
-      {% empty %}
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-  {% if not templates %}
-  <p class="empty">No templates yet.</p>
+  {% if page_obj %}
+    {% include "ui/_list_summary.html" with entity_name="template" entity_name_plural="templates" %}
+    <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Case templates</caption>
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Display Name</th>
+          <th scope="col">Severity</th>
+          <th scope="col">TLP</th>
+          <th scope="col">PAP</th>
+          <th scope="col">Flags</th>
+          <th scope="col"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in page_obj.object_list %}
+        <tr>
+          <td>
+            {% if can_mutate %}<a href="{% url 'ui-case-template-detail' t.id %}">{{ t.name }}</a>
+            {% else %}{{ t.name }}{% endif %}
+          </td>
+          <td>{{ t.display_name }}</td>
+          <td><span class="sev sev-{{ t.severity }}">{{ t.get_severity_display }}</span></td>
+          <td>{{ t.tlp|choice_name:tlp_choices }}</td>
+          <td>{{ t.pap|choice_name:pap_choices }}</td>
+          <td>{{ t.flag|default:"—" }}</td>
+          <td>
+            {% if can_mutate %}
+            <a class="btn" href="{% url 'ui-case-template-detail' t.id %}">Edit</a>
+            {% url 'ui-case-template-delete' t.id as delete_url %}
+            {% with modal_id="delete-template-"|add:t.id|stringformat:"s" %}
+            {% include "ui/_modal.html" with modal_id=modal_id title="Delete template?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
+            {% endwith %}
+            <button type="button" class="btn btn-err" data-modal-open="delete-template-{{ t.id }}">Delete</button>
+            {% else %}
+            <span class="dim">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% include "ui/_pager.html" with entity_name="Case template" %}
+  {% else %}
+    {# Legacy path — view not yet converted to paginate() #}
+    <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Case templates</caption>
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Display Name</th>
+          <th scope="col">Severity</th>
+          <th scope="col">TLP</th>
+          <th scope="col">PAP</th>
+          <th scope="col">Flags</th>
+          <th scope="col"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in templates %}
+        <tr>
+          <td>
+            {% if can_mutate %}<a href="{% url 'ui-case-template-detail' t.id %}">{{ t.name }}</a>
+            {% else %}{{ t.name }}{% endif %}
+          </td>
+          <td>{{ t.display_name }}</td>
+          <td><span class="sev sev-{{ t.severity }}">{{ t.get_severity_display }}</span></td>
+          <td>{{ t.tlp|choice_name:tlp_choices }}</td>
+          <td>{{ t.pap|choice_name:pap_choices }}</td>
+          <td>{{ t.flag|default:"—" }}</td>
+          <td>
+            {% if can_mutate %}
+            <a class="btn" href="{% url 'ui-case-template-detail' t.id %}">Edit</a>
+            {% url 'ui-case-template-delete' t.id as delete_url %}
+            {% with modal_id="delete-template-"|add:t.id|stringformat:"s" %}
+            {% include "ui/_modal.html" with modal_id=modal_id title="Delete template?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
+            {% endwith %}
+            <button type="button" class="btn btn-err" data-modal-open="delete-template-{{ t.id }}">Delete</button>
+            {% else %}
+            <span class="dim">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% if not templates %}
+    <p class="empty">No templates yet.</p>
+    {% endif %}
+  {% endif %}
+
+  {# Honest empty state for paginated path #}
+  {% if page_obj and page_obj.paginator.count == 0 %}
+    <p class="empty">No templates yet.{% if can_mutate %} <a href="{% url 'ui-case-template-create' %}">Create one</a>.{% endif %}</p>
   {% endif %}
 </div>
 {% endblock %}

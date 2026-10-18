@@ -62,17 +62,21 @@ def browser(analyst: User) -> Client:
 
 
 def test_case_detail_passes_attachments_queryset(browser: Client, case: Case) -> None:
-    """T1a: case_detail context includes attachments queryset ordered by -created_at."""
+    """T1a: case_detail context includes attachments rail capped at RAIL_CAP with total."""
     url = reverse("ui-case-detail", kwargs={"case_id": case.number})
     response = browser.get(url)
     assert response.status_code == 200
 
     attachments = response.context["attachments"]
-    # Should be a queryset (evaluated to list in template)
-    assert hasattr(attachments, "ordered")
-    # Ordering: -created_at
-    query = str(attachments.query).lower()
-    assert "order by" in query and "created_at" in query and "desc" in query
+    attachments_total = response.context["attachments_total"]
+    # Now a list (capped at RAIL_CAP) with honest total
+    assert isinstance(attachments, list)
+    assert attachments_total == case.attachments.count()
+    # Length should be min(total, RAIL_CAP)
+    assert len(attachments) == min(attachments_total, 200)
+    # Ordering preserved: newest first (-created_at)
+    if len(attachments) > 1:
+        assert attachments[0].created_at >= attachments[1].created_at
 
 
 def test_case_detail_attachment_form_field_name_matches_api(browser: Client, case: Case) -> None:

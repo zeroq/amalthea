@@ -5,6 +5,9 @@
 {% endcomment %}
 <section class="card" aria-labelledby="h-comments">
   <h2 id="h-comments">Comments</h2>
+  {% if comments_total is not None and comments_total > comments|length %}
+    <p class="list-summary dim">Showing latest {{ comments|length }} of {{ comments_total }} notes</p>
+  {% endif %}
   <ol class="timeline" id="timeline-events">
     {% for event in comments %}
       {% include "ui/_timeline_entry.html" %}

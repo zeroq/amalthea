@@ -14,6 +14,9 @@
 <section class="card" aria-labelledby="h-tasks" id="case-tasks">
   <div class="card-header">
     <h2 id="h-tasks">Tasks <span class="count">{{ tasks|length }}</span></h2>
+    {% if tasks_total is not None and tasks_total > tasks|length %}
+      <span class="list-summary dim">Showing latest {{ tasks|length }} of {{ tasks_total }} tasks</span>
+    {% endif %}
     {% if can_mutate %}
     <button type="button" class="btn" data-modal-open="task-create-modal">
       <i class="fa-solid fa-plus" aria-hidden="true"></i>

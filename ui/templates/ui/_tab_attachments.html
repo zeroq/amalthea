@@ -9,6 +9,9 @@
     <button type="submit" class="btn">Upload</button>
   </form>
   {% endif %}
+  {% if attachments_total is not None and attachments_total > attachments|length %}
+    <p class="list-summary dim">Showing latest {{ attachments|length }} of {{ attachments_total }} attachments</p>
+  {% endif %}
   {% if attachments %}
     <div class="table-wrap card-spaced">
       <table class="data-table data-table-tight">

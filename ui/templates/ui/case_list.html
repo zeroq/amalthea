@@ -16,33 +16,74 @@
 {% endblock %}
 
 {% block content %}
-{% if cases %}
-  <div class="table-wrap">
-  <table class="data-table">
-    <caption class="sr-only">Cases by severity, newest first</caption>
-    <thead>
-      <tr>
-        <th scope="col">Case</th><th scope="col">Severity</th><th scope="col">Status</th>
-        <th scope="col">Title</th><th scope="col">Assignee</th><th scope="col">Started</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for case in cases %}
+<div class="card">
+  {% if page_obj.paginator %}
+    {% include "ui/_list_summary.html" with entity_name="case" entity_name_plural="cases" %}
+    <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Cases by severity, newest first</caption>
+      <thead>
         <tr>
-          <td><a class="mono" href="{% url 'ui-case-detail' case.number %}">#{{ case.number }}</a></td>
-          <td><span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span></td>
-          <td>{{ case.status.value }}</td>
-          <td><a href="{% url 'ui-case-detail' case.number %}">{{ case.title }}</a></td>
-          <td>{{ case.assignee.login|default:"—" }}</td>
-          <td class="mono dim">{{ case.start_date|date:"Y-m-d H:i" }}</td>
+          <th scope="col">Case</th><th scope="col">Severity</th><th scope="col">Status</th>
+          <th scope="col">Title</th><th scope="col">Assignee</th><th scope="col">Started</th>
         </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-{% else %}
-  <p class="empty">No cases {% if not show_closed %}open{% endif %}.{% if can_mutate %} <a href="{% url 'ui-case-create' %}">Open one</a>.{% endif %}</p>
-{% endif %}
+      </thead>
+      <tbody>
+        {% for case in page_obj.object_list %}
+          <tr>
+            <td><a class="mono" href="{% url 'ui-case-detail' case.number %}">#{{ case.number }}</a></td>
+            <td><span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span></td>
+            <td>{{ case.status.value }}</td>
+            <td><a href="{% url 'ui-case-detail' case.number %}">{{ case.title }}</a></td>
+            <td>{{ case.assignee.login|default:"—" }}</td>
+            <td class="mono dim">{{ case.start_date|date:"Y-m-d H:i" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+
+    {% if page_obj.paginator.count == 0 %}
+      {# Honest empty state for paginated path #}
+      {% if show_closed %}
+        <p class="empty">No cases match your filters. <a href="{% url 'ui-case-list' %}">Clear filters</a></p>
+      {% else %}
+        <p class="empty">No cases open.{% if can_mutate %} <a href="{% url 'ui-case-create' %}">Open one</a>.{% endif %}</p>
+      {% endif %}
+    {% else %}
+      {% include "ui/_pager.html" with entity_name="Case" %}
+    {% endif %}
+  {% else %}
+    {# Legacy path — view not yet converted to paginate() #}
+    {% if cases %}
+      <div class="table-wrap">
+      <table class="data-table">
+        <caption class="sr-only">Cases by severity, newest first</caption>
+        <thead>
+          <tr>
+            <th scope="col">Case</th><th scope="col">Severity</th><th scope="col">Status</th>
+            <th scope="col">Title</th><th scope="col">Assignee</th><th scope="col">Started</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for case in cases %}
+            <tr>
+              <td><a class="mono" href="{% url 'ui-case-detail' case.number %}">#{{ case.number }}</a></td>
+              <td><span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span></td>
+              <td>{{ case.status.value }}</td>
+              <td><a href="{% url 'ui-case-detail' case.number %}">{{ case.title }}</a></td>
+              <td>{{ case.assignee.login|default:"—" }}</td>
+              <td class="mono dim">{{ case.start_date|date:"Y-m-d H:i" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    {% else %}
+      <p class="empty">No cases {% if not show_closed %}open{% endif %}.{% if can_mutate %} <a href="{% url 'ui-case-create' %}">Open one</a>.{% endif %}</p>
+    {% endif %}
+  {% endif %}
+</div>
 
 {% if can_mutate %}
   {% url 'ui-case-create' as case_create_url %}

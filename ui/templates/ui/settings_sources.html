@@ -17,7 +17,98 @@
     </p>
   </div>
 
-  <div class="table-wrap">
+  {% if page_obj %}
+    {% include "ui/_list_summary.html" with entity_name="token" entity_name_plural="tokens" %}
+    <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Ingestion tokens</caption>
+      <thead>
+        <tr>
+          <th scope="col">Source</th>
+          {% if show_org_column %}
+          <th scope="col">Organisation</th>
+          {% endif %}
+          <th scope="col">Name</th>
+          <th scope="col">Prefix</th>
+          <th scope="col">Created</th>
+          <th scope="col">Last used</th>
+          <th scope="col">Issued by</th>
+          <th scope="col">Status / Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for token in page_obj.object_list %}
+        <tr data-token-id="{{ token.id }}">
+          <td>
+            {{ token.source.name }} <span class="mono dim">({{ token.source.slug }})</span>
+          </td>
+          {% if show_org_column %}
+          <td>{{ token.organisation.name }}</td>
+          {% endif %}
+          <td>{{ token.name }}</td>
+          <td class="mono">{{ token.prefix }}</td>
+          <td class="mono dim">{{ token.created_at|date:"Y-m-d H:i" }}</td>
+          <td class="mono dim">{{ token.last_used_at|date:"Y-m-d H:i"|default:"never" }}</td>
+          <td class="dim">{{ token.created_by.login|default:"—" }}</td>
+          <td>
+            {# Revoked supersedes a pause: a token that was deactivated then revoked reads "Revoked". #}
+            {% if token.is_revoked %}
+              <span class="pill pill-off">Revoked</span>
+              <span class="mono dim token-revoked-at">{{ token.revoked_at|date:"Y-m-d H:i" }}</span>
+              <div class="case-actions">
+                {% url 'ui-settings-token-delete' token.id as delete_url %}
+                {% with sid=token.id|stringformat:"s" %}
+                {% with modal_id="delete-token-"|add:sid form_id="delete-token-"|add:sid|add:"-form" %}
+                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_delete_form.html" title="Delete token?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
+                {% endwith %}
+                {% endwith %}
+                <button type="button" class="btn btn-sm btn-err" data-modal-open="delete-token-{{ token.id }}">Delete</button>
+              </div>
+            {% elif token.is_deactivated %}
+              <span class="pill pill-pending">Deactivated</span>
+              <span class="mono dim token-deactivated-at">{{ token.deactivated_at|date:"Y-m-d H:i" }}</span>
+              <div class="case-actions">
+                <form method="post" action="{% url 'ui-settings-token-activate' token.id %}" class="inline-form">{% csrf_token %}
+                  <button type="submit" class="btn btn-sm">Activate</button>
+                </form>
+                {% url 'ui-settings-token-delete' token.id as delete_url %}
+                {% with sid=token.id|stringformat:"s" %}
+                {% with modal_id="delete-token-"|add:sid form_id="delete-token-"|add:sid|add:"-form" %}
+                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_delete_form.html" title="Delete token?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
+                {% endwith %}
+                {% endwith %}
+                <button type="button" class="btn btn-sm btn-err" data-modal-open="delete-token-{{ token.id }}">Delete</button>
+              </div>
+            {% else %}
+              <span class="pill pill-on">Active</span>
+              <div class="case-actions">
+                {% url 'ui-settings-token-deactivate' token.id as deactivate_url %}
+                {% with sid=token.id|stringformat:"s" %}
+                {% with modal_id="deactivate-token-"|add:sid form_id="deactivate-token-"|add:sid|add:"-form" %}
+                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_deactivate_form.html" title="Deactivate token?" confirm_text="Deactivate" cancel_text="Cancel" form_action=deactivate_url size="md" %}
+                {% endwith %}
+                {% endwith %}
+                <button type="button" class="btn btn-sm" data-modal-open="deactivate-token-{{ token.id }}">Deactivate</button>
+                {% url 'ui-settings-token-revoke' token.id as revoke_url %}
+                {% with sid=token.id|stringformat:"s" %}
+                {% with modal_id="revoke-token-"|add:sid form_id="revoke-token-"|add:sid|add:"-form" %}
+                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_revoke_form.html" title="Revoke token?" confirm_text="Revoke" confirm_class="btn-err" cancel_text="Cancel" form_action=revoke_url size="md" %}
+                {% endwith %}
+                {% endwith %}
+                <button type="button" class="btn btn-sm btn-err" data-modal-open="revoke-token-{{ token.id }}">Revoke</button>
+              </div>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% include "ui/_pager.html" with entity_name="Token" %}
+  {% else %}
+    {# Legacy path — view not yet converted to paginate() #}
+    <div class="table-wrap">
     <table class="data-table">
       <caption class="sr-only">Ingestion tokens</caption>
       <thead>
@@ -107,7 +198,13 @@
         {% endfor %}
       </tbody>
     </table>
-  </div>
+    </div>
+  {% endif %}
+
+  {# Honest empty state for paginated path #}
+  {% if page_obj and page_obj.paginator.count == 0 %}
+    <p class="empty">No ingestion tokens yet. <a href="#" data-modal-open="token-create-modal">Create one</a> to let a source send alerts.</p>
+  {% endif %}
 </div>
 
 {# Create token modal — fields rendered server-side (no inline JS, CSP-safe) #}

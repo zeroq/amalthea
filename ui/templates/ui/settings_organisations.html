@@ -10,48 +10,98 @@
 {% block content %}
 {% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
 <div class="card">
-  <div class="table-wrap">
-  <table class="data-table">
-    <caption class="sr-only">Organisations</caption>
-    <thead>
-      <tr>
-        <th scope="col">Name</th>
-        <th scope="col">Members</th>
-        <th scope="col">Cases</th>
-        <th scope="col">Alerts</th>
-        <th scope="col">Observables</th>
-        <th scope="col">Created</th>
-        <th scope="col"></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for org in organisations %}
-      <tr data-org-id="{{ org.id }}" data-cases="{{ org.cases_count }}" data-alerts="{{ org.alerts_count }}" data-observables="{{ org.observables_count }}" data-tokens="{{ org.tokens_count }}" data-members="{{ org.members_count }}">
-        <td><a href="{% url 'ui-settings-organisations-edit' org.id %}">{{ org.name }}</a></td>
-        <td>{{ org.members_count }}</td>
-        <td>{{ org.cases_count }}</td>
-        <td>{{ org.alerts_count }}</td>
-        <td>{{ org.observables_count }}</td>
-        <td class="mono dim">{{ org.created_at|date:"Y-m-d H:i" }}</td>
-        <td>
-          <a class="btn" href="{% url 'ui-settings-organisations-edit' org.id %}">Edit</a>
-          {% url 'ui-settings-organisations-delete' org.id as delete_url %}
-          {% with sid=org.id|stringformat:"s" %}
-          {% with modal_id="delete-org-"|add:sid form_id="delete-org-"|add:sid|add:"-form" %}
-          {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id org=org organisations=organisations body_template="ui/_settings_org_delete_form.html" title="Delete organisation?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="lg" %}
-          {% endwith %}
-          {% endwith %}
-          <button type="button" class="btn btn-err" data-modal-open="delete-org-{{ org.id }}">Delete</button>
-        </td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="7" class="empty">No organisations yet. <a href="#" data-modal-open="org-create-modal">Create one</a>.</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
+  {% if page_obj %}
+    {% include "ui/_list_summary.html" with entity_name="organisation" entity_name_plural="organisations" %}
+    <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Organisations</caption>
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Members</th>
+          <th scope="col">Cases</th>
+          <th scope="col">Alerts</th>
+          <th scope="col">Observables</th>
+          <th scope="col">Created</th>
+          <th scope="col"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for org in page_obj.object_list %}
+        <tr data-org-id="{{ org.id }}" data-cases="{{ org.cases_count }}" data-alerts="{{ org.alerts_count }}" data-observables="{{ org.observables_count }}" data-tokens="{{ org.tokens_count }}" data-members="{{ org.members_count }}">
+          <td><a href="{% url 'ui-settings-organisations-edit' org.id %}">{{ org.name }}</a></td>
+          <td>{{ org.members_count }}</td>
+          <td>{{ org.cases_count }}</td>
+          <td>{{ org.alerts_count }}</td>
+          <td>{{ org.observables_count }}</td>
+          <td class="mono dim">{{ org.created_at|date:"Y-m-d H:i" }}</td>
+          <td>
+            <a class="btn" href="{% url 'ui-settings-organisations-edit' org.id %}">Edit</a>
+            {% url 'ui-settings-organisations-delete' org.id as delete_url %}
+            {% with sid=org.id|stringformat:"s" %}
+            {% with modal_id="delete-org-"|add:sid form_id="delete-org-"|add:sid|add:"-form" %}
+            {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id org=org organisations=organisations body_template="ui/_settings_org_delete_form.html" title="Delete organisation?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="lg" %}
+            {% endwith %}
+            {% endwith %}
+            <button type="button" class="btn btn-err" data-modal-open="delete-org-{{ org.id }}">Delete</button>
+          </td>
+        </tr>
+        {% empty %}
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% include "ui/_pager.html" with entity_name="Organisation" %}
+  {% else %}
+    {# Legacy path — view not yet converted to paginate() #}
+    <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Organisations</caption>
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Members</th>
+          <th scope="col">Cases</th>
+          <th scope="col">Alerts</th>
+          <th scope="col">Observables</th>
+          <th scope="col">Created</th>
+          <th scope="col"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for org in organisations %}
+        <tr data-org-id="{{ org.id }}" data-cases="{{ org.cases_count }}" data-alerts="{{ org.alerts_count }}" data-observables="{{ org.observables_count }}" data-tokens="{{ org.tokens_count }}" data-members="{{ org.members_count }}">
+          <td><a href="{% url 'ui-settings-organisations-edit' org.id %}">{{ org.name }}</a></td>
+          <td>{{ org.members_count }}</td>
+          <td>{{ org.cases_count }}</td>
+          <td>{{ org.alerts_count }}</td>
+          <td>{{ org.observables_count }}</td>
+          <td class="mono dim">{{ org.created_at|date:"Y-m-d H:i" }}</td>
+          <td>
+            <a class="btn" href="{% url 'ui-settings-organisations-edit' org.id %}">Edit</a>
+            {% url 'ui-settings-organisations-delete' org.id as delete_url %}
+            {% with sid=org.id|stringformat:"s" %}
+            {% with modal_id="delete-org-"|add:sid form_id="delete-org-"|add:sid|add:"-form" %}
+            {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id org=org organisations=organisations body_template="ui/_settings_org_delete_form.html" title="Delete organisation?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="lg" %}
+            {% endwith %}
+            {% endwith %}
+            <button type="button" class="btn btn-err" data-modal-open="delete-org-{{ org.id }}">Delete</button>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="7" class="empty">No organisations yet. <a href="#" data-modal-open="org-create-modal">Create one</a>.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% endif %}
+
+  {# Honest empty state for paginated path #}
+  {% if page_obj and page_obj.paginator.count == 0 %}
+    <p class="empty">No organisations yet. <a href="#" data-modal-open="org-create-modal">Create one</a>.</p>
+  {% endif %}
 </div>
 
 {# Create organisation modal — fields rendered server-side (no inline JS, CSP-safe) #}

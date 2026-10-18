@@ -16,8 +16,50 @@
 {% block content %}
 <section class="card" aria-labelledby="h-shares">
   <h2 id="h-shares">Current shares</h2>
-  {% if shares %}
+  {% if page_obj.paginator %}
+    {% include "ui/_list_summary.html" with entity_name="share" entity_name_plural="shares" %}
     <div class="table-wrap">
+    <table class="data-table data-table-tight">
+      <caption class="sr-only">Organisations this case is shared with</caption>
+      <thead>
+        <tr>
+          <th scope="col">Organisation</th>
+          <th scope="col">Permissions</th>
+          <th scope="col">Created</th>
+          <th scope="col"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in page_obj.object_list %}
+        <tr>
+          <td>{{ item.share.organisation.name }}</td>
+          <td>
+            <span class="pill {% if item.share.permissions.write %}pill-readwrite{% else %}pill-read{% endif %}">
+              {% if item.share.permissions.write %}Read/Write{% else %}Read-only{% endif %}
+            </span>
+          </td>
+          <td class="mono dim">{{ item.share.created_at|date:"Y-m-d H:i" }}</td>
+          <td>
+            <button type="button" class="btn btn-err btn-sm" data-modal-open="revoke-share-{{ item.share.id }}">
+              Revoke
+            </button>
+            {% include "ui/_modal.html" with modal_id="revoke-share-"|add:item.share.id title="Revoke share?" body="Revoke access for " confirm_text="Revoke" confirm_class="btn-err" form_action=item.revoke_url size="sm" %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+
+    {% if page_obj.paginator.count == 0 %}
+      <p class="empty">No shares configured. This case is private to your organisation.</p>
+    {% else %}
+      {% include "ui/_pager.html" with entity_name="Share" %}
+    {% endif %}
+  {% else %}
+    {# Legacy path — view not yet converted to paginate() #}
+    {% if shares %}
+      <div class="table-wrap">
       <table class="data-table data-table-tight">
         <caption class="sr-only">Organisations this case is shared with</caption>
         <thead>
@@ -48,9 +90,10 @@
           {% endfor %}
         </tbody>
       </table>
-    </div>
-  {% else %}
-    <p class="empty">No shares configured. This case is private to your organisation.</p>
+      </div
+    {% else %}
+      <p class="empty">No shares configured. This case is private to your organisation.</p>
+    {% endif %}
   {% endif %}
 </section>
 

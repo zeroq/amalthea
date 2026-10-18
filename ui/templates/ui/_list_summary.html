@@ -1,0 +1,26 @@
+{% load i18n %}
+{% comment %}
+  List summary line — "Showing X–Y of Z <entity>" with optional "(filtered from N)"
+  Context:
+    page_obj         — django.core.paginator.Page (required)
+    entity_name      — singular entity name, e.g. "alert", "case" (required)
+    entity_name_plural — plural entity name, e.g. "alerts", "cases" (optional, defaults to entity_name + "s")
+    filtered_from    — int | None, unfiltered org-scoped count when a filter is active (optional)
+  Usage:
+    {% include "ui/_list_summary.html" with entity_name="alert" entity_name_plural="alerts" %}
+{% endcomment %}
+
+{% if page_obj %}
+  {% with total=page_obj.paginator.count start=page_obj.start_index end=page_obj.end_index %}
+    {% if total > 0 %}
+      <p class="list-summary">
+        Showing <strong>{% if start == end %}{{ start }}{% else %}{{ start }}–{{ end }}{% endif %}</strong>
+        of <strong>{{ total|floatformat:0 }}</strong>
+        {{ entity_name_plural|default:entity_name }}
+        {% if filtered_from is not None and filtered_from != total %}
+          <span class="dim">(filtered from {{ filtered_from|floatformat:0 }})</span>
+        {% endif %}
+      </p>
+    {% endif %}
+  {% endwith %}
+{% endif %}

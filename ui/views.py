@@ -117,6 +117,7 @@ from ingest.models import IngestionSource
 from observables.extractor import add_observable_with_status, extract_into_case
 from observables.models import Observable, ObservableType
 from realtime.publisher import publish_case_event
+from ui.pagination import paginate
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,9 @@ CASE_STAGE_VALUES = ("New", "InProgress", "Closed")
 CASE_INLINE_EDIT_FIELDS: frozenset[str] = frozenset(
     {"severity", "scope", "case_type", "data_classification", "phase", "verdict"}
 )
-PAGE_SIZE = 200
+#: Default page size for picker dropdowns (assignee pickers, etc.) — NOT for paginated lists.
+#: Paginated lists use `ui.pagination.DEFAULT_PAGE_SIZE` (50) with `MAX_PAGE_SIZE` (200) ceiling.
+PICKER_PAGE_SIZE = 200
 #: Upper bound on outbound HTTP headers per playbook. `header_count` is form-controlled and drives a
 #: CPU-bound `range()`, so it must be capped (see `_parse_playbook_config`) — far above real usage.
 MAX_HEADERS = 64
@@ -400,19 +403,38 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 def alert_list(request: HttpRequest) -> HttpResponse:
     """The triage queue: unlinked alerts by default, because those are the decisions waiting."""
     scope = request.GET.get("scope", "unlinked")
-    queryset = Alert.objects.select_related(
+    base_queryset = Alert.objects.select_related(
         "status", "assignee", "ingestion_source", "case", "owner_org"
     ).filter(org_q("owner_org", request.user))
+
+    # Compute unfiltered org-scoped count for filtered_from (honest empty state support)
+    unfiltered_count = base_queryset.count()
+
     if scope == "linked":
-        queryset = queryset.filter(case__isnull=False)
+        queryset = base_queryset.filter(case__isnull=False)
     elif scope == "unlinked":
-        queryset = queryset.filter(case__isnull=True)
+        queryset = base_queryset.filter(case__isnull=True)
+    else:  # scope == "all"
+        queryset = base_queryset
+
+    # Determine if a filter is active: scope parameter explicitly provided (including default "unlinked")
+    # The default "unlinked" scope is a filter, so filtered_from should show the unfiltered total.
+    # Only when scope="all" (no filter) is filtered_from None.
+    has_filter = scope != "all"
+
+    page_obj = paginate(request, queryset.order_by("-date"))
+    # filtered_from is only meaningful when the filter actually filters something out
+    # (unfiltered count > filtered count). When unfiltered == filtered, it's not a real filter.
+    filtered_count = page_obj.paginator.count
+    filtered_from = unfiltered_count if has_filter and unfiltered_count > filtered_count else None
+
     return render(
         request,
         "ui/alert_list.html",
         _base_context(
             request,
-            alerts=queryset.order_by("-date")[:PAGE_SIZE],
+            page_obj=page_obj,
+            filtered_from=filtered_from,
             scope=scope,
             scopes=("unlinked", "linked", "all"),
         ),
@@ -441,7 +463,7 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
             alert=alert,
             merge_candidates=Case.objects.filter(case_visible_q(request.user))
             .filter(closed_date__isnull=True)
-            .order_by("-start_date")[:PAGE_SIZE],
+            .order_by("-start_date")[:PICKER_PAGE_SIZE],
             is_cross_org=is_cross_org,
             alert_status_options=alert_status_options,
             tlp_choices=TLP_CHOICES,
@@ -597,14 +619,27 @@ def _render_case_list(
     from identity.scoping import case_visible_q, is_viewer
 
     show_closed = request.GET.get("closed") == "1"
-    queryset = Case.objects.select_related("status", "assignee", "owner_org").filter(
+    base_queryset = Case.objects.select_related("status", "assignee", "owner_org").filter(
         case_visible_q(request.user)
     )
-    if not show_closed:
-        queryset = queryset.filter(closed_date__isnull=True)
+    unfiltered_count = base_queryset.count()
+
+    if show_closed:
+        queryset = base_queryset.filter(closed_date__isnull=False)
+    else:
+        queryset = base_queryset.filter(closed_date__isnull=True)
+
+    # Pagination for the cases list (primary list P). The assignees picker
+    # remains capped at PICKER_PAGE_SIZE (class K, not paged).
+    has_filter = show_closed
+    page_obj = paginate(request, queryset.order_by("-severity", "-start_date"))
+    filtered_from = (
+        unfiltered_count if has_filter and unfiltered_count > page_obj.paginator.count else None
+    )
 
     context = {
-        "cases": queryset.order_by("-severity", "-start_date")[:PAGE_SIZE],
+        "page_obj": page_obj,
+        "filtered_from": filtered_from,
         "show_closed": show_closed,
         "open_new_case": open_new_case,
     }
@@ -617,7 +652,7 @@ def _render_case_list(
             assignees = (
                 User.objects.filter(org=request.user.org, is_active=True)
                 .select_related("org")
-                .order_by("login")[:PAGE_SIZE]
+                .order_by("login")[:PICKER_PAGE_SIZE]
             )
         context.update(
             _case_create_form_context(post_data, status_options, assignees, request=request)
@@ -656,7 +691,7 @@ def case_create(request: HttpRequest) -> HttpResponse:
     assignees = (
         User.objects.filter(org=org, is_active=True)
         .select_related("org")
-        .order_by("login")[:PAGE_SIZE]
+        .order_by("login")[:PICKER_PAGE_SIZE]
     )
 
     if request.method == "GET":
@@ -882,35 +917,103 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
 
     can_classify = is_admin(request.user)
 
+    # Rails (R surfaces) — cap with honest totals (Q3/Q4, D1/D2/D3).
+    # No filtered main-list route exists for these, so we provide `<name>_total` counts.
+    # For chronological rails rendered oldest-first, we take the newest RAIL_CAP and
+    # re-order back to display order so the rendered subset is the newest N.
+    from ui.pagination import RAIL_CAP
+
+    # Alerts: order by -date (newest first), so simple slice is correct
+    alerts_total = alerts_qs.count()
+    alerts = list(alerts_qs[:RAIL_CAP])
+
+    # Tasks: order by (order, created_at) ascending — take newest by -order, -created_at then reverse
+    tasks_total = tasks_qs.count()
+    tasks = list(tasks_qs.order_by("-order", "-created_at")[:RAIL_CAP])[::-1]
+
+    # Observables: order by -created_at (newest first), so simple slice is correct
+    observables_total = observables_qs.count()
+    observables = list(observables_qs[:RAIL_CAP])
+
+    # Attachments: order by -created_at (newest first), so simple slice is correct
+    attachments_total = attachments_qs.count()
+    attachments = list(attachments_qs[:RAIL_CAP])
+
+    # Comments: order by (date, id) ascending (chronological) — take newest then reverse
+    comments_total = comments_qs.count()
+    comments = list(comments_qs.order_by("-date", "-id")[:RAIL_CAP])[::-1]
+
+    # Timeline: order by (date, id) ascending (chronological, contractual for live.js) — take newest then reverse
+    timeline_total = timeline_qs.count()
+    timeline = list(timeline_qs.order_by("-date", "-id")[:RAIL_CAP])[::-1]
+
+    # Audit logs: order by -created_at (newest first), so simple slice is correct
+    audit_logs_total = audit_logs_qs.count()
+    audit_logs = list(audit_logs_qs[:RAIL_CAP])
+
+    # Pages: order by (order, created_at) ascending — take newest then reverse
+    pages_qs = case.pages.select_related("created_by", "updated_by").order_by("order", "created_at")
+    pages_total = pages_qs.count()
+    pages = list(pages_qs.order_by("-order", "-created_at")[:RAIL_CAP])[::-1]
+
+    # Runs: order by -created_at (newest first), so simple slice is correct
+    runs_qs = (
+        AutomationRun.objects.filter(case=case)
+        .select_related("playbook", "triggered_by_observable")
+        .order_by("-created_at")
+    )
+    runs_total = runs_qs.count()
+    runs = list(runs_qs[:RAIL_CAP])
+
+    # Procedures: order by (occur_date, id) ascending — take newest then reverse
+    procedures_qs = case.procedures.select_related("ttp").order_by("occur_date", "id")
+    procedures_total = procedures_qs.count()
+    procedures = list(procedures_qs.order_by("-occur_date", "-id")[:RAIL_CAP])[::-1]
+
+    # TTPs: global vocabulary (not a log) — cap **head-first** in display order (D1/D5).
+    # A vocabulary is searched/scanned alphabetically, so the first RAIL_CAP items
+    # must be visible. This is distinct from logs/working sets (tasks, comments,
+    # timeline, pages, procedures, etc.) which are capped to their newest N.
+    ttps_qs = TTP.objects.order_by("name")
+    ttps_total = ttps_qs.count()
+    ttps = list(ttps_qs[:RAIL_CAP])
+
     return render(
         request,
         "ui/case_detail.html",
         _base_context(
             request,
             case=case,
-            timeline=timeline_qs,
-            comments=comments_qs,
-            observables=observables_qs,
-            tasks=tasks_qs,
-            pages=case.pages.select_related("created_by", "updated_by").order_by(
-                "order", "created_at"
-            ),
-            runs=AutomationRun.objects.filter(case=case)
-            .select_related("playbook", "triggered_by_observable")
-            .order_by("-created_at"),
-            procedures=case.procedures.select_related("ttp").order_by("occur_date", "id"),
-            ttps=TTP.objects.order_by("name"),
+            timeline=timeline,
+            timeline_total=timeline_total,
+            comments=comments,
+            comments_total=comments_total,
+            observables=observables,
+            observables_total=observables_total,
+            tasks=tasks,
+            tasks_total=tasks_total,
+            pages=pages,
+            pages_total=pages_total,
+            runs=runs,
+            runs_total=runs_total,
+            procedures=procedures,
+            procedures_total=procedures_total,
+            ttps=ttps,
+            ttps_total=ttps_total,
             status_choices=case_status_options,
             assignees=User.objects.filter(org_q("org", request.user), is_active=True).order_by(
                 "login"
-            )[:PAGE_SIZE],
+            )[:PICKER_PAGE_SIZE],
             is_owner=is_owner,
             is_cross_org=is_cross_org,
-            attachments=attachments_qs,
-            alerts=alerts_qs,
+            attachments=attachments,
+            attachments_total=attachments_total,
+            alerts=alerts,
+            alerts_total=alerts_total,
             active_tab=active_tab,
             tabs=tabs,
-            audit_logs=audit_logs_qs,
+            audit_logs=audit_logs,
+            audit_logs_total=audit_logs_total,
             case_procedure_create_url=reverse(
                 "ui-case-procedure-create", kwargs={"case_id": case.number}
             ),
@@ -1485,12 +1588,12 @@ def task_detail(request: HttpRequest, task_id: str) -> HttpResponse:
             notes=notes,
             can_mutate=can_mutate,
             task_status_options=TASK_STATUS_CHOICES,
-            # The edit modal's assignee picker needs the same uncapped, org-scoped list the tab
-            # passes; without it the <select> would render empty and a save would clear the
-            # assignee. Same query as `case_detail`'s `task_assignees`.
+            # The edit modal's assignee picker needs the same org-scoped list the tab
+            # passes (capped at PICKER_PAGE_SIZE); without it the <select> would render empty
+            # and a save would clear the assignee. Same query as `case_detail`'s `task_assignees`.
             task_assignees=User.objects.filter(org_q("org", request.user), is_active=True).order_by(
                 "login"
-            ),
+            )[:PICKER_PAGE_SIZE],
         ),
     )
 
@@ -1667,14 +1770,23 @@ def automation_list(request: HttpRequest) -> HttpResponse:
     from identity.scoping import case_visible_q
 
     visible_cases = Case.objects.filter(case_visible_q(request.user))
+    queryset = (
+        AutomationRun.objects.select_related("case", "playbook", "triggered_by_observable")
+        .filter(case__in=visible_cases)
+        .order_by("-created_at")
+    )
+
+    # No filters on this list currently, so filtered_from is None
+    page_obj = paginate(request, queryset)
+    filtered_from = None
+
     return render(
         request,
         "ui/automation_list.html",
         _base_context(
             request,
-            runs=AutomationRun.objects.select_related("case", "playbook", "triggered_by_observable")
-            .filter(case__in=visible_cases)
-            .order_by("-created_at")[:PAGE_SIZE],
+            page_obj=page_obj,
+            filtered_from=filtered_from,
             playbooks=AutomationRun.objects.filter(case__in=visible_cases)
             .values("playbook_name")
             .annotate(n=Count("id"))
@@ -1718,7 +1830,7 @@ def sources_list(request: HttpRequest) -> HttpResponse:
 
     from ingest.mapping import read_rules
 
-    sources = list(
+    queryset = (
         # ADR-009: org-owned, so the list is scoped like every other tenant row (superAdmin: all).
         IngestionSource.objects.filter(org_q("organisation", request.user))
         .annotate(
@@ -1728,6 +1840,12 @@ def sources_list(request: HttpRequest) -> HttpResponse:
         )
         .order_by("slug")
     )
+
+    # No filters on this list currently, so filtered_from is None
+    page_obj = paginate(request, queryset)
+    filtered_from = None
+
+    sources = list(page_obj.object_list)
     for source in sources:
         # Display-only attributes: "7 rules · severity←severity_name" (§7). The count is the honest
         # "how much is configured", and the severity rule is the one an analyst checks first.
@@ -1748,6 +1866,8 @@ def sources_list(request: HttpRequest) -> HttpResponse:
         "ui/sources_list.html",
         _base_context(
             request,
+            page_obj=page_obj,
+            filtered_from=filtered_from,
             sources=sources,
             # The detail page is admin-only, so a viewer/analyst gets plain text rather than a link
             # that would 404 (§7: "admin for own-org sources, everyone else never").
@@ -1760,12 +1880,16 @@ def sources_list(request: HttpRequest) -> HttpResponse:
 @require_GET
 def playbook_list(request: HttpRequest) -> HttpResponse:
     """List all playbooks with their trigger, action, and last run status."""
+    queryset = Playbook.objects.prefetch_related("runs").order_by("name")
+    page_obj = paginate(request, queryset)
+    filtered_from = None  # No filters on this list
     return render(
         request,
         "ui/playbook_list.html",
         _base_context(
             request,
-            playbooks=Playbook.objects.prefetch_related("runs").order_by("name"),
+            page_obj=page_obj,
+            filtered_from=filtered_from,
         ),
     )
 
@@ -1859,11 +1983,15 @@ def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
 
     if request.method == "GET":
         visible_cases = Case.objects.filter(case_visible_q(request.user))
-        runs = (
+        runs_qs = (
             AutomationRun.objects.filter(playbook=playbook, case__in=visible_cases)
             .select_related("case", "triggered_by_observable")
-            .order_by("-created_at")[:50]
+            .order_by("-created_at")
         )
+        from ui.pagination import RAIL_CAP
+
+        runs_total = runs_qs.count()
+        runs = list(runs_qs[:RAIL_CAP])
         return render(
             request,
             "ui/playbook_detail.html",
@@ -1871,6 +1999,7 @@ def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
                 request,
                 playbook=playbook,
                 runs=runs,
+                runs_total=runs_total,
                 trigger_events=sorted(TRIGGER_EVENTS),
                 actions=ACTIONS,
                 http_methods=HTTP_METHODS,
@@ -2219,12 +2348,16 @@ def case_apply_template(request: HttpRequest, case_id: str) -> HttpResponse:
 @require_GET
 def case_template_list(request: HttpRequest) -> HttpResponse:
     """List case templates."""
+    queryset = CaseTemplate.objects.all().order_by("name")
+    page_obj = paginate(request, queryset)
+    filtered_from = None  # No filters on this list
     return render(
         request,
         "ui/case_template_list.html",
         _base_context(
             request,
-            templates=CaseTemplate.objects.all().order_by("name"),
+            page_obj=page_obj,
+            filtered_from=filtered_from,
             tlp_choices=TLP_CHOICES,
             pap_choices=PAP_CHOICES,
         ),
@@ -2426,12 +2559,16 @@ def case_template_delete(request: HttpRequest, template_id: str) -> HttpResponse
 @require_GET
 def tag_list(request: HttpRequest) -> HttpResponse:
     """List all tags."""
+    queryset = Tag.objects.all().order_by("name")
+    page_obj = paginate(request, queryset)
+    filtered_from = None  # No filters on this list
     return render(
         request,
         "ui/tag_list.html",
         _base_context(
             request,
-            tags=Tag.objects.all().order_by("name"),
+            page_obj=page_obj,
+            filtered_from=filtered_from,
         ),
     )
 
@@ -2521,22 +2658,33 @@ def observable_list(request: HttpRequest) -> HttpResponse:
             # dropdown falls back to "All types" instead of echoing junk back into the form.
             type_filter = ""
 
-    queryset = (
+    base_queryset = (
         Observable.objects.select_related("data_type", "owner_org")
         .prefetch_related("case_observables__case")
         .filter(org_q("owner_org", request.user))
     )
+    unfiltered_count = base_queryset.count()
+
+    queryset = base_queryset
     if query:
         queryset = queryset.filter(data__icontains=query)
     if type_filter:
         queryset = queryset.filter(data_type_id=type_filter)
+
+    # Pagination for the observables list (primary list P)
+    has_filter = bool(query or type_filter)
+    page_obj = paginate(request, queryset.order_by("-created_at"))
+    filtered_from = (
+        unfiltered_count if has_filter and unfiltered_count > page_obj.paginator.count else None
+    )
 
     return render(
         request,
         "ui/observable_list.html",
         _base_context(
             request,
-            observables=queryset.order_by("-created_at")[:PAGE_SIZE],
+            page_obj=page_obj,
+            filtered_from=filtered_from,
             observable_types=ObservableType.objects.order_by("name"),
             query=query,
             type_filter=type_filter,
@@ -2555,15 +2703,24 @@ def observable_detail(request: HttpRequest, observable_id: str) -> HttpResponse:
     is_cross_org = observable.owner_org_id != user_org_id
     # P2/C3: blast-radius for delete dialog
     affected_cases = _observable_affected_cases(observable)
+
+    # Linked cases rail (R surface) — cap with honest total (Q3/Q4, D1)
+    from ui.pagination import RAIL_CAP
+
+    cases_qs = observable.case_observables.select_related("case__owner_org").order_by(
+        "-case__start_date"
+    )
+    cases_total = cases_qs.count()
+    cases = list(cases_qs[:RAIL_CAP])
+
     return render(
         request,
         "ui/observable_detail.html",
         _base_context(
             request,
             observable=observable,
-            cases=observable.case_observables.select_related("case__owner_org").order_by(
-                "-case__start_date"
-            ),
+            cases=cases,
+            cases_total=cases_total,
             affected_cases=affected_cases,
             is_owner=is_cross_org is False,  # owner org can manage
             is_cross_org=is_cross_org,
@@ -2655,7 +2812,7 @@ def case_edit(request: HttpRequest, case_id: str) -> HttpResponse:
     assignees = (
         User.objects.filter(org=case.owner_org, is_active=True)
         .select_related("org")
-        .order_by("login")[:PAGE_SIZE]
+        .order_by("login")[:PICKER_PAGE_SIZE]
     )
 
     if request.method == "GET":
@@ -3310,10 +3467,10 @@ def case_share_list(request: HttpRequest, case_id: str) -> HttpResponse:
             )
         return redirect("ui-case-share-list", case_id=case.number)
 
-    # Build share data with revoke URLs
-    shares = []
+    # Build full list of share dicts (for template compatibility)
+    all_shares = []
     for share in shares_qs:
-        shares.append(
+        all_shares.append(
             {
                 "share": share,
                 "revoke_url": reverse(
@@ -3322,10 +3479,25 @@ def case_share_list(request: HttpRequest, case_id: str) -> HttpResponse:
             }
         )
 
+    # Pagination for the shares list (primary list P) — use the frozen helper.
+    # Paginator accepts a sequence, so the list-of-dicts shape the template expects is preserved.
+    from ui.pagination import paginate
+
+    page_obj = paginate(request, all_shares)
+    filtered_from = None  # No filters on this list
+    shares = page_obj.object_list
+
     return render(
         request,
         "ui/case_share_list.html",
-        _base_context(request, case=case, shares=shares, available_orgs=available_orgs),
+        _base_context(
+            request,
+            case=case,
+            page_obj=page_obj,
+            filtered_from=filtered_from,
+            shares=shares,
+            available_orgs=available_orgs,
+        ),
     )
 
 
@@ -3773,17 +3945,20 @@ def settings_organisations(request: HttpRequest) -> HttpResponse:
 
     from django.db.models import Count
 
-    orgs = list(
-        Organisation.objects.annotate(
-            members_count=Count("users", distinct=True),
-            cases_count=Count("cases", distinct=True),
-            alerts_count=Count("alerts", distinct=True),
-            observables_count=Count("observables", distinct=True),
-            tokens_count=Count("ingestion_tokens", distinct=True),
-            # ADR-009: an owned IngestionSource PROTECTs its org.
-            sources_count=Count("ingestion_sources", distinct=True),
-        ).order_by("name")
-    )
+    queryset = Organisation.objects.annotate(
+        members_count=Count("users", distinct=True),
+        cases_count=Count("cases", distinct=True),
+        alerts_count=Count("alerts", distinct=True),
+        observables_count=Count("observables", distinct=True),
+        tokens_count=Count("ingestion_tokens", distinct=True),
+        # ADR-009: an owned IngestionSource PROTECTs its org.
+        sources_count=Count("ingestion_sources", distinct=True),
+    ).order_by("name")
+
+    page_obj = paginate(request, queryset)
+    filtered_from = None  # No filters on this list
+
+    orgs = list(page_obj.object_list)
     for org in orgs:
         # Dynamic, template-only display attributes (not model fields).
         org.blockers_text = _org_blockers_text(org)  # type: ignore[attr-defined]
@@ -3792,7 +3967,7 @@ def settings_organisations(request: HttpRequest) -> HttpResponse:
     return render(
         request,
         "ui/settings_organisations.html",
-        _base_context(request, organisations=orgs),
+        _base_context(request, page_obj=page_obj, filtered_from=filtered_from, organisations=orgs),
     )
 
 
@@ -3967,13 +4142,23 @@ def settings_users(request: HttpRequest) -> HttpResponse:
                 messages.success(request, f"User '{user.login}' created.")
                 return redirect("ui-settings-users")
 
-    users = User.objects.select_related("org").order_by("username")
+    queryset = User.objects.select_related("org").order_by("username")
+    page_obj = paginate(request, queryset)
+    filtered_from = None  # No filters on this list
+    users = list(page_obj.object_list)
     orgs = Organisation.objects.order_by("name")
 
     return render(
         request,
         "ui/settings_users.html",
-        _base_context(request, users=users, orgs=orgs, role_choices=USER_ROLE_VALUES),
+        _base_context(
+            request,
+            page_obj=page_obj,
+            filtered_from=filtered_from,
+            users=users,
+            orgs=orgs,
+            role_choices=USER_ROLE_VALUES,
+        ),
     )
 
 
@@ -4175,15 +4360,20 @@ def _settings_sources_context(request: HttpRequest) -> dict:
     # fact that decides whether deleting the token also reaps the feed (§10b). `source_alert_count` is
     # the blast radius the modal warns about. `distinct=True` on both: two aggregate joins over the
     # same base rows would otherwise cross-multiply.
-    tokens = list(
-        qs.annotate(
-            source_token_count=Count("source__tokens", distinct=True),
-            source_alert_count=Count("source__alerts", distinct=True),
-        )
+    qs = qs.annotate(
+        source_token_count=Count("source__tokens", distinct=True),
+        source_alert_count=Count("source__alerts", distinct=True),
     )
 
+    # Pagination for the tokens list (primary list P)
+    page_obj = paginate(request, qs)
+    filtered_from = None  # No filters on this list
+    tokens = list(page_obj.object_list)
+
     return {
-        "tokens": tokens,
+        "page_obj": page_obj,
+        "filtered_from": filtered_from,
+        "tokens": tokens,  # Kept for backward compatibility with settings_token_create re-render
         "show_org_column": is_superadmin,
         # ADR-009: only the org's own feeds are nameable here (a superAdmin sees all and picks the
         # org, which is then the org the source is provisioned in).
@@ -4274,6 +4464,18 @@ def _source_detail_context(
     from ingest.remap import MAX_REMAP_ALERTS, REMAP_FIELDS, mapping_health
 
     errors = errors or {}
+
+    # Tokens rail (R surface) — cap with honest total (Q3/Q4, D1)
+    from ui.pagination import RAIL_CAP
+
+    tokens_qs = (
+        source.tokens.select_related("organisation", "created_by")
+        .defer("secret_hash")
+        .order_by("-created_at")
+    )
+    tokens_total = tokens_qs.count()
+    tokens = list(tokens_qs[:RAIL_CAP])
+
     return {
         "source": source,
         # `legacy` is the one shape the page must explain rather than silently upgrade (§7 rule 4).
@@ -4291,9 +4493,8 @@ def _source_detail_context(
         ),
         "transforms": transforms_for_editor(),
         "rule_count": len(read_rules(source.mapping_config)),
-        "tokens": source.tokens.select_related("organisation", "created_by")
-        .defer("secret_hash")
-        .order_by("-created_at"),
+        "tokens": tokens,
+        "tokens_total": tokens_total,
         "alert_count": Alert.objects.filter(ingestion_source=source).count(),
         # --- P5: what the stored records say, before anyone opens nineteen alerts -------------------
         "mapping_health": mapping_health(source),

@@ -1,6 +1,9 @@
 {% load ui_tags %}
 <section class="card card-spaced" aria-labelledby="h-procs">
   <h2 id="h-procs">Procedures <span class="count">{{ procedures|length }}</span></h2>
+  {% if procedures_total is not None and procedures_total > procedures|length %}
+    <p class="list-summary dim">Showing latest {{ procedures|length }} of {{ procedures_total }} procedures</p>
+  {% endif %}
   <ul class="procedures" id="case-procedures">
     {% for procedure in procedures %}
       {% include "ui/_procedure_entry.html" %}

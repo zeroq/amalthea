@@ -179,6 +179,9 @@
 
 <div class="card">
   <h2>Tokens</h2>
+  {% if tokens_total is not None and tokens_total > tokens|length %}
+    <p class="list-summary dim">Showing latest {{ tokens|length }} of {{ tokens_total }} tokens</p>
+  {% endif %}
   {% if tokens %}
     <div class="table-wrap">
       <table class="data-table">

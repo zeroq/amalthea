@@ -49,7 +49,7 @@
 
         <dt>Updated</dt>
         <dd>{{ playbook.updated_at|date:"Y-m-d H:i" }}</dd>
-</dl>
+      </dl>
 
       <div class="card-actions">
         <button type="button" class="btn btn-err" data-modal-open="delete-playbook-{{ playbook.id|stringformat:"s" }}">Delete playbook</button>
@@ -88,6 +88,9 @@
 
     <div class="card">
       <h3>Recent runs</h3>
+      {% if runs_total is not None and runs_total > runs|length %}
+        <p class="list-summary dim">Showing latest {{ runs|length }} of {{ runs_total }} runs</p>
+      {% endif %}
       {% if runs %}
       <div class="table-wrap">
       <table class="data-table">

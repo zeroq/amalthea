@@ -11,74 +11,151 @@
 
 {% block content %}
 <div class="card">
-  <div class="table-wrap">
-  <table class="data-table">
-    <caption class="sr-only">Playbooks</caption>
-    <thead>
-      <tr>
-        <th scope="col">Name</th>
-        <th scope="col">Trigger</th>
-        <th scope="col">Action</th>
-        <th scope="col">Active</th>
-        <th scope="col">Last run</th>
-        <th scope="col">Runs</th>
-        <th scope="col"></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for pb in playbooks %}
-      <tr>
-        <td>
-          {% if can_mutate %}<a href="{% url 'ui-playbook-detail' pb.id %}">{{ pb.name }}</a>
-          {% else %}{{ pb.name }}{% endif %}
-        </td>
-        <td>{{ pb.trigger_event }}</td>
-        <td>
-          <span class="pill">{{ pb.config.action }}</span>
-        </td>
-        <td>
-          {% if pb.is_active %}
-            <span class="pill pill-on">Active</span>
-          {% else %}
-            <span class="pill pill-off">Inactive</span>
-          {% endif %}
-        </td>
-        <td>
-          {% with runs=pb.runs.all %}
-            {% if runs %}
-              <span class="dim">{{ runs.0.created_at|date:"Y-m-d H:i" }}</span>
+  {% if page_obj %}
+    {% include "ui/_list_summary.html" with entity_name="playbook" entity_name_plural="playbooks" %}
+    <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Playbooks</caption>
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Trigger</th>
+          <th scope="col">Action</th>
+          <th scope="col">Active</th>
+          <th scope="col">Last run</th>
+          <th scope="col">Runs</th>
+          <th scope="col"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for pb in page_obj.object_list %}
+        <tr>
+          <td>
+            {% if can_mutate %}<a href="{% url 'ui-playbook-detail' pb.id %}">{{ pb.name }}</a>
+            {% else %}{{ pb.name }}{% endif %}
+          </td>
+          <td>{{ pb.trigger_event }}</td>
+          <td>
+            <span class="pill">{{ pb.config.action }}</span>
+          </td>
+          <td>
+            {% if pb.is_active %}
+              <span class="pill pill-on">Active</span>
             {% else %}
-              <span class="dim">—</span>
+              <span class="pill pill-off">Inactive</span>
             {% endif %}
-          {% endwith %}
-        </td>
-        <td>
-          <span class="pill">{{ pb.runs.count }}</span>
-        </td>
-        <td>
-          {% if can_mutate %}
-          <a class="btn" href="{% url 'ui-playbook-detail' pb.id %}">Open</a>
-          {% if pb.runs.count == 0 %}
-          {% url 'ui-playbook-delete' pb.id as delete_url %}
-          {% with modal_id="delete-playbook-"|add:pb.id|stringformat:"s" %}
-          {% include "ui/_modal.html" with modal_id=modal_id title="Delete playbook?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
-          {% endwith %}
-          <button type="button" class="btn btn-err" data-modal-open="delete-playbook-{{ pb.id }}">Delete</button>
-          {% endif %}
-          {% else %}
-          <span class="dim">—</span>
-          {% endif %}
-        </td>
-      </tr>
-      {% empty %}
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-  {% if not playbooks %}
-  <p class="empty">
-    No playbooks yet.{% if can_mutate %} <a href="{% url 'ui-playbook-create' %}">Create one</a>.{% endif %}
-  </p>
+          </td>
+          <td>
+            {% with runs=pb.runs.all %}
+              {% if runs %}
+                <span class="dim">{{ runs.0.created_at|date:"Y-m-d H:i" }}</span>
+              {% else %}
+                <span class="dim">—</span>
+              {% endif %}
+            {% endwith %}
+          </td>
+          <td>
+            <span class="pill">{{ pb.runs.count }}</span>
+          </td>
+          <td>
+            {% if can_mutate %}
+            <a class="btn" href="{% url 'ui-playbook-detail' pb.id %}">Open</a>
+            {% if pb.runs.count == 0 %}
+            {% url 'ui-playbook-delete' pb.id as delete_url %}
+            {% with modal_id="delete-playbook-"|add:pb.id|stringformat:"s" %}
+            {% include "ui/_modal.html" with modal_id=modal_id title="Delete playbook?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
+            {% endwith %}
+            <button type="button" class="btn btn-err" data-modal-open="delete-playbook-{{ pb.id }}">Delete</button>
+            {% endif %}
+            {% else %}
+            <span class="dim">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% include "ui/_pager.html" with entity_name="Playbook" %}
+  {% else %}
+    {# Legacy path — view not yet converted to paginate() #}
+    <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Playbooks</caption>
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Trigger</th>
+          <th scope="col">Action</th>
+          <th scope="col">Active</th>
+          <th scope="col">Last run</th>
+          <th scope="col">Runs</th>
+          <th scope="col"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for pb in playbooks %}
+        <tr>
+          <td>
+            {% if can_mutate %}<a href="{% url 'ui-playbook-detail' pb.id %}">{{ pb.name }}</a>
+            {% else %}{{ pb.name }}{% endif %}
+          </td>
+          <td>{{ pb.trigger_event }}</td>
+          <td>
+            <span class="pill">{{ pb.config.action }}</span>
+          </td>
+          <td>
+            {% if pb.is_active %}
+              <span class="pill pill-on">Active</span>
+            {% else %}
+              <span class="pill pill-off">Inactive</span>
+            {% endif %}
+          </td>
+          <td>
+            {% with runs=pb.runs.all %}
+              {% if runs %}
+                <span class="dim">{{ runs.0.created_at|date:"Y-m-d H:i" }}</span>
+              {% else %}
+                <span class="dim">—</span>
+              {% endif %}
+            {% endwith %}
+          </td>
+          <td>
+            <span class="pill">{{ pb.runs.count }}</span>
+          </td>
+          <td>
+            {% if can_mutate %}
+            <a class="btn" href="{% url 'ui-playbook-detail' pb.id %}">Open</a>
+            {% if pb.runs.count == 0 %}
+            {% url 'ui-playbook-delete' pb.id as delete_url %}
+            {% with modal_id="delete-playbook-"|add:pb.id|stringformat:"s" %}
+            {% include "ui/_modal.html" with modal_id=modal_id title="Delete playbook?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
+            {% endwith %}
+            <button type="button" class="btn btn-err" data-modal-open="delete-playbook-{{ pb.id }}">Delete</button>
+            {% endif %}
+            {% else %}
+            <span class="dim">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% if not playbooks %}
+    <p class="empty">
+      No playbooks yet.{% if can_mutate %} <a href="{% url 'ui-playbook-create' %}">Create one</a>.{% endif %}
+    </p>
+    {% endif %}
+  {% endif %}
+
+  {# Honest empty state for paginated path #}
+  {% if page_obj and page_obj.paginator.count == 0 %}
+    <p class="empty">
+      No playbooks yet.{% if can_mutate %} <a href="{% url 'ui-playbook-create' %}">Create one</a>.{% endif %}
+    </p>
   {% endif %}
 </div>
 {% endblock %}

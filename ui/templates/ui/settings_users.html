@@ -10,56 +10,113 @@
 {% block content %}
 {% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
 <div class="card">
-  <div class="table-wrap">
-  <table class="data-table">
-    <caption class="sr-only">Users</caption>
-    <thead>
-      <tr>
-        <th scope="col">Username</th>
-        <th scope="col">Email</th>
-        <th scope="col">Role</th>
-        <th scope="col">Organisation</th>
-        <th scope="col">Active</th>
-        <th scope="col">Last login</th>
-        <th scope="col"></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for user in users %}
-      <tr data-user-id="{{ user.id }}"
-          data-is-superadmin="{% if user.role == 'superAdmin' %}1{% else %}0{% endif %}"
-          data-is-self="{% if user.id == request.user.id %}1{% else %}0{% endif %}">
-        <td>{{ user.login }}</td>
-        <td>{{ user.email }}</td>
-        <td><span class="pill">{{ user.role }}</span></td>
-        <td>{{ user.org.name }}</td>
-        <td>
-          {% if user.is_active %}
-            <span class="pill pill-on">Yes</span>
-          {% else %}
-            <span class="pill pill-off">No</span>
-          {% endif %}
-        </td>
-        <td class="mono dim">{{ user.last_login|date:"Y-m-d H:i"|default:"—" }}</td>
-        <td>
-          <a class="btn" href="{% url 'ui-settings-users-edit' user.id %}">Edit</a>
-          {% url 'ui-settings-users-delete' user.id as delete_url %}
-          {% with sid=user.id|stringformat:"s" %}
-          {% with modal_id="delete-user-"|add:sid form_id="delete-user-"|add:sid|add:"-form" %}
-          {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_user_delete_form.html" user=user title="Delete user?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
-          {% endwith %}
-          {% endwith %}
-          <button type="button" class="btn btn-err" data-modal-open="delete-user-{{ user.id }}">Delete</button>
-        </td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="7" class="empty">No users yet. <a href="#" data-modal-open="user-create-modal">Create one</a>.</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
+  {% if page_obj.paginator %}
+    {% include "ui/_list_summary.html" with entity_name="user" entity_name_plural="users" %}
+    <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Users</caption>
+      <thead>
+        <tr>
+          <th scope="col">Username</th>
+          <th scope="col">Email</th>
+          <th scope="col">Role</th>
+          <th scope="col">Organisation</th>
+          <th scope="col">Active</th>
+          <th scope="col">Last login</th>
+          <th scope="col"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in page_obj.object_list %}
+        <tr data-user-id="{{ user.id }}"
+            data-is-superadmin="{% if user.role == 'superAdmin' %}1{% else %}0{% endif %}"
+            data-is-self="{% if user.id == request.user.id %}1{% else %}0{% endif %}">
+          <td>{{ user.login }}</td>
+          <td>{{ user.email }}</td>
+          <td><span class="pill">{{ user.role }}</span></td>
+          <td>{{ user.org.name }}</td>
+          <td>
+            {% if user.is_active %}
+              <span class="pill pill-on">Yes</span>
+            {% else %}
+              <span class="pill pill-off">No</span>
+            {% endif %}
+          </td>
+          <td class="mono dim">{{ user.last_login|date:"Y-m-d H:i"|default:"—" }}</td>
+          <td>
+            <a class="btn" href="{% url 'ui-settings-users-edit' user.id %}">Edit</a>
+            {% url 'ui-settings-users-delete' user.id as delete_url %}
+            {% with sid=user.id|stringformat:"s" %}
+            {% with modal_id="delete-user-"|add:sid form_id="delete-user-"|add:sid|add:"-form" %}
+            {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_user_delete_form.html" user=user title="Delete user?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
+            {% endwith %}
+            {% endwith %}
+            <button type="button" class="btn btn-err" data-modal-open="delete-user-{{ user.id }}">Delete</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+
+    {% if page_obj.paginator.count == 0 %}
+      <p class="empty">No users yet. <a href="#" data-modal-open="user-create-modal">Create one</a>.</p>
+    {% else %}
+      {% include "ui/_pager.html" with entity_name="User" %}
+    {% endif %}
+  {% else %}
+    {# Legacy path — view not yet converted to paginate() #}
+    <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Users</caption>
+      <thead>
+        <tr>
+          <th scope="col">Username</th>
+          <th scope="col">Email</th>
+          <th scope="col">Role</th>
+          <th scope="col">Organisation</th>
+          <th scope="col">Active</th>
+          <th scope="col">Last login</th>
+          <th scope="col"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        <tr data-user-id="{{ user.id }}"
+            data-is-superadmin="{% if user.role == 'superAdmin' %}1{% else %}0{% endif %}"
+            data-is-self="{% if user.id == request.user.id %}1{% else %}0{% endif %}">
+          <td>{{ user.login }}</td>
+          <td>{{ user.email }}</td>
+          <td><span class="pill">{{ user.role }}</span></td>
+          <td>{{ user.org.name }}</td>
+          <td>
+            {% if user.is_active %}
+              <span class="pill pill-on">Yes</span>
+            {% else %}
+              <span class="pill pill-off">No</span>
+            {% endif %}
+          </td>
+          <td class="mono dim">{{ user.last_login|date:"Y-m-d H:i"|default:"—" }}</td>
+          <td>
+            <a class="btn" href="{% url 'ui-settings-users-edit' user.id %}">Edit</a>
+            {% url 'ui-settings-users-delete' user.id as delete_url %}
+            {% with sid=user.id|stringformat:"s" %}
+            {% with modal_id="delete-user-"|add:sid form_id="delete-user-"|add:sid|add:"-form" %}
+            {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_user_delete_form.html" user=user title="Delete user?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
+            {% endwith %}
+            {% endwith %}
+            <button type="button" class="btn btn-err" data-modal-open="delete-user-{{ user.id }}">Delete</button>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="7" class="empty">No users yet. <a href="#" data-modal-open="user-create-modal">Create one</a>.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% endif %}
 </div>
 
 {# Create user modal — fields rendered server-side (no inline JS, CSP-safe) #}

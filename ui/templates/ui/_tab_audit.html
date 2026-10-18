@@ -6,6 +6,9 @@
 {% endcomment %}
 <section class="card" aria-labelledby="h-audit-timeline">
   <h2 id="h-audit-timeline">Case timeline</h2>
+  {% if timeline_total is not None and timeline_total > timeline|length %}
+    <p class="list-summary dim">Showing latest {{ timeline|length }} of {{ timeline_total }} events</p>
+  {% endif %}
   <ol class="timeline" id="audit-timeline"
       data-ws-url="{% if request.is_secure %}wss{% else %}ws{% endif %}://{{ request.get_host }}/ws/case/{{ case.id }}/">
     {% for event in timeline %}
@@ -18,6 +21,9 @@
 
 <section class="card" aria-labelledby="h-audit">
   <h2 id="h-audit">Audit log</h2>
+  {% if audit_logs_total is not None and audit_logs_total > audit_logs|length %}
+    <p class="list-summary dim">Showing latest {{ audit_logs|length }} of {{ audit_logs_total }} audit entries</p>
+  {% endif %}
   {% if audit_logs %}
     <div class="table-wrap">
       <table class="data-table data-table-tight">
@@ -42,6 +48,9 @@
 {# Automation runs — provisional placement per §7.4 #}
   <section class="card card-spaced" aria-labelledby="h-runs">
   <h2 id="h-runs">Automation runs <span class="count">{{ runs|length }}</span></h2>
+  {% if runs_total is not None and runs_total > runs|length %}
+    <p class="list-summary dim">Showing latest {{ runs|length }} of {{ runs_total }} runs</p>
+  {% endif %}
   {% if runs %}
     <div class="table-wrap">
       <table class="data-table data-table-tight">
@@ -65,4 +74,4 @@
   {% else %}
     <p class="empty">No playbook has run for this case.</p>
   {% endif %}
-</section>
+  </section>

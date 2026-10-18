@@ -1,0 +1,39 @@
+{% comment %}
+  Pagination nav — plain links, keyboard-operable, no JS.
+  Context:
+    page_obj         — django.core.paginator.Page (required)
+    entity_name      — singular entity name for aria-label, e.g. "Alert", "Case" (required)
+  Usage:
+    {% include "ui/_pager.html" with entity_name="Alert" %}
+{% endcomment %}
+
+{% if page_obj and page_obj.paginator.num_pages > 1 %}
+  <nav class="pager" aria-label="{{ entity_name }} pagination">
+    {% if page_obj.has_previous %}
+      <a rel="prev" href="{% querystring page=page_obj.previous_page_number %}">‹ Newer</a>
+    {% else %}
+      <span class="pager-disabled" aria-disabled="true">‹ Newer</span>
+    {% endif %}
+
+    <span class="pager-status" aria-current="page">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+
+    {% if page_obj.has_next %}
+      <a rel="next" href="{% querystring page=page_obj.next_page_number %}">Older ›</a>
+    {% else %}
+      <span class="pager-disabled" aria-disabled="true">Older ›</span>
+    {% endif %}
+  </nav>
+
+  {% comment %} Per-page size selector — only when there are more than 25 rows.
+     Rendered as a separate control group so it doesn't interfere with pager link tests. {% endcomment %}
+  {% if page_obj.paginator.count > 25 %}
+    <div class="pager-sizes" role="group" aria-label="Results per page">
+      {% with current=page_obj.paginator.per_page %}
+        {% if current == 25 %}<span class="btn btn-sm" aria-current="true">25</span>{% else %}<a class="btn btn-sm" href="{% querystring per_page=25 page=1 %}">25</a>{% endif %}
+        {% if current == 50 %}<span class="btn btn-sm" aria-current="true">50</span>{% else %}<a class="btn btn-sm" href="{% querystring per_page=50 page=1 %}">50</a>{% endif %}
+        {% if current == 100 %}<span class="btn btn-sm" aria-current="true">100</span>{% else %}<a class="btn btn-sm" href="{% querystring per_page=100 page=1 %}">100</a>{% endif %}
+        {% if current == 200 %}<span class="btn btn-sm" aria-current="true">200</span>{% else %}<a class="btn btn-sm" href="{% querystring per_page=200 page=1 %}">200</a>{% endif %}
+      {% endwith %}
+    </div>
+  {% endif %}
+{% endif %}

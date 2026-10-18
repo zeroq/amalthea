@@ -44,8 +44,8 @@ Earlier: **viewer role enforcement shipped** (ADR-006 +
 `PLAN-2026-10-12-viewer-role-enforcement.md`, independently verified + security-reviewed over 3 rounds;
 closes §11.1 and the P3-review M1/L3; follow-ups in §11.4/§11.5; `make check` 1617 passed / 3 skipped).
 **NEW — §12 records the analyst-impact gaps found in the post-wave UI audit** (no cross-case/correlation
-surface, no search, every list silently capped at 200 with no pager, a decorative observables filter,
-API-only case pages). Earlier: §6.16 P3 procedures/TTP UI + P5 D1/D3 shipped (P3 follow-ups §11.4, P5
+surface, no search, a decorative observables filter, API-only case pages; the "every list silently capped
+at 200 with no pager" item **shipped 2026-10-18**). Earlier: §6.16 P3 procedures/TTP UI + P5 D1/D3 shipped (P3 follow-ups §11.4, P5
 follow-ups §11.1–11.3); README Quickstart webhook flow refreshed for the per-org `IngestionToken`
 (ADR-004) and §10.8 filed; §6.16 UI wave P1 + P2 shipped + verified + security-remediated; §6.12
 org/user Settings and §6.14 Wave 6.3A hardening done 2026-10-11; §10 backlog captured.
@@ -69,9 +69,9 @@ hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the
 | Priority | Item | Description | Impact on the analyst |
 |----------|------|-------------|-----------------------|
 | **1** | **§12.3 — No cross-case / correlation surface (Modules B + C)** | `correlation_key` is derived, indexed and queryable but **nothing consumes it**: no auto-bundling of correlated alerts into a Case, and no "cases sharing this observable" view. The observable page lists its linked cases, but nothing links *from* a case. Also settles §10.7 "Similar" + Q-D4. | **Highest** — the marquee differentiator ("instantly highlight an advanced persistent pattern") is invisible in the UI. |
-| **2** | **§6.16 P6 — Global search (B3)** | No search surface anywhere in the UI; the only affordance is browsing lists, which §12.1/12.2 make lossy. Plan: `PLAN-2026-10-11-ui-completeness.md` B3/Q5 (cases + alerts + observables). | **Highest** — "have we seen this hash / IP / user before?" is the most asked triage question and has no answer. |
-| **3** | **§12.1 — Lists are silently truncated at 200, with no pager** | Every list view slices `[:PAGE_SIZE]` (200); no `Paginator`/`?page=` exists in `ui/`. | **High** — on any real instance the analyst cannot reach last month's cases, and is not told rows were cut. |
-| **4** | **§12.2 — The observables-list filter does nothing — SHIPPED 2026-10-15** | `observable_list` now reads `q`/`type` from `request.GET`, passes `observable_types` (the dropdown is no longer empty), stays org-scoped, and tolerates a malformed `type` id. The pager + honest empty state remain §12.1. | **Done** — the control no longer lies; the §12.1 truncation caveat still applies. |
+| **2** | **§6.16 P6 — Global search (B3)** | No search surface anywhere in the UI; the only affordance is browsing lists (now paginated since §12.1, but still browse-only). Plan: `PLAN-2026-10-11-ui-completeness.md` B3/Q5 (cases + alerts + observables). | **Highest** — "have we seen this hash / IP / user before?" is the most asked triage question and has no answer. |
+| **3** | **§12.1 — Lists are silently truncated at 200, with no pager — SHIPPED 2026-10-18** | A shared `paginate()` primitive (50/page, `?per_page` bounded, hostile `?page` never 500s) now covers all 12 list surfaces; rails are capped at `RAIL_CAP = 200` with an honest count line; every primary list has a pager, a "showing X–Y of Z" count and an empty state that separates *no rows* from *filtered to none* (with Clear filters). Plan `docs/planning/PLAN-2026-10-18-ui-pagination.md`; verified 33/34 ACs (`docs/verification/VERIFY-2026-10-18-ui-pagination.md`) and security PASS (`docs/reviews/REVIEW-2026-10-18-ui-pagination.md`). | **Done** — the remaining half-answer is the unmeasured Postgres `COUNT` (§12.1-fu1). |
+| **4** | **§12.2 — The observables-list filter does nothing — SHIPPED 2026-10-15** | `observable_list` now reads `q`/`type` from `request.GET`, passes `observable_types` (the dropdown is no longer empty), stays org-scoped, and tolerates a malformed `type` id. The pager + honest empty state shipped with §12.1 (2026-10-18). | **Done** — the control no longer lies, inside a list that now pages and counts honestly. |
 | **5** | **§12.4 — No bulk actions in the UI** | `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk` (PATCH) exist in the API with per-item isolation; the UI stub was deleted (Q2) and not replaced. | **Medium-High** — a 200-alert morning is single-item work. |
 | **6** | **§10.3–10.6 — Case scope / type / data-classification / phase — SHIPPED 2026-10-15** | `PLAN-2026-10-14-case-classification-fields.md`, commit `822d050`, verified 21/21 ACs. `data_classification` is admin-only and audited; `phase` is a separate field from `CaseStatus` (Q-D2). | **Done** — follow-up is §10.9 (status labels). |
 | **7** | **§12.5 — Case pages: renderable, not authorable** | **Code shipped 2026-10-14** (`ecbcef6`); **verified 2026-10-17 at 14/14 ACs — provisional** (`docs/verification/VERIFY-2026-10-17-case-pages-ui.md`; inline, awaiting an independent `verifier` re-run). One new low-severity finding (V1, duplicate modal id). | **Medium** — a documentation surface the analyst can see but never contribute to. |
@@ -82,7 +82,7 @@ hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the
 | **10b** | **§6.13 / §6.16 P4c — Settings: Sources → delete inactive token — SHIPPED 2026-10-17** | In Settings → Sources, an inactive row (revoked **or** deactivated) now offers **Delete** behind a confirm modal; an active token is refused until it is deactivated. Only an `admin` for that org’s tokens, or a `superAdmin`, may delete. The `ingestion_token.deleted` audit row is written *before* the row is removed, in the same transaction, so the trail keeps the token id and owning org. | **Done** — removes stale credentials and keeps the token list tidy. |
 | **10c** | **§6.13 / §6.16 P4d — Settings: Sources → deleting a feed's last token deletes the feed — SHIPPED 2026-10-17** | Deleting a token that is a feed's **last** credential now also deletes the feed and its mapping profile, so the **Sources** list stops advertising a feed that can never receive anything. The feed's alerts are kept (`Alert.ingestion_source` is `SET_NULL` — evidence outlives the profile); the confirm modal states the consequence before the click; `ingestion_source.deleted` is audited. Also fixes two false UI claims found on the way: the source page rendered a *deactivated* token as **Active**, and `sources_list.html` said an open feed "accepts unauthenticated posts" (false since strict token auth) — closes §10.8(a). | **Done** — tidies the Sources list without losing evidence. Guards: `TestFeedReapedWithLastToken`, `TestSourceDetailTokenStatus`. |
 | **11** | **Security: §11.2 (M3) + S3 + S5** | **M3** playbook secrets are global + cleartext to any authenticated user of any org. **S3** per-account lockout on the **API** login; stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. | **Medium (security)** — M3 blocks multi-tenant trust; S5's caps are the analyst-facing half (upload robustness). |
-| **12** | **§2.6 + §2.7 (test hardening) + §7.1–7.4 + §8.5/§8.7 + §11.3/§11.4-L1/§11.5** | Coverage back ≥ 80% (79% since the tenant wave) + the Phase-12/T2 QA list; Tailwind source/artifact split; mutation coverage; timestamp wording; protocol-relative `href`; unaudited procedure attaches; Django admin outside the role model; `django.request` log forging. | **None** — engineering hygiene + accepted Low/Info follow-ups. |
+| **12** | **§2.6 + §2.7 (test hardening) + §7.4 + §8.5/§8.7 + §11.4-L1/§11.5** | Coverage back ≥ 80% (79% since the tenant wave) + the Phase-12/T2 QA list; Tailwind source/artifact split (§7.4 — the committed `app.css` still drifts from a fresh `make css`); mutation coverage; timestamp wording; unaudited procedure attaches; Django admin outside the role model; `django.request` log forging. (§11.3 protocol-relative `href` **fixed 2026-10-17**.) | **None** — engineering hygiene + accepted Low/Info follow-ups. |
 | **13** | **Orphaned routes** | `ui-case-attachment-list` (+ its now-dead `ui/case_attachments.html`) and `ui-case-attachment-detail` (405) are reachable by URL only — the case page renders its own attachment table. `ui-case-export` / `ui-taxonomy` are now wired (P1), so this row supersedes the old claim. | **Low** — dead surface; delete or build an entry point. |
 | **14** | **§12.6 — Taxonomy: three cards break the mono convention for their values — SHIPPED 2026-10-17** | `ui/templates/ui/taxonomy.html` now renders the **Case Statuses**, **Alert Statuses** and **Observable Types** value / name cells as `<td class="mono">`, matching the four code cards (**Case Scope**, **Case Phase**, **Case Type**, **Data Classification**). | **Done** — visual consistency on the Taxonomy page; display-only, no behaviour change. |
 | **15** | **§12.7 — Cases list: make the case title clickable — SHIPPED 2026-10-17** | `ui/templates/ui/case_list.html` now links the **case title** to `ui-case-detail` (same URL as the **case number**); it is a real `<a>`, so keyboard access needs no JS. | **Done** — small UX improvement. |
@@ -560,23 +560,39 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
 (search) and P7 (realtime) stay in their own plan and should land after
 §12.1/12.2 — searching a truncated list is a half-answer.
 
-- [ ] **12.1 — Every UI list is silently truncated at `PAGE_SIZE = 200`, with no pager.** `alert_list`
-  (`ui/views.py:353`), the alert-detail rail (`:382`), `case_list` (`:455`), the case-detail rail (`:491`),
-  `automation_list` (`:650`), `observable_list` (`:1423`) and the Settings user list (`:1541`) all slice
-  `[:PAGE_SIZE]`; there is **no** `Paginator` / `page_obj` / `?page=` anywhere in `ui/`. On a real instance
-  an analyst cannot reach anything older than the newest 200 rows, and nothing on the page says rows were
-  cut. Fix: server-rendered pagination (degrade to `?page=` links; HTMX optional), a visible
-  "showing N of M" count, and an honest empty state that distinguishes *no rows* from *filtered to none* —
-  note the API is *not* a workaround for the analyst: `GET /case` defaults to the same cap
-  (`timelineLimit` default 50 / max 200 in `cases/views.py`). Source: audit 2026-10-12.
+- [x] **12.1 — Every UI list was silently truncated at `PAGE_SIZE = 200`, with no pager — FIXED 2026-10-18.**
+  Plan: `docs/planning/PLAN-2026-10-18-ui-pagination.md` (APPROVED; decisions §11, frozen interface §11a,
+  deviations §13). Verified: `docs/verification/VERIFY-2026-10-18-ui-pagination.md` (33/34 ACs met, 0 not met,
+  0 deviated — Q7 deferred) and `docs/reviews/REVIEW-2026-10-18-ui-pagination.md` (PASS).
+  Shipped: a single `ui/pagination.py::paginate()` primitive (default 50/page, `?per_page=25|50|100|200`
+  allow-listed, `MAX_PAGE_SIZE=200` hard ceiling, hostile `?page` never 500s, out-of-range clamps to the last
+  page) applied to **all 12** accounts of the working list surfaces — not just the seven named above; the
+  alert-detail and case-detail rails are pickers/rails, capped (not paged) at the new `RAIL_CAP = 200` with an
+  honest "showing latest N of M" line; `_pager.html` / `_list_summary.html` give every primary list a real
+  pager plus a "showing X–Y of Z" count; and the empty states now distinguish *no rows* from *filtered to
+  none* (the latter offers Clear filters). Regression tests: `tests/conformance/test_ui_pagination.py` (48)
+  and `tests/conformance/test_ui_pagination_edge_cases.py` (50), the latter pinning five defects found in
+  review (plural "alertss", a dead falsy-`Page` gate, a missing escape hatch, a `filtered_from` that counted
+  the filtered set, and an unbalanced pager tag) — all fixed. The API remains untouched (§11 Q8).
+  **Still open:** the filtered-observables `COUNT` cost was never measured at scale (SQLite cannot answer it);
+  see the new item below. The `?page=` cap is gone but the **picker/vocabulary** search gap (F1) remains.
 - [x] **12.2 — The observables-list filter is decorative — FIXED 2026-10-15.** `observable_list` now reads
   `request.GET`: `q` filters the artifact value (`data__icontains`) and `type` narrows to one `ObservableType`
   id, with `query` / `observable_types` / `type_filter` passed to the context so the dropdown is populated and
   the submitted type stays selected. The filter stays org-scoped (`org_q`) and a non-UUID `type` is dropped
   rather than 500-ing out of the UUID column. Regression tests in `tests/conformance/test_ui_p2_wiring.py`
-  (value, type, malformed id, org scoping). **Not** closed by this: §12.1 — there is still no pager and the
-  empty state still cannot tell "no rows" from "filtered to none", so filtering a truncated 200-row list
-  remains a half-answer. Source: audit 2026-10-12.
+  (value, type, malformed id, org scoping). **Closed by §12.1 (2026-10-18):** the pager and the honest
+  empty state now exist, so filtering a paginated list is a full answer rather than a half one — the empty
+  state distinguishes *no rows* from *filtered to none*. Source: audit 2026-10-12.
+- [ ] **12.1-fu1 — Measure the filtered-list `COUNT` on Postgres before trusting it (plan §11 Q7).**
+  `observable_list`'s `q` filter is `data__icontains` over a JSONB column with no supporting index; pagination
+  adds a `COUNT` per filtered request (plus the unfiltered-base `COUNT` for the "filtered from N" disclosure).
+  On SQLite this is unanswerable, so the measurement was **honestly deferred** rather than assumed — the
+  verification report records it as the sole unmet AC (`docs/verification/VERIFY-2026-10-18-ui-pagination.md`),
+  and the security review keeps it as open item O1. Do it when the Postgres suite lands (§3.1): seed ~100k
+  observables, `EXPLAIN (ANALYZE, BUFFERS)` a filtered list request, and if the plan or the latency is
+  unacceptable add a GIN/`pg_trgm` index (or move to a `search_vector`) — recording the before/after plan in
+  the plan doc. Low risk of *correctness* failure; a real risk of a slow list on a large instance.
 - [ ] **12.3 — No cross-case / correlation surface (AGENTS.md §2 Modules B + C).** `Alert.correlation_key`
   is derived at ingest (`ingest/mapping.py::extract_correlation_key`), indexed (`(correlation_key, date)`)
   and exposed to the query engine — but **no code consumes it**: there is no automatic bundling of

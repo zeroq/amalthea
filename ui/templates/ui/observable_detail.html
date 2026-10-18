@@ -176,6 +176,9 @@
 
     <div class="card">
       <h3>Linked Cases ({{ cases|length }})</h3>
+      {% if cases_total is not None and cases_total > cases|length %}
+        <p class="list-summary dim">Showing latest {{ cases|length }} of {{ cases_total }} linked cases</p>
+      {% endif %}
       {% if cases %}
       <div class="table-wrap">
       <table class="data-table">

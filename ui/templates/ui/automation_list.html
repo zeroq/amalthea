@@ -19,37 +19,80 @@
   </section>
 {% endif %}
 
-{% if runs %}
-  <div class="table-wrap">
-  <table class="data-table">
-    <caption class="sr-only">Automation runs, newest first</caption>
-    <thead>
-      <tr>
-        <th scope="col">Playbook</th><th scope="col">Status</th><th scope="col">Trigger</th>
-        <th scope="col">Case</th><th scope="col">Queued</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for run in runs %}
+<div class="card">
+  {% if page_obj.paginator %}
+    {% include "ui/_list_summary.html" with entity_name="run" entity_name_plural="runs" %}
+    <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Automation runs, newest first</caption>
+      <thead>
         <tr>
-          <td class="mono">{{ run.playbook_name }}</td>
-          <td>
-            <span class="pill pill-{{ run.status|lower }}">{{ run.status }}</span>
-            {% if run.error %}<pre class="tl-body error">{{ run.error }}</pre>{% endif %}
-          </td>
-          <td class="mono break">
-            {% if run.triggered_by_observable %}
-              {{ run.triggered_by_observable.data_type.name }} {{ run.triggered_by_observable.data }}
-            {% else %}—{% endif %}
-          </td>
-          <td>{% if run.case %}<a href="{% url 'ui-case-detail' run.case.number %}">#{{ run.case.number }}</a>{% else %}—{% endif %}</td>
-          <td class="mono dim">{{ run.created_at|date:"Y-m-d H:i:s" }}</td>
+          <th scope="col">Playbook</th><th scope="col">Status</th><th scope="col">Trigger</th>
+          <th scope="col">Case</th><th scope="col">Queued</th>
         </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-{% else %}
-  <p class="empty">No runs recorded.</p>
-{% endif %}
+      </thead>
+      <tbody>
+        {% for run in page_obj.object_list %}
+          <tr>
+            <td class="mono">{{ run.playbook_name }}</td>
+            <td>
+              <span class="pill pill-{{ run.status|lower }}">{{ run.status }}</span>
+              {% if run.error %}<pre class="tl-body error">{{ run.error }}</pre>{% endif %}
+            </td>
+            <td class="mono break">
+              {% if run.triggered_by_observable %}
+                {{ run.triggered_by_observable.data_type.name }} {{ run.triggered_by_observable.data }}
+              {% else %}—{% endif %}
+            </td>
+            <td>{% if run.case %}<a href="{% url 'ui-case-detail' run.case.number %}">#{{ run.case.number }}</a>{% else %}—{% endif %}</td>
+            <td class="mono dim">{{ run.created_at|date:"Y-m-d H:i:s" }}</td>
+          </tr>
+        {% empty %}
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+
+    {% if page_obj.paginator.count == 0 %}
+      <p class="empty">No runs recorded.</p>
+    {% else %}
+      {% include "ui/_pager.html" with entity_name="Automation" %}
+    {% endif %}
+  {% else %}
+    {# Legacy path — view not yet converted to paginate() #}
+    {% if runs %}
+      <div class="table-wrap">
+      <table class="data-table">
+        <caption class="sr-only">Automation runs, newest first</caption>
+        <thead>
+          <tr>
+            <th scope="col">Playbook</th><th scope="col">Status</th><th scope="col">Trigger</th>
+            <th scope="col">Case</th><th scope="col">Queued</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for run in runs %}
+            <tr>
+              <td class="mono">{{ run.playbook_name }}</td>
+              <td>
+                <span class="pill pill-{{ run.status|lower }}">{{ run.status }}</span>
+                {% if run.error %}<pre class="tl-body error">{{ run.error }}</pre>{% endif %}
+              </td>
+              <td class="mono break">
+                {% if run.triggered_by_observable %}
+                  {{ run.triggered_by_observable.data_type.name }} {{ run.triggered_by_observable.data }}
+                {% else %}—{% endif %}
+              </td>
+              <td>{% if run.case %}<a href="{% url 'ui-case-detail' run.case.number %}">#{{ run.case.number }}</a>{% else %}—{% endif %}</td>
+              <td class="mono dim">{{ run.created_at|date:"Y-m-d H:i:s" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    {% else %}
+      <p class="empty">No runs recorded.</p>
+    {% endif %}
+  {% endif %}
+</div>
 {% endblock %}

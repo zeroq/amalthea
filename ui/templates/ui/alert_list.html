@@ -14,36 +14,93 @@
 {% endblock %}
 
 {% block content %}
-{% if alerts %}
-  <div class="table-wrap">
-  <table class="data-table">
-    <caption class="sr-only">Alerts, newest first</caption>
-    <thead>
-      <tr>
-        <th scope="col">Severity</th><th scope="col">Title</th><th scope="col">Type</th>
-        <th scope="col">Source</th><th scope="col">Seen</th>
-        <th scope="col">State</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for alert in alerts %}
+<div class="card">
+  {% if page_obj.paginator %}
+    {% include "ui/_list_summary.html" with entity_name="alert" entity_name_plural="alerts" %}
+    <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Alerts, newest first</caption>
+      <thead>
         <tr>
-          <td><span class="sev sev-{{ alert.severity|sev_class }}">{{ alert.severity|sev_label }}</span></td>
-          <td><a href="{% url 'ui-alert-detail' alert.id %}">{{ alert.title }}</a></td>
-          <td class="mono">{{ alert.type }}</td>
-          <td class="mono">{{ alert.source }}{% if alert.ingestion_source %} <span class="dim">({{ alert.ingestion_source.slug }})</span>{% endif %}</td>
-          <td class="mono dim">{{ alert.date|date:"Y-m-d H:i" }}</td>
-          <td>
-            {% if alert.case %}
-              <a href="{% url 'ui-case-detail' alert.case.number %}">#{{ alert.case.number }}</a>
-            {% else %}{{ alert.status.value }}{% endif %}
-          </td>
+          <th scope="col">Severity</th><th scope="col">Title</th><th scope="col">Type</th>
+          <th scope="col">Source</th><th scope="col">Seen</th>
+          <th scope="col">State</th>
         </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-{% else %}
-  <p class="empty">No alerts in this scope.</p>
-{% endif %}
+      </thead>
+      <tbody>
+        {% for alert in page_obj.object_list %}
+          <tr>
+            <td><span class="sev sev-{{ alert.severity|sev_class }}">{{ alert.severity|sev_label }}</span></td>
+            <td><a href="{% url 'ui-alert-detail' alert.id %}">{{ alert.title }}</a></td>
+            <td class="mono">{{ alert.type }}</td>
+            <td class="mono">{{ alert.source }}{% if alert.ingestion_source %} <span class="dim">({{ alert.ingestion_source.slug }})</span>{% endif %}</td>
+            <td class="mono dim">{{ alert.date|date:"Y-m-d H:i" }}</td>
+            <td>
+              {% if alert.case %}
+                <a href="{% url 'ui-case-detail' alert.case.number %}">#{{ alert.case.number }}</a>
+              {% else %}{{ alert.status.value }}{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+
+    {% if page_obj.paginator.count == 0 %}
+      {# Honest empty state for paginated path #}
+      {% if scope == "linked" or scope == "all" %}
+        <p class="empty">No alerts match your filters. <a href="{% url 'ui-alert-list' %}">Clear filters</a></p>
+      {% elif scope == "unlinked" and filtered_from %}
+        <p class="empty">No alerts — no unlinked alerts (filtered from {{ filtered_from }}). <a href="{% url 'ui-alert-list' %}?scope=all">View all scopes</a></p>
+      {% else %}
+        <p class="empty">No alerts in this scope.</p>
+      {% endif %}
+    {% else %}
+      {% include "ui/_pager.html" with entity_name="Alert" %}
+    {% endif %}
+  {% else %}
+    {# Legacy / transitional path — view may pass alerts + scope + filtered_from #}
+    {% if alerts %}
+      <div class="table-wrap">
+      <table class="data-table">
+        <caption class="sr-only">Alerts, newest first</caption>
+        <thead>
+          <tr>
+            <th scope="col">Severity</th><th scope="col">Title</th><th scope="col">Type</th>
+            <th scope="col">Source</th><th scope="col">Seen</th>
+            <th scope="col">State</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for alert in alerts %}
+            <tr>
+              <td><span class="sev sev-{{ alert.severity|sev_class }}">{{ alert.severity|sev_label }}</span></td>
+              <td><a href="{% url 'ui-alert-detail' alert.id %}">{{ alert.title }}</a></td>
+              <td class="mono">{{ alert.type }}</td>
+              <td class="mono">{{ alert.source }}{% if alert.ingestion_source %} <span class="dim">({{ alert.ingestion_source.slug }})</span>{% endif %}</td>
+              <td class="mono dim">{{ alert.date|date:"Y-m-d H:i" }}</td>
+              <td>
+                {% if alert.case %}
+                  <a href="{% url 'ui-case-detail' alert.case.number %}">#{{ alert.case.number }}</a>
+                {% else %}{{ alert.status.value }}{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div
+    {% else %}
+      {# Empty list — check for filtered_from to give honest empty state #}
+      {% if filtered_from %}
+        {% if scope == "unlinked" %}
+          <p class="empty">No alerts — no unlinked alerts (filtered from {{ filtered_from }}). <a href="{% url 'ui-alert-list' %}?scope=all">View all scopes</a></p>
+        {% else %}
+          <p class="empty">No alerts match your filters (filtered from {{ filtered_from }}). <a href="{% url 'ui-alert-list' %}">Clear filters</a></p>
+        {% endif %}
+      {% else %}
+        <p class="empty">No alerts in this scope.</p>
+      {% endif %}
+    {% endif %}
+  {% endif %}
+</div>
 {% endblock %}

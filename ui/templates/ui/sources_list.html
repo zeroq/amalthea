@@ -9,18 +9,20 @@
   token decides both the profile and the organisation the alert lands in.
 </p>
 
-{% if sources %}
-  <div class="table-wrap">
-  <table class="data-table">
-    <caption class="sr-only">Configured ingestion sources</caption>
-    <thead>
-      <tr>
-        <th scope="col">Slug</th><th scope="col">Name</th><th scope="col">Alerts</th>
-        <th scope="col">Secret</th><th scope="col">Correlation</th><th scope="col">Mapping</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for source in sources %}
+<div class="card">
+  {% if page_obj %}
+    {% include "ui/_list_summary.html" with entity_name="source" entity_name_plural="sources" %}
+    <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Configured ingestion sources</caption>
+      <thead>
+        <tr>
+          <th scope="col">Slug</th><th scope="col">Name</th><th scope="col">Alerts</th>
+          <th scope="col">Secret</th><th scope="col">Correlation</th><th scope="col">Mapping</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for source in page_obj.object_list %}
         <tr>
           <td class="mono">
             {% if can_open_source_page %}
@@ -47,20 +49,73 @@
             {% else %}<span class="dim">none — literal keys only</span>{% endif %}
           </td>
         </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
+        {% empty %}
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% include "ui/_pager.html" with entity_name="Source" %}
+  {% else %}
+    {# Legacy path — view not yet converted to paginate() #}
+    {% if sources %}
+      <div class="table-wrap">
+      <table class="data-table">
+        <caption class="sr-only">Configured ingestion sources</caption>
+        <thead>
+          <tr>
+            <th scope="col">Slug</th><th scope="col">Name</th><th scope="col">Alerts</th>
+            <th scope="col">Secret</th><th scope="col">Correlation</th><th scope="col">Mapping</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for source in sources %}
+          <tr>
+            <td class="mono">
+              {% if can_open_source_page %}
+                <a href="{% url 'ui-settings-source-detail' source.id %}">{{ source.slug }}</a>
+              {% else %}
+                {{ source.slug }}
+              {% endif %}
+            </td>
+            <td>{{ source.name }}</td>
+            <td class="mono">{{ source.alert_count }}</td>
+            <td>
+              {% if source.has_active_token %}
+                <span class="pill pill-on">required</span>
+              {% elif source.has_paused_token %}
+                <span class="pill pill-pending">paused</span>
+              {% else %}
+                <span class="pill pill-off">none</span>
+              {% endif %}
+            </td>
+            <td>{{ source.correlation_enabled|yesno:"on,off" }}</td>
+            <td class="mono break">
+              {% if source.rule_count %}
+                {{ source.rule_count }} rule{{ source.rule_count|pluralize }}{% if source.severity_rule %} · severity←{{ source.severity_rule }}{% endif %}
+              {% else %}<span class="dim">none — literal keys only</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    {% else %}
+      <p class="empty">No ingestion sources configured.</p>
+    {% endif %}
+  {% endif %}
 
-  <p class="hint">
-    Every post is authenticated by an ingestion token, so a feed marked <em>none</em> (no token) or
-    <em>paused</em> (its tokens are all deactivated) accepts nothing at all — not anonymous posts,
-    just nothing. Mint or activate a token in
-    <a href="{% url 'ui-settings-sources' %}">Settings → Sources</a> to open a feed.
-    Deleting a feed's last token deletes the feed too, so a feed only stays here while it has a
-    credential.
-  </p>
-{% else %}
-  <p class="empty">No ingestion sources configured.</p>
-{% endif %}
+  {# Honest empty state for paginated path #}
+  {% if page_obj and page_obj.paginator.count == 0 %}
+    <p class="empty">No ingestion sources configured.</p>
+  {% endif %}
+</div>
+
+<p class="hint">
+  Every post is authenticated by an ingestion token, so a feed marked <em>none</em> (no token) or
+  <em>paused</em> (its tokens are all deactivated) accepts nothing at all — not anonymous posts,
+  just nothing. Mint or activate a token in
+  <a href="{% url 'ui-settings-sources' %}">Settings → Sources</a> to open a feed.
+  Deleting a feed's last token deletes the feed too, so a feed only stays here while it has a
+  credential.
+</p>
 {% endblock %}

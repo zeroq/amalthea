@@ -29,6 +29,10 @@
   </div>
   <div class="full-width">
     <label for="f-ttpId">Link to TTP vocabulary (optional)</label>
+    {% if ttps_total is not None and ttps_total > ttps|length %}
+      <p class="list-summary dim">Showing the first {{ ttps|length }} of {{ ttps_total }} TTPs.</p>
+      {# F1: the full vocabulary picker with search is a follow-up #}
+    {% endif %}
     <select id="f-ttpId" name="ttpId"{% if form_id %} form="{{ form_id }}"{% endif %}>
       <option value="">-- none --</option>
       {% for ttp in ttps %}
