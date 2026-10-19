@@ -98,8 +98,16 @@
           <form method="post" action="{% url 'ui-alert-merge' alert.id %}">{% csrf_token %}
             <label for="f-case">Case</label>
             <select id="f-case" name="case_id" required>
-              {% for case in merge_candidates %}
-                <option value="{{ case.number }}">#{{ case.number }} — {{ case.title }}</option>
+              {% for sc in merge_candidates %}
+                {% with c=sc.case shared_count=sc.shared_count shared=sc.shared %}
+                  {% if shared_count > 0 %}
+                    <option value="{{ c.number }}">
+                      #{{ c.number }} — {{ c.title }} ({{ shared_count }} shared artifact{{ shared_count|pluralize }}: {% for dt, val in shared %}{{ dt }}: {{ val }}{% if not forloop.last %}, {% endif %}{% endfor %})
+                    </option>
+                  {% else %}
+                    <option value="{{ c.number }}">#{{ c.number }} — {{ c.title }}</option>
+                  {% endif %}
+                {% endwith %}
               {% endfor %}
             </select>
             <button type="submit" class="btn">Merge alert</button>

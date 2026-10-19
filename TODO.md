@@ -556,7 +556,9 @@ audited and enumerated by tests — but several **read/discovery** surfaces an a
 truncated or decorative. None of these is a regression (they shipped that way) and none is in a plan yet.
 
 Recommended: one small plan (`PLAN-…-analyst-ergonomics`) covering **§12.1 + §12.2 + §12.4** together, since
-they share the list-view plumbing and are cheap; **§12.3** needs a decision first (§10.7/Q-D4). §6.16 P6
+they share the list-view plumbing and are cheap. **§10.7/Q-D4 is now settled**: §12.3's "Similar" surface was
+re-opened and shipped 2026-10-18 as a read-only, correlation-ranked panel plus a correlation-ranked, audited
+attach path — **automatic** ingest-time bundling was deliberately deferred (see §12.3 and §12.3-fu1). §6.16 P6
 (search) and P7 (realtime) stay in their own plan and should land after
 §12.1/12.2 — searching a truncated list is a half-answer.
 
@@ -593,7 +595,7 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
   observables, `EXPLAIN (ANALYZE, BUFFERS)` a filtered list request, and if the plan or the latency is
   unacceptable add a GIN/`pg_trgm` index (or move to a `search_vector`) — recording the before/after plan in
   the plan doc. Low risk of *correctness* failure; a real risk of a slow list on a large instance.
-- [ ] **12.3 — No cross-case / correlation surface (AGENTS.md §2 Modules B + C).** `Alert.correlation_key`
+- [x] **12.3 — No cross-case / correlation surface (AGENTS.md §2 Modules B + C) — SHIPPED 2026-10-18 (read-only Similar panel + correlation-ranked, audited attach; automatic bundling deferred).** `Alert.correlation_key`
   is derived at ingest (`ingest/mapping.py::extract_correlation_key`), indexed (`(correlation_key, date)`)
   and exposed to the query engine — but **no code consumes it**: there is no automatic bundling of
   correlated alerts into a `Case` (Module B: "automatically bundled … identical destination IP within a
@@ -603,10 +605,38 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
   (§10.7 "Similar" tab semantics, **Q-D4**); then: an automated-bundle service that is **explicit and
   auditable** (silent auto-merges are unacceptable — every bundle must write a ledger entry + `AuditLog` row,
   per §9 of the plan and ADR-002), plus a case-side "related cases" panel reusing
-  `case_observables__observable` (no new model). Source: audit 2026-10-12; AGENTS.md §2. **Q-D4 decided
-  2026-10-14:** deferred — `PLAN-2026-10-14-case-classification-fields.md` §12 settled it, and the "Similar"
-  tab remains the explicit "not yet implemented" placeholder in `ui/templates/ui/_tab_similar.html`. Nothing
-  else depends on it; it is still unimplemented and unscheduled.
+  `case_observables__observable` (no new model). Source: audit 2026-10-12; AGENTS.md §2. **Q-D4 was decided
+  2026-10-14 as deferred** (`PLAN-2026-10-14-case-classification-fields.md` §12) — then **re-opened and
+  settled by shipping** on 2026-10-18.
+  Plan: `docs/planning/PLAN-2026-10-18-correlation-similar-cases.md` (APPROVED; decisions §11 = Q1b–Q8b,
+  frozen interfaces §6, deviations §13). Verified: `docs/verification/VERIFY-2026-10-18-correlation-similar-cases.md`
+  (all P1/P2 ACs met; 20/20 tests) and `docs/reviews/REVIEW-2026-10-18-correlation-similar-cases.md`
+  (CONDITIONAL PASS → material findings M1–M4 fixed before merge).
+  Shipped: `cases/correlation.py` — **one** ranking primitive (`cases_sharing_findings`) feeding both halves,
+  plus `candidate_cases_for_alert` (a **pure** dry-run extraction over the alert payload via
+  `observables/extractor.py::find_observables`, with the ingest size/depth bounds re-applied) and
+  `record_alert_bundled` (one ledger entry `kind="correlation-bundle"` + one `AuditLog` row
+  `action="case.alert_bundled"`, both inside the caller's `transaction.atomic()`).
+  `_tab_similar.html` is now a real ranked panel with two distinct empty states; `alert_detail`'s merge
+  candidates are correlation-ranked rather than "newest open cases"; **`alert_escalate` and `alert_merge`
+  both now write ledger + audit** (they previously wrote only a `TimelineEvent`), closing the ADR-002 §9 gap
+  on that path; and `ignore_similarity` is consumed for the first time. Under decision **Q1b**, automatic
+  ingest-time bundling was **deferred** — see §12.3-fu1. Tests:
+  `tests/conformance/test_correlation_similar_cases.py` (20).
+- [ ] **12.3-fu1 — Automatic ingest-time bundling was deferred by decision Q1b (the "more urgent half" of
+  Module B).** Plan: `docs/planning/PLAN-2026-10-18-correlation-similar-cases.md` §5.x (scope) and §11 (the
+  pre-settled answers, so the trigger design is **not** re-litigated when this starts).
+  Pre-settled: **Q3c** — a rule matches on `correlation_key` **or** a shared observable, configurable,
+  defaulting to `correlation_key` within a window; **Q4a** — the rule lives in a minimal per-org
+  `CorrelationRule` (`enabled=False` by default, `window_minutes=10`, capped), and it was deliberately
+  **not** built in the §12.3 wave because a model with no consumer is exactly the inert-artifact problem
+  tracked as TODO item 1; **Q5a** — evaluate synchronously in the ingest request, behind `enabled=False`,
+  with a bounded candidate set (the seek is `alert_corrkey_date_idx`, already indexed).
+  AGENTS.md's example — "identical destination IP within a 10-minute window" — is exactly this rule.
+  Hard requirements when it lands: it must **never** be silent (ledger entry naming the key + window, plus
+  an `AuditLog` row — the machinery now exists as `cases/correlation.py::record_alert_bundled`); it must
+  never choose a **closed** case; and the §12.1-fu1 Postgres measurement should land first, since the rule
+  adds a query to the hot ingest path. Source: §12.3 decision 2026-10-18.
 - [ ] **12.4 — No bulk actions in the UI.** `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk`
   (PATCH) exist in the API with per-item isolation + status reporting (`compat/bulk.py`,
   `test_t2_p4_surface.py`), but the UI stub was deleted under Q2 (P1) and nothing replaced it — triaging a
@@ -711,6 +741,18 @@ they share the list-view plumbing and are cheap; **§12.3** needs a decision fir
       (`app.css`: `margin-top:0`, centred, 34px equal-height controls) and is now reused outside Case
       templates (`source_detail.html`, and the Settings → Sources token row) — generalize/rename it as part
       of this item rather than inventing a second utility. Source: user request 2026-10-17.
+
+- [ ] **12.10 — `sev_class` emits CSS classes that do not exist, so severity renders unstyled wherever that
+  filter is used.** `ui/templatetags/ui_tags.py::sev_class` maps `1`–`4` to
+  `low`/`medium`/`high`/`critical`, i.e. it emits `sev-high` / `sev-critical` — but `ui/static/ui/app.css`
+  defines only `.sev-1`…`.sev-4` and `.sev-unknown`. So a template using the filter
+  (`ui/templates/ui/_tab_alerts.html:25`) renders severity **without its semantic colour**, while a template
+  that interpolates raw (`sev-{{ severity }}`, e.g. `ui/templates/ui/observable_detail.html:201-202` and the
+  new `_tab_similar.html`) works. Found 2026-10-18 while reviewing §12.3; **pre-existing**, unrelated to that
+  work, and deliberately not fixed there. Fix one of two ways and add a regression test: (a) add
+  `.sev-low`/`.sev-medium`/`.sev-high`/`.sev-critical` to `app.css`, or (b) make `sev_class` return the
+  numeric suffix so both idioms agree. Either way severity must keep its text label — never colour alone
+  (AGENTS.md §6). Source: §12.3 planner review 2026-10-18.
 
 ---
 

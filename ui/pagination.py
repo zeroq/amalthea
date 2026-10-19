@@ -44,7 +44,10 @@ and correctness policies:
   org-scoped count when a filter is active; `None` otherwise.
 """
 
+from __future__ import annotations
+
 from django.core.paginator import EmptyPage, Page, PageNotAnInteger, Paginator
+from django.db import models
 from django.db.models.query import QuerySet
 from django.http import HttpRequest
 
@@ -62,19 +65,22 @@ MAX_PAGE_SIZE = 200
 #   procedures, audit logs): cap to **newest N** and re-order back to display
 #   order. The analyst needs to see recent activity, not the oldest rows.
 RAIL_CAP = 200
+# Page size for picker dropdowns (assignee pickers, merge candidate lists, etc.)
+# — NOT for paginated lists. Paginated lists use DEFAULT_PAGE_SIZE / MAX_PAGE_SIZE.
+PICKER_PAGE_SIZE = 200
 
 # Allow-list for ?per_page= — only these exact strings are accepted.
 ALLOWED_PER_PAGE = {"25", "50", "100", "200"}
 
 
-def paginate(
+def paginate[T: models.Model](
     request: HttpRequest,
-    queryset: QuerySet,
+    queryset: QuerySet[T],
     *,
     size: int = DEFAULT_PAGE_SIZE,
     param: str = "page",
     per_page_param: str = "per_page",
-) -> Page:
+) -> Page[T]:
     """Paginate an already-filtered queryset for a UI list.
 
     Args:

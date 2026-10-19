@@ -1,9 +1,68 @@
 {% load ui_tags %}
+{% comment %}
+  Similar cases tab — ranked list of cases sharing observables with this case.
+  Context: similar_cases (list[SimilarCase]), similar_total (int), case (Case).
+  SimilarCase fields: .case, .shared_count (int), .shared (list[tuple[data_type, value]]).
+{% endcomment %}
 <section class="card" aria-labelledby="h-similar">
   <h2 id="h-similar">Similar cases</h2>
-  <p class="empty">
-    This feature is not yet implemented.
-    <br>
-    Cross-case correlation via shared observables will be added in a future release.
-  </p>
+
+  {% if similar_cases %}
+    <ol class="similar-list" role="list">
+      {% for sc in similar_cases %}
+      <li class="similar-row">
+        <div class="similar-main">
+          <a href="{% url 'ui-case-detail' sc.case.number %}"
+             class="similar-link"
+             aria-label="Open case #{{ sc.case.number }} — {{ sc.case.title }}">
+            <span class="similar-case-ref">#{{ sc.case.number }}</span>
+            <span class="similar-title">{{ sc.case.title }}</span>
+          </a>
+
+          <dl class="similar-meta" aria-label="Case metadata">
+            <dt class="sr-only">Status</dt>
+            <dd class="similar-status">
+              <span class="pill sev-{{ sc.case.severity }}">{{ sc.case.get_status_display }}</span>
+            </dd>
+            <dt class="sr-only">Severity</dt>
+            <dd class="similar-severity">
+              <span class="sev sev-{{ sc.case.severity }}">{{ sc.case.get_severity_display }}</span>
+            </dd>
+          </dl>
+        </div>
+
+        <div class="similar-shared" aria-label="Shared artifacts">
+          <span class="similar-count" aria-label="{{ sc.shared_count }} shared artifact{{ sc.shared_count|pluralize }}">
+            {{ sc.shared_count }} shared
+          </span>
+
+          {% if sc.shared %}
+          <ul class="shared-chips" role="list" aria-label="Shared observable values">
+            {% for data_type, value in sc.shared %}
+            <li class="shared-chip mono" title="{{ data_type }}: {{ value }}">
+              {{ data_type }}: {{ value }}
+            </li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+
+    {# Honest truncation: show "showing N of M" when capped (pattern from observable_detail.html:179-180) #}
+    {% if similar_total > similar_cases|length %}
+      <p class="list-summary dim">
+        Showing <strong>{{ similar_cases|length }}</strong> of <strong>{{ similar_total }}</strong> similar cases
+      </p>
+    {% endif %}
+
+  {% else %}
+    {# Two distinct empty states per §7 and AC-P1.3 #}
+    {% if case.case_observables.exists %}
+      <p class="empty">No other case shares artifacts with this one.</p>
+    {% else %}
+      <p class="empty">This case has no artifacts yet.</p>
+    {% endif %}
+  {% endif %}
 </section>

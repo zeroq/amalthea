@@ -38,6 +38,7 @@ from django.contrib.auth.views import (  # noqa: F401 (re-exported for ui/urls.p
     LogoutView,
     PasswordChangeView,
 )
+from django.core.exceptions import PermissionDenied
 from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import Count, Max
@@ -57,6 +58,11 @@ from automation.dispatcher import TRIGGER_EVENTS
 from automation.executor import registered_actions
 from automation.models import AutomationRun, Playbook
 from automation.playbooks import ACTIONS, HTTP_METHODS
+from cases.correlation import (
+    candidate_cases_for_alert,
+    cases_sharing_findings,
+    record_alert_bundled,
+)
 from cases.create import DEFAULT_CASE_STATUS, create_case
 from cases.ledger import append_timeline_event
 from cases.models import (
@@ -117,7 +123,7 @@ from ingest.models import IngestionSource
 from observables.extractor import add_observable_with_status, extract_into_case
 from observables.models import Observable, ObservableType
 from realtime.publisher import publish_case_event
-from ui.pagination import paginate
+from ui.pagination import PICKER_PAGE_SIZE, paginate
 
 logger = logging.getLogger(__name__)
 
@@ -132,9 +138,6 @@ CASE_STAGE_VALUES = ("New", "InProgress", "Closed")
 CASE_INLINE_EDIT_FIELDS: frozenset[str] = frozenset(
     {"severity", "scope", "case_type", "data_classification", "phase", "verdict"}
 )
-#: Default page size for picker dropdowns (assignee pickers, etc.) — NOT for paginated lists.
-#: Paginated lists use `ui.pagination.DEFAULT_PAGE_SIZE` (50) with `MAX_PAGE_SIZE` (200) ceiling.
-PICKER_PAGE_SIZE = 200
 #: Upper bound on outbound HTTP headers per playbook. `header_count` is form-controlled and drives a
 #: CPU-bound `range()`, so it must be capped (see `_parse_playbook_config`) — far above real usage.
 MAX_HEADERS = 64
@@ -455,15 +458,15 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
         .exclude(stage="Imported")
         .order_by("order", "value")
     )
+    # Correlation-ranked merge candidates (P2) with plain open-case fallback
+    merge_candidates = candidate_cases_for_alert(alert, user=request.user)
     return render(
         request,
         "ui/alert_detail.html",
         _base_context(
             request,
             alert=alert,
-            merge_candidates=Case.objects.filter(case_visible_q(request.user))
-            .filter(closed_date__isnull=True)
-            .order_by("-start_date")[:PICKER_PAGE_SIZE],
+            merge_candidates=merge_candidates,
             is_cross_org=is_cross_org,
             alert_status_options=alert_status_options,
             tlp_choices=TLP_CHOICES,
@@ -494,7 +497,18 @@ def alert_escalate(request: HttpRequest, alert_id: str) -> HttpResponse:
                 assignee=request.user if request.POST.get("assign_me") else None,
                 actor=request.user,
             )
+            # Record the bundle in ledger + audit (P2 — closes ADR-002 §9 gap on this path)
+            record_alert_bundled(
+                case,
+                alert,
+                actor=request.user,
+                reason="Alert escalated into new case",
+                source="escalate",
+            )
     except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect("ui-alert-detail", alert_id=alert_id)
+    except PermissionDenied as exc:
         messages.error(request, str(exc))
         return redirect("ui-alert-detail", alert_id=alert_id)
     if warnings:
@@ -515,8 +529,20 @@ def alert_merge(request: HttpRequest, alert_id: str) -> HttpResponse:
     case = resolve_case(request.user, request.POST.get("case_id") or "", write=True)
     if case is None:
         raise Http404()
-    with transaction.atomic():
-        merge_alert_into_case(alert, case, actor=request.user)
+    try:
+        with transaction.atomic():
+            merge_alert_into_case(alert, case, actor=request.user)
+            # Record the bundle in ledger + audit (P2 — closes ADR-002 §9 gap on this path)
+            record_alert_bundled(
+                case,
+                alert,
+                actor=request.user,
+                reason="Alert merged into existing case",
+                source="merge",
+            )
+    except PermissionDenied as exc:
+        messages.error(request, str(exc))
+        return redirect("ui-alert-detail", alert_id=alert_id)
     messages.success(request, f"Alert merged into case {case.number}.")
     return _case_detail_redirect(request, case.number)
 
@@ -978,6 +1004,31 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     ttps_total = ttps_qs.count()
     ttps = list(ttps_qs[:RAIL_CAP])
 
+    # Similar cases tab — only query when the tab is rendered (plan: no query when not rendered)
+    similar_cases = []
+    similar_total = 0
+    if active_tab == "similar":
+        from cases.models import CaseObservable
+        from observables.extractor import Finding
+
+        # Build findings from this case's CaseObservables, excluding ignore_similarity
+        case_observables = (
+            CaseObservable.objects.filter(case=case)
+            .select_related("observable__data_type")
+            .exclude(observable__ignore_similarity=True)
+        )
+        findings = [
+            Finding(
+                type_name=co.observable.data_type.name,
+                raw=co.observable.data,
+                normalized=co.observable.normalized_data,
+            )
+            for co in case_observables
+        ]
+        similar_cases, similar_total = cases_sharing_findings(
+            findings, user=request.user, exclude_case=case
+        )
+
     return render(
         request,
         "ui/case_detail.html",
@@ -1018,6 +1069,9 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
                 "ui-case-procedure-create", kwargs={"case_id": case.number}
             ),
             procedure_create_extra_fields={"tab": "ttp"},
+            # Similar cases (Module C)
+            similar_cases=similar_cases,
+            similar_total=similar_total,
             # Edit-case modal (case_detail.html §"Edit case"): mirror the edit page's context.
             form_values=case_edit_form_values,
             severity_choices=SEVERITY_CHOICES,
@@ -3481,8 +3535,6 @@ def case_share_list(request: HttpRequest, case_id: str) -> HttpResponse:
 
     # Pagination for the shares list (primary list P) — use the frozen helper.
     # Paginator accepts a sequence, so the list-of-dicts shape the template expects is preserved.
-    from ui.pagination import paginate
-
     page_obj = paginate(request, all_shares)
     filtered_from = None  # No filters on this list
     shares = page_obj.object_list

@@ -675,3 +675,131 @@
   background: var(--color-bg-raised);
   cursor: not-allowed;
 }
+
+/* ============================================================================
+   Similar cases list — ranked correlation results (PLAN-2026-10-18 P1)
+   ============================================================================ */
+.similar-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.similar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px 24px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-line);
+}
+.similar-row:last-child {
+  border-bottom: none;
+}
+.similar-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.similar-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--color-text);
+  font-weight: 500;
+}
+.similar-link:hover {
+  color: var(--color-accent);
+}
+.similar-link:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.similar-case-ref {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+.similar-title {
+  word-break: break-word;
+}
+.similar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.similar-meta dt.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.similar-status .pill,
+.similar-severity .sev {
+  font-size: 12px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.similar-shared {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+  text-align: right;
+}
+.similar-count {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+.shared-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.shared-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  background: var(--color-bg-raised);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+
+/* Responsive: stack on narrow viewports */
+@media (max-width: 640px) {
+  .similar-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .similar-shared {
+    text-align: left;
+  }
+  .shared-chips {
+    justify-content: flex-start;
+  }
+}
