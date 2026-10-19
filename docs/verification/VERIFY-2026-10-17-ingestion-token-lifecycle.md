@@ -16,6 +16,16 @@ Status: **Pass** — 22/22 ACs Met
 > **Action:** re-run `verifier` against both plans when the service recovers and re-issue this file;
 > until then treat "Pass" as provisional. No `security-auditor` pass has been run on §10a–§10c either
 > (see Follow-ups).
+>
+> **Both re-runs delivered 2026-10-19 — this file is superseded but kept intact** as the historical record of what
+> the build session actually checked. Superseding reports:
+> - [`VERIFY-2026-10-19-ingestion-token-lifecycle-independent.md`](./VERIFY-2026-10-19-ingestion-token-lifecycle-independent.md) —
+>   independent re-verification at `44282f8`: **22/22 ACs Met, 16/16 design decisions, unchanged verdict**. It
+>   records that *this* file's mutation check was carried into it rather than re-run.
+> - [`../reviews/SECURITY-2026-10-19-ingestion-token-lifecycle.md`](../reviews/SECURITY-2026-10-19-ingestion-token-lifecycle.md) —
+>   the **first** security pass on §10a–§10c: **PASS**, 0 Critical / 0 High, 2 Medium (the feed-reap race on
+>   concurrent create; the prefix/retry and throttle-key coupling), 2 Low, 2 Info.
+> - Findings are filed as `TODO.md` §10.12-fu1…fu4; §10.12 itself is closed.
 
 ---
 
