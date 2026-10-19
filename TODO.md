@@ -1,7 +1,21 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-19 (**§12.8 is fully closed** — its last blocker §12.8-fu4 landed 2026-10-19, so the
+Last updated: 2026-10-19 (**correctness wave landed — and CI has been red all week**). The wave closed `§12.10`
+(severity pills rendered unstyled: the filter emitted `sev-high` while `app.css` defines only `.sev-1`…`.sev-4`),
+`§12.5-fu1` (a dialog heading and its Title input shared one DOM `id`, so the input lost its accessible name) and
+`§12.5-fu2` (no committed cross-tenant enumeration for the three case-page write routes) — each with a
+regression test; `make check` is green; **the pytest run is the user's and is still pending**. The wave also
+turned up a **broken test already sitting on `main`** (§12.3-fu2: §12.3 repointed a view context to `SimilarCase`
+and left an older assertion behind), and chasing that exposed a bigger problem: **CI has failed on every run for
+at least a week** (**§12.11**) — the `secrets` job times out at its 10-minute cap, and *no local gate runs the
+test suite at all*, which is how a broken test reached `main` unseen. Earlier: **§10.12 closed** — the
+ingestion-token wave §10a–§10c finally has *both* passes, not
+just the self-graded one: an **independent** re-verification (**22/22 ACs**, 16/16 design decisions, at
+`44282f8`) and its **first `security-auditor`** review (**PASS** — 0 Critical / 0 High, 2 Medium / 2 Low / 2
+Info). One caveat is recorded in the new report: its *Mutation check* section is carried over from the
+2026-10-17 provisional report rather than performed independently. Findings filed as §10.12-fu1…fu4. Earlier:
+**§12.8 is fully closed** — its last blocker §12.8-fu4 landed 2026-10-19, so the
 shipped case-verdict/close-flow feature flips to `[x]`; note its first fu4 verification report is
 **invalidated** — the tests it cites had been deleted from the tree during that run — so the wave's evidence
 is a **54-test user-run `pytest`** plus a planner diff review; see §12.8-fu4. Earlier: **two
@@ -79,13 +93,13 @@ hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the
 
 | Priority | Item | Description | Impact on the analyst |
 |----------|------|-------------|-----------------------|
-| **1** | **§12.3 — No cross-case / correlation surface (Modules B + C)** | `correlation_key` is derived, indexed and queryable but **nothing consumes it**: no auto-bundling of correlated alerts into a Case, and no "cases sharing this observable" view. The observable page lists its linked cases, but nothing links *from* a case. Also settles §10.7 "Similar" + Q-D4. | **Highest** — the marquee differentiator ("instantly highlight an advanced persistent pattern") is invisible in the UI. |
+| **1** | **§12.3 — No cross-case / correlation surface (Modules B + C) — SHIPPED 2026-10-18** | The gap: `correlation_key` was derived, indexed and queryable while **nothing consumed it**. Now a read-only **Similar** panel (cases sharing an observable, correlation-ranked) plus a manual, correlation-ranked and **audited** attach path. **Automatic ingest-time bundling was deliberately deferred** (decision Q1b) → **§12.3-fu1**. Also settled §10.7 "Similar" + Q-D4. | **Done** — the manual half; auto-bundling is §12.3-fu1. Follow-up §12.3-fu2 (an older cross-tenant test this wave left stale on `main`) repaired 2026-10-19. |
 | **2** | **§6.16 P6 — Global search (B3)** | No search surface anywhere in the UI; the only affordance is browsing lists (now paginated since §12.1, but still browse-only). Plan: `PLAN-2026-10-11-ui-completeness.md` B3/Q5 (cases + alerts + observables). | **Highest** — "have we seen this hash / IP / user before?" is the most asked triage question and has no answer. |
 | **3** | **§12.1 — Lists are silently truncated at 200, with no pager — SHIPPED 2026-10-18** | A shared `paginate()` primitive (50/page, `?per_page` bounded, hostile `?page` never 500s) now covers all 12 list surfaces; rails are capped at `RAIL_CAP = 200` with an honest count line; every primary list has a pager, a "showing X–Y of Z" count and an empty state that separates *no rows* from *filtered to none* (with Clear filters). Plan `docs/planning/PLAN-2026-10-18-ui-pagination.md`; verified 33/34 ACs (`docs/verification/VERIFY-2026-10-18-ui-pagination.md`) and security PASS (`docs/reviews/REVIEW-2026-10-18-ui-pagination.md`). | **Done** — the remaining half-answer is the unmeasured Postgres `COUNT` (§12.1-fu1). |
 | **4** | **§12.2 — The observables-list filter does nothing — SHIPPED 2026-10-15** | `observable_list` now reads `q`/`type` from `request.GET`, passes `observable_types` (the dropdown is no longer empty), stays org-scoped, and tolerates a malformed `type` id. The pager + honest empty state shipped with §12.1 (2026-10-18). | **Done** — the control no longer lies, inside a list that now pages and counts honestly. |
 | **5** | **§12.4 — No bulk actions in the UI** | `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk` (PATCH) exist in the API with per-item isolation; the UI stub was deleted (Q2) and not replaced. | **Medium-High** — a 200-alert morning is single-item work. |
 | **6** | **§10.3–10.6 — Case scope / type / data-classification / phase — SHIPPED 2026-10-15** | `PLAN-2026-10-14-case-classification-fields.md`, commit `822d050`, verified 21/21 ACs. `data_classification` is admin-only and audited; `phase` is a separate field from `CaseStatus` (Q-D2). | **Done** — follow-up is §10.9 (status labels). |
-| **7** | **§12.5 — Case pages: renderable, not authorable** | **Code shipped 2026-10-14** (`ecbcef6`); **independently verified 2026-10-18 at 23/23 checks** (`docs/verification/VERIFY-2026-10-18-case-pages-ui-independent.md`, superseding the planner-authored 2026-10-17 report); F11–F15 confirmed fixed. Open follow-ups: V1 modal-id a11y (§12.5-fu1), cross-tenant test enumeration (§12.5-fu2). | **Done** 2026-10-18. |
+| **7** | **§12.5 — Case pages: renderable, not authorable** | **Code shipped 2026-10-14** (`ecbcef6`); **independently verified 2026-10-18 at 23/23 checks** (`docs/verification/VERIFY-2026-10-18-case-pages-ui-independent.md`, superseding the planner-authored 2026-10-17 report); F11–F15 confirmed fixed. Open follow-ups: V1 modal-id a11y (§12.5-fu1) and cross-tenant enumeration (§12.5-fu2) — **both closed 2026-10-19**. | **Done** 2026-10-18. |
 | **8** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; the ledger already syncs on the case page. |
 | **9** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — an ops/onboarding concern, not triage. |
 | **10** | **§6.13 / §6.16 P4 — Settings: ingestion tokens + audit-log viewer** | Per-org webhook tokens (create/revoke, show-once) + read-only `AuditLog` viewer; also retires the stale webhook copy (§10.8). | **Medium** — self-serve ingestion; the audit viewer is the accountability half. |
@@ -447,16 +461,46 @@ backlog once the analyst-visible classification fields (10.3–10.6) are designe
   a one-shot nonce in a hidden field (server-cached; the reload returns the same 200 without
   re-creating), or an explicit "create another token?" nudge. Exposure is low (authenticated admin,
    their own org, the token is listed) — hence deferred rather than fixed blind.
-- [ ] **10.12 — Ingestion-token lifecycle (§10a–§10c): two outstanding passes, previously untracked.** The
-  Settings → Sources token wave (pause/resume/delete, last-token feed reaping, §10.8a) shipped 2026-10-17 and is
-  recorded as **Done** in the top table, but its verification is only a **PROVISIONAL PASS** — 22/22 ACs graded by
-  *the same session that wrote the code*
-  ([`VERIFY-2026-10-17-ingestion-token-lifecycle.md`](./docs/verification/VERIFY-2026-10-17-ingestion-token-lifecycle.md)) —
-  and **no `security-auditor` pass has been run on §10a–§10c either**. This is exactly the debt §12.8 (and §12.5)
-  carried; it simply never got a checkbox. Scope for the security pass: the two independent refusals of a paused token
-  (`ingest/views.py:121` queryset **and** `identity/models.py:326-333` `verify()`), the single shared org scope on the
-  four mutation routes, the last-token feed reaping (`Alert.ingestion_source` is `SET_NULL`, so evidence is kept), and
-  the `ingestion_token.deleted` audit-write ordering. Source: found while closing §12.5/§12.8 on 2026-10-18.
+- [x] **10.12 — Ingestion-token lifecycle (§10a–§10c): both outstanding passes discharged 2026-10-19.** *(DONE
+  2026-10-19.)* The wave shipped 2026-10-17 with its verification graded by *the same session that wrote the
+  code* and with **no** security review at all — the §12.5/§12.8 debt class, simply never given a checkbox. Both
+  passes are now delivered:
+  - **Independent verification** —
+    [`VERIFY-2026-10-19-ingestion-token-lifecycle-independent.md`](./docs/verification/VERIFY-2026-10-19-ingestion-token-lifecycle-independent.md):
+    **22/22 ACs Met** (12 Plan A + 10 Plan B), **16/16 design decisions** implemented, re-derived from source at
+    `44282f8`, ~30 commits after the build. The 2026-10-17 report is kept as the historical record and now points
+    forward. *Caveat recorded in the new report:* its **Mutation check** section is carried over from the
+    2026-10-17 report rather than run here (writing was forbidden), so that section is the **provisional**
+    report's evidence; unaffected are the AC grades, which this pass made.
+  - **Security review** —
+    [`SECURITY-2026-10-19-ingestion-token-lifecycle.md`](./docs/reviews/SECURITY-2026-10-19-ingestion-token-lifecycle.md):
+    **PASS** — 0 Critical / 0 High / **2 Medium** / 2 Low / 2 Info. Confirms: the two paused-token refusals
+    (`ingest/views.py:121` **and** `identity/models.py:333`) are consistent and are the **only** token-resolution
+    paths anywhere; all four mutation routes go through one `_org_scoped_token` and return a uniform 404 *before
+    any write*; both audit rows precede the row they describe; Argon2 + one-time plaintext, no secret material in
+    any audit row. `/`
+  - **Findings are filed as §10.12-fu1…fu4 below** — nothing was silently folded into "Done".
+- [ ] **10.12-fu1 — (Medium, real, Postgres-only) the last-token reap can delete a token created concurrently.**
+  `settings_token_delete` does `source_reaped = not source.tokens.exists()` → `source.delete()`. A concurrent
+  `settings_token_create` targeting the same feed is **not** serialised: `exists()` can miss the `get_or_create`
+  row, then the feed delete cascades it (`IngestionToken.source` is `CASCADE`) — the new token vanishes with **no
+  audit row and no error**. The audit's suggested `select_for_update` is a start but must cover **both** sides:
+  locking only the reap path converts silent loss into an FK violation on the loser's INSERT (a 500). Needs a
+  Postgres harness to test (folds into §3.1). Source: `docs/reviews/SECURITY-2026-10-19-…` M1.
+- [ ] **10.12-fu2 — The token prefix does double duty (Low + Low).** The 12-char prefix of the plaintext — 72 bits,
+  and a unique lookup key — is also the webhook throttle bucket (`wh:token:{prefix}:{window}`), while creation
+  retries only 3× on collision. Same collision therefore merges two rate-limit buckets. Either hash the cache key
+  and widen the prefix (migration), or document the retry window as accepted. Source: security review M2 + L2.
+- [ ] **10.12-fu3 — Django admin renders a paused token as neither readable state (Low).**
+  `IngestionTokenAdmin.list_display` omits `deactivated_at`, so in the read-only admin a paused credential looks
+  like a live one. Found **independently** by both passes (security L1; verifier O6). Source: security review L1.
+- [ ] **10.12-fu4 — Three test-quality gaps in the wave's own guards (Low; no grade depends on them).**
+  (a) `TestTokenActivationLifecycle._mint` passes `slug=` into `_mk_source` for a feed the view never uses — it
+  binds via `slugify(source_name)`, so every token in that class lands on one shared feed and the `slug=` row is
+  orphaned; the argument does not mean what it reads like (Plan B's `_mint` was fixed, Plan A's was not).
+  (b) The **Revoke** affordance on an *active* row is rendered (`settings_sources.html`) but unpinned — the
+  state-matrix test asserts only Deactivate/Activate/Delete. (c) The `source.delete()` rollback path (a raise
+  mid-transaction must restore the token row) is correct by construction and untested. Source: verifier O1–O3.
 
 **Open design questions (resolve in the plan before coding):**
 
@@ -658,6 +702,14 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
   an `AuditLog` row — the machinery now exists as `cases/correlation.py::record_alert_bundled`); it must
   never choose a **closed** case; and the §12.1-fu1 Postgres measurement should land first, since the rule
   adds a query to the hot ingest path. Source: §12.3 decision 2026-10-18.
+- [x] **12.3-fu2 — §12.3 left a cross-tenant test behind: `test_ui_alert_detail_merge_candidates_scoped`
+  was broken on `main` and nothing noticed.** The view repointed `merge_candidates` from `Case` to
+  `SimilarCase` (`cases/correlation.py`), but the older test in `tests/conformance/test_tenant_scoping.py` still
+  read `{c.id for c in candidates}` → `AttributeError`. Net effect: for that whole period the alert-detail
+  merge-candidate context had **no functioning org-scoping test** (the real invariant still held — the view +
+  `alert_detail.html` use `SimilarCase` consistently and `candidate_cases_for_alert` filters via
+  `case_visible_q`; it was the guard that was dead, not the behaviour). **FIXED 2026-10-19** — assertions read
+  through `.case`, intent unchanged. Why it survived is the actual finding: **§12.11**.
 - [ ] **12.4 — No bulk actions in the UI.** `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk`
   (PATCH) exist in the API with per-item isolation + status reporting (`compat/bulk.py`,
   `test_t2_p4_surface.py`), but the UI stub was deleted under Q2 (P1) and nothing replaced it — triaging a
@@ -691,7 +743,7 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
   (14 plan ACs + 3 data-model conventions + 6 security), **0 Not Met, 0 Deviated**; the five shared-layer defects
   **F11–F15 are confirmed fixed** at HEAD; `ruff format --check` / `ruff check` / `mypy` / `manage.py check` were
   green first-hand. Residual items are follow-ups, not AC failures — see §12.5-fu1 (V1 a11y) and §12.5-fu2 (O1).
-- [ ] **12.5-fu1 — Modal heading and its Title input share one DOM `id`, so the input loses its accessible name
+- [x] **12.5-fu1 — Modal heading and its Title input share one DOM `id`, so the input loses its accessible name
   (shared layer; pre-existing).** `ui/templates/ui/_modal.html:73` gives every dialog heading
   `id="{{ modal_id }}-title"` and points `aria-labelledby` at it, but the modal **body** templates give the Title
   *input* the same id (`_page_form.html:20-21`; `_task_form_modal_body.html:23-33`). One `id` cannot identify two
@@ -701,13 +753,32 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
   pre-existing task modals — **replicated, not introduced**, by §12.5 and §12.8. Fix: suffix modal-body field ids
   (`{{ modal_id }}-title-field`) in `_page_form.html` **and** `_task_form_modal_body.html`, then add a guard test
   asserting one element per `id` per rendered modal. Source: independent verification 2026-10-18.
-- [ ] **12.5-fu2 — Enumerate cross-tenant 404 for the three page write routes (observation O1).** The three
+  **FIXED 2026-10-19.** The Title *input* ids became `{{ modal_id }}-title-field` in both
+  `_page_form.html` and `_task_form_modal_body.html` (whose two Title inputs are mutually exclusive
+  `{% if form_values %}` / `{% else %}` branches, so only one ever renders — the heading keeps
+  `{{ modal_id }}-title` as `aria-labelledby`'s target, and the error paragraph moved to
+  `…-title-field-error` so it still describes the field it belongs to). Checked first: nothing else
+  depended on the old ids (`modal.js` drives every dialog from `data-modal-*` attributes, not ids).
+  Guarded by `test_modal_ids_are_unique_and_accessible`, which asserts exactly one element per id across
+  the page-create/edit **and** task-create/edit modals and that the heading is an `<h2>` while the
+  labelled element is the `<input>`.
+- [x] **12.5-fu2 — Enumerate cross-tenant 404 for the three page write routes (observation O1).** The three
   `ui-case-page-create|-edit|-delete` routes are correctly gated by the shared `resolve_case(..., write=True)` guard
   (harness-verified for a foreign case *and* a foreign page id), but **no committed test enumerates it**:
   `tests/conformance/test_tenant_scoping.py`'s three write-route sweeps (`:1856`, `:1940`, `:2052`) all filter to API
   routes (`not name.startswith("ui-")`), and the three names appear only in `_UI_WRITE_ONLY_ROUTES` (`:880-882`),
   which merely excludes them from the *read* sweep. Add per-route UI cross-tenant tests, as that file already does
   for other routes. Source: independent verification 2026-10-18.
+  **DONE 2026-10-19.** Eight tests added to `TestUITenantScoping` in `tests/conformance/test_tenant_scoping.py`
+  (the only file touched): per route, a foreign case *and* — for `edit`/`delete` — a foreign page id embedded in
+  the caller's **own** case URL, plus a **read-only-share** twin of each. The share twins are the load-bearing
+  ones: a plain foreign case still returns `None` even at `write=False`, so only the share path distinguishes
+  `write=True` from `write=False` — i.e. only it pins the guard the TODO was actually about. Each test asserts
+  the exact **404** (a 403/redirect would leak existence), that the target row is untouched, and that no
+  `AuditLog` row is claimed. Non-vacuity was demonstrated by runtime monkeypatching (a throwaway plugin in
+  `/tmp`, no app code edited, plugin deleted): demoting `write=True`→`False` failed exactly the 3 share tests,
+  removing tenant resolution failed the 3 foreign-case + 3 share tests, and dropping `case=case` from the page
+  lookup failed exactly the 2 foreign-page tests.
 - [x] **12.6 — Taxonomy: three cards break the monospace convention for their values — FIXED 2026-10-17.** `ui/templates/ui/taxonomy.html`
   renders the four code-valued cards — **Case Scope**, **Case Phase**, **Case Type** and **Data
   Classification** — with `<td class="mono">` for the code column, but the three list cards rendered
@@ -839,7 +910,7 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
       templates (`source_detail.html`, and the Settings → Sources token row) — generalize/rename it as part
       of this item rather than inventing a second utility. Source: user request 2026-10-17.
 
-- [ ] **12.10 — `sev_class` emits CSS classes that do not exist, so severity renders unstyled wherever that
+- [x] **12.10 — `sev_class` emits CSS classes that do not exist, so severity renders unstyled wherever that
   filter is used.** `ui/templatetags/ui_tags.py::sev_class` maps `1`–`4` to
   `low`/`medium`/`high`/`critical`, i.e. it emits `sev-high` / `sev-critical` — but `ui/static/ui/app.css`
   defines only `.sev-1`…`.sev-4` and `.sev-unknown`. So a template using the filter
@@ -850,12 +921,54 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
   `.sev-low`/`.sev-medium`/`.sev-high`/`.sev-critical` to `app.css`, or (b) make `sev_class` return the
   numeric suffix so both idioms agree. Either way severity must keep its text label — never colour alone
   (AGENTS.md §6). Source: §12.3 planner review 2026-10-18.
+  **FIXED 2026-10-19 — option (b).** `sev_class` now returns the numeric suffix (`"1"`…`"4"`, else `"unknown"`)
+  derived from the pinned severity range, so the filter and the raw-interpolation templates emit the same class
+  and the shipped CSS needs no change — deliberately avoiding option (a), because `app.css` is compiled *in
+  place* (`tailwindcss -i app.css -o app.css`) and is mid-drift (§7.4), so hand-adding selectors is the riskier
+  of the two. Guarded by `test_css_defines_all_emitted_severity_classes` (fails if the filter and `app.css`
+  drift apart again — the exact shape of the original bug), five `sev_class` unit tests, and the pre-existing
+  severity test moved from `sev-high` to `sev-3` (it had been **pinning the bug**). Pending: pytest run
+  (user-run).
+- [ ] **12.11 — CI has failed on every run for at least a week, and no local gate runs the test suite.**
+  Found 2026-10-19 while chasing §12.3-fu2. Evidence (read from the public `actions` API — `gh` is not
+  installed here): every non-cancelled run since at least Oct 15 is `failure`, for two independent reasons.
+  **(a) The `secrets` job hits its own `timeout-minutes: 10`** (`.github/workflows/ci.yml:88`): the step
+  *Full-history scan (local scanner, authoritative)* is `cancelled` on **every** run, and the gitleaks backstop
+  is then `skipped`. So the "no secret is ever pushed" property the workflow comments call enforced is in fact
+  **not being checked at all** — a *security* regression, not just noise — and it turns every run red
+  regardless of code.
+  **(b) The `DoD gate` job fails.** Oct 15–17 it failed at the step named *"SQLite DoD gate (lint, types,
+  migrations, suite)"*; from `4370900`/`e17c45d` onwards that step passes and the next one, *"Postgres
+  conformance suite"* (`DJANGO_SETTINGS_MODULE=amalthea.settings.test_pg pytest -q`), fails; the coverage,
+  lock-currentness and supply-chain steps therefore never ran. One cause is now known and fixed (§12.3-fu2);
+  the remainder is **unmeasured**, because the failing step's log needs a signed-in session.
+  **Why §12.3-fu2 got through:** nothing local runs the test suite, and three names say otherwise.
+  `make check` is lint/types/migrations/css only, yet its own help text claims "…css compile, pytest"; the
+  pre-push hook calls it a "full check"; and the locally installed `.git/hooks/pre-commit` even announces
+  *"running check-fast (ruff + pytest)"*. That last one is a divergence: `c7f3db5` ("skip pytest in hooks", for
+  speed) removed pytest from the hooks and updated `scripts/pre-commit.sh` to say "(ruff)", but `make hooks` was
+  never re-run here, so the installed hook is still the older script. The *decision* is defensible (a ~15-minute
+  suite per commit is not), but the effect stands: the only automated full-suite run is CI, which is red — so a
+  broken test can sit on `main` indefinitely.
+  Proposed, in order: (1) fix the `secrets` timeout (raise the cap or bound the scan) and confirm the
+  full-history scan completes — it is the only automated secret check; (2) make that step run the suite, or
+  rename the step and the Makefile help text so nobody trusts a green "suite" step again; (3) get the Postgres
+  suite green (locally and in CI) — it needs a Postgres harness (§3.1); (4) only then does "CI is green" mean
+  anything. Until then no plan or verification report should cite CI as evidence.
+  **Parked by user decision 2026-10-19** — feature work takes priority. When it is picked up: the user's local
+  Postgres run failed only because Postgres is not installed locally but runs in the compose container
+  (`docker-compose.yml`), so the container is the way to reproduce; CI *does* provide a `postgres:16-alpine`
+  service, so the CI-side Postgres failure is still unmeasured (its log needs a signed-in session).
 
 ---
 
 ## 🎯 Next Recommended Items
 
 The canonical **NEXT HIGHEST-IMPACT ITEMS** table at the top of this file is the single source of truth.
+**Refresh 2026-10-19 (b):** **§10.12 is closed** — the §10a–§10c ingestion-token wave got both the passes it
+was missing: an independent re-verification (22/22 ACs) and its **first** security review (PASS, 0 Critical /
+0 High). But its four follow-ups are **newly open**, and `§10.12-fu1` is a *real* Postgres-only race (Medium —
+a concurrently created token can be cascade-deleted by the reap), so this is not a "nothing to see" closure.
 **Refresh 2026-10-19:** §12.8-fu4 landed, so **§12.8 is closed** and the case-verdict/close-flow feature is
 fully done; the two entries that topped the 2026-10-18 ranking are now history (§12.8-fu3 was resolved too).
 Everything else holds. Ranked as of 2026-10-19:
@@ -871,10 +984,15 @@ Everything else holds. Ranked as of 2026-10-19:
    of the client-supplied `X-Forwarded-For`) and **S5** (attachment aggregate caps + extension-from-content-type).
    These are deployment-hardening, not analyst ergonomics.
 5. **§2.6 / §2.7** — coverage back to ≥ 80%, and the 10 still-NOT-MET Phase-12/T2 ACs.
-6. **Small open follow-ups** — `§12.5-fu1` (a modal heading id collides with a field id, costing that field its
-   accessible name), `§12.5-fu2` (no cross-tenant 404 enumeration for the case-page routes), `§10.12` (the
-   ingestion-token wave still has *no* independent verification and *no* security pass), `§12.10`
-   (`ui_tags.sev_class` emits `sev-high`/`sev-critical` classes `app.css` never defines).
+6. **§12.11 — CI is red on every run, and no local gate runs the test suite.** §12.3-fu2 shows the
+   consequence: a broken test can sit on `main` indefinitely. Two small fixes (the `secrets` job's 10-minute
+   timeout — which means the full-history secret scan is *not running at all* — and either making the
+   "…migrations, suite)" step run the suite or renaming it and `make check`'s help text), plus a Postgres pass
+   over the conformance suite. Highest *leverage* in this list, because every other claim here is currently
+   unbacked by CI.
+7. **Small open follow-ups** — `§12.3-fu1` (auto-bundling, deferred by Q1b), `§10.12-fu1…fu4`, `§12.1-fu1`,
+   `§12.8-fu1/2/3`, `§6.13/§6.16 P4` (audit-log viewer). Newly closed 2026-10-19: `§12.10`, `§12.5-fu1`,
+   `§12.5-fu2`, `§12.3-fu2`.
 
 **Phase 12 / T2 is not fully shipped**: independent verification (2026-10-10) found 3 ACs MET / 3 DEVIATED /
 10 NOT MET (`VERIFY-2026-10-10-t2-and-phase12.md`). Wave A closed the three unambiguous bugs; the
