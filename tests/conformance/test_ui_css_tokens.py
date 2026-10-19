@@ -20,6 +20,16 @@ rule in AGENTS.md §6.
 The third guard — tab strips must not show a scrollbar — pins the ``.tabs`` scrollbar suppression,
 which counteracts the deliberate 1px active-tab overlap that would otherwise draw a bar on every
 strip (see the test for the full explanation).
+
+The fourth guard — cheat-sheet modal must have correct styling — ensures the ``dialog.cheatsheet-modal``
+rule exists with its critical declarations (``max-width:400px``, ``overflow:auto``). The selector
+was accidentally stripped during the Phase A split, causing the modal to render without border,
+background, or scrolling.
+
+The fifth guard — filter-bar text input must have correct sizing — ensures a rule targeting the
+filter input (``.filter-bar input[type="text"]`` or minified equivalent) exists with ``flex:1``
+and ``max-width:300px``. A duplicate unquoted selector and a dead group selector caused the rule
+to vanish entirely after the Phase A split.
 """
 
 from __future__ import annotations
@@ -85,4 +95,59 @@ def test_tab_strips_do_not_show_a_scrollbar() -> None:
     assert re.search(r"\.tabs::-webkit-scrollbar\s*\{[^}]*display:\s*none", css), (
         "`.tabs::-webkit-scrollbar { display: none }` is required to hide the scrollbar in "
         "Chrome/Safari/Edge, where this stylesheet forces classic (non-overlay) scrollbars."
+    )
+
+
+def test_cheatsheet_modal_has_correct_styling() -> None:
+    """Guard against loss of the cheat-sheet modal rule (Regression 1).
+
+    The ``dialog.cheatsheet-modal`` rule must exist with its critical declarations.
+    The Phase A split accidentally stripped the ``dialog`` type selector, causing the modal to
+    render without border, background, max-height constraint, or scrolling.
+    """
+    css = _stylesheet()
+    # Find the dialog.cheatsheet-modal rule (minifier may normalize whitespace)
+    rule_match = re.search(r"dialog\.cheatsheet-modal\s*\{([^}]+)\}", css)
+    assert rule_match, (
+        "`dialog.cheatsheet-modal` rule is missing from app.css — the cheat-sheet modal will have "
+        "no border, background, max-width, max-height, or overflow styling."
+    )
+    declarations = rule_match.group(1)
+    # Normalize whitespace for robust checking
+    normalized = re.sub(r"\s+", " ", declarations)
+    assert "max-width:400px" in normalized.replace(" ", ""), (
+        f"`dialog.cheatsheet-modal` missing `max-width:400px` declaration. Found: {declarations!r}"
+    )
+    assert "overflow:auto" in normalized.replace(" ", ""), (
+        f"`dialog.cheatsheet-modal` missing `overflow:auto` declaration. Found: {declarations!r}"
+    )
+
+
+def test_filter_bar_text_input_has_correct_sizing() -> None:
+    """Guard against loss of the filter-bar text input rule (Regression 2).
+
+    A rule targeting the filter text input must exist with ``flex:1`` and ``max-width:300px``.
+    Accept the minified selector form (``.filter-bar input[type=text]`` or
+    ``.filter-bar input[type='text']``) — the point is that the rule exists and a quoted-selector
+    input is covered. The Phase A split introduced a dead unquoted duplicate and a group selector
+    that caused the compiled rule to vanish.
+    """
+    css = _stylesheet()
+    # Match either quoted or unquoted attribute selector (minifier normalizes)
+    rule_match = re.search(
+        r"\.filter-bar\s+input\s*\[\s*type\s*=\s*[\"']?text[\"']?\s*\]\s*\{([^}]+)\}", css
+    )
+    assert rule_match, (
+        'Filter-bar text input rule (`.filter-bar input[type="text"]`) is missing from app.css — '
+        "the filter input will not have the correct flex/max-width sizing."
+    )
+    declarations = rule_match.group(1)
+    normalized = re.sub(r"\s+", " ", declarations)
+    # Check for flex:1 (or flex: 1) and max-width:300px
+    norm_nospace = normalized.replace(" ", "")
+    assert "flex:1" in norm_nospace, (
+        f"Filter-bar input rule missing `flex:1` declaration. Found: {declarations!r}"
+    )
+    assert "max-width:300px" in norm_nospace, (
+        f"Filter-bar input rule missing `max-width:300px` declaration. Found: {declarations!r}"
     )
