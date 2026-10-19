@@ -8,8 +8,8 @@ Last updated: 2026-10-19 (**correctness wave landed — and CI has been red all 
 regression test; `make check` is green; **the pytest run is the user's and is still pending**. The wave also
 turned up a **broken test already sitting on `main`** (§12.3-fu2: §12.3 repointed a view context to `SimilarCase`
 and left an older assertion behind), and chasing that exposed a bigger problem: **CI has failed on every run for
-at least a week** (**§12.11**) — the `secrets` job times out at its 10-minute cap, and *no local gate runs the
-test suite at all*, which is how a broken test reached `main` unseen. Earlier: **§10.12 closed** — the
+at least a week** (**§12.11**) — the `secrets` job times out at its 10-minute cap, and the full suite is never run
+locally — which is how a broken test reached `main` unseen. Earlier: **§10.12 closed** — the
 ingestion-token wave §10a–§10c finally has *both* passes, not
 just the self-graded one: an **independent** re-verification (**22/22 ACs**, 16/16 design decisions, at
 `44282f8`) and its **first `security-auditor`** review (**PASS** — 0 Critical / 0 High, 2 Medium / 2 Low / 2
@@ -929,7 +929,7 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
   drift apart again — the exact shape of the original bug), five `sev_class` unit tests, and the pre-existing
   severity test moved from `sev-high` to `sev-3` (it had been **pinning the bug**). Pending: pytest run
   (user-run).
-- [ ] **12.11 — CI has failed on every run for at least a week, and no local gate runs the test suite.**
+- [ ] **12.11 — CI has failed on every run for at least a week, and the full suite is never run locally.**
   Found 2026-10-19 while chasing §12.3-fu2. Evidence (read from the public `actions` API — `gh` is not
   installed here): every non-cancelled run since at least Oct 15 is `failure`, for two independent reasons.
   **(a) The `secrets` job hits its own `timeout-minutes: 10`** (`.github/workflows/ci.yml:88`): the step
@@ -942,14 +942,16 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
   conformance suite"* (`DJANGO_SETTINGS_MODULE=amalthea.settings.test_pg pytest -q`), fails; the coverage,
   lock-currentness and supply-chain steps therefore never ran. One cause is now known and fixed (§12.3-fu2);
   the remainder is **unmeasured**, because the failing step's log needs a signed-in session.
-  **Why §12.3-fu2 got through:** nothing local runs the test suite, and three names say otherwise.
+  **Why §12.3-fu2 got through:** the full suite is never run locally, and three names imply it is.
   `make check` is lint/types/migrations/css only, yet its own help text claims "…css compile, pytest"; the
   pre-push hook calls it a "full check"; and the locally installed `.git/hooks/pre-commit` even announces
   *"running check-fast (ruff + pytest)"*. That last one is a divergence: `c7f3db5` ("skip pytest in hooks", for
-  speed) removed pytest from the hooks and updated `scripts/pre-commit.sh` to say "(ruff)", but `make hooks` was
-  never re-run here, so the installed hook is still the older script. The *decision* is defensible (a ~15-minute
-  suite per commit is not), but the effect stands: the only automated full-suite run is CI, which is red — so a
-  broken test can sit on `main` indefinitely.
+  speed) removed pytest from both hooks and updated `scripts/pre-commit.sh` to say "(ruff)", but `make hooks`
+  was never re-run here, so the installed hooks are still the older scripts. (The installed pre-push hook does
+  run `tests/conformance/test_schema_mutation_guards.py` — 15 tests, ~2s — but nothing runs the other ~500, so
+  a stale test elsewhere is still invisible.) The *decision* to drop the suite from the hooks is defensible (a
+  ~15-minute suite per commit is not), but the effect stands: the only automated full-suite run is CI, which is
+  red — so a broken test can sit on `main` indefinitely.
   Proposed, in order: (1) fix the `secrets` timeout (raise the cap or bound the scan) and confirm the
   full-history scan completes — it is the only automated secret check; (2) make that step run the suite, or
   rename the step and the Makefile help text so nobody trusts a green "suite" step again; (3) get the Postgres
@@ -984,7 +986,7 @@ Everything else holds. Ranked as of 2026-10-19:
    of the client-supplied `X-Forwarded-For`) and **S5** (attachment aggregate caps + extension-from-content-type).
    These are deployment-hardening, not analyst ergonomics.
 5. **§2.6 / §2.7** — coverage back to ≥ 80%, and the 10 still-NOT-MET Phase-12/T2 ACs.
-6. **§12.11 — CI is red on every run, and no local gate runs the test suite.** §12.3-fu2 shows the
+6. **§12.11 — CI is red on every run, and the full suite is never run locally.** §12.3-fu2 shows the
    consequence: a broken test can sit on `main` indefinitely. Two small fixes (the `secrets` job's 10-minute
    timeout — which means the full-history secret scan is *not running at all* — and either making the
    "…migrations, suite)" step run the suite or renaming it and `make check`'s help text), plus a Postgres pass
