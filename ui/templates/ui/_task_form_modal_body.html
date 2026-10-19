@@ -20,16 +20,16 @@
 
 {% comment %} Title {% endcomment %}
 <div class="field-row">
-  <label for="{{ modal_id }}-title">Title <span class="required" aria-hidden="true">*</span></label>
+  <label for="{{ modal_id }}-title-field">Title <span class="required" aria-hidden="true">*</span></label>
   {% if form_values %}
-    <input type="text" id="{{ modal_id }}-title" name="title" maxlength="500"
+    <input type="text" id="{{ modal_id }}-title-field" name="title" maxlength="500"
            value="{{ form_values.title }}" required autofocus form="{{ form_id }}"
-           {% if errors.title %}aria-invalid="true" aria-describedby="{{ modal_id }}-title-error"{% endif %}>
+           {% if errors.title %}aria-invalid="true" aria-describedby="{{ modal_id }}-title-field-error"{% endif %}>
     {% if errors.title %}
-    <p id="{{ modal_id }}-title-error" class="field-error">{{ errors.title }}</p>
+    <p id="{{ modal_id }}-title-field-error" class="field-error">{{ errors.title }}</p>
     {% endif %}
   {% else %}
-    <input type="text" id="{{ modal_id }}-title" name="title" maxlength="500"
+    <input type="text" id="{{ modal_id }}-title-field" name="title" maxlength="500"
            value="{{ task.title|default:'' }}" required autofocus form="{{ form_id }}">
   {% endif %}
 </div>

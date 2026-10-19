@@ -21,23 +21,29 @@ from typing import Any
 from django import template
 from django.utils.safestring import mark_safe
 
-from core.enums import SEVERITY_CHOICES
+from core.enums import SEVERITY_CHOICES, SEVERITY_MAX, SEVERITY_MIN
 from ingest.mapping import REASON_LABELS, UNRESOLVED_REASONS
 from ui.markdown import render_markdown
 
 register = template.Library()
 
 _LABELS = dict(SEVERITY_CHOICES)
-_NAMES = {1: "low", 2: "medium", 3: "high", 4: "critical"}
+_VALID_SEVERITIES = frozenset(range(SEVERITY_MIN, SEVERITY_MAX + 1))
 
 
 @register.filter
 def sev_class(value: Any) -> str:
-    """CSS class suffix for a severity, e.g. `3` -> `high`."""
+    """CSS class suffix for a severity, matching `ui/static/ui/app.css`.
+
+    The stylesheet defines numeric classes `.sev-1` … `.sev-4` and `.sev-unknown`.
+    Other templates interpolate raw numbers (e.g. `sev-{{ case.severity }}`), so
+    this filter must return the same numeric suffix to keep both idioms identical.
+    """
     try:
-        return _NAMES.get(int(value), "unknown")
+        ival = int(value)
     except (TypeError, ValueError):
         return "unknown"
+    return str(ival) if ival in _VALID_SEVERITIES else "unknown"
 
 
 @register.filter

@@ -12,8 +12,11 @@ through the UI form, so the test walks the same path a person does.
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 
 import pytest
+from django.template import Context, Template
 from django.test import Client
 from django.urls import reverse
 
@@ -639,7 +642,7 @@ def test_severity_is_shown_as_text_not_colour_alone(
     _ingest(source)  # without this the queue is empty and the assertion passes vacuously
     body = browser.get(reverse("ui-alert-list")).content.decode()
     assert "High" in body, "the severity label is missing"
-    assert "sev-high" in body, "the severity class is missing"
+    assert "sev-3" in body, "the severity class is missing"
 
 
 def _create_alert_directly(org=None) -> Alert:
@@ -697,3 +700,113 @@ def test_the_alert_page_explains_why_a_mapped_field_fell_back(
     assert "$.severity" in body
     assert "70" in body
     assert "severity_defaulted: no severity mapping; defaulted to 2" in body
+
+
+def test_sev_class_valid_severities_emit_numeric_suffix() -> None:
+    t = Template("{% load ui_tags %}{{ value|sev_class }}")
+    assert t.render(Context({"value": 1})) == "1"
+    assert t.render(Context({"value": 2})) == "2"
+    assert t.render(Context({"value": 3})) == "3"
+    assert t.render(Context({"value": 4})) == "4"
+
+
+def test_sev_class_string_numbers_emit_numeric_suffix() -> None:
+    t = Template("{% load ui_tags %}{{ value|sev_class }}")
+    assert t.render(Context({"value": "1"})) == "1"
+    assert t.render(Context({"value": "3"})) == "3"
+
+
+def test_sev_class_out_of_range_emits_unknown() -> None:
+    t = Template("{% load ui_tags %}{{ value|sev_class }}")
+    assert t.render(Context({"value": 0})) == "unknown"
+    assert t.render(Context({"value": 5})) == "unknown"
+    assert t.render(Context({"value": 9})) == "unknown"
+    assert t.render(Context({"value": -1})) == "unknown"
+
+
+def test_sev_class_non_numeric_emits_unknown() -> None:
+    t = Template("{% load ui_tags %}{{ value|sev_class }}")
+    assert t.render(Context({"value": "high"})) == "unknown"
+    assert t.render(Context({"value": "critical"})) == "unknown"
+    assert t.render(Context({"value": "foo"})) == "unknown"
+    assert t.render(Context({"value": ""})) == "unknown"
+
+
+def test_sev_class_none_emits_unknown() -> None:
+    t = Template("{% load ui_tags %}{{ value|sev_class }}")
+    assert t.render(Context({"value": None})) == "unknown"
+
+
+def test_css_defines_all_emitted_severity_classes() -> None:
+    """Regression guard: every class `sev_class` can emit must exist in app.css.
+
+    The bug in §12.10 happened because the filter emitted `sev-high` but the
+    stylesheet only defined `.sev-3`. This test fails if the two ever drift again.
+    """
+    css_path = Path("ui/static/ui/app.css")
+    css = css_path.read_text()
+
+    # `sev_class` emits "1".."4" for valid severities and "unknown" otherwise, and every
+    # template writes `sev-{{ … }}`, so these are exactly the suffixes that must be styled.
+    for suffix in ("1", "2", "3", "4", "unknown"):
+        assert f".sev-{suffix}" in css, f"missing .sev-{suffix} in app.css"
+
+
+def test_modal_ids_are_unique_and_accessible(browser: Client) -> None:
+    """Guard for §12.5-fu1: every modal in the case detail page has unique IDs.
+
+    The case detail page renders:
+      - page-create-modal (page create)
+      - page-edit-<uuid> (for each existing page)
+      - task-create-modal
+      - task-edit-<uuid> (for each existing task)
+
+    Each modal's <h2> heading uses id="{{ modal_id }}-title" (aria-labelledby target).
+    The Title *input* inside the modal body must use a distinct id
+    ("{{ modal_id }}-title-field") with a matching <label for="...">.
+    This test asserts that contract holds so the regression cannot return silently.
+    """
+    from cases.models import Page, Task
+
+    # Create a case with one page and one task so both edit modals exist
+    case = _case("Modal ID Test Case")
+    page = Page.objects.create(case=case, title="Test Page", content="", order=0)
+    task = Task.objects.create(case=case, title="Test Task", status="Waiting")
+
+    response = browser.get(reverse("ui-case-detail", kwargs={"case_id": str(case.number)}))
+    assert response.status_code == 200
+    body = response.content.decode()
+
+    # Parse all id="..." values
+    ids = re.findall(r'id="([^"]+)"', body)
+    id_counts: dict[str, int] = {}
+    for id_ in ids:
+        id_counts[id_] = id_counts.get(id_, 0) + 1
+
+    # Check each modal we know should exist
+    modal_ids = [
+        "page-create-modal",
+        f"page-edit-{page.id}",
+        "task-create-modal",
+        f"task-edit-{task.id}",
+    ]
+
+    for modal_id in modal_ids:
+        # The dialog heading: exactly one <h2 id="modal_id-title">
+        h2_id = f"{modal_id}-title"
+        assert id_counts.get(h2_id) == 1, f"missing or duplicate heading id {h2_id}"
+        # It must be an <h2> (not an input or anything else)
+        assert f'<h2 id="{h2_id}"' in body, f"heading {h2_id} is not an <h2>"
+
+        # The Title input: exactly one id="modal_id-title-field"
+        input_id = f"{modal_id}-title-field"
+        assert id_counts.get(input_id) == 1, f"missing or duplicate input id {input_id}"
+        # It must be an <input> with a matching <label for="...">
+        assert f'<input type="text" id="{input_id}"' in body, (
+            f"Title input {input_id} not found or not an input"
+        )
+        assert f'for="{input_id}"' in body, f"label for {input_id} not found"
+
+    # Also verify the modal dialog ids themselves are unique
+    for modal_id in modal_ids:
+        assert id_counts.get(modal_id) == 1, f"missing or duplicate modal dialog id {modal_id}"

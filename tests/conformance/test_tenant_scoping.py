@@ -3094,9 +3094,12 @@ class TestUITenantScoping:
         assert resp1.status_code == 200
         assert resp2.status_code == 404  # Cross-tenant alert
 
-        # Org1 user should only see org1 cases in merge candidates
+        # Org1 user should only see org1 cases in merge candidates.
+        # §12.3 (d596db6) repointed this context from `Case` to `SimilarCase` (correlation-ranked
+        # wrappers, `cases/correlation.py`), so the assertions read through `.case`; this test
+        # was left behind and broke — see TODO §12.3-fu2. The tenant-scoping intent is unchanged.
         candidates = resp1.context["merge_candidates"]
-        candidate_ids = {c.id for c in candidates}
+        candidate_ids = {sc.case.id for sc in candidates}
         assert self.case1.id in candidate_ids
         assert self.case2.id not in candidate_ids
 
@@ -3285,3 +3288,239 @@ class TestUITenantScoping:
         task2 = Task.objects.filter(case=self.case1, title="Test Task 2").first()
         assert task2 is not None
         assert task2.assignee == self.user1, "Task assignee lookup failed for own org user"
+
+    # --- §12.5-fu2: case-page write routes (cross-tenant enumeration) ---
+    # Why these exist: the three generic sweeps do NOT cover these routes.
+    # `_UI_WRITE_ONLY_ROUTES` excludes them from the UI *read* sweep, and the three
+    # write sweeps in `TestWriteRouteEnumerationConformance` filter to API routes
+    # (`not name.startswith("ui-")`). A refactor that drops the shared
+    # `resolve_case(..., write=True)` guard — or the `case=case` clause on the page
+    # lookup — would therefore leave CI green. Each test pins the exact 404 (not a
+    # 403/redirect, which would leak existence) and the inert effect on the target.
+    # TODO §12.5-fu2 (independent verification 2026-10-18, observation O1).
+
+    def test_ui_case_page_create_cross_tenant_returns_404(self) -> None:
+        """POST /cases/<org-B-case>/page from org A → uniform 404, no page created."""
+        from cases.models import Page
+        from identity.models import AuditLog
+
+        audit_before = AuditLog.objects.count()
+        resp = self.client1.post(
+            reverse("ui-case-page-create", kwargs={"case_id": self.case2.number}),
+            {"title": "Injected", "content": "cross-tenant"},
+        )
+        assert resp.status_code == 404, (
+            f"Expected uniform 404, got {resp.status_code}: {resp.content}"
+        )
+        assert not Page.objects.filter(case=self.case2).exists(), (
+            "Cross-tenant page create must not mutate org B's case"
+        )
+        assert AuditLog.objects.count() == audit_before, (
+            "Denied request must not write an AuditLog row"
+        )
+
+    def test_ui_case_page_create_readonly_share_returns_404(self) -> None:
+        """A read-only share must not authorize page writes: 404, no page created.
+
+        Pins the `write=True` half of the guard specifically — a demotion to
+        `write=False` would still 404 a foreign case (no share at all) but would
+        let a read-only share holder write.
+        """
+        from cases.models import Page
+        from identity.models import AuditLog
+
+        audit_before = AuditLog.objects.count()
+        resp = self.client2.post(
+            reverse("ui-case-page-create", kwargs={"case_id": self.shared_case.number}),
+            {"title": "Injected", "content": "via read-only share"},
+        )
+        assert resp.status_code == 404, (
+            f"Expected uniform 404, got {resp.status_code}: {resp.content}"
+        )
+        assert not Page.objects.filter(case=self.shared_case).exists(), (
+            "Read-only share must not allow page creation"
+        )
+        assert AuditLog.objects.count() == audit_before
+
+    def test_ui_case_page_edit_cross_tenant_case_returns_404(self) -> None:
+        """POST /cases/<org-B-case>/page/<page>/edit from org A → 404, page untouched."""
+        from cases.models import Page
+        from identity.models import AuditLog
+
+        page = Page.objects.create(
+            case=self.case2,
+            title="Org B page",
+            content="original",
+            order=1,
+            created_by=self.user2,
+        )
+        audit_before = AuditLog.objects.count()
+        resp = self.client1.post(
+            reverse(
+                "ui-case-page-edit",
+                kwargs={"case_id": self.case2.number, "page_id": page.id},
+            ),
+            {"title": "Hijacked", "content": "mutated"},
+        )
+        assert resp.status_code == 404, (
+            f"Expected uniform 404, got {resp.status_code}: {resp.content}"
+        )
+        page.refresh_from_db()
+        assert page.title == "Org B page", "Cross-tenant edit must not change org B's page"
+        assert page.content == "original", "Cross-tenant edit must not change org B's page"
+        assert page.updated_by is None, "Cross-tenant edit must not stamp updated_by"
+        assert AuditLog.objects.count() == audit_before
+
+    def test_ui_case_page_edit_cross_tenant_page_returns_404(self) -> None:
+        """A foreign page id embedded in the caller's OWN case URL → 404, page untouched.
+
+        The distinct attack: the case in the URL is resolvable and writable by the
+        caller, so only the `case=case` clause on the page lookup (which makes the
+        page org-scoped through its case) can reject the request.
+        """
+        from cases.models import Page
+        from identity.models import AuditLog
+
+        page = Page.objects.create(
+            case=self.case2,
+            title="Org B page",
+            content="original",
+            order=1,
+            created_by=self.user2,
+        )
+        audit_before = AuditLog.objects.count()
+        resp = self.client1.post(
+            reverse(
+                "ui-case-page-edit",
+                kwargs={"case_id": self.case1.number, "page_id": page.id},
+            ),
+            {"title": "Hijacked", "content": "mutated"},
+        )
+        assert resp.status_code == 404, (
+            f"Expected uniform 404, got {resp.status_code}: {resp.content}"
+        )
+        page.refresh_from_db()
+        assert page.title == "Org B page", "Foreign page id must not be editable via own case"
+        assert page.content == "original", "Foreign page id must not be editable via own case"
+        assert page.updated_by is None
+        assert AuditLog.objects.count() == audit_before
+
+    def test_ui_case_page_edit_readonly_share_returns_404(self) -> None:
+        """Read-only share holder editing a page on the shared case → 404, page untouched.
+
+        Pins `write=True` on the edit route (see the create twin above).
+        """
+        from cases.models import Page
+        from identity.models import AuditLog
+
+        page = Page.objects.create(
+            case=self.shared_case,
+            title="Shared page",
+            content="original",
+            order=1,
+            created_by=self.user1,
+        )
+        audit_before = AuditLog.objects.count()
+        resp = self.client2.post(
+            reverse(
+                "ui-case-page-edit",
+                kwargs={"case_id": self.shared_case.number, "page_id": page.id},
+            ),
+            {"title": "Hijacked", "content": "mutated"},
+        )
+        assert resp.status_code == 404, (
+            f"Expected uniform 404, got {resp.status_code}: {resp.content}"
+        )
+        page.refresh_from_db()
+        assert page.title == "Shared page", "Read-only share must not allow page edits"
+        assert page.content == "original"
+        assert page.updated_by is None
+        assert AuditLog.objects.count() == audit_before
+
+    def test_ui_case_page_delete_cross_tenant_case_returns_404(self) -> None:
+        """POST /cases/<org-B-case>/page/<page>/delete from org A → 404, page survives."""
+        from cases.models import Page
+        from identity.models import AuditLog
+
+        page = Page.objects.create(
+            case=self.case2,
+            title="Org B page",
+            content="original",
+            order=1,
+            created_by=self.user2,
+        )
+        audit_before = AuditLog.objects.count()
+        resp = self.client1.post(
+            reverse(
+                "ui-case-page-delete",
+                kwargs={"case_id": self.case2.number, "page_id": page.id},
+            ),
+        )
+        assert resp.status_code == 404, (
+            f"Expected uniform 404, got {resp.status_code}: {resp.content}"
+        )
+        assert Page.objects.filter(pk=page.id).exists(), (
+            "Cross-tenant page delete must not remove org B's page"
+        )
+        assert AuditLog.objects.count() == audit_before
+
+    def test_ui_case_page_delete_cross_tenant_page_returns_404(self) -> None:
+        """A foreign page id embedded in the caller's OWN case URL → 404, page survives.
+
+        Same distinct attack as the edit twin: the case resolves, so only the
+        `case=case` clause on the page lookup can reject the delete.
+        """
+        from cases.models import Page
+        from identity.models import AuditLog
+
+        page = Page.objects.create(
+            case=self.case2,
+            title="Org B page",
+            content="original",
+            order=1,
+            created_by=self.user2,
+        )
+        audit_before = AuditLog.objects.count()
+        resp = self.client1.post(
+            reverse(
+                "ui-case-page-delete",
+                kwargs={"case_id": self.case1.number, "page_id": page.id},
+            ),
+        )
+        assert resp.status_code == 404, (
+            f"Expected uniform 404, got {resp.status_code}: {resp.content}"
+        )
+        assert Page.objects.filter(pk=page.id).exists(), (
+            "Foreign page id must not be deletable via own case"
+        )
+        assert AuditLog.objects.count() == audit_before
+
+    def test_ui_case_page_delete_readonly_share_returns_404(self) -> None:
+        """Read-only share holder deleting a page on the shared case → 404, page survives.
+
+        Pins `write=True` on the delete route (see the create twin above).
+        """
+        from cases.models import Page
+        from identity.models import AuditLog
+
+        page = Page.objects.create(
+            case=self.shared_case,
+            title="Shared page",
+            content="original",
+            order=1,
+            created_by=self.user1,
+        )
+        audit_before = AuditLog.objects.count()
+        resp = self.client2.post(
+            reverse(
+                "ui-case-page-delete",
+                kwargs={"case_id": self.shared_case.number, "page_id": page.id},
+            ),
+        )
+        assert resp.status_code == 404, (
+            f"Expected uniform 404, got {resp.status_code}: {resp.content}"
+        )
+        assert Page.objects.filter(pk=page.id).exists(), (
+            "Read-only share must not allow page deletion"
+        )
+        assert AuditLog.objects.count() == audit_before
