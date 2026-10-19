@@ -1029,6 +1029,17 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             findings, user=request.user, exclude_case=case
         )
 
+    # Add-tag dialog (§12.8): `Tag` is global and grows without bound, so the picker is capped at
+    # `PICKER_PAGE_SIZE`. Fetching one row past the cap detects truncation without a second `COUNT`
+    # on the hot case-detail path, and without evaluating the queryset twice.
+    available_tag_choices = list(
+        Tag.objects.exclude(id__in=case.tags.values_list("id", flat=True)).order_by("name")[
+            : PICKER_PAGE_SIZE + 1
+        ]
+    )
+    available_tags = available_tag_choices[:PICKER_PAGE_SIZE]
+    available_tags_truncated = len(available_tag_choices) > PICKER_PAGE_SIZE
+
     return render(
         request,
         "ui/case_detail.html",
@@ -1092,9 +1103,8 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             closing_verdict_choices=[
                 c for c in CASE_VERDICT_CHOICES if c[0] in CASE_CLOSING_VERDICTS
             ],
-            available_tags=Tag.objects.exclude(
-                id__in=case.tags.values_list("id", flat=True)
-            ).order_by("name"),
+            available_tags=available_tags,
+            available_tags_truncated=available_tags_truncated,
             case_field_edit_url=reverse("ui-case-field-edit", kwargs={"case_id": case.number}),
             case_close_url=reverse("ui-case-close", kwargs={"case_id": case.number}),
             case_tag_add_url=reverse("ui-case-tag-add", kwargs={"case_id": case.number}),

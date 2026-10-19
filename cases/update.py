@@ -256,26 +256,27 @@ def propagate_close_to_alerts(case: Case, verdict: str, *, actor: Any) -> int:
     transaction rather than on Celery.
 
     Uses `QuerySet.update()` — no per-row signals — matching the `merge` helper's recorded
-    convention. The ledger carries one case-level summary event rather than one row per
-    alert, so closing a case with fifty linked alerts does not bury its closing comment.
-    Returns the number of alerts closed.
+    convention. A single statement over the filtered queryset means no materialised ID list and
+    hence no `IN (...)` parameter ceiling (Postgres' 65 535 bind limit); the returned rowcount is
+    the number of alerts actually closed.
+
+    The ledger carries one case-level summary event rather than one row per alert, so closing a
+    case with fifty linked alerts does not bury its closing comment.
     """
     from alerts.models import Alert
     from identity.models import AuditLog
 
-    alert_ids = list(Alert.objects.filter(case=case).values_list("id", flat=True))
-    if not alert_ids:
-        return 0
-
     closed_status = resolve_closed_alert_status()
-    Alert.objects.filter(id__in=alert_ids).update(status=closed_status, verdict=verdict)
+    count = Alert.objects.filter(case=case).update(status=closed_status, verdict=verdict)
+    if not count:
+        return 0
 
     append_timeline_event(
         case,
-        title=f"Closed {len(alert_ids)} linked alert(s)",
+        title=f"Closed {count} linked alert(s)",
         kind="alerts-closed",
         actor=actor,
-        metadata={"count": len(alert_ids), "verdict": verdict},
+        metadata={"count": count, "verdict": verdict},
     )
     AuditLog.objects.create(
         actor=actor,
@@ -285,9 +286,9 @@ def propagate_close_to_alerts(case: Case, verdict: str, *, actor: Any) -> int:
         target_type="Case",
         target_id=str(case.id),
         ip=None,
-        details={"count": len(alert_ids), "verdict": verdict},
+        details={"count": count, "verdict": verdict},
     )
-    return len(alert_ids)
+    return count
 
 
 @transaction.atomic

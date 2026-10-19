@@ -209,6 +209,13 @@ ADR-008: the path names no source. The credential is the only routing fact — i
   successful close stamps `closedDate` + `endDate`, closes every linked alert (copying the verdict
   onto each, deviation **V-2**) and appends an `alerts-closed` ledger event; reopening clears
   `closedDate`. The same rule is enforced on `PATCH /api/v1/case/_bulk` per item and on create.
+
+**Close-rule boundary (SECURITY-2026-10-18 M2):** This rule is enforced at the service layer
+(`apply_case_update`, `case_bulk_update`, `create_case`) and **does not** apply to direct ORM
+writes (`Case.save()`, `Case.objects.update()`), management commands, shell, or raw SQL. A direct
+write that sets a `Closed`-stage status will persist `closedDate` but leave `verdict="undefined"`
+with no closing comment. All user-reachable API/UI paths are guarded; the bypass exists only for
+code paths that deliberately circumvent the service layer.
 - `task` POST: 201 `{"_id","id","title","status"}`; default status `"Waiting"`.
 - `task_detail` PATCH ⇒ **204, no body** (no plan number — see [`deviations.md`](./deviations.md));
   `status` validated against

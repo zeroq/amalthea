@@ -181,6 +181,16 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
     real incident?"; a case **cannot enter stage `Closed`** while it is `undefined` and the close
     carries no comment — the rule lives in `cases/update.py::enforce_close_rule` (§12.8(4),
     deviation **V-1** for the token spelling, **V-2** for close-propagation).
+
+**Close-rule boundary (SECURITY-2026-10-18 M2):** The close rule (non-`undefined` verdict + non-blank
+closing comment) is a *service-layer invariant* enforced at three entry points:
+`apply_case_update` (single PATCH / UI inline edit), `case_bulk_update` (bulk PATCH), and
+`create_case` (create-to-Closed). It **does not** constrain direct ORM writes
+(`Case.save()`, `Case.objects.update()`), management commands, shell access, or raw SQL.
+A direct write that sets `status` to a `Closed`-stage value will persist `closed_date` (via
+`Case.save().stamp_closed_date()`) but leave `verdict="undefined"` and no closing comment.
+This is a documented architectural decision, not a bug — the service layer is the enforced
+boundary for all user-reachable paths.
 - `start_date` (default now, NOT NULL) · `end_date` · `closed_date` · `owner_org` — FK →
   `Organisation`, **`NOT NULL`**, `on_delete=PROTECT` (ADR-004) · `ingestion_warnings` — JSONB.
 - Manager: `AllocatingQuerySet.as_manager()` (number allocation covers `save` **and** `bulk_create`).

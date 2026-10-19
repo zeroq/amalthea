@@ -15,6 +15,9 @@ Controls target the footer form by id.
     </label>
     {% endfor %}
   </div>
+  {% if available_tags_truncated %}
+  <p class="field-hint">Showing the first {{ available_tags|length }} tags; type to add others.</p>
+  {% endif %}
 </fieldset>
 {% endif %}
 <div class="field">

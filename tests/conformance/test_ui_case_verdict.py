@@ -17,6 +17,7 @@ from django.urls import reverse
 from alerts.models import Alert, AlertStatus
 from cases.models import Case, CaseStatus, Tag
 from identity.models import Organisation, User
+from ui.pagination import PICKER_PAGE_SIZE
 
 # --------------------------------------------------------------------------
 # Fixtures
@@ -351,6 +352,45 @@ def test_tag_add_emits_a_tags_changed_event(browser: Client, case: Case) -> None
 
     browser.post(reverse("ui-case-tag-add", kwargs={"case_id": case.number}), {"new_tags": "solo"})
     assert case.timeline_events.filter(kind="tags-changed").count() == 1
+
+
+def _tag_add_dialog(browser: Client, case: Case) -> str:
+    """The rendered body of the Add-tag dialog, sliced out of the case-detail page."""
+    page = browser.get(
+        reverse("ui-case-detail", kwargs={"case_id": case.number}), {"tab": "general"}
+    ).content.decode()
+    start = page.index('dialog id="case-tag-add-modal"')
+    return page[start : page.index("</dialog>", start)]
+
+
+def test_tag_add_dialog_caps_available_tags_at_picker_page_size(
+    browser: Client, case: Case
+) -> None:
+    """L2 (SECURITY-2026-10-18): `Tag` is global and unbounded, so the picker is capped.
+
+    The cap must be deterministic and disclosed: `order_by("name")` runs *before* the slice, so
+    the same capped set renders every time, and the hint names the number actually shown.
+    """
+    for index in range(PICKER_PAGE_SIZE + 1):
+        Tag.objects.create(name=f"cap-{index:04d}")
+
+    dialog = _tag_add_dialog(browser, case)
+    assert dialog.count('name="tags"') == PICKER_PAGE_SIZE
+    assert f"Showing the first {PICKER_PAGE_SIZE} tags" in dialog
+    assert 'value="cap-0000"' in dialog
+    assert f'value="cap-{PICKER_PAGE_SIZE:04d}"' not in dialog
+
+
+def test_tag_add_dialog_at_exactly_picker_page_size_shows_no_hint(
+    browser: Client, case: Case
+) -> None:
+    """At the cap nothing is withheld, so the truncation hint must not appear."""
+    for index in range(PICKER_PAGE_SIZE):
+        Tag.objects.create(name=f"exact-{index:04d}")
+
+    dialog = _tag_add_dialog(browser, case)
+    assert dialog.count('name="tags"') == PICKER_PAGE_SIZE
+    assert "Showing the first" not in dialog
 
 
 def test_tag_remove_detaches_a_tag(browser: Client, case: Case) -> None:

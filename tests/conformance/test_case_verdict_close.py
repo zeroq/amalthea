@@ -347,6 +347,49 @@ def test_close_records_one_audit_row_and_one_timeline_event(
     assert events.first().metadata["count"] == 2
 
 
+@pytest.mark.django_db
+def test_propagate_close_issues_one_update_and_selects_no_ids(
+    default_org: Organisation, open_status: CaseStatus, admin_user: User
+) -> None:
+    """M1 (SECURITY-2026-10-18): the propagation must not materialise alert ids.
+
+    The earlier shape built `id__in=[...]` from a Python list of every linked alert id, which
+    fails once a case has more linked alerts than Postgres' 65 535 bind-parameter limit. The
+    behaviour is identical either way, so pin it on the statements instead: one UPDATE against
+    `alert`, no SELECT of ids, and a bounded parameter list.
+    """
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from cases.update import propagate_close_to_alerts
+
+    linked = 25
+    case = _case(default_org, open_status)
+    for index in range(linked):
+        _alert(default_org, ref=f"prop-{index}", case=case)
+    unrelated = _alert(default_org, ref="prop-unrelated")
+
+    with CaptureQueriesContext(connection) as captured:
+        count = propagate_close_to_alerts(case, "true_positive", actor=admin_user)
+
+    assert count == linked
+    unrelated.refresh_from_db()
+    assert unrelated.status.stage == "New", "an alert with no case must stay untouched"
+
+    # `resolve_closed_alert_status()` reads `alert_status`; `Alert.Meta.db_table` is the explicit
+    # `"alert"`, so this filter keeps the propagation's own statements and nothing else.
+    statements = [
+        query["sql"].lstrip() for query in captured.captured_queries if ' "alert" ' in query["sql"]
+    ]
+    updates = [sql for sql in statements if sql.upper().startswith("UPDATE")]
+    selects = [sql for sql in statements if sql.upper().startswith("SELECT")]
+    assert len(updates) == 1, f"expected a single UPDATE, got {statements}"
+    assert not selects, f"the propagation must not read alert rows back: {selects}"
+    # One `%s` per bound column plus the case id — never one bind per linked alert, which is what
+    # `id__in=[...]` produced (25 alerts would have meant a 27-placeholder statement).
+    assert updates[0].count("%s") <= 4, f"the bind list grows with N: {updates[0]}"
+
+
 # ---------------------------------------------------------------------------------------
 # Audit visibility (defect D4b)
 # ---------------------------------------------------------------------------------------
@@ -531,3 +574,42 @@ def test_viewer_cannot_close(
     assert resp.status_code in (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND)
     case.refresh_from_db()
     assert case.status.stage == "InProgress"
+
+
+# ---------------------------------------------------------------------------------------
+# The close rule is a *service-layer* invariant, not a database one (M2, SECURITY-2026-10-18)
+# ---------------------------------------------------------------------------------------
+#
+# `enforce_close_rule` runs inside `apply_case_update`, `case_bulk_update` and `create_case`.
+# Nothing below that layer can enforce it: the verdict is a column on `case_record` while the
+# stage lives in the `case_status` data table, so no `CHECK` can span the two, and a DB constraint
+# cannot demand a closing *comment* at all. These tests pin the documented boundary — they assert
+# the bypass deliberately, so that any change which closes the gap has to flip them on purpose.
+
+
+@pytest.mark.django_db
+def test_queryset_update_bypasses_the_close_rule(
+    default_org: Organisation, open_status: CaseStatus, closed_status: CaseStatus
+) -> None:
+    case = _case(default_org, open_status)
+    Case.objects.filter(pk=case.pk).update(status=closed_status)
+
+    case.refresh_from_db()
+    assert case.status.stage == "Closed"
+    assert case.verdict == "undefined", "the ORM path must not invent a verdict"
+    assert case.closed_date is None, "`update()` never runs `save()`, so nothing stamps the date"
+
+
+@pytest.mark.django_db
+def test_save_bypasses_the_close_rule_but_stamps_closed_date(
+    default_org: Organisation, open_status: CaseStatus, closed_status: CaseStatus
+) -> None:
+    """`save()` is the half-applied path: the date is stamped, the verdict/comment rule is skipped."""
+    case = _case(default_org, open_status)
+    case.status = closed_status
+    case.save()
+
+    case.refresh_from_db()
+    assert case.status.stage == "Closed"
+    assert case.verdict == "undefined"
+    assert case.closed_date is not None, "`save()` -> `stamp_closed_date()` still runs"

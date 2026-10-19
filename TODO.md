@@ -1,12 +1,16 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-18 (**two verification debts closed out** — §12.5 is **closed** (independent verification,
+Last updated: 2026-10-19 (**§12.8 is fully closed** — its last blocker §12.8-fu4 landed 2026-10-19, so the
+shipped case-verdict/close-flow feature flips to `[x]`; note its first fu4 verification report is
+**invalidated** — the tests it cites had been deleted from the tree during that run — so the wave's evidence
+is a **54-test user-run `pytest`** plus a planner diff review; see §12.8-fu4. Earlier: **two
+verification debts closed out** — §12.5 is **closed** (independent verification,
 23/23 checks: `docs/verification/VERIFY-2026-10-18-case-pages-ui-independent.md`, superseding the planner-authored
 2026-10-17 report; F11–F15 confirmed fixed) and §12.8's two caveats are **discharged**: the independent re-run graded
 **18/18 ACs** and the security pass returned **CONDITIONAL PASS**
-(`docs/reviews/SECURITY-2026-10-18-case-verdict-close-flow.md`; 0 Critical / 0 High) — §12.8 flips to `[x]` once
-§12.8-fu4 lands). Earlier: **UI icons fixed** — the Font Awesome subset stylesheet never set
+(`docs/reviews/SECURITY-2026-10-18-case-verdict-close-flow.md`; 0 Critical / 0 High), whose three conditions
+(§12.8-fu4) landed 2026-10-19). Earlier: **UI icons fixed** — the Font Awesome subset stylesheet never set
 `font-family` on `.fa-solid`, the class every template icon uses, so the codepoints rendered as
 `.notdef` tofu boxes (most visible in Safari); a malformed last line also swallowed
 `.fa-comments`/`.fa-list-check`/`.fa-paperclip`. Both fixed in
@@ -93,7 +97,7 @@ hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the
 | **13** | **Orphaned routes** | `ui-case-attachment-list` (+ its now-dead `ui/case_attachments.html`) and `ui-case-attachment-detail` (405) are reachable by URL only — the case page renders its own attachment table. `ui-case-export` / `ui-taxonomy` are now wired (P1), so this row supersedes the old claim. | **Low** — dead surface; delete or build an entry point. |
 | **14** | **§12.6 — Taxonomy: three cards break the mono convention for their values — SHIPPED 2026-10-17** | `ui/templates/ui/taxonomy.html` now renders the **Case Statuses**, **Alert Statuses** and **Observable Types** value / name cells as `<td class="mono">`, matching the four code cards (**Case Scope**, **Case Phase**, **Case Type**, **Data Classification**). | **Done** — visual consistency on the Taxonomy page; display-only, no behaviour change. |
 | **15** | **§12.7 — Cases list: make the case title clickable — SHIPPED 2026-10-17** | `ui/templates/ui/case_list.html` now links the **case title** to `ui-case-detail` (same URL as the **case number**); it is a real `<a>`, so keyboard access needs no JS. | **Done** — small UX improvement. |
-| **16** | **§12.8 — Case Details (General) + verdict taxonomy + close flow — SHIPPED 2026-10-17** | Code shipped (`PLAN-2026-10-17-case-verdict-close-flow.md`, `2476edb`); **independently verified 2026-10-17 at 18/18 ACs** (`docs/verification/VERIFY-2026-10-17-case-verdict-close-flow.md`, re-issued in `554bb0d`; one new low deviation **D-N1** → §12.8-fu3); **security pass 2026-10-18 = CONDITIONAL PASS** (`SECURITY-2026-10-18-case-verdict-close-flow.md`). Inline metadata edits, Tags row, Verdict on Case + Alert + Taxonomy, enforced close (Verdict + closing comment) and close-propagation to linked alerts. | **Done** — pending the §12.8-fu4 hardening conditions before `[x]`. |
+| **16** | **§12.8 — Case Details (General) + verdict taxonomy + close flow — SHIPPED 2026-10-17** | Code shipped (`PLAN-2026-10-17-case-verdict-close-flow.md`, `2476edb`); **independently verified 2026-10-17 at 18/18 ACs** (`docs/verification/VERIFY-2026-10-17-case-verdict-close-flow.md`, re-issued in `554bb0d`; one new low deviation **D-N1** → §12.8-fu3); **security pass 2026-10-18 = CONDITIONAL PASS** (`SECURITY-2026-10-18-case-verdict-close-flow.md`). Inline metadata edits, Tags row, Verdict on Case + Alert + Taxonomy, enforced close (Verdict + closing comment) and close-propagation to linked alerts. | **Done** 2026-10-19 — the §12.8-fu4 hardening conditions (M1/L2/M2) landed. |
 | **17** | **§12.9 — UI layout/style standardization** | Establish and apply a small set of UI/layout rules across the UI: (1) Input field height must match the button height next to it. (2) For action columns in tables, prefer compact icon-only actions with accessible names (not full text buttons) where space-limited and common. (3) Standardize table markup/styles: the table lives inside a `.card`, and filters go in a separate card above the table (use **Observables List View** as the reference). Codify in a short "UI Layout Guidelines" note (e.g. in `ui/README.md` or `docs/spec/ui-style.md`) and apply to affected views (e.g. Cases, Alerts, Tasks, Users, Tokens) to avoid drift. | **Low** — global consistency; reduces CSS/markup churn. |
 
 
@@ -718,7 +722,7 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
   Make the **case title** (the human-readable title column) a link to the same destination, reusing the
   same URL and link text logic, preserving truncation and an accessible link name (e.g. "Open case
   <number> <title>" if present). Source: user request 2026-10-17. (Done 2026-10-17)
-- [~] **12.8 — Case Details (General): inline edits, Tags, Verdict, and enforced close flow — CODE SHIPPED 2026-10-17; independently verified 18/18 ACs; security pass CONDITIONAL PASS 2026-10-18.**
+- [x] **12.8 — Case Details (General): inline edits, Tags, Verdict, and enforced close flow — CLOSED 2026-10-19** (code shipped 2026-10-17; independently verified 18/18 ACs; security pass CONDITIONAL PASS 2026-10-18; hardening conditions §12.8-fu4 landed 2026-10-19).**
   (1) **Inline metadata edits** on the General tab (`ui-case-detail`): add edit icons next to **Severity**,
       **Scope**, **Type**, **Classification** and **Phase**; each opens a dedicated `<dialog>` modal populated
       with allowed values from Taxonomy (no free text). Mutations must be org-scoped and respect role rules
@@ -738,8 +742,8 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
       the UI updates. Use `<dialog>` for all modals (no native `confirm/alert/prompt`), preserve keyboard
       accessibility and org scoping. Source: user request 2026-10-17.
   **Code shipped 2026-10-17; independently re-verified at 18/18 ACs (§12.8-fu1); security pass returned
-  CONDITIONAL PASS on 2026-10-18 (§12.8-fu2). Still `[~]`: it may flip to `[x]` — and only then may
-  `COMPLETED.md` list it — once the §12.8-fu4 conditions land.**
+  CONDITIONAL PASS on 2026-10-18 (§12.8-fu2); the §12.8-fu4 hardening conditions landed 2026-10-19 — so this
+  closed `[x]` on 2026-10-19 and `COMPLETED.md` may now list it.**
   Report: `docs/verification/VERIFY-2026-10-17-case-verdict-close-flow.md`. Per
   `docs/planning/PLAN-2026-10-17-case-verdict-close-flow.md`: `Case.verdict` + `Alert.verdict`
   (snake_case tokens `undefined`/`true_positive`/`false_positive`, migration `cases/0018`, `alerts/0015`) with DB
@@ -773,7 +777,7 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
   three choke points — all PASS. Two sufficient negatives: the close rule is **not** reachable via `compat/`, and
   `not_viewer` logs `match.url_name` not `request.path` (CWE-117 clear). The three conditions are tracked in
   §12.8-fu4 below. Source: planned security review; user request 2026-10-17.
-- [ ] **12.8-fu4 — Clear the §12.8 security-review conditions (M1 and L2 are real; M2 re-graded Medium → Info).**
+- [x] **12.8-fu4 — Clear the §12.8 security-review conditions — DONE 2026-10-19 (M1 and L2 were real; M2 re-graded Medium → Info).**
   This is the last blocker before §12.8 can flip to `[x]`:
   - **M1 — fix by simplification; do NOT add the auditor's "refuse the close" cap.** `cases/update.py:266-271`
     materialises **every** linked alert id into a Python list solely to build an `id__in=` UPDATE. Two defects:
@@ -801,6 +805,28 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
     (introduced by §12.3) with a "showing first N" note rather than inventing a second limit.
   - **L1** is the D-N1 decision and is tracked separately in §12.8-fu3.
   Source: security review 2026-10-18.
+  **DONE 2026-10-19.** All three conditions are cleared. **M1** is now one statement —
+  `Alert.objects.filter(case=case).update(status=closed_status, verdict=verdict)` — with the returned rowcount
+  driving the timeline event, the `case.alerts_closed` audit row and the return value, so nothing is
+  materialised into Python and there is no `IN (...)` ceiling. **L2** caps the Add-tag picker at the existing
+  `PICKER_PAGE_SIZE`, fetching one row *past* the cap so truncation is detected without a second `COUNT` on
+  the hot case-detail path (and without evaluating the queryset twice). **M2** is documented in
+  `docs/spec/data-model.md` + `docs/spec/api.md` and pinned by two bypass tests. Tests:
+  `tests/conformance/test_case_verdict_close.py` (+3), `tests/conformance/test_ui_case_verdict.py` (+2).
+  **Verification caveat — why this closed on a manual run.** The first independent verification of this wave,
+  `docs/verification/VERIFY-2026-10-18-case-verdict-close-flow-fu4.md`, is **invalidated**: the five tests it
+  cites as passing had been **deleted from the tree during that very run** (they survived only as stale
+  bytecode), its evidence is internally inconsistent (it claims 52 passes *and* "24 + 7 = 31" for the same two
+  files; the tree holds 49), and it left its own ad-hoc test file behind. The five tests were reconstructed
+  from that bytecode plus the file conventions and run by the **user**:
+  `pytest tests/conformance/test_case_verdict_close.py test_ui_case_verdict.py` → **54 passed** (2026-10-19),
+  alongside a planner line-by-line review of the diff. An independent re-run was offered and the user elected
+  to run the suite manually instead — so this wave's evidence is a manual run, **not** a fresh independent
+  pass; re-verify it if a later review needs that. (The reconstruction also closed the two coverage gaps the
+  invalidated report had itself identified: the L2 exact-cap boundary, and the `save()`-path bypass.)
+  **Left open by decision:** no load test for `propagate_close_to_alerts` at large N — the single `UPDATE`
+  still holds row locks for the transaction, which is inherent to the approach and was deliberately not
+  capped.
 - [ ] **12.9 — UI layout/style standardization (global).** (1) **Input/button height alignment:** inputs must
       match button height next to them (form control sizing). (2) **Action columns use fitting icons:** prefer
       compact icon-only actions with accessible names (aria-label/title), not full text buttons in tight action
@@ -830,24 +856,25 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
 ## 🎯 Next Recommended Items
 
 The canonical **NEXT HIGHEST-IMPACT ITEMS** table at the top of this file is the single source of truth.
-**Refresh 2026-10-18:** the §12.1/§12.2 list-view wave and the §12.3 correlation wave have both shipped, and
-§12.5 (case pages) is closed by an independent verification — so the ranking written 2026-10-13 (when those were
-the cheapest wins) is superseded. Ranked as of 2026-10-18:
+**Refresh 2026-10-19:** §12.8-fu4 landed, so **§12.8 is closed** and the case-verdict/close-flow feature is
+fully done; the two entries that topped the 2026-10-18 ranking are now history (§12.8-fu3 was resolved too).
+Everything else holds. Ranked as of 2026-10-19:
 
-1. **§12.8-fu4** — the last blocker on §12.8: one small `cases/update.py` simplification (removes a >65k-alert
-   correctness bug) plus a tag-picker cap. The cheapest item on the board that closes a shipped feature.
-2. **§12.8-fu3** — decide D-N1 (amend plan §9.3 prose vs. re-open the close dialog). A one-line docs change.
-3. **§11.2 (M3)** — playbook action secrets are global and rendered in cleartext to any cross-org analyst. The
+1. **§11.2 (M3)** — playbook action secrets are global and rendered in cleartext to any cross-org analyst. The
    highest-severity *open* finding in the repo, and it needs a policy call (scope `Playbook` by org vs. stop
    storing plaintext secrets).
-4. **§6.16 P6** — global search over cases/alerts/observables. The biggest remaining *feature* gap; §12.1 made the
+2. **§6.16 P6** — global search over cases/alerts/observables. The biggest remaining *feature* gap; §12.1 made the
    lists truthful, so it no longer has to search a truncated corpus.
-5. **§12.4 / §6.16 P7** — bulk triage, realtime breadth.
-6. **Security, unchanged** — **S3** (per-account lockout on the API login; wire `identity/ratelimit.py` into
+3. **§12.4 / §6.16 P7** — bulk triage, realtime breadth.
+4. **Security, unchanged** — **S3** (per-account lockout on the API login; wire `identity/ratelimit.py` into
    `compat/views.py::api_login`, return **429** + `Retry-After`, derive the client IP from the proxy chain instead
    of the client-supplied `X-Forwarded-For`) and **S5** (attachment aggregate caps + extension-from-content-type).
    These are deployment-hardening, not analyst ergonomics.
-7. **§2.6 / §2.7** — coverage back to ≥ 80%, and the 10 still-NOT-MET Phase-12/T2 ACs.
+5. **§2.6 / §2.7** — coverage back to ≥ 80%, and the 10 still-NOT-MET Phase-12/T2 ACs.
+6. **Small open follow-ups** — `§12.5-fu1` (a modal heading id collides with a field id, costing that field its
+   accessible name), `§12.5-fu2` (no cross-tenant 404 enumeration for the case-page routes), `§10.12` (the
+   ingestion-token wave still has *no* independent verification and *no* security pass), `§12.10`
+   (`ui_tags.sev_class` emits `sev-high`/`sev-critical` classes `app.css` never defines).
 
 **Phase 12 / T2 is not fully shipped**: independent verification (2026-10-10) found 3 ACs MET / 3 DEVIATED /
 10 NOT MET (`VERIFY-2026-10-10-t2-and-phase12.md`). Wave A closed the three unambiguous bugs; the
