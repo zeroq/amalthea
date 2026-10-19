@@ -236,7 +236,7 @@ Each is a real `<form method="post">` so the no-JS fallback is a plain POST (pro
 
 | Name | Params | Behaviour |
 |------|--------|-----------|
-| `ui-case-close` | `verdict`, `comment` | Delegates to `apply_case_update` with the case's current Closed-stage status value. Failure → message + redirect back to General with the dialog re-rendered open. |
+| `ui-case-close` | `verdict`, `comment` | Delegates to `apply_case_update` with the case's current Closed-stage status value. Failure → `messages.error` + redirect back to General. **Amended 2026-10-18 (deviation D-N1, resolved as *amend*):** the modal is **not** re-rendered open — flash + redirect is the affordance every other inline-edit failure already uses, and re-opening only the close dialog was an inconsistency, not a requirement. |
 | `ui-case-field-edit` | `field`, `value` | Validates `field` against the allowed inline set, delegates to `apply_case_update`. Unknown field → 404, never 500. |
 | `ui-case-tag-add` | `tags` (multi), `new_tags` (text) | Delegates to `apply_case_update` with `addTags`. |
 | `ui-case-tag-remove` | `tag` | Delegates to `apply_case_update` with `removeTags`. |
@@ -336,10 +336,18 @@ None blocking. Recorded for later:
 
 **Not done here (out of scope, unchanged):** `Tag` org-scoping (§9 caveat); the new tracked-change kinds (`classification-changed`, `severity-changed`, `verdict-changed`, `tags-changed`, `alerts-closed`) render the default grey timeline dot (only the status dot is keyed to a colour).
 
-**Inline verification done 2026-10-17 (18/18 ACs) — provisional.** No *independent* `verifier` /
-`security-auditor` pass has run (the subagent pool returned 503 throughout), so §12.8 stays `[~]` in
-TODO.md and out of `COMPLETED.md`. Report:
-`docs/verification/VERIFY-2026-10-17-case-verdict-close-flow.md` — re-run the `verifier` (and a
-`security-auditor` on the §12.8 surface) when the service recovers and re-issue that file.
+**Verification — discharged 2026-10-17/18.** The inline pass (18/18 ACs) was superseded by an **independent**
+re-run at `79793f5` (18/18 ACs Met, 0 Not Met, 0 Deviated; report re-issued in `554bb0d`; see §12.8-fu1 in
+TODO.md), and a **`security-auditor` pass on the §12.8 surface** ran 2026-10-18 returning **CONDITIONAL PASS** —
+[`SECURITY-2026-10-18-case-verdict-close-flow.md`](../reviews/SECURITY-2026-10-18-case-verdict-close-flow.md)
+(0 Critical / 0 High; 2 Medium / 2 Low / 2 Info). §12.8 stays `[~]` in TODO.md and out of `COMPLETED.md` only
+until its hardening follow-up (**§12.8-fu4**) lands: a `propagate_close_to_alerts` simplification, a tag-picker
+cap, and documentation of the service-layer close-rule boundary.
+
+**D-N1 — resolved 2026-10-18 (*amend*, not *implement*).** §9.3 originally promised the close dialog be
+"re-rendered open" on a refused close; the shipped behaviour is `messages.error` + redirect. The independent
+re-run and the security pass both recommended keeping the shipped behaviour for consistency with every other
+inline-edit failure path, so §9.3 has been amended to match (see the `ui-case-close` row above). No code change,
+and no test asserted the re-open — the deviation is closed as *amended*, not *fixed*.
 
 **Open follow-up:** `make css` cannot run locally (arm64 `scripts/tailwindcss`), so the §F5 `app.css` additions (`.meta-edit`, `.case-tags`, `.case-tags-label`, `.tag-list`, `.field`, `.tl-status-changed:before`) were hand-written into the file's existing commented component section and are **not** re-minified into the compiled block; a maintainer on a supported platform should run `make css` before release.
