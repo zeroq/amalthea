@@ -177,6 +177,7 @@ vendored *asset* changes — no API.)
 | **D6** | Icon-only is restricted to **secondary, ubiquitous** row actions (View/Edit/Delete-class). Primary standalone actions keep text; where an icon accompanies a label it is decorative (`aria-hidden="true"`). | AGENTS.md §6 verbatim: an icon *supplements* a visible label on primary actions, never replaces it; icon-only controls must carry an accessible name. |
 | **D7** | The conventions live in **`docs/spec/ui-style.md`** (not `ui/README.md`; there is no `ui/README.md`, and `docs/spec/` already holds the other house specs). | Discoverability + consistency with `api.md`, `data-model.md`, `realtime.md`, … |
 | **D8** | Extend `tests/conformance/test_ui_css_tokens.py` rather than adding a new test module for the styling guards. | That module already owns "the stylesheet must not silently break" (undefined tokens, focus outline, tab scrollbars). The new guards are the same species. |
+| **D9** | (Phase A follow-up) disable Tailwind automatic source detection (`source(none)`) and declare `@source` explicitly for `ui/templates/**` and `ui/static/ui/*.js`. | Auto-detection scanned the whole repo (minus `.gitignore`), so `.opencode/` skill docs and conformance tests silently injected 37 phantom utilities and made the artifact a function of unrelated files — the §7.4 drift class. Scoping makes the artifact a function of its declared sources only. |
 
 ## 8. Scope: the 13 list surfaces
 
@@ -257,16 +258,56 @@ survives in minified-equivalent form, incl. `.tabs` `overflow-x:auto`/`border-bo
 `word-break`/`min-width`); AC-4 ✓ (perturbed source → `css-check` fails, revert → passes); AC-5 ✓ (skip is
 loud and distinct from clean); AC-6 ✓. `make check` green. **AC-9's ongoing guard remains open** (Phase C).
 
+#### Phase A — follow-up defect found while writing Phase B (2026-10-19): unscoped content detection
+
+Writing `docs/spec/ui-style.md` made `make css-check` **fail**: the CSS example in the doc contains
+`flex-wrap: wrap`, and Tailwind v4's *automatic source detection* scans **every non-`.gitignore`d file in
+the repo** — so a spec/doc/test file containing a class-like token silently injects utilities into the
+committed artifact. Verified root cause by deleting the doc: the compile then matched the committed
+artifact byte-for-byte. This is the §7.4 drift class in a new guise: the artifact was a function of *every
+tracked file*, not of `app.src.css`.
+
+Audit of the committed artifact found **37 phantom utility classes** — none authored in `ui/templates/**`
+or `ui/static/ui/*.js`. They came from `.opencode/skill/frontend-design/SKILL.md` (Tailwind demo classes:
+`backdrop-blur-md`, `bg-[#0F131C]/60`, `text-[#00F0FF]`, `tracking-wider`, …) and
+`tests/conformance/test_ui_icons.py` (`rotate-180`).
+
+**Fix (in `app.src.css`):** `@import "tailwindcss" source(none);` + explicit `@source "../../templates";`
+`@source "./*.js";`. Automatic detection is off; only the files that actually author class names are
+scanned. Verified: (a) recompiled artifact no longer contains any phantom; (b) every class authored in
+templates/JS is still defined (`space-x-3`, `space-y-6`, `.control-row` inputs, …); (c) \(`make css`
+idempotent; (d) appending class-like tokens to `docs/`/`.opencode/`/`tests/` no longer changes the
+artifact — the drift is closed. Artifact size **63 591 → 50 683 bytes** (the 37 dead utilities removed);
+`make check` green; `test_ui_css_tokens.py` (5) and `test_ui_loop.py`+`test_ui_icons.py` (39) pass.
+
+**Consequence for the doc:** `docs/spec/ui-style.md` must not be a Tailwind scan source — it isn't now —
+so its CSS examples are safe. `@source` list must be kept in sync if classes are ever authored outside
+`ui/templates` or `ui/static/ui/*.js`.
+
 ### Phase B — conventions document (G2)
 
 | Task | Files | AC |
 |---|---|---|
 | B1 | write `docs/spec/ui-style.md` | AC-7, AC-8 |
 
-- **AC-7** `docs/spec/ui-style.md` covers, with a before/after example each: control heights; the aligned
-  action-row utility; icon-only rules incl. the accessible-name requirement and the primary/secondary
-  boundary; and the table-in-card + filters-in-own-card layout, naming `observable_list.html` as the reference.
-- **AC-8** The document states the **subset constraint** (which icons exist) and the rule for adding one.
+**Status: done (2026-10-19).** `docs/spec/ui-style.md` written; added to the `docs/spec/README.md`
+reading guide. It covers: the source/artifact split and its consequences (§0); control heights and the
+34 px unit (§1); the `.control-row` utility with `.filter-bar`/`.case-actions` as one-wave aliases (§2);
+icons — decorative `aria-hidden`, icon-only accessible-name requirement, the primary/secondary boundary,
+and the **exact** subset inventory with the four absent glyphs (`fa-play`, `fa-pause`, `fa-ban`,
+`fa-pencil`) plus the "do not hand-edit the subset" rule (§3); the two-card list layout with
+`observable_list.html` as the named reference and the honest empty-state rule (§4); the modal-not-native
+rule (§5); the keyboard/a11y baseline (§6); and the conformance-guard policy (§7). Before/after examples
+included for control heights, the action-row utility, the list layout and the icon rules.
+
+### Phase B — AC results
+
+- **AC-7** ✓ control heights + `.control-row` + icon-only rules (accessible name, primary/secondary
+  boundary) + table-in-card/filters-in-own-card with `observable_list.html` named — each with a
+  before/after example.
+- **AC-8** ✓ the subset constraint is stated numerically (**127** classes present; the plan's earlier
+  "132" corrected) with the absent glyphs named and the add-an-icon rule (extend via the vendoring path,
+  reviewed separately; until then use a subset icon or text).
 
 ### Phase C — apply the layout convention (G3, G4)
 

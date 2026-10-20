@@ -1,5 +1,15 @@
 /** Hand-edited Tailwind v4 source — DO NOT EDIT THE GENERATED app.css **/
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+
+/*
+ * Content sources — automatic detection is DISABLED (`source(none)`) and scanning is restricted to
+ * the files that actually author class names. With automatic detection on, Tailwind scans the whole
+ * repo, so any unrelated file containing a class-like token (a doc example, a CSS snippet in a spec,
+ * a test fixture) silently adds/removes utilities in the committed artifact and breaks `make css-check`.
+ * Keep this list in sync with where classes are authored: templates and the UI JavaScript.
+ */
+@source "../../templates";
+@source "./*.js";
 
 @theme {
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;

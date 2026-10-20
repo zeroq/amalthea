@@ -17,6 +17,7 @@ spec win, and the disagreement is recorded in [`deviations.md`](./deviations.md)
 | [`automation.md`](./automation.md) | Domain events, playbook triggers, dispatch/idempotency, executor safety |
 | [`query-dsl.md`](./query-dsl.md) | `POST /api/v1/query` — steps, operators, field whitelists, paging |
 | [`identity-auth.md`](./identity-auth.md) | Users, organisations, roles, tenant isolation, API keys/scopes, ingestion tokens, DRF config, per-env settings |
+| [`ui-style.md`](./ui-style.md) | House UI style: Tailwind source/artifact split, control heights, `.control-row`, icons, list layout, modals, a11y |
 | [`deviations.md`](./deviations.md) | Register of every deviation from AGENTS.md §2/§3 and the plan, with evidence |
 
 ## Conformance statement (drift policy)
