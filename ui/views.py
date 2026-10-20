@@ -969,6 +969,38 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     observables_total = observables_qs.count()
     observables = list(observables_qs[:RAIL_CAP])
 
+    # "Seen in" modal payload (plan 2026-10-20): the cases each rendered artifact has been seen in.
+    # Scoped through case_visible_q so a share/cross-org link can never leak a case number/title.
+    # `case_visible_q` describes *Case* fields (`owner_org_id`/`shares__organisation_id`), so it must
+    # be applied via `case__in=Case.objects.filter(...)` — not directly to the CaseObservable queryset
+    # (that raises FieldError). This mirrors the established pattern in this module.
+    # Bounded by RAIL_CAP observables; replaces the per-row case_observables.count() N+1.
+    # Keyed by the observable's UUID (not str()) so the template looks it up directly with
+    # `{{ linked_cases_by_observable|get_item:link.observable.id }}` — no string formatting, and no
+    # filter-chain precedence trap (`|get_item:…|stringformat:"s"` stringifies the *result*, not the key).
+    observable_ids = [link.observable_id for link in observables]
+    seen_links = (
+        CaseObservable.objects.filter(observable_id__in=observable_ids)
+        .filter(case__in=Case.objects.filter(case_visible_q(request.user)))
+        .select_related("case__status")
+        .order_by("-case__start_date")
+    )
+    linked_cases_by_observable: dict[uuid.UUID, dict] = {}
+    for cl in seen_links:
+        bucket = linked_cases_by_observable.setdefault(cl.observable_id, {"cases": [], "total": 0})
+        bucket["total"] += 1
+        if len(bucket["cases"]) < RAIL_CAP:
+            bucket["cases"].append(
+                {
+                    "number": cl.case.number,
+                    "title": cl.case.title,
+                    # `Case.status` is an FK to `CaseStatus` with no `choices`, so there is no
+                    # auto-generated `get_status_display`; the label lives on the related row.
+                    "status": cl.case.status.value,
+                    "severity": cl.case.severity,
+                }
+            )
+
     # Attachments: order by -created_at (newest first), so simple slice is correct
     attachments_total = attachments_qs.count()
     attachments = list(attachments_qs[:RAIL_CAP])
@@ -1016,7 +1048,6 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     similar_cases = []
     similar_total = 0
     if active_tab == "similar":
-        from cases.models import CaseObservable
         from observables.extractor import Finding
 
         # Build findings from this case's CaseObservables, excluding ignore_similarity
@@ -1060,6 +1091,7 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             comments_total=comments_total,
             observables=observables,
             observables_total=observables_total,
+            linked_cases_by_observable=linked_cases_by_observable,
             tasks=tasks,
             tasks_total=tasks_total,
             pages=pages,

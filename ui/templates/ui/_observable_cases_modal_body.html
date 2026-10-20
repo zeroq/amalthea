@@ -1,0 +1,25 @@
+{% comment %}Read-only body for the "Seen in" modal on the case-detail Observables tab.{% endcomment %}
+<div class="table-wrap">
+  <table class="data-table">
+    <caption class="sr-only">Cases where this artifact was seen</caption>
+    <thead>
+      <tr>
+        <th scope="col">Case</th>
+        <th scope="col">Title</th>
+        <th scope="col">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in seen.cases %}
+      <tr>
+        <td><a href="{% url 'ui-case-detail' c.number %}">{{ c.number }}</a></td>
+        <td><a href="{% url 'ui-case-detail' c.number %}">{{ c.title|truncatechars:50 }}</a></td>
+        <td><span class="sev sev-{{ c.severity }}">{{ c.status }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if seen.total > seen.cases|length %}
+  <p class="list-summary dim">Showing latest {{ seen.cases|length }} of {{ seen.total }} cases</p>
+{% endif %}

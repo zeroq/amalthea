@@ -607,7 +607,9 @@ def test_an_artifact_seen_in_two_cases_shows_its_case_count(browser: Client) -> 
         reverse("ui-case-detail", kwargs={"case_id": str(first.number)})
     ).content.decode()
     assert "evil.example" in body
-    assert "2 case(s)" in body, "the artifact does not report that it appears in both cases"
+    # The cross-case count is now a control that opens the "seen in" modal (plan 2026-10-20).
+    assert f'data-modal-open="observable-cases-{observable.id}"' in body
+    assert "2 cases" in body, "the artifact does not report that it appears in both cases"
 
 
 def test_the_timeline_is_ordered_oldest_first(browser: Client) -> None:

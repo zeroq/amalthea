@@ -42,7 +42,19 @@
             <td class="mono break">
               <a href="{% url 'ui-observable-detail' link.observable.id %}">{{ link.observable.data }}</a>
             </td>
-            <td class="mono dim">{{ link.observable.case_observables.count }} case(s)</td>
+            <td class="mono dim">
+              {% with seen=linked_cases_by_observable|get_item:link.observable.id %}
+                {% if seen and seen.cases %}
+                  <button type="button" class="btn btn-sm btn-ghost"
+                          data-modal-open="observable-cases-{{ link.observable.id }}"
+                          aria-label="Show cases where this artifact was seen">
+                    {{ seen.cases|length }} case{{ seen.cases|length|pluralize }}
+                  </button>
+                {% else %}
+                  <span class="dim">0 cases</span>
+                {% endif %}
+              {% endwith %}
+            </td>
             {% if can_mutate %}
             <td class="actions">
               {% comment %}
@@ -70,6 +82,20 @@
     </p>
   {% endif %}
 </section>
+
+{% comment %}
+  "Seen in" modals — rendered for ALL roles (not gated by can_mutate).
+  One modal per observable that has a non-empty visible linked-cases bucket.
+  `get_item` needs the UUID key, but `add:` needs a string (Django's `add` returns '' for a UUID
+  operand), so we stringify once into `oid` and use it only for the modal id.
+{% endcomment %}
+{% for link in observables %}
+  {% with seen=linked_cases_by_observable|get_item:link.observable.id oid=link.observable.id|stringformat:"s" %}
+    {% if seen and seen.cases %}
+      {% include "ui/_modal.html" with modal_id="observable-cases-"|add:oid title="Cases where this artifact was seen" body_template="ui/_observable_cases_modal_body.html" show_cancel=False close_url=request.path seen=seen %}
+    {% endif %}
+  {% endwith %}
+{% endfor %}
 
 {% if can_mutate %}
 {% include "ui/_modal.html" with modal_id="observable-create-modal" form_id="observable-create-form" body_template="ui/_observable_form_modal_body.html" title="New artifact" confirm_text="Add artifact" form_action=observable_create_url size="lg" %}

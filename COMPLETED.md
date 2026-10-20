@@ -1328,8 +1328,36 @@ follow-ups — see the top of [`TODO.md`](./TODO.md).*
     unchanged at 42); `app.css` regenerated.
   - `make check` green; layout wave committed separately at `42d5a55`.
 
+## 2026-10-20 — **Case detail → Observables: clickable "Seen in" count → linked-cases modal**
+
+- [x] **Clickable "Seen in" count on the Observables tab — SHIPPED 2026-10-20.**
+  `docs/planning/PLAN-2026-10-20-observable-seen-in-modal.md` (approved) +
+  `docs/planning/BRIEF-2026-10-20-observable-seen-in-modal.md`. The per-artifact **"Seen in"** cell is now
+  a quiet `btn-ghost` control that opens a read-only modal listing the cases the artifact was seen in:
+  **Case** (link), **Title** (also a link), **Status**. Available to **all roles** (viewers included — the
+  modal is rendered outside the `can_mutate` guard). Zero-visible links render plain `0 cases` with no
+  control. The list is capped at `RAIL_CAP` with an honest *"Showing latest N of M cases"* line.
+  - **Tenant-safe:** the payload is scoped by `case_visible_q(user)`
+    (`.filter(case__in=Case.objects.filter(case_visible_q(request.user)))`) so a share/cross-org link can
+    never leak a case number/title. Dedicated cross-org leak test added (+ falsifiability proven).
+  - **Perf:** replaces the previous per-row `case_observables.count()` N+1 with **one** bounded query,
+    grouped in Python and keyed by observable UUID.
+  - **Files:** `ui/views.py` (`_case_detail` context), `ui/templates/ui/_tab_observables.html`,
+    new `ui/templates/ui/_observable_cases_modal_body.html`; new
+    `tests/conformance/test_ui_observable_seen_in_modal.py` (7 tests); `test_ui_loop.py` count assertion
+    updated to the new control markup.
+  - **Fixes folded in (QA-caught, invisible to `make check`):** `case_visible_q` must be applied via
+    `case__in=...` (it references `Case` fields, not `CaseObservable` — a direct filter raised `FieldError`);
+    and `Case.get_status_display()` does not exist (FK to `CaseStatus` without `choices`) → use
+    `case.status.value`. Recorded in plan §11.1.
+  - **No schema change; no API change; no new CSS** (undefined-class backlog unchanged at 42).
+  - `make check` green; targeted regression: `test_ui_observable_seen_in_modal` (7),
+    `test_tenant_scoping` (100), `test_ui_loop` (44), wiring/table/viewer/pagination (178) — all pass.
+
 ---
 
-*Last updated: 2026-10-20 — **§10.1 org-scoped user management** (ADR-010; verified 24/24 + security
-reviewed) plus the Settings/Cases/Alerts UI refinements (filter cards, tri-state case scope, right-aligned
-in-card actions). Uncommitted in the working tree at the time of writing.*
+*Last updated: 2026-10-20 — **clickable "Seen in" → linked-cases modal** on the case-detail Observables tab
+(tenant-scoped, viewer-visible, N+1 removed; two QA-caught defects fixed) plus **§10.1 org-scoped user
+management** (ADR-010; verified 24/24 + security reviewed) and the Settings/Cases/Alerts UI refinements
+(filter cards, tri-state case scope, right-aligned in-card actions). Uncommitted in the working tree at the
+time of writing.*
