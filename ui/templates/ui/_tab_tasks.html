@@ -64,13 +64,11 @@
 
       {% if can_mutate %}
       <div class="task-actions">
-        <button type="button" class="btn btn-ghost btn-sm" data-modal-open="task-edit-{{ task.id }}">
-          <i class="fa-solid fa-pen" aria-hidden="true"></i>
-          Edit
+        <button type="button" class="icon-link" data-modal-open="task-edit-{{ task.id }}" aria-label="Edit task {{ task.title }}">
+          <i class="fa-regular fa-pen-to-square" aria-hidden="true"></i>
         </button>
-        <button type="button" class="btn btn-ghost btn-sm btn-err" data-modal-open="task-del-{{ task.id }}">
-          <i class="fa-solid fa-trash" aria-hidden="true"></i>
-          Remove
+        <button type="button" class="icon-link icon-link-err" data-modal-open="task-del-{{ task.id }}" aria-label="Remove task {{ task.title }}">
+          <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
         </button>
       </div>
       {% endif %}

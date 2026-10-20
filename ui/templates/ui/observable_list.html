@@ -42,7 +42,7 @@
           <td>{{ obs.case_observables.count }}</td>
           <td>{{ obs.created_at|date:"Y-m-d H:i" }}</td>
           <td>{{ obs.updated_at|default:obs.created_at|date:"Y-m-d H:i" }}</td>
-          <td><a class="btn" href="{% url 'ui-observable-detail' obs.id %}">View</a></td>
+          <td><a class="icon-link" href="{% url 'ui-observable-detail' obs.id %}" aria-label="View observable {{ obs.data }}"><i class="fa-regular fa-eye" aria-hidden="true"></i></a></td>
         </tr>
         {% endfor %}
       </tbody>
@@ -82,7 +82,7 @@
           <td>{{ obs.case_observables.count }}</td>
           <td>{{ obs.created_at|date:"Y-m-d H:i" }}</td>
           <td>{{ obs.updated_at|default:obs.created_at|date:"Y-m-d H:i" }}</td>
-          <td><a class="btn" href="{% url 'ui-observable-detail' obs.id %}">View</a></td>
+          <td><a class="icon-link" href="{% url 'ui-observable-detail' obs.id %}" aria-label="View observable {{ obs.data }}"><i class="fa-regular fa-eye" aria-hidden="true"></i></a></td>
         </tr>
         {% empty %}
         {% endfor %}

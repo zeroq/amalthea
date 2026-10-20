@@ -404,6 +404,46 @@ dialog.cheatsheet-modal{border:1px solid var(--color-line);border-radius:var(--r
   color: var(--color-err);
 }
 
+/* Plain icon action — an inline icon link with no button chrome (no border, background or padding).
+   Used for the quiet table row actions (View/Open/Edit/Delete): the glyph itself is the control and
+   it sits on the text baseline so it lines up with the surrounding row text. The colour is a dim
+   text tone that brightens on hover, and a focus ring keeps it keyboard-visible. */
+.icon-link {
+  color: var(--color-text-dim);
+  text-decoration: none;
+  vertical-align: baseline;
+  display: inline-block;
+}
+.icon-link > i {
+  font-size: 1em;
+  line-height: 1;
+}
+/* Breathing room between two icon actions in the same table row (e.g. Open + Delete). Scoped to
+   `.data-table` so it does not stack with the flex `gap` already present in non-table action groups
+   (`.task-actions`). A general sibling combinator is used rather than `+` because a hidden
+   `_modal.html` <dialog> sits between the two controls in the DOM; it is display:none, so it
+   contributes no space of its own. */
+.data-table .icon-link ~ .icon-link {
+  margin-left: 10px;
+}
+.icon-link:hover,
+.icon-link:focus-visible {
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+/* Destructive variant — Delete/Revoke. Red at rest so the affordance stays visible without hover;
+   it is still paired with an explicit action word in the accessible name (severity/state is never
+   signalled by colour alone, per the design spec). */
+.icon-link-err {
+  color: var(--color-err);
+}
+.icon-link-err:hover,
+.icon-link-err:focus-visible {
+  color: var(--color-err);
+  filter: brightness(1.15);
+}
+
 /* Inline validation errors in the task modal (plan Q10). `.field-row` is a shared flex row used by
    the page/observable/procedure forms, so the wrap is scoped to rows that actually carry an error:
    the message drops to its own line without disturbing the other forms. */
@@ -468,46 +508,39 @@ dialog.cheatsheet-modal{border:1px solid var(--color-line);border-radius:var(--r
 }
 
 /* ============================================================================
-   Case actions — equal-height aligned controls in _tab_general.html
+   Aligned control row — the canonical utility for a horizontal group of
+   ≥2 controls (filter forms, per-row action groups, card headers with buttons):
+   a wrapping, vertically-centred flex row whose buttons/dropdowns all pin to
+   the 34px control height. `.case-actions` and `.filter-bar` are one-wave
+   aliases (plan decision D5) kept so the rename is reviewable; new markup uses
+   `.control-row`.
    ============================================================================ */
-.case-actions .btn {
-  margin-top: 0;
+.control-row,
+.case-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
+/* `.filter-bar` deliberately does NOT get its own `display:flex`/`gap`: its
+   markup is also `.inline-form`, which already supplies `display:flex;gap:6px`.
+   Adding them here would silently change the filter bar's 6px gap to 8px. */
+.control-row,
 .case-actions,
+.filter-bar,
+.control-row .inline-form,
 .case-actions .inline-form {
   align-items: center;
 }
-.case-actions select,
-.case-actions .btn {
-  box-sizing: border-box;
-  height: 34px;
-  padding-top: 0;
-  padding-bottom: 0;
-}
-.case-actions .btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* ============================================================================
-   Observables filter bar — equal-height controls
-   The row is a flex container, so the auto-height text input and type dropdown
-   stretch to the tallest item, while the base `.btn` adds a 14px top margin.
-   Pin every control to the button height (mirrors the .case-actions pattern).
-   ============================================================================ */
-.filter-bar {
-  align-items: center;
-  margin-bottom: var(--gap);
-}
+.control-row .btn,
+.case-actions .btn,
 .filter-bar .btn {
   margin-top: 0;
 }
-.filter-bar input[type="text"] {
-  flex: 1;
-  width: auto;
-  max-width: 300px;
-}
+.control-row select,
+.control-row .btn,
+.case-actions select,
+.case-actions .btn,
 .filter-bar select,
 .filter-bar .btn {
   box-sizing: border-box;
@@ -515,10 +548,23 @@ dialog.cheatsheet-modal{border:1px solid var(--color-line);border-radius:var(--r
   padding-top: 0;
   padding-bottom: 0;
 }
+.control-row .btn,
+.case-actions .btn,
 .filter-bar .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+/* Filter-row input sizing (previously under `.filter-bar` only). */
+.control-row input[type="text"],
+.filter-bar input[type="text"] {
+  flex: 1;
+  width: auto;
+  max-width: 300px;
+}
+/* `.filter-bar` keeps its own bottom margin (it used to be explicit). */
+.filter-bar {
+  margin-bottom: var(--gap);
 }
 
 /* ============================================================================

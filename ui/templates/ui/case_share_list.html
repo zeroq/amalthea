@@ -40,8 +40,8 @@
           </td>
           <td class="mono dim">{{ item.share.created_at|date:"Y-m-d H:i" }}</td>
           <td>
-            <button type="button" class="btn btn-err btn-sm" data-modal-open="revoke-share-{{ item.share.id }}">
-              Revoke
+            <button type="button" class="icon-link icon-link-err" data-modal-open="revoke-share-{{ item.share.id }}" aria-label="Revoke access for {{ item.share.organisation.name }}">
+              <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
             </button>
             {% include "ui/_modal.html" with modal_id="revoke-share-"|add:item.share.id title="Revoke share?" body="Revoke access for " confirm_text="Revoke" confirm_class="btn-err" form_action=item.revoke_url size="sm" %}
           </td>
@@ -81,8 +81,8 @@
             </td>
             <td class="mono dim">{{ item.share.created_at|date:"Y-m-d H:i" }}</td>
             <td>
-              <button type="button" class="btn btn-err btn-sm" data-modal-open="revoke-share-{{ item.share.id }}">
-                Revoke
+              <button type="button" class="icon-link icon-link-err" data-modal-open="revoke-share-{{ item.share.id }}" aria-label="Revoke access for {{ item.share.organisation.name }}">
+                <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
               </button>
               {% include "ui/_modal.html" with modal_id="revoke-share-"|add:item.share.id title="Revoke share?" body="Revoke access for " confirm_text="Revoke" confirm_class="btn-err" form_action=item.revoke_url size="sm" %}
             </td>

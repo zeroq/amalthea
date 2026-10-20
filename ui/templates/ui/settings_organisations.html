@@ -36,14 +36,14 @@
           <td>{{ org.observables_count }}</td>
           <td class="mono dim">{{ org.created_at|date:"Y-m-d H:i" }}</td>
           <td>
-            <a class="btn" href="{% url 'ui-settings-organisations-edit' org.id %}">Edit</a>
+            <a class="icon-link" href="{% url 'ui-settings-organisations-edit' org.id %}" aria-label="Edit organisation {{ org.name }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></a>
             {% url 'ui-settings-organisations-delete' org.id as delete_url %}
             {% with sid=org.id|stringformat:"s" %}
             {% with modal_id="delete-org-"|add:sid form_id="delete-org-"|add:sid|add:"-form" %}
             {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id org=org organisations=organisations body_template="ui/_settings_org_delete_form.html" title="Delete organisation?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="lg" %}
             {% endwith %}
             {% endwith %}
-            <button type="button" class="btn btn-err" data-modal-open="delete-org-{{ org.id }}">Delete</button>
+            <button type="button" class="icon-link icon-link-err" data-modal-open="delete-org-{{ org.id }}" aria-label="Delete organisation {{ org.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
           </td>
         </tr>
         {% empty %}
@@ -78,14 +78,14 @@
           <td>{{ org.observables_count }}</td>
           <td class="mono dim">{{ org.created_at|date:"Y-m-d H:i" }}</td>
           <td>
-            <a class="btn" href="{% url 'ui-settings-organisations-edit' org.id %}">Edit</a>
+            <a class="icon-link" href="{% url 'ui-settings-organisations-edit' org.id %}" aria-label="Edit organisation {{ org.name }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></a>
             {% url 'ui-settings-organisations-delete' org.id as delete_url %}
             {% with sid=org.id|stringformat:"s" %}
             {% with modal_id="delete-org-"|add:sid form_id="delete-org-"|add:sid|add:"-form" %}
             {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id org=org organisations=organisations body_template="ui/_settings_org_delete_form.html" title="Delete organisation?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="lg" %}
             {% endwith %}
             {% endwith %}
-            <button type="button" class="btn btn-err" data-modal-open="delete-org-{{ org.id }}">Delete</button>
+            <button type="button" class="icon-link icon-link-err" data-modal-open="delete-org-{{ org.id }}" aria-label="Delete organisation {{ org.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
           </td>
         </tr>
         {% empty %}

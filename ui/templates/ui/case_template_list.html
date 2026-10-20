@@ -41,12 +41,12 @@
           <td>{{ t.flag|default:"—" }}</td>
           <td>
             {% if can_mutate %}
-            <a class="btn" href="{% url 'ui-case-template-detail' t.id %}">Edit</a>
+            <a class="icon-link" href="{% url 'ui-case-template-detail' t.id %}" aria-label="Edit template {{ t.name }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></a>
             {% url 'ui-case-template-delete' t.id as delete_url %}
             {% with modal_id="delete-template-"|add:t.id|stringformat:"s" %}
             {% include "ui/_modal.html" with modal_id=modal_id title="Delete template?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
             {% endwith %}
-            <button type="button" class="btn btn-err" data-modal-open="delete-template-{{ t.id }}">Delete</button>
+            <button type="button" class="icon-link icon-link-err" data-modal-open="delete-template-{{ t.id }}" aria-label="Delete template {{ t.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
             {% else %}
             <span class="dim">—</span>
             {% endif %}
@@ -88,12 +88,12 @@
           <td>{{ t.flag|default:"—" }}</td>
           <td>
             {% if can_mutate %}
-            <a class="btn" href="{% url 'ui-case-template-detail' t.id %}">Edit</a>
+            <a class="icon-link" href="{% url 'ui-case-template-detail' t.id %}" aria-label="Edit template {{ t.name }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></a>
             {% url 'ui-case-template-delete' t.id as delete_url %}
             {% with modal_id="delete-template-"|add:t.id|stringformat:"s" %}
             {% include "ui/_modal.html" with modal_id=modal_id title="Delete template?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
             {% endwith %}
-            <button type="button" class="btn btn-err" data-modal-open="delete-template-{{ t.id }}">Delete</button>
+            <button type="button" class="icon-link icon-link-err" data-modal-open="delete-template-{{ t.id }}" aria-label="Delete template {{ t.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
             {% else %}
             <span class="dim">—</span>
             {% endif %}

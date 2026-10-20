@@ -182,3 +182,75 @@ def test_no_undefined_icons_in_base_html() -> None:
     assert not missing, (
         f"base.html uses undefined icons: {', '.join(f'fa-{i}' for i in sorted(missing))}"
     )
+
+
+# --- AC-15: icon-only controls must carry an accessible name --------------------------------------
+
+# An "icon-only" control is an <a> or <button> whose *only element content* is an <i> icon (the
+# icon is the clickable surface). Such a control has no visible text, so it must carry an
+# accessible name (aria-label, or title) and the icon itself must be aria-hidden.
+_ICON_ONLY_RE = re.compile(
+    r"<(a|button)\b([^>]*?)>\s*<i\b([^>]*?)>\s*</i>\s*</\1>",
+    re.IGNORECASE | re.DOTALL,
+)
+_ATTR_RE = re.compile(r"([a-zA-Z-]+)\s*=\s*\"([^\"]*)\"")
+
+
+def _attrs(attr_text: str) -> dict[str, str]:
+    return {name.lower(): value for name, value in _ATTR_RE.findall(attr_text)}
+
+
+def _iter_icon_only_controls():
+    """Yield (template_name, tag, attrs, icon_attrs) for every icon-only control in templates."""
+    for template_path in sorted(TEMPLATE_DIR.glob("*.html")):
+        text = template_path.read_text(encoding="utf-8")
+        text = re.sub(r"{%\s*comment\s*%}.*?{%\s*endcomment\s*%}", "", text, flags=re.DOTALL)
+        text = re.sub(r"{#.*?#}", "", text, flags=re.DOTALL)
+        for match in _ICON_ONLY_RE.finditer(text):
+            tag = match.group(1).lower()
+            ctrl_attrs = _attrs(match.group(2))
+            icon_attrs = _attrs(match.group(3))
+            yield template_path.name, tag, ctrl_attrs, icon_attrs
+
+
+def test_icon_only_controls_have_accessible_names() -> None:
+    """AC-15 — every icon-only control has an accessible name and a hidden icon.
+
+    A control whose only content is an icon is invisible to assistive tech unless it carries an
+    accessible name (`aria-label`, or a `title` fallback). The decorative icon must also be
+    `aria-hidden="true"` so it is not announced. This is the mechanical form of AGENTS.md §6 and
+    guards the D6 rule ("icon-only is restricted to secondary row actions, with an accessible
+    name") against regressions like the §12.5-fu1 modality bug.
+    """
+    missing_name: list[str] = []
+    not_hidden: list[str] = []
+
+    for template, tag, ctrl_attrs, icon_attrs in _iter_icon_only_controls():
+        label = ctrl_attrs.get("aria-label") or ctrl_attrs.get("title")
+        if not label or not label.strip():
+            missing_name.append(f"{template}: <{tag} …> has no aria-label/title")
+        if icon_attrs.get("aria-hidden") != "true":
+            not_hidden.append(f"{template}: <{tag} …> icon is not aria-hidden")
+
+    assert not missing_name, (
+        "Icon-only controls with no accessible name (add aria-label or title):\n  "
+        + "\n  ".join(missing_name)
+    )
+    assert not not_hidden, (
+        'Icon-only controls whose icon is not aria-hidden="true" (decorative icons must be '
+        "hidden from assistive tech):\n  " + "\n  ".join(not_hidden)
+    )
+
+
+def test_icon_only_controls_are_actually_present() -> None:
+    """Sanity — the AC-15 extractor must find icon-only controls, else the guard is vacuous.
+
+    Phase D converts the ubiquitous secondary row actions (Edit/Delete/View) to icon-only
+    controls, so there must be some. An empty set means the regex silently stopped matching (the
+    exact way an a11y guard goes quietly dead), so this fails loudly rather than passing green.
+    """
+    found = list(_iter_icon_only_controls())
+    assert found, (
+        "no icon-only controls were detected in templates — the AC-15 extractor is broken or the "
+        "icon-only row actions are missing."
+    )

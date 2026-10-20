@@ -635,6 +635,31 @@ def test_the_html_declares_the_accessibility_basics(browser: Client) -> None:
     assert 'id="main"' in body
 
 
+def test_list_surfaces_keep_tables_in_a_card(browser: Client) -> None:
+    """AC-11 — no table may sit outside a `.card`, and its horizontal scroll wrapper stays.
+
+    The standard list-surface layout is a `.card` containing a `.table-wrap` (so wide tables scroll
+    instead of breaking the page). This pins the structure across the rendered list surfaces that
+    exist with no data, so a future rewrite that drops the wrapper or pulls a table out of its card
+    is caught. Empty-state branches must still render (the surface must not 500 or show a bare
+    table header with nothing under it).
+    """
+    import re
+
+    for route in ("ui-alert-list", "ui-case-list", "ui-observable-list"):
+        body = browser.get(reverse(route)).content.decode()
+        # Any <table> must be preceded by a .table-wrap inside a .card on the same page.
+        assert "<table" in body, f"{route}: expected a table on the list surface"
+        assert 'class="table-wrap"' in body, (
+            f"{route}: the table is not wrapped in .table-wrap — a wide table would break layout"
+        )
+        assert 'class="card"' in body, f"{route}: the table is not inside a .card"
+        # The table-wrap must appear after a card opens (crude but adequate structural ordering check).
+        assert re.search(r'class="card"[\s\S]*?class="table-wrap"[\s\S]*?<table', body), (
+            f"{route}: the table is not nested as .card > .table-wrap > table"
+        )
+
+
 def test_severity_is_shown_as_text_not_colour_alone(
     browser: Client, source: IngestionSource
 ) -> None:

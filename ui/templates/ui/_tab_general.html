@@ -47,7 +47,7 @@
     </div>
 
     {% if can_mutate %}
-    <div class="case-actions">
+    <div class="control-row">
       <form method="post" action="{% url 'ui-case-status' case.number %}" class="inline-form">{% csrf_token %}
         <input type="hidden" name="tab" value="general">
         <label class="sr-only" for="f-stage">Case status</label>

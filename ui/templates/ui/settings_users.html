@@ -44,14 +44,14 @@
           </td>
           <td class="mono dim">{{ user.last_login|date:"Y-m-d H:i"|default:"—" }}</td>
           <td>
-            <a class="btn" href="{% url 'ui-settings-users-edit' user.id %}">Edit</a>
+            <a class="icon-link" href="{% url 'ui-settings-users-edit' user.id %}" aria-label="Edit user {{ user.username }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></a>
             {% url 'ui-settings-users-delete' user.id as delete_url %}
             {% with sid=user.id|stringformat:"s" %}
             {% with modal_id="delete-user-"|add:sid form_id="delete-user-"|add:sid|add:"-form" %}
             {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_user_delete_form.html" user=user title="Delete user?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
             {% endwith %}
             {% endwith %}
-            <button type="button" class="btn btn-err" data-modal-open="delete-user-{{ user.id }}">Delete</button>
+            <button type="button" class="icon-link icon-link-err" data-modal-open="delete-user-{{ user.id }}" aria-label="Delete user {{ user.username }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
           </td>
         </tr>
         {% endfor %}
@@ -98,14 +98,14 @@
           </td>
           <td class="mono dim">{{ user.last_login|date:"Y-m-d H:i"|default:"—" }}</td>
           <td>
-            <a class="btn" href="{% url 'ui-settings-users-edit' user.id %}">Edit</a>
+            <a class="icon-link" href="{% url 'ui-settings-users-edit' user.id %}" aria-label="Edit user {{ user.username }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></a>
             {% url 'ui-settings-users-delete' user.id as delete_url %}
             {% with sid=user.id|stringformat:"s" %}
             {% with modal_id="delete-user-"|add:sid form_id="delete-user-"|add:sid|add:"-form" %}
             {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_user_delete_form.html" user=user title="Delete user?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
             {% endwith %}
             {% endwith %}
-            <button type="button" class="btn btn-err" data-modal-open="delete-user-{{ user.id }}">Delete</button>
+            <button type="button" class="icon-link icon-link-err" data-modal-open="delete-user-{{ user.id }}" aria-label="Delete user {{ user.username }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
           </td>
         </tr>
         {% empty %}

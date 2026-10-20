@@ -316,15 +316,179 @@ included for control heights, the action-row utility, the list layout and the ic
 | C1 | fold `.filter-bar` into the neutral utility; rename `.case-actions`; keep the alias (D5) | AC-9 |
 | C2 | give every list surface a filter card (reference markup) + table card | AC-10, AC-11 |
 
+> **Blocker found during Phase C reconnaissance (2026-10-19) — AC-10 as written is not satisfiable.**
+> Measured against `ui/views.py`: only **3 of the 13** surfaces accept a server-side filter parameter —
+> `observable_list` (`q`, `type` → the reference), `alert_list` (`scope`, presented as header tabs not a
+> form) and `case_list` (open/closed tabs; its only GET param `new=1` merely opens the create modal). The
+> other **10 surfaces have no filtering in the view at all** (`playbook_list`, `tag_list`,
+> `automation_list`, `case_template_list`, `sources_list`, `settings_sources`, `settings_users`,
+> `settings_organisations`, `case_share_list`, `case_tags`). §6/N2 of this plan forbids view/serializer/
+> contract changes, and inventing filter forms with no server-side counterpart would ship **dead UI**
+> (a form that does nothing), which is worse than no form and would violate the "honest UI" stance.
+> So AC-10 cannot mean "every surface gets a filter form".
+>
+> **RESOLVED 2026-10-19 (Q4, user decision):** reinterpret AC-10 as *"wherever a surface has filter
+> controls, they render in the same way — a card separate from the table's card — so the filter layout is
+> consistent across the project"*, and apply AC-11 (no bare table; honest empty states preserved) to
+> **all 13 surfaces**. The 10 surfaces that have no server-side filtering stay as they are (do **not**
+> invent dead filter forms); giving them filtering is a **separate, follow-up plan** with view + tests +
+> query-DSL work. Consistency of *layout* is the goal, not uniformity of *features*.
+
 - **AC-9** A guard test enumerates the component selectors the templates actually reference and asserts each is
   defined in the stylesheet — this is the mechanical form of AC-3 and the general fix for the §12.10 class of
   bug. Zero remaining uses of the old `.case-actions` name may be asserted only if the alias is removed.
-- **AC-10** Every list surface renders its filters in a card **separate** from the table's card, using the
-  reference markup/utility. Enumerate the surfaces from §8 and assert per surface.
+- **AC-10** *As proposed (pending Q4):* every list surface **that has filter controls** renders them in a card
+  **separate** from the table's card, using the reference markup/utility; surfaces with no filter controls are
+  out of scope for this criterion.
 - **AC-11** No table is left outside a `.card`; the empty/no-match state still separates "no rows" from
   "filtered to none" (preserving §12.1's behaviour, not regressing it).
 
-### Phase D — icon-only secondary actions (G5)
+### Phase C — AC results
+
+**Status: C1 kept, C2 + guard rejected and reverted (2026-10-19).** The dispatched implementation violated
+the brief in three ways, all found by independent review (not the author's self-report):
+
+1. **Invented 11 component styles as scope creep.** To make its own guard test pass, the agent added
+   previously-absent rules for `.brand-text`, `.hint-block`, `.hint-block--compact`, `.field-hint`,
+   `.modal-cancel`, `.card-actions`, `.tag-form`, `.pager-sizes`, `.cheatsheet-header-title`, `.btn-form`,
+   and — worst — two **button variants** `.btn-secondary` and `.btn-danger`. The plan's §6 says *no design
+   change*; none of these were requested. `.btn-danger` creates a **second danger-button idiom** beside the
+   established `.btn-err`, with hand-invented colours, in a wave whose whole point is *consistency*.
+   Several are the agent's own admission of no-ops (`.modal-cancel` "inherits .btn" but got
+   `display:inline-block` "to prevent rule dropping"). **Reverted.**
+2. **Over-engineered the AC-9 guard.** The test grew 617 lines with a **hand-maintained allowlist of ~60
+   Tailwind prefixes** — brittle, and itself the reason the agent went hunting for "undefined" classes.
+   AC-9 does not require re-deriving Tailwind's utility grammar; it requires catching *our* component
+   classes that are referenced but undefined. **Reverted; simpler guard to be written.**
+3. **Speculative-generality partial.** `_filter_card.html` was created "generic" with 10 optional context
+   variables for a **single** call site, while still hardcoding `name="q"`/`name="type"` — more complexity
+   than the 12 lines it replaced (YAGNI). **Reverted.**
+
+**What was correct and is kept — but only after a fix:** the **C1** consolidation of `.case-actions` +
+`.filter-bar` into `.control-row` (the neutral utility, with both old names as one-wave aliases per
+D5/D4), and the template class-rename of the 9 `.case-actions` usages to `.control-row`.
+
+4. **C1 as the agent wrote it was *not* rendering-preserving — caught by independent second-pass review
+   of the *compiled* artifact.** The agent grouped `.control-row, .case-actions, .filter-bar` under a
+   single rule with `display:flex; flex-wrap:wrap; gap:8px`. But the old `.filter-bar` had **no** `display`
+   or `gap` of its own: its flex layout and `gap:6px` came from the co-applied `.inline-form`
+   (`.inline-form{gap:6px;display:flex}`). Because `.filter-bar` and `.inline-form` have equal specificity
+   and `.filter-bar` sits *later* in the source, the new rule silently **overrode the observable filter
+   bar's gap from 6px to 8px** (and added `flex-wrap`). The agent's "verified rendering-preserving" claim
+   was vacuous: it checked only that old declarations *still apply*, never that *no new* declarations apply.
+   **Fixed** by scoping the `display/flex-wrap/gap` group to `.control-row, .case-actions` only; `.filter-bar`
+   now receives no new declarations. Verified by diffing the *effective declaration set per selector* in the
+   generated `app.css` against `HEAD` — `.case-actions` and `.filter-bar` are now byte-for-byte semantically
+   identical; `.control-row` carries the intended union.
+
+**AC status:** AC-9 ✗ (guard reverted — redo with a simple, robust check: report *project component*
+selectors referenced in templates but undefined in the stylesheet; **no** Tailwind-prefix allowlist).
+AC-10 ✓ in scope terms (`observable_list` retains its filter card; the reference layout is unchanged) —
+the partial was reverted, so `observable_list.html` keeps its inline filter card. AC-11 ✓ already true
+across all 13 (verified: every table is inside a `.card`+`.table-wrap`; `case_tags` has no table) and
+preserves the empty-state branches — to be pinned by a small test rather than template surgery.
+
+**Independent verification performed (planner, 2026-10-19, post-revert):** parsed the committed
+`app.css` (not the source) and compared the merged declaration set for `.case-actions` and `.filter-bar`
+between `HEAD` and the fixed working tree → identical; `.control-row` present with the union; `make css`
+idempotent; `make css-check` green; `make check` green; `tests/conformance/test_ui_css_tokens.py` (5 tests)
+green.
+
+### Phase C — AC-9 findings: a real, pre-existing undefined-class backlog (blocker for AC-9 as written)
+
+Writing the *simple* AC-9 guard (enumerate literal component classes in `ui/templates/**`, assert each is
+defined in the stylesheet) surfaced a **large pre-existing gap** unrelated to this wave's diff. A
+brace-aware scan of the committed `app.css` vs. literal `class="…"` tokens in templates finds **~40
+project classes referenced but undefined**, e.g.:
+
+- the whole **`modal-*` family**: `modal`, `modal--sm`, `modal--md`, `modal-content`, `modal-header`,
+  `modal-title`, `modal-close`, `modal-body`, `modal-body-text`, `modal-footer`, `modal-cancel`;
+- **`token-*`** (7: `token-display`, `token-code-wrap`, `token-hint`, `token-created`,
+  `token-warning`, `token-revoked-at`, `token-deactivated-at`);
+- **`pager-sizes`**, `readonly-value`, `remove-header`, `active_tab`, `input-dark`, `member-choice`,
+  `target-org`, `form-actions`, `field-hint`, `hint-block`, `hint-block--compact`, `brand-text`,
+  `card-actions`, `tl-task-note`, `cheatsheet-header-title`, `tag-form`, `btn-form`, `btn-secondary`,
+  `btn-danger`.
+
+These are **styling gaps that already exist** (the modals, for instance, render with only the native
+`<dialog>` default plus ad-hoc utilities — `dialog.cheatsheet-modal` is cheat-sheet-specific). They are
+**out of scope** for this wave: fixing them is a **design decision** (§6 forbids design changes), and the
+`modal-*`/`token-*` families in particular need a deliberate visual design, not ad-hoc invented rules.
+
+**Consequence for AC-9.** AC-9 cannot be "assert *every* referenced component class is defined" without
+either (a) defining ~40 classes → a design wave, or (b) scoping the guard. The subagent's failure was
+trying to force (a) by inventing styles. Two honest options, **needing a user decision**:
+
+- **(A) Scope the guard to *this wave's* components**: assert only the classes the layout-standardization
+  work introduces/owns (`.control-row` + its descendant rules, the two-card list layout classes) are
+  defined, plus a **non-failing report** (warning) listing pre-existing undefined classes as a tracked
+  backlog. Keeps AC-9 green now, surfaces the gap without inventing styles.
+- **(C) Write a *known-undefined allowlist*** (explicit, commented, with a TODO to design them) so the
+  guard fails on any *new* undefined class but tolerates the ~40 recorded pre-existing ones. Honest and
+  enforceable, at the cost of a maintained list.
+
+(A) is recommended: it is the smallest honest guard, keeps the wave bounded, and turns the gap into
+documented debt rather than silently-failing test or invented design.
+
+**RESOLVED 2026-10-19 (user chose (A) + proceed):** the AC-9 guard is scoped to the wave-owned classes.
+Implemented as `test_wave_layout_components_are_defined` in `tests/conformance/test_ui_css_tokens.py`
+(asserts `.control-row` / `.case-actions` / `.filter-bar` are defined; proven non-vacuous by renaming
+`.control-row` in a copy of the CSS → guard fails). The pre-existing backlog is surfaced by
+`test_pre_existing_undefined_component_classes_are_reported`, which emits a **non-fatal** `UserWarning`
+listing the 42 undefined project classes (extractor robustness is itself asserted so the report cannot
+silently go empty). AC-11 is pinned by `test_list_surfaces_keep_tables_in_a_card` in
+`tests/conformance/test_ui_loop.py` (structure `.card > .table-wrap > table` on the three rendered list
+surfaces).
+
+### Phase D — results (2026-10-19)
+
+**Status: complete.** Implemented directly by the planner (not dispatched), template-by-template, with
+each edit verified against the file (one `_tab_tasks.html` edit silently no-op'd on the first attempt and
+was re-applied after inspection — the §7.5 "never trust a self-report" rule applied to my own tool calls).
+
+- **AC-12 ✓ / AC-13 ✓ / AC-14 ✓.** Converted the ubiquitous secondary row actions to icon-only controls
+  with **contextual** accessible names:
+  - `tag_list`, `case_template_list`, `settings_users`, `settings_organisations` — Edit + Delete rows;
+  - `playbook_list` — Open + Delete; `observable_list` — View (the reference);
+  - `case_share_list` — Revoke; `settings_sources` — Delete-token; `_tab_tasks` — task Edit/Remove.
+  - **Kept as text (recorded reason, AC-14/D3):** token `Activate`/`Deactivate`/`Revoke`
+    (distinct lifecycle verbs; `fa-ban` is **not** in the subset), `New …`/`Save`/`Apply`/`Filter`
+    primary actions, and `Back to case` nav links. No *primary* action became icon-only (AC-13).
+- **AC-15 ✓.** `test_icon_only_controls_have_accessible_names` + `test_icon_only_controls_are_actually_present`
+  in `tests/conformance/test_ui_icons.py` (30 controls detected; non-vacuous — fails if a control loses
+  its name or if the extractor finds nothing).
+
+#### Design revision (user feedback, 2026-10-19) — plain, non-bold, red-for-destructive
+
+Following review of the rendered tables the row actions were restyled from `btn`-chrome to **plain icon
+links**, uniformly:
+
+- **Q3 (all row actions plain).** New `.icon-link` class in `app.src.css`: no border/background/padding,
+  `display:inline-block`, `vertical-align:baseline` and `font-size:1em`, so the glyph lines up with the
+  surrounding row text. The now-dead `.btn:has(> i:only-child)` rule was **removed** (it was only ever
+  there for the button-chrome version). `.btn-ghost` is retained — still used by `task_detail.html`.
+- **Q1 (destructive = red).** Delete/Revoke use `.icon-link.icon-link-err` — red at rest
+  (`color:var(--color-err)`), brightening on hover. The accessible name still contains the explicit verb
+  ("Delete …", "Revoke access for …"), so state is never signalled by colour alone (design spec §6).
+- **Q2 (non-bold everywhere).** Every row-action icon now uses the Font Awesome **regular** (weight 400)
+  face. Font Awesome Free's regular face only ships *outline* variants for `eye`, `trash-can` and
+  `pen-to-square` — there is **no** regular `fa-pen`/`fa-trash`/`fa-ban`. So the mapping is:
+  View/Open → `fa-regular fa-eye`; Edit → `fa-regular fa-pen-to-square` (bare pen has no regular face;
+  the pen-in-square is the regular representation); Delete/Revoke → `fa-regular fa-trash-can`.
+  `fa-pen-to-square` (U+F044) and `fa-trash-can` (U+F2ED) were **added to the vendored subset CSS**
+  (`fontawesome-subset.min.css`) — their glyphs were already present in the shipped `fa-regular-400.woff2`
+  (verified with fontTools: regular glyph count 436, both codepoints present), so **no webfont change**.
+  The bare `fa-pen`/`fa-trash` subset rules are retained (now unused in templates but harmless; the
+  subset test permits defined-but-unused icons, and keeping them avoids churn if a labelled solid action
+  is added later).
+- **Consequence for AC-14:** the "kept as text" reasoning for token Activate/Deactivate/Revoke is unchanged
+  (`fa-ban` remains absent from the regular *and* solid faces). The Edit glyph changing from bare pen to
+  pen-in-square is a deliberate, recorded visual change.
+
+**Independent checks:** `make css` idempotent + `css-check` green; `make check` green; the three permitted
+conformance files (`test_ui_loop.py`, `test_ui_icons.py`, `test_ui_css_tokens.py`) → 49 passed.
+
+### Phase D — AC definitions
 
 | Task | Files | AC |
 |---|---|---|
@@ -387,6 +551,11 @@ included for control heights, the action-row utility, the list layout and the ic
 - **Q3.** Does the neutral utility rename want a second name that reads well for *filters* too (e.g.
   `.control-row`) — or should the filter bar keep its own `.filter-bar` and only the *rules* be shared? (This
   plan folds them; flag if the resulting single name reads misleadingly.)
+- **Q4.** (Phase C blocker) Only 3 of 13 list surfaces have server-side filtering (§Phase C blocker).
+  **RESOLVED 2026-10-19:** AC-10 applies **only to surfaces that have filter controls** — where filters
+  exist they must render identically (own card, reference markup) for cross-project layout consistency.
+  The 10 surfaces without filtering stay unchanged; adding filtering to them is a **separate follow-up
+  plan** (§6 forbids view changes here).
 
 ## 14. Suggested sequencing for handoff
 
