@@ -1149,7 +1149,7 @@ def test_ui_case_create_modal_post_invalid_status_rerenders_list(browser: Client
     body = response.content.decode()
 
     # We are back on the case list, not the standalone create page.
-    assert "/cases?closed=1" in body  # the "All" scope tab lives only on the list
+    assert 'aria-label="Case filters"' in body  # the list's own filter card
     assert 'id="h-create"' not in body  # the standalone page's heading
 
     # The modal is present and marked auto-open.

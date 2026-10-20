@@ -1289,5 +1289,47 @@ Settings UI hardening (§6.14).*
 *Next review: after §12.1/§12.2 (pagination + a truthful observables filter) or the S3/S5 security
 follow-ups — see the top of [`TODO.md`](./TODO.md).*
 
+---
 
+## 2026-10-20 — **§10.1 Org-scoped user management** + Settings/Cases/Alerts UI refinements
 
+- [x] **§10.1 role-scoped user management — SHIPPED 2026-10-20.**
+  `docs/planning/PLAN-2026-10-20-org-scoped-user-management.md` (approved; ADR-010 accepted). An `admin`
+  now manages every user of their **own** organisation (list/create/edit/delete/deactivate, change role
+  within the org); `superAdmin` keeps cross-org reach via a **per-org table** layout. All §6.12 guards hold
+  per-scope: uniform **404** for out-of-scope ids (never a 403 existence oracle), **no escalation** to
+  `superAdmin` (server-side role-subset guard; the edit allow-list rejects a present-but-empty/forged role),
+  the last-superAdmin guard preserved, and every mutation audited via `identity.services`
+  (`record_user_change`, `delete_user` → `user.deleted` with `target_org`). A lower role never *sees* a
+  higher-role user (the admin list adds `.exclude(role=SUPER_ADMIN_ROLE)`; edit/delete of a superAdmin were
+  already 404'd). New nav entry **Users** (`Organisations · Users · Sources`).
+  - **Verified:** `docs/verification/VERIFY-2026-10-20-org-scoped-user-management.md` — **24/24 ACs MET**,
+    READY TO COMMIT.
+  - **Security:** `docs/verification/SECURITY-2026-10-20-org-scoped-user-management.md` — 0 Critical / 0 High;
+    SA-01 (edit allow-list accepted a present-but-empty role) **fixed**; SA-06 rejected as a false positive
+    (the edit view intentionally serves a GET form); SA-02/03 accepted as backlog notes.
+  - **Tests:** new `tests/conformance/test_settings_users_scoping.py` (41 tests: role gates, org binding,
+    escalation attempt, per-org layout, audit, nav, superAdmin-hidden, empty/absent role); stale pins updated
+    in `test_settings_ui.py` / `test_tenant_scoping.py` / `test_ui_pagination_edge_cases.py` /
+    `test_ui_urls_smoke.py` (route class `superadmin_only` → `admin_or_superadmin`).
+  - **No schema change; no API change.**
+
+- [x] **UI refinements (user-requested).**
+  - **Sources** — "New token" moved into the card header (`<h2>Ingestion tokens</h2>` + button), matching
+    Users' in-card placement.
+  - **Cases + Alerts** — the scope filter is now a real `<form method="get" class="inline-form filter-bar">`
+    in its **own card above the table** (the `observable_list.html` convention): select + **Filter** +
+    **Clear**. Cases' card also hosts the **right-aligned** "New case" (`.btn-end`); the table card gained a
+    `.card-header` heading.
+  - **Cases scope is now tri-state `?scope=open|all|closed`** — fixing a pre-existing mislabel where the
+    "All" tab actually rendered *closed-only* and the union set was unreachable. `?closed=1` → `?scope=closed`
+    across tests. New `tests/conformance/test_case_scope_filter.py` (10 tests; non-vacuity proven).
+  - New CSS utility `.filter-bar .btn-end { margin-left: auto }` (defined → AC-9 undefined-class backlog
+    unchanged at 42); `app.css` regenerated.
+  - `make check` green; layout wave committed separately at `42d5a55`.
+
+---
+
+*Last updated: 2026-10-20 — **§10.1 org-scoped user management** (ADR-010; verified 24/24 + security
+reviewed) plus the Settings/Cases/Alerts UI refinements (filter cards, tri-state case scope, right-aligned
+in-card actions). Uncommitted in the working tree at the time of writing.*

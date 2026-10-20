@@ -21,14 +21,20 @@
       <label for="id_role">Role</label>
       <select id="id_role" name="role" required>
         {% for role in role_choices %}
+          {% if not is_superadmin and role not in allowed_admin_roles %}{% else %}
         <option value="{{ role }}" {% if user_obj.role == role %}selected{% endif %}>{{ role }}</option>
+          {% endif %}
         {% endfor %}
       </select>
       {% if user_obj.pk == request.user.pk and request.user.role == "superAdmin" %}
       <p class="hint">You cannot change your own role away from superAdmin.</p>
       {% endif %}
+      {% if not is_superadmin %}
+      <p class="hint">Admins may only assign Analyst or Viewer roles.</p>
+      {% endif %}
     </div>
 
+    {% if is_superadmin %}
     <div class="meta-inline">
       <label for="id_org">Organisation</label>
       <select id="id_org" name="org">
@@ -38,6 +44,11 @@
         {% endfor %}
       </select>
     </div>
+    {% else %}
+      {# Admin: org is pinned, render as hidden input #}
+      <input type="hidden" name="org" value="{{ user_obj.org_id }}" form="{{ form_id|default:'' }}">
+      <p class="hint dim">Organisation: {{ user_obj.org.name }} (pinned)</p>
+    {% endif %}
 
     <div class="meta-inline">
       <label for="id_is_active">Active</label>

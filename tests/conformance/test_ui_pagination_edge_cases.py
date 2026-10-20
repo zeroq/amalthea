@@ -30,7 +30,7 @@ the defect id and the exact trigger:
       automation_list.html:94, case_share_list.html:96, settings_users.html:118).
       A zero-row ``Page`` is falsy (``Page.__len__`` -> 0), so that block is dead
       code and a filtered-empty request falls through to the legacy copy — e.g.
-      ``GET /cases/?closed=1`` with zero closed cases renders "No cases . Open one."
+      ``GET /cases/?scope=closed`` with zero closed cases renders "No cases . Open one."
       instead of "No cases match your filters. Clear filters".
   DEF-3  ui/templates/ui/alert_list.html:88 excludes ``scope=unlinked`` from the
       filtered-empty branch although the view treats it as a filter
@@ -300,15 +300,17 @@ def test_pager_hrefs_preserve_scope_and_per_page(
 def test_pager_hrefs_preserve_closed_filter_and_per_page(
     browser: Client, org: Organisation, analyst: User, case_status: CaseStatus
 ) -> None:
-    """Pager links on /cases?closed=1 keep closed=1 and per_page=25."""
+    """Pager links on /cases?scope=closed keep scope=closed and per_page=25."""
     _make_cases(org, case_status, analyst, 60, prefix="Closed case", closed=True)
 
-    response = browser.get(reverse("ui-case-list"), {"closed": "1", "per_page": "25", "page": "3"})
+    response = browser.get(
+        reverse("ui-case-list"), {"scope": "closed", "per_page": "25", "page": "3"}
+    )
     assert response.status_code == 200
     queries = _nav_queries(_body(response))
     assert queries, "60 closed rows at per_page=25 spans 3 pages — pager must render"
     for query in queries:
-        assert query.get("closed") == ["1"], f"closed=1 lost in pager href: {query}"
+        assert query.get("scope") == ["closed"], f"scope=closed lost in pager href: {query}"
         assert query.get("per_page") == ["25"], f"per_page lost in pager href: {query}"
     assert queries[0].get("page") == ["2"], "page 3 must offer prev = page 2"
 
@@ -653,23 +655,35 @@ def test_settings_users_404_for_non_superadmin(browser: Client) -> None:
 
 
 @pytest.mark.django_db
-def test_settings_users_page_2_for_superadmin(
+def test_settings_users_superadmin_sees_multiple_orgs(
     superadmin_browser: Client, org: Organisation, other_org: Organisation
 ) -> None:
-    """Positive control: the global user list pages correctly for a superAdmin."""
+    """Positive control: the superAdmin sees users from all orgs in per-org cards."""
     _make_users(org, 60)
-    _mk_user("zzother", other_org)  # sorts last -> lands on page 2, proves the list is global
+    _mk_user("zzother", other_org)  # proves the list includes other orgs
 
-    response = superadmin_browser.get(reverse("ui-settings-users"), {"page": "2"})
+    response = superadmin_browser.get(reverse("ui-settings-users"))
     assert response.status_code == 200
-    page_obj = response.context["page_obj"]
-    assert page_obj.number == 2
-    assert page_obj.paginator.count == 62  # 60 + superadmin + other-org user
-    assert page_obj.start_index() == 51
-    assert page_obj.end_index() == 62
+    # SuperAdmin uses per-org cards, not pagination
+    assert response.context["page_obj"] is None
+    org_contexts = response.context["org_contexts"]
+    # There may be a Default org with 0 users; we care about our two test orgs
+    test_org_contexts = [
+        ctx for ctx in org_contexts if ctx["org"].name in (org.name, other_org.name)
+    ]
+    assert len(test_org_contexts) == 2
+    # Check that users from both orgs are visible
     body = _body(response)
     assert "zzother" in body, "superadmin must see users from every organisation"
-    assert 'rel="prev"' in body
+    # The first org has 61 users (60 created + superadmin), capped at 200 so not capped
+    # The second org has 1 user
+    for ctx in test_org_contexts:
+        if ctx["org"].name == org.name:
+            assert ctx["member_count"] == 61
+            assert not ctx["capped"]
+        else:
+            assert ctx["member_count"] == 1
+            assert not ctx["capped"]
 
 
 # --- §6: genuinely-empty copy vs filtered-empty copy ----------------------
@@ -927,9 +941,9 @@ def test_summary_plural_runs_defect(
 def test_case_filtered_empty_copy_defect(
     browser: Client, org: Organisation, analyst: User, case_status: CaseStatus
 ) -> None:
-    """DEFECT DEF-2 — trigger: GET /cases/?closed=1 with 0 closed (5 open exist)."""
+    """DEFECT DEF-2 — trigger: GET /cases/?scope=closed with 0 closed (5 open exist)."""
     _make_cases(org, case_status, analyst, 5)
-    response = browser.get(reverse("ui-case-list"), {"closed": "1"})
+    response = browser.get(reverse("ui-case-list"), {"scope": "closed"})
     assert response.status_code == 200
     assert response.context["page_obj"].paginator.count == 0
     text = _text(_body(response))
@@ -937,7 +951,7 @@ def test_case_filtered_empty_copy_defect(
         "DEF-2 (case_list.html:79): the honest-empty block is gated on "
         "{% if page_obj and ... %} but a zero-row Page is falsy, so the legacy copy "
         f"renders instead (observed: {text[text.find('No cases') :][:120]!r}). "
-        "Trigger: GET /cases/?closed=1 with zero closed cases."
+        "Trigger: GET /cases/?scope=closed with zero closed cases."
     )
     assert "Clear filters" in text, "DEF-2: a filtered-empty list must offer Clear filters"
 
@@ -1019,11 +1033,11 @@ def test_alert_default_scope_empty_no_escape_hatch_defect(
 def test_case_list_filtered_from_counts_filtered_set_defect(
     browser: Client, org: Organisation, analyst: User, case_status: CaseStatus
 ) -> None:
-    """DEFECT DEF-4 — trigger: GET /cases/?closed=1 with 40 open + 60 closed."""
+    """DEFECT DEF-4 — trigger: GET /cases/?scope=closed with 40 open + 60 closed."""
     _make_cases(org, case_status, analyst, 40, prefix="Open case")
     _make_cases(org, case_status, analyst, 60, prefix="Closed case", closed=True)
 
-    response = browser.get(reverse("ui-case-list"), {"closed": "1"})
+    response = browser.get(reverse("ui-case-list"), {"scope": "closed"})
     assert response.status_code == 200
     assert response.context["page_obj"].paginator.count == 60
     observed = response.context["filtered_from"]
@@ -1032,7 +1046,7 @@ def test_case_list_filtered_from_counts_filtered_set_defect(
         "DEF-4 (ui/views.py:634): case_list computes filtered_from on the ALREADY-FILTERED "
         "queryset, so filtered_from == total and the template guard hides the disclosure. "
         f"Expected '(filtered from 100)', observed context filtered_from={observed!r} and "
-        "no disclosure rendered. Trigger: GET /cases/?closed=1 with 40 open + 60 closed."
+        "no disclosure rendered. Trigger: GET /cases/?scope=closed with 40 open + 60 closed."
     )
 
 

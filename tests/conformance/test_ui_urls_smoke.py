@@ -125,15 +125,17 @@ def test_every_get_routable_ui_page_renders(browser: Client, case: Case) -> None
     # SuperAdmin-only routes: these correctly return 404 for a regular analyst.
     superadmin_only = {
         "ui-settings-organisations",
-        "ui-settings-users",
         "ui-settings-organisations-edit",
-        "ui-settings-users-edit",
     }
 
     # Admin-or-superAdmin routes: these return 404 for analyst/viewer but 200 for admin/superAdmin.
+    # Users is org-scoped for admin and global for superAdmin, but the gate is the same: analyst
+    # never reaches it (ADR-010).
     admin_or_superadmin = {
         "ui-settings",
         "ui-settings-sources",
+        "ui-settings-users",
+        "ui-settings-users-edit",
     }
 
     exercised: list[str] = []

@@ -379,12 +379,15 @@ unscheduled. **See also §12** (analyst-impact gaps found 2026-10-12) — **10.7
 tracked as **12.3** together with the missing auto-bundle consumer, which is the more urgent half of the
 backlog once the analyst-visible classification fields (10.3–10.6) are designed.
 
-- [ ] **10.1 — Role-scoped user management.** §6.12 shipped Settings → Users but **superAdmin-only**
-  (`ui/views.py::_require_superadmin_ui`). Extend it so an **`admin` manages every user of their own
-  organisation** (list/create/edit/delete/deactivate, reset password, change role within the org) while
-  `superAdmin` keeps cross-org reach. All the §6.12 guards must hold per-scope: uniform 404 for
-  out-of-scope ids (never a 403 existence oracle), can't escalate to `superAdmin` or edit outside the org,
-  last-superAdmin guard, audit every mutation. UI: same Settings pages, filtered by `request.user.org`.
+- [x] **10.1 — Role-scoped user management.** **DONE 2026-10-20** — `PLAN-2026-10-20-org-scoped-user-management.md`
+  (ADR-010), implemented, independently verified 24/24 ACs (`docs/verification/VERIFY-2026-10-20-org-scoped-user-management.md`)
+  and security-reviewed (`docs/verification/SECURITY-2026-10-20-org-scoped-user-management.md`; 0 Critical/High;
+  SA-01 fixed, SA-06 rejected as a false positive). An `admin` now manages every user of **their own org**
+  (list/create/edit/delete/deactivate, change role within the org); `superAdmin` keeps cross-org reach via a
+  per-org table layout. All §6.12 guards hold per-scope (uniform 404 for out-of-scope ids; no escalation to
+  `superAdmin`; last-superAdmin guard; audit every mutation via `identity.services`). A lower role never
+  *sees* a higher-role user (admin list `.exclude(role=SUPER_ADMIN_ROLE)`). Original request: §6.12 shipped Settings → Users but **superAdmin-only**
+  (`ui/views.py::_require_superadmin_ui`); extension kept that cross-org reach while adding own-org admin scope.
 - [x] **10.2 — Create a case manually from the UI.** **DONE 2026-10-13** — `PLAN-2026-10-13-ui-case-create.md`,
   implemented and independently verified (`VERIFY-2026-10-13-ui-case-create.md`, verdict **Partial**) +
   security-reviewed (`REVIEW-2026-10-13-ui-case-create.md`). `GET|POST /cases/new` (`ui-case-create`, above

@@ -3,17 +3,20 @@
 {% block title %}Alerts · Amalthea{% endblock %}
 {% block heading %}Alerts{% endblock %}
 
-{% block actions %}
-  <nav class="tabs" aria-label="Alert scope">
-    {% for value in scopes %}
-      <a class="tab {% if scope == value %}tab-on{% endif %}"
-         href="{% url 'ui-alert-list' %}?scope={{ value }}"
-         {% if scope == value %}aria-current="page"{% endif %}>{{ value }}</a>
-    {% endfor %}
-  </nav>
-{% endblock %}
-
 {% block content %}
+<div class="card">
+  <form method="get" class="inline-form filter-bar" aria-label="Alert filters">
+    <label class="sr-only" for="f-alert-scope">Scope</label>
+    <select id="f-alert-scope" name="scope" class="filter-type">
+      {% for value in scopes %}
+      <option value="{{ value }}" {% if scope == value %}selected{% endif %}>{{ value|capfirst }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-primary" type="submit">Filter</button>
+    <a class="btn" href="{% url 'ui-alert-list' %}">Clear</a>
+  </form>
+</div>
+
 <div class="card">
   {% if page_obj.paginator %}
     {% include "ui/_list_summary.html" with entity_name="alert" entity_name_plural="alerts" %}

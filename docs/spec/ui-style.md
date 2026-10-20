@@ -203,6 +203,15 @@ Rules:
   link to clear them; a genuinely empty collection reads "No X found" — the two are distinct (§ the
   reference's two branches). Do not show an empty table and call it "no results".
 
+Two established refinements on top of the base shape (both live in `ui/templates/ui/case_list.html`):
+
+- **Scope heading.** When a list is scoped (e.g. Cases: open/all/closed), the table card carries a
+  `.card-header` whose `<h2>` names the active scope — `Open cases` / `All cases` / `Closed cases` — so the
+  rows are never ambiguous. The Cases scope is the tri-state `?scope=open|all|closed` (default `open`).
+- **Right-aligned trailing action.** A primary "New …" action that belongs to the list may sit at the
+  **far right** of the filter row via `.filter-bar .btn-end` (`margin-left: auto`), mirroring the
+  right-aligned action in a `.card-header` (the Users page's "New user"). Filters stay left.
+
 ## 5. Dialogs and modals
 
 Confirmation and input dialogs use the custom modal pattern — a `<dialog>` element with a styled backdrop

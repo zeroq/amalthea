@@ -3,13 +3,13 @@
 
 {% block heading %}Sources{% endblock %}
 
-{% block actions %}
-<a class="btn btn-primary" href="#" data-modal-open="token-create-modal">New token</a>
-{% endblock %}
-
 {% block content %}
 {% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
 <div class="card">
+  <div class="card-header">
+    <h2>Ingestion tokens</h2>
+    <a class="btn btn-primary" href="#" data-modal-open="token-create-modal">New token</a>
+  </div>
   <div class="hint-block hint-block--compact">
     <p class="dim">
       Ingestion endpoint: <code>{{ webhook_path }}</code>

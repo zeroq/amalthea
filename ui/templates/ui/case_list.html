@@ -3,20 +3,27 @@
 {% block title %}Cases · Amalthea{% endblock %}
 {% block heading %}Cases{% endblock %}
 
-{% block actions %}
-  <nav class="tabs" aria-label="Case scope">
-    <a class="tab {% if not show_closed %}tab-on{% endif %}" href="{% url 'ui-case-list' %}"
-       {% if not show_closed %}aria-current="page"{% endif %}>Open</a>
-    <a class="tab {% if show_closed %}tab-on{% endif %}" href="{% url 'ui-case-list' %}?closed=1"
-       {% if show_closed %}aria-current="page"{% endif %}>All</a>
-  </nav>
-  {% if can_mutate %}
-  <a class="btn btn-primary" href="{% url 'ui-case-create' %}" data-modal-open="new-case-modal">New case</a>
-  {% endif %}
-{% endblock %}
-
 {% block content %}
 <div class="card">
+  <form method="get" class="inline-form filter-bar" aria-label="Case filters">
+    <label class="sr-only" for="f-case-scope">Scope</label>
+    <select id="f-case-scope" name="scope" class="filter-type">
+      <option value="open" {% if scope == "open" %}selected{% endif %}>Open</option>
+      <option value="all" {% if scope == "all" %}selected{% endif %}>All</option>
+      <option value="closed" {% if scope == "closed" %}selected{% endif %}>Closed</option>
+    </select>
+    <button class="btn btn-primary" type="submit">Filter</button>
+    <a class="btn" href="{% url 'ui-case-list' %}">Clear</a>
+    {% if can_mutate %}
+    <a class="btn btn-primary btn-end" href="{% url 'ui-case-create' %}" data-modal-open="new-case-modal">New case</a>
+    {% endif %}
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>{% if scope == "closed" %}Closed cases{% elif scope == "all" %}All cases{% else %}Open cases{% endif %}</h2>
+  </div>
   {% if page_obj.paginator %}
     {% include "ui/_list_summary.html" with entity_name="case" entity_name_plural="cases" %}
     <div class="table-wrap">
@@ -45,7 +52,7 @@
 
     {% if page_obj.paginator.count == 0 %}
       {# Honest empty state for paginated path #}
-      {% if show_closed %}
+      {% if scope != "open" %}
         <p class="empty">No cases match your filters. <a href="{% url 'ui-case-list' %}">Clear filters</a></p>
       {% else %}
         <p class="empty">No cases open.{% if can_mutate %} <a href="{% url 'ui-case-create' %}">Open one</a>.{% endif %}</p>
@@ -80,7 +87,7 @@
       </table>
       </div>
     {% else %}
-      <p class="empty">No cases {% if not show_closed %}open{% endif %}.{% if can_mutate %} <a href="{% url 'ui-case-create' %}">Open one</a>.{% endif %}</p>
+      <p class="empty">No cases {% if scope == "open" %}open{% endif %}.{% if can_mutate %} <a href="{% url 'ui-case-create' %}">Open one</a>.{% endif %}</p>
     {% endif %}
   {% endif %}
 </div>

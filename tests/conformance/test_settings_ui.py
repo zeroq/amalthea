@@ -662,7 +662,8 @@ class TestSettingsUIDialogs:
 
         resp = client.get(reverse("ui-settings-users"))
         content = resp.content.decode()
-        assert 'data-modal-open="user-create-modal"' in content
+        # superAdmin has per-org create modals: user-create-modal-<org_id>
+        assert f'data-modal-open="user-create-modal-{org.id}"' in content
 
 
 class TestOrgDeleteModalBlockers:
@@ -890,4 +891,5 @@ class TestSettingsUICspAndEscaping:
 
         users_html = client.get(reverse("ui-settings-users")).content.decode()
         assert 'name="username"' in users_html
-        assert 'form="user-create-form"' in users_html
+        # superAdmin has per-org create forms: user-create-form-<org_id>
+        assert f'form="user-create-form-{org.id}"' in users_html

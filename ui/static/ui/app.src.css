@@ -566,6 +566,12 @@ dialog.cheatsheet-modal{border:1px solid var(--color-line);border-radius:var(--r
 .filter-bar {
   margin-bottom: var(--gap);
 }
+/* Right-aligned trailing action in a filter row (e.g. the list's primary
+   "New …" button), mirroring the right-aligned action in a `.card-header`.
+   `margin-left:auto` pushes it to the far edge, past the filter controls. */
+.filter-bar .btn-end {
+  margin-left: auto;
+}
 
 /* ============================================================================
    Rail submenu — nested items under Settings (expand on active section)

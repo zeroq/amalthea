@@ -798,9 +798,7 @@ _UI_GLOBAL_READ_ROUTES: set[str] = {
     # Settings (superAdmin only - global management views)
     "ui-settings-organisations",
     "ui-settings-organisations-edit",
-    "ui-settings-users",
-    "ui-settings-users-edit",
-    # Settings — Sources (admin+superAdmin read; hybrid scoping: org-scoped for admin, global for superAdmin).
+    # Settings — Users (admin+superAdmin read; hybrid scoping: org-scoped for admin, global for superAdmin).
     # DEVIATION: These routes are NOT purely global — they are tenant-scoped for admin users but global
     # for superAdmin. The conformance suite's model expects a single behaviour per route.
     # They are included here to exclude them from the generic tenant-scoping assertion, which would
@@ -808,6 +806,8 @@ _UI_GLOBAL_READ_ROUTES: set[str] = {
     # a uniform 200-with-filtered-results for list routes. A dedicated test covers their behaviour.
     "ui-settings",
     "ui-settings-sources",
+    "ui-settings-users",
+    "ui-settings-users-edit",
 }
 
 # Route names that are WRITE-only (POST/PATCH/DELETE only, no GET) — exclude from read conformance.

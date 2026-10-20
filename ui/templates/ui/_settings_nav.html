@@ -26,6 +26,17 @@ Usage (from settings_sources.html, settings_organisations.html, settings_users.h
     </a>
   {% endif %}
 
+  {% comment %} Users tab - admin and superAdmin {% endcomment %}
+  {% if request.user.role == "admin" or request.user.role == "superAdmin" %}
+    {% url 'ui-settings-users' as users_url %}
+    <a class="tab{% if active_tab == 'ui-settings-users' %} tab-on{% endif %}"
+       href="{{ users_url }}"
+       {% if active_tab == 'ui-settings-users' %}aria-current="page"{% endif %}>
+      <i class="fa-solid fa-users" aria-hidden="true"></i>
+      Users
+    </a>
+  {% endif %}
+
   {% comment %} Sources tab - admin and superAdmin {% endcomment %}
   {% if request.user.role == "admin" or request.user.role == "superAdmin" %}
     {% url 'ui-settings-sources' as sources_url %}

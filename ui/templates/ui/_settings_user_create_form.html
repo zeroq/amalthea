@@ -20,19 +20,27 @@ Fields target the modal's form via form="{{ form_id }}" and work with JS disable
   <select id="user-create-role" name="role" required form="{{ form_id }}">
     <option value="">— select —</option>
     {% for role in role_choices %}
+      {% if not is_superadmin and role not in allowed_admin_roles %}{% else %}
     <option value="{{ role }}">{{ role }}</option>
+      {% endif %}
     {% endfor %}
   </select>
 </div>
+{% if is_superadmin %}
 <div class="meta-inline">
   <label for="user-create-org">Organisation</label>
   <select id="user-create-org" name="org" required form="{{ form_id }}">
     <option value="">— select —</option>
-    {% for org in orgs %}
-    <option value="{{ org.id }}">{{ org.name }}</option>
+    {% for o in all_orgs %}
+    <option value="{{ o.id }}" {% if o == selected_org %}selected{% endif %}>{{ o.name }}</option>
     {% endfor %}
   </select>
 </div>
+{% else %}
+  {# Admin: org is pinned, render as hidden input #}
+  <input type="hidden" name="org" value="{{ org.id }}" form="{{ form_id }}">
+  <p class="hint dim">Organisation: {{ org.name }} (pinned)</p>
+{% endif %}
 <div class="meta-inline">
   <label for="user-create-active">Active</label>
   <div class="check">

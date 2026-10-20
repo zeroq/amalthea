@@ -116,6 +116,15 @@ Accessibility notes that are not optional:
           </li>
           {% endif %}
           {% if request.user.role == "admin" or request.user.role == "superAdmin" %}
+          {% url 'ui-settings-users' as users_url %}
+          <li>
+            <a href="{{ users_url }}" {% if request.resolver_match.url_name == 'ui-settings-users' %}aria-current="page"{% endif %}>
+              <i class="fa-solid fa-users" aria-hidden="true"></i>
+              Users
+            </a>
+          </li>
+          {% endif %}
+          {% if request.user.role == "admin" or request.user.role == "superAdmin" %}
           {% url 'ui-settings-sources' as sources_url %}
           <li>
             <a href="{{ sources_url }}" {% if request.resolver_match.url_name == 'ui-settings-sources' %}aria-current="page"{% endif %}>

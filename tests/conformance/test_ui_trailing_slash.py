@@ -75,10 +75,10 @@ def test_ui_cases_trailing_slash_301_then_200(browser: Client, analyst) -> None:
 
 
 def test_ui_cases_trailing_slash_preserves_query_string(browser: Client) -> None:
-    """Query string preserved: GET /cases/?closed=1 → 301, Location == /cases?closed=1."""
-    response = browser.get("/cases/?closed=1")
+    """Query string preserved: GET /cases/?scope=closed → 301, Location == /cases?scope=closed."""
+    response = browser.get("/cases/?scope=closed")
     assert response.status_code == 301
-    assert response["Location"] == "/cases?closed=1"
+    assert response["Location"] == "/cases?scope=closed"
 
 
 # --------------------------------------------------------------------------

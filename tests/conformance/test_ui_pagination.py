@@ -435,7 +435,7 @@ def test_alert_list_scope_filter_preserved_across_pages(
 def test_case_list_closed_filter_preserved_across_pages(
     browser: Client, org: Organisation, analyst: User, case_status: CaseStatus
 ) -> None:
-    """Paging preserves closed=1 filter."""
+    """Paging preserves scope=closed filter."""
     # Create open cases
     for i in range(30):
         Case.objects.create(
@@ -461,13 +461,13 @@ def test_case_list_closed_filter_preserved_across_pages(
         )
         c.save(update_fields=["closed_date"])
 
-    response = browser.get(reverse("ui-case-list"), {"closed": "1"})
+    response = browser.get(reverse("ui-case-list"), {"scope": "closed"})
     assert response.status_code == 200
     page_obj = response.context["page_obj"]
     assert page_obj.paginator.count == 60  # Only closed cases
 
-    # Page 2 should preserve closed=1
-    response = browser.get(reverse("ui-case-list"), {"closed": "1", "page": "2"})
+    # Page 2 should preserve scope=closed
+    response = browser.get(reverse("ui-case-list"), {"scope": "closed", "page": "2"})
     assert response.status_code == 200
     page_obj = response.context["page_obj"]
     assert page_obj.number == 2
