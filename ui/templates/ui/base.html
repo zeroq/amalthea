@@ -56,6 +56,7 @@ Accessibility notes that are not optional:
           {% if nav_case_count %}<span class="badge" title="{{ nav_case_count }} open cases">{{ nav_case_count }}</span>{% endif %}
         </a>
       </li>
+      <li class="rail-sep" aria-hidden="true"></li>
       <li>
         <a href="{% url 'ui-observable-list' %}" {% if request.resolver_match.url_name == 'ui-observable-list' %}aria-current="page"{% endif %}>
           <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
@@ -74,6 +75,7 @@ Accessibility notes that are not optional:
           <span class="k">p</span> Playbooks
         </a>
       </li>
+      <li class="rail-sep" aria-hidden="true"></li>
       <li>
         <a href="{% url 'ui-sources-list' %}" {% if request.resolver_match.url_name == 'ui-sources-list' %}aria-current="page"{% endif %}>
           <i class="fa-solid fa-rss" aria-hidden="true"></i>
