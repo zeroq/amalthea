@@ -36,7 +36,7 @@ extension** (deviation **P12-2** — TheHive 5 / `thehive4py` 2.1.0 expose no pl
 **Write-time validation** (`automation.playbooks.validate_config`, mirrors `executor.execute`):
 - `action` ∈ `{"http","python"}`.
 - `http`: `url` required; `method` ∈ standard verbs; `headers` string→string; `timeoutSeconds` >0 ≤ 30s.
-- `python`: `action_path` must be a key in `automation.executor.registered_actions()`.
+- `python`: `action_path` must name a discovered script (see `automation.scripts_loader.script_names()`).
 - Unknown action ⇒ 400. Validation happens at write time so a bad playbook never becomes a `Failed` run.
 
 `GET /playbook/_meta` returns the live vocabulary (AC6.12-P2-c):
@@ -117,10 +117,12 @@ content. `_subject_label` names the observable for the ledger (else the case).
 - `"http"` → `run_http_action(config, values)`: one outbound request to `config["url"]` with the
   interpolation values; redirects followed manually and capped (`MAX_REDIRECTS = 3`), body truncated
   to `MAX_OUTPUT_BYTES = 64 KiB` with a `[truncated at …]` marker.
-- `"python"` → `run_python_action(config, values)`: `config["action_path"]` looked up in
-  `_ACTIONS` (populated by `register_action(path, fn)`); an unregistered path raises `ActionError`
-  listing the registered paths. **Nothing from `config` is imported or evaluated** — a playbook row
-  names a path, it does not supply code.
+- `"python"` → `run_python_action(config, values)`: `config["action_path"]` is resolved by
+  `automation.scripts_loader.load_script` to a discovered script in `PLAYBOOK_SCRIPTS_DIR`
+  (default: `automation/scripts/`) and invoked as `run(**values)`; an unknown name raises
+  `ActionError` listing the discovered names. **Nothing from `config` is imported or evaluated** — a
+  playbook row names a script; the loader imports a file from a known folder using an explicit path
+  from the folder scan. See `docs/decisions/ADR-011-playbook-scripts-folder.md`.
 
 Any other action name ⇒ `ActionError` (`"unknown action … expected 'http' or 'python'"`).
 
@@ -129,8 +131,9 @@ Any other action name ⇒ `ActionError` (`"unknown action … expected 'http' or
 `ALLOWED_SCHEMES = {"http", "https"}`; `assert_safe_url(url)` re-checks after every interpolation and
 **on every redirect hop** (`MAX_REDIRECTS`), `DEFAULT_TIMEOUT_SECONDS = 10.0`. The docstring is
 explicit about why the boundary exists: an `fqdn` observable holding `169.254.169.254` must not make
-the worker read the cloud metadata service. A shipped no-network action
-`amalthea.automation.executor.enrichment_probe` is registered for offline tests.
+the worker read the cloud metadata service. A shipped no-network script
+`automation/scripts/enrichment_probe.py` (discovered as `enrichment_probe`) is available for offline
+tests and serves as the documented example.
 
 ## Feedback loop (`record_result`)
 
@@ -149,10 +152,45 @@ result live (see [`realtime.md`](./realtime.md)).
 ## Evidence
 
 `tests/conformance/test_mvp_loop_automation.py` (ingest→escalate→extract→automate→ledger),
-`test_automation_executor.py` (SSRF/schemes, registered-action lookup, truncation, interpolation
-names), `test_indexes.py` (`ar_pending_idx` is a **Plan** index),
+`test_automation_executor.py` (SSRF/schemes, script lookup, truncation, interpolation
+names), `test_playbook_scripts_loader.py` (discovery, identity, skip-on-error, path-escape guard),
+`test_indexes.py` (`ar_pending_idx` is a **Plan** index),
 `tests/conformance/test_tenant_scoping.py` (`playbook_run` cross-tenant 404), `test_playbook_authoring.py`
 (role gating). Deviation register:
 [`deviations.md`](./deviations.md) — P12-1 (task.completed registered-but-unemitted) and P10-4
 (alert-observable links do not dispatch). Tenant isolation:
 [`../decisions/ADR-004-tenant-isolation.md`](../decisions/ADR-004-tenant-isolation.md).
+
+## Playbook scripts folder (runbook)
+
+A `python` playbook action points at a **script** — an individual `.py` file in `PLAYBOOK_SCRIPTS_DIR`
+(default `automation/scripts/`, override with `AMALTHEA_PLAYBOOK_SCRIPTS_DIR`). Discovery and
+loading live in `automation/scripts_loader.py`; the design and its trust boundary are in
+[`ADR-011`](../decisions/ADR-011-playbook-scripts-folder.md).
+
+**Adding a script** (operator, on the deployment host):
+
+1. Drop a `.py` file in the folder (e.g. `automation/scripts/check_ad.py`). Do **not** prefix the
+   stem with `_` — such files are treated as helpers and skipped.
+2. Give it module-level metadata and a `run(**values) -> str` entry point:
+
+   ```python
+   NAME = "check_ad"  # optional; defaults to the filename stem
+   DESCRIPTION = "Query Active Directory for a user."
+   TRIGGER_HINT = "observable.created"  # advisory only
+
+
+   def run(**values: object) -> str:
+       user = values.get("observable")
+       return f"check_ad: would look up {user!r}"
+   ```
+
+3. `action_path` in a playbook config is the script **name** (e.g. `"check_ad"`), never a dotted
+   module path.
+4. Run `python manage.py list_playbook_scripts` to confirm discovery (and to catch load errors and
+   playbooks pointing at missing scripts). `make check` runs this automatically.
+
+**Invariants** — the folder is **deploy-only**: the application never writes to `PLAYBOOK_SCRIPTS_DIR`
+and exposes no upload or in-app editor. Loading uses an explicit path from the folder scan; no
+`Playbook` row is ever imported or evaluated, and a script that fails to import is skipped and
+reported rather than crashing discovery.

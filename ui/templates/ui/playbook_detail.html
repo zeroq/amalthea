@@ -64,6 +64,40 @@
         <h3>Action configuration</h3>
         <pre class="body">{{ playbook.config|prettyjson }}</pre>
       </div>
+
+      {% if playbook.config.action == "python" %}
+      <div class="card">
+        <h3>Script</h3>
+        {% with script_info=script_dict|get_item:playbook.config.action_path %}
+        {% if script_info and script_info.load_error is None %}
+        <dl class="meta">
+          <dt>Name</dt>
+          <dd>{{ script_info.name }}</dd>
+
+          <dt>Description</dt>
+          <dd>{{ script_info.description|default:"—" }}</dd>
+
+          <dt>File path</dt>
+          <dd><code class="mono">{{ script_info.path }}</code></dd>
+
+          <dt>Trigger hint</dt>
+          <dd><span class="pill">{{ script_info.trigger_hint|default:"—" }}</span></dd>
+        </dl>
+        <h4>Source (read-only)</h4>
+        <pre class="body">{{ script_info.source|default:"—" }}</pre>
+        {% else %}
+        <div class="empty">
+          <p>Script <code>{{ playbook.config.action_path }}</code> could not be found or failed to load.</p>
+          {% if script_info and script_info.load_error %}
+          <p class="hint">Load error: {{ script_info.load_error }}</p>
+          {% else %}
+          <p class="hint">The script may have been removed or renamed. Deploy a <code>.py</code> file with this name to the playbook scripts folder.</p>
+          {% endif %}
+        </div>
+        {% endif %}
+        {% endwith %}
+      </div>
+      {% endif %}
   </div>
 
   <div class="stack">

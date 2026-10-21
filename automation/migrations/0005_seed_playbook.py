@@ -28,7 +28,7 @@ SEED_DESCRIPTION = (
 SEED_IS_ACTIVE = False
 SEED_CONFIG = {
     'action': 'python',
-    'action_path': 'amalthea.automation.executor.enrichment_probe',
+    'action_path': 'enrichment_probe',
 }
 
 

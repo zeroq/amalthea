@@ -76,7 +76,7 @@ def test_playbook_meta_trigger_list_matches_dispatcher(analyst: User) -> None:
     )
 
 
-def test_playbook_meta_registered_actions_match_executor(analyst: User) -> None:
+def test_playbook_meta_scripts_match_loader(analyst: User) -> None:
     c, _ = _api_key_client(analyst, scope="read")
     code, body = _get(c, "/api/v1/playbook/_meta")
     assert code == 200
@@ -90,9 +90,13 @@ def test_playbook_meta_registered_actions_match_executor(analyst: User) -> None:
         "HEAD",
         "OPTIONS",
     }
-    assert set(actions["python"]["registeredPaths"]) == set(
-        __import__("automation.executor", fromlist=["registered_actions"]).registered_actions()
-    )
+    # The python action now returns "scripts" instead of "registeredPaths"
+    assert "scripts" in actions["python"]
+    script_names_from_meta = {s["name"] for s in actions["python"]["scripts"]}
+    # Should match the discovered script names
+    from automation.scripts_loader import script_names
+
+    assert script_names_from_meta == set(script_names())
 
 
 # --- config validation matrix (AC6.12-P2-b) ---------------------------------
@@ -221,7 +225,7 @@ def test_config_good_python_accepted(analyst: User) -> None:
             "triggerEvent": "observable.created",
             "config": {
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         },
     )
@@ -242,7 +246,7 @@ def test_playbook_crud(analyst: User) -> None:
             "triggerEvent": "observable.created",
             "config": {
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         },
     )
@@ -309,7 +313,7 @@ def test_delete_playbook_with_runs_refused(analyst: User) -> None:
             "triggerEvent": "observable.created",
             "config": {
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         },
     )
@@ -343,7 +347,7 @@ def test_run_now_creates_run_and_timeline(analyst: User) -> None:
             "triggerEvent": "observable.created",
             "config": {
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         },
     )
@@ -444,7 +448,7 @@ def test_delete_playbook_with_runs_refused_400(analyst: User) -> None:
             "triggerEvent": "observable.created",
             "config": {
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         },
     )
@@ -483,7 +487,7 @@ def test_readonly_user_cannot_create_playbook(readonly_client) -> None:
             "triggerEvent": "observable.created",
             "config": {
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         },
     )
@@ -503,7 +507,7 @@ def test_readonly_user_cannot_update_playbook(readonly_client, analyst: User) ->
             "triggerEvent": "observable.created",
             "config": {
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         },
     )
@@ -528,7 +532,7 @@ def test_readonly_user_cannot_delete_playbook(readonly_client, analyst: User) ->
             "triggerEvent": "observable.created",
             "config": {
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         },
     )
@@ -552,7 +556,7 @@ def test_readonly_user_cannot_run_playbook(readonly_client, analyst: User) -> No
             "triggerEvent": "observable.created",
             "config": {
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         },
     )
@@ -586,7 +590,7 @@ def test_analyst_user_can_create_playbook(analyst: User) -> None:
             "triggerEvent": "observable.created",
             "config": {
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         },
     )
@@ -604,7 +608,7 @@ def test_analyst_user_can_update_playbook(analyst: User) -> None:
             "triggerEvent": "observable.created",
             "config": {
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         },
     )
@@ -626,7 +630,7 @@ def test_analyst_user_can_delete_playbook(analyst: User) -> None:
             "triggerEvent": "observable.created",
             "config": {
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         },
     )
@@ -648,7 +652,7 @@ def test_analyst_user_can_run_playbook(analyst: User) -> None:
             "triggerEvent": "observable.created",
             "config": {
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         },
     )

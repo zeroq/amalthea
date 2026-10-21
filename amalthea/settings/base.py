@@ -216,6 +216,14 @@ CACHES = {
     }
 }
 
+# --- Playbook Scripts Folder (ADR-011) -------------------------------------
+# Directory containing playbook script files (*.py). Each script declares
+# NAME, DESCRIPTION, TRIGGER_HINT and a run(**values) -> str entry point.
+# Override with AMALTHEA_PLAYBOOK_SCRIPTS_DIR for a mounted volume in containers.
+PLAYBOOK_SCRIPTS_DIR = os.getenv(
+    "AMALTHEA_PLAYBOOK_SCRIPTS_DIR", str(BASE_DIR / "automation" / "scripts")
+)
+
 # --- Tenant Isolation (P1) -----------------------------------------------
 # Default organisation name used by the greenfield migration to backfill NULL
 # owner_org / User.org. Can be overridden via env var.

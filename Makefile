@@ -22,6 +22,7 @@ check: ## Full DoD gate (lint, types, migrations, css compile, pytest)
 	@echo "── django check";      $(PY) manage.py check
 	@echo "── migrations in sync"; $(PY) manage.py makemigrations --check --dry-run
 	@echo "── css drift check";   $(MAKE) --no-print-directory css-check
+	@echo "── playbook scripts";  $(PY) manage.py list_playbook_scripts
 	@
 	@echo "✓ check passed"
 

@@ -17,7 +17,7 @@ def create_example_playbook(apps, schema_editor):
             "is_active": True,
             "config": {
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         },
     )

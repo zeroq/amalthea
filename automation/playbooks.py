@@ -6,10 +6,10 @@ wrong answer for one being written now: a rejected write is a 400 an analyst can
 run is a failed run nobody is watching. This module is the write-time mirror of
 `automation.executor.execute`, and it deliberately **mirrors rather than centralises** — it
 validates, it never invokes: nothing here is imported from `config`, the same rule the executor's
-registration lookup follows.
+discovery lookup follows.
 
 `_meta` (see `automation.views.playbook_meta`) is built from the same constants, so the pickers
-the UI renders cannot advertise a method or an action the validator would refuse.
+the UI renders cannot advertise a method or a script the validator would refuse.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from automation.executor import registered_actions
+from automation.scripts_loader import script_names
 
 #: Actions `executor.execute` dispatches on. Kept next to the validator so `_meta`, the
 #: validator and the executor's own branch on `config["action"]` fail loudly together.
@@ -92,10 +92,7 @@ def _validate_python(config: Mapping[str, Any]) -> dict[str, list[str]]:
     path = config.get("action_path")
     if not isinstance(path, str) or not path.strip():
         return {"action_path": ["required"]}
-    if path not in registered_actions():
-        return {
-            "action_path": [
-                f"not a registered action path; registered: {sorted(registered_actions())}"
-            ]
-        }
+    known = script_names()
+    if path not in known:
+        return {"action_path": [f"not a discovered script; known: {known}"]}
     return {}

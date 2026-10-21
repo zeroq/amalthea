@@ -110,14 +110,24 @@
 
     <div id="python-fields" class="hidden">
       <div class="meta-inline">
-        <label for="id_action_path">Action path (registered python function)</label>
+        <label for="id_action_path">Script</label>
+        {% if scripts %}
         <select id="id_action_path" name="action_path">
           <option value="">— select —</option>
-          {% for path in registered_paths %}
-          <option value="{{ path }}" {% if config.action_path == path %}selected{% endif %}>{{ path }}</option>
+          {% for script in scripts %}
+          <option value="{{ script.name }}" {% if config.action_path == script.name %}selected{% endif %}>{{ script.name }}</option>
           {% endfor %}
         </select>
-        <p class="hint">Registered in <code>automation/executor.py</code> via <code>register_action()</code>.</p>
+        {% if selected_script and selected_script.description %}
+        <p class="hint">{{ selected_script.description }}</p>
+        {% endif %}
+        {% else %}
+        <div class="empty">
+          <p>No playbook scripts found in <code>automation/scripts/</code>.</p>
+          <p class="hint">Deploy a <code>.py</code> file to the playbook scripts folder to make it available. The folder is deploy-only — there is no upload control.</p>
+        </div>
+        <input type="hidden" name="action_path" id="id_action_path" value="">
+        {% endif %}
       </div>
     </div>
 

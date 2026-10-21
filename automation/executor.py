@@ -4,9 +4,11 @@ An `AutomationRun` executes exactly one action, chosen by `Playbook.config["acti
 
 * `"http"` — a single outbound request to `config["url"]`, with the observable's value
   interpolated into `config` placeholders. The response body, truncated, becomes `output_log`.
-* `"python"` — a dotted path to a function registered in :func:`register_action`. Registration is
-  what makes this safe: nothing is imported from `config`, so a playbook row cannot name an
-  arbitrary callable, and no caller-supplied value is ever `eval`'d or unpickled.
+* `"python"` — a script name resolved against the **discovered scripts** in
+  `PLAYBOOK_SCRIPTS_DIR` (ADR-011). The script is loaded by the `scripts_loader` module,
+  which imports files from a known folder using explicit paths from the scan — never from
+  a string supplied by the `Playbook` row. The script declares a `run(**values) -> str`
+  entry point.
 
 **The SSRF guard is the reason this module exists as a boundary.** A playbook URL is operator-
 configured, but its *interpolations* come from adversary-controlled telemetry: an `fqdn` observable
@@ -27,7 +29,6 @@ import socket
 import ssl
 import urllib.error
 import urllib.request
-from collections.abc import Callable
 from dataclasses import dataclass
 from http.client import HTTPConnection, HTTPSConnection
 from typing import Any
@@ -49,10 +50,6 @@ MAX_TIMEOUT_SECONDS = 30.0
 #: Schemes we will dial. Anything else — `file:`, `gopher:`, `dict:` — is refused before a socket.
 ALLOWED_SCHEMES: frozenset[str] = frozenset({"http", "https"})
 
-#: Registrations for the `"python"` action. Keyed by dotted path so the *config* names a target
-#: rather than importing one.
-_ACTIONS: dict[str, Callable[..., str]] = {}
-
 
 class UnsafeURLError(ValueError):
     """A URL the SSRF guard refuses to fetch, with the reason attached."""
@@ -60,15 +57,6 @@ class UnsafeURLError(ValueError):
 
 class ActionError(RuntimeError):
     """The action itself failed (connection refused, non-2xx, action raised)."""
-
-
-def register_action(path: str, fn: Callable[..., str]) -> None:
-    """Register `fn` under the dotted `path` a playbook's `config["action_path"]` names."""
-    _ACTIONS[path] = fn
-
-
-def registered_actions() -> dict[str, Callable[..., str]]:
-    return dict(_ACTIONS)
 
 
 class _PinnedHTTPConnection(HTTPConnection):
@@ -381,12 +369,12 @@ def _render(method: str, chain: list[str], status: int, payload: bytes) -> str:
 
 
 def run_python_action(config: dict[str, Any], values: dict[str, Any]) -> ActionResult:
-    """Invoke a **registered** callable. Nothing in `config` is imported or evaluated."""
+    """Invoke a discovered script by name. Nothing in `config` is imported or evaluated."""
+    from automation.scripts_loader import load_script
+
     path = str(config.get("action_path") or "")
-    action = _ACTIONS.get(path)
-    if action is None:
-        raise ActionError(f"no registered action at {path!r}; registered: {sorted(_ACTIONS)}")
-    output = action(**values)
+    script = load_script(path)
+    output = script(**values)
     text = output if isinstance(output, str) else repr(output)
     return ActionResult(output_log=text[:MAX_OUTPUT_BYTES], ok=True)
 
@@ -399,25 +387,3 @@ def execute(config: dict[str, Any], values: dict[str, Any]) -> ActionResult:
     if action == "python":
         return run_python_action(config, values)
     raise ActionError(f"unknown action {action!r}; expected 'http' or 'python'")
-
-
-def _enrichment_probe(**values: object) -> str:
-    """A registered no-network action, used by tests and as the documented example.
-
-    It exists because a SOAR gateway whose only demonstrable action is an outbound HTTP request is hard
-    to verify offline, and a test that monkeypatches `urllib` is verifying the mock, not the loop.
-    This one exercises the real dispatch, the real registration lookup, the real `AutomationRun`
-    lifecycle and the real timeline write, with no socket involved.
-
-    It takes `**values` rather than a named parameter on purpose: `run_python_action` forwards the
-    same interpolation names an `http` action gets, so an action declaring a narrower signature would
-    fail on a perfectly normal binding — a confusing way to learn the calling convention.
-    """
-    subject = (
-        values.get("observable") or values.get("case_id") or values.get("case") or "(no subject)"
-    )
-    kind = values.get("observable_type") or "case"
-    return f"enrichment probe: no network lookup performed for {kind} {subject!r}"
-
-
-register_action("amalthea.automation.executor.enrichment_probe", _enrichment_probe)

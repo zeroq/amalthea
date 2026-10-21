@@ -18,9 +18,8 @@ from automation.executor import (
     UnsafeURLError,
     assert_safe_url,
     execute,
-    register_action,
-    registered_actions,
 )
+from automation.scripts_loader import script_names
 
 
 @pytest.mark.parametrize(
@@ -101,22 +100,28 @@ def test_an_unknown_action_is_refused_rather_than_guessed() -> None:
         execute({"action": "carrier-pigeon"}, {})
 
 
-def test_the_python_action_only_runs_registered_callables() -> None:
-    """Nothing in `config` is imported, so a playbook row cannot name an arbitrary callable."""
-    with pytest.raises(ActionError, match="no registered action"):
+def test_the_python_action_only_runs_discovered_scripts() -> None:
+    """Nothing in `config` is imported, so a playbook row cannot name an arbitrary callable.
+
+    The executor only runs scripts discovered in the playbook scripts folder.
+    """
+    with pytest.raises(ActionError, match="no discovered script"):
         execute({"action": "python", "action_path": "os.system"}, {})
-    with pytest.raises(ActionError, match="no registered action"):
+    with pytest.raises(ActionError, match="no discovered script"):
         execute({"action": "python", "action_path": "builtins.eval"}, {})
 
 
 def test_a_registered_action_receives_the_interpolation_values() -> None:
-    register_action("tests.receiver", lambda **kw: f"saw {kw.get('observable')}")
+    """A discovered script receives the interpolation values."""
+    # Use the built-in enrichment_probe script
     result = execute(
-        {"action": "python", "action_path": "tests.receiver"},
+        {"action": "python", "action_path": "enrichment_probe"},
         {"observable": "evil.example", "observable_type": "fqdn"},
     )
     assert result.ok is True
-    assert result.output_log == "saw evil.example"
+    assert (
+        result.output_log == "enrichment probe: no network lookup performed for fqdn 'evil.example'"
+    )
 
 
 def test_an_unknown_interpolation_key_is_visible_not_fatal() -> None:
@@ -215,11 +220,11 @@ def test_ipv6_spellings_normalize_to_one_artifact() -> None:
     assert normalize("ip", "::1", is_case_sensitive=False) == "::1"
 
 
-def test_the_builtin_probe_is_registered_under_its_dotted_path() -> None:
-    """The documented example must be reachable by the path a playbook row actually names."""
-    assert "amalthea.automation.executor.enrichment_probe" in registered_actions()
+def test_the_builtin_probe_is_discovered_under_its_name() -> None:
+    """The documented example must be reachable by the script name a playbook row actually names."""
+    assert "enrichment_probe" in script_names()
     result = execute(
-        {"action": "python", "action_path": "amalthea.automation.executor.enrichment_probe"},
+        {"action": "python", "action_path": "enrichment_probe"},
         {"observable": "evil.example", "observable_type": "fqdn"},
     )
     assert result.ok is True

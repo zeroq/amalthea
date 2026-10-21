@@ -301,9 +301,9 @@ code paths that deliberately circumvent the service layer.
   `automation.playbooks.validate_config` — mirrors `executor.execute` exactly). 201 `playbook_json`.
 - `config` validation at write time (AC6.12-P2-b):
   - `http`: `url` required; `method` ∈ standard HTTP verbs; `headers` string→string map; `timeoutSeconds` positive number ≤ 30.
-  - `python`: `action_path` must be a key in `automation.executor.registered_actions()`.
+  - `python`: `action_path` must name a discovered script (resolver `automation.scripts_loader.script_names()`).
   - Unknown `action` ⇒ 400.
-- `_meta` (AC6.12-P2-c): `{"triggerEvents":[…], "actions":[{"action":"http",…},{"action":"python","registeredPaths":[…]}], "actionNames":["http","python"]}` — rendered from the live code so the UI pickers cannot drift.
+- `_meta` (AC6.12-P2-c): `{"triggerEvents":[…], "actions":[{"action":"http",…},{"action":"python","scripts":[{"name":…,"description":…,"triggerHint":…}]}], "actionNames":["http","python"]}` — rendered from the live script folder so the UI pickers cannot drift.
 - `playbook/<idOrName>`: lookup by UUID or `name`; PATCH ⇒ **204 no body** (deviation); DELETE ⇒ **204** or **400** if the playbook has any `AutomationRun` (FK is `PROTECT`).
 - `playbook/<idOrName>/run`: body `{"case"?: idOrNumber, "observable"?: id}` with at least one required; returns **202** + run JSON (`triggeredBy: "manual"`); enqueues a non-deduping run (key `manual:<uuid4>`); result lands in `output_log` **and** case timeline (AC6.12-P2-a).
 

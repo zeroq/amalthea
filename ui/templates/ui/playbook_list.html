@@ -37,6 +37,9 @@
           <td>{{ pb.trigger_event }}</td>
           <td>
             <span class="pill">{{ pb.config.action }}</span>
+            {% if pb.config.action == "python" and pb.config.action_path %}
+            <span class="dim mono">{{ pb.config.action_path }}</span>
+            {% endif %}
           </td>
           <td>
             {% if pb.is_active %}
@@ -104,6 +107,9 @@
           <td>{{ pb.trigger_event }}</td>
           <td>
             <span class="pill">{{ pb.config.action }}</span>
+            {% if pb.config.action == "python" and pb.config.action_path %}
+            <span class="dim mono">{{ pb.config.action_path }}</span>
+            {% endif %}
           </td>
           <td>
             {% if pb.is_active %}

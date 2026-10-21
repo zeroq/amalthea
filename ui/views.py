@@ -55,9 +55,9 @@ from alerts.escalation import (
 )
 from alerts.models import Alert, AlertStatus
 from automation.dispatcher import TRIGGER_EVENTS
-from automation.executor import registered_actions
 from automation.models import AutomationRun, Playbook
 from automation.playbooks import ACTIONS, HTTP_METHODS
+from automation.scripts_loader import discover_scripts, script_names
 from cases.correlation import (
     alerts_fuzzy_similar_to_case,
     candidate_cases_for_alert,
@@ -268,14 +268,34 @@ def _parse_playbook_config(post: Any) -> tuple[dict[str, Any] | None, str | None
         action_path = (post.get("action_path") or "").strip()
         if not action_path:
             return None, "Action path is required for Python actions."
-        if action_path not in registered_actions():
+        known_scripts = script_names()
+        if action_path not in known_scripts:
             return (
                 None,
-                f"Unknown action path. Registered: {', '.join(sorted(registered_actions().keys()))}",
+                f"Unknown script. Discovered: {', '.join(sorted(known_scripts))}",
             )
         config["action_path"] = action_path
 
     return config, None
+
+
+def _get_script_source(script_name: str) -> str | None:
+    """Safely retrieve the source code of a discovered script for read-only display.
+
+    Returns the source as a string, or None if the script is not found or has a load error.
+    Never executes the script; uses inspect.getsource on the loaded module.
+    """
+    import inspect
+
+    scripts = discover_scripts()
+    info = scripts.get(script_name)
+    if info is None or info.load_error is not None or info.run is None:
+        return None
+    try:
+        return inspect.getsource(info.run)
+    except (OSError, TypeError):
+        # Could be a built-in function or source not available
+        return None
 
 
 def _base_context(request: HttpRequest, **extra: Any) -> dict[str, Any]:
@@ -2088,17 +2108,29 @@ def playbook_list(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_http_methods(["GET", "POST"])
 def playbook_create(request: HttpRequest) -> HttpResponse:
-    """Create a new playbook. GET shows the form, POST creates it."""
-    # GET: any authenticated org member; POST: requires analyst or above
-    if request.method == "POST":
-        if request.user.role not in ("analyst", "admin", "superAdmin"):
-            return render(request, "ui/404.html", status=404)
+    """Create a new playbook. GET shows the form, POST creates it.
 
-    from automation.dispatcher import TRIGGER_EVENTS
-    from automation.executor import registered_actions
-    from automation.playbooks import ACTIONS, HTTP_METHODS
+    Both GET and POST require admin or superAdmin role (P5 authz tightening).
+    """
+    if request.user.role not in ("admin", "superAdmin"):
+        return render(request, "ui/404.html", status=404)
+
+    from automation.playbooks import HTTP_METHODS
+    from automation.scripts_loader import discover_scripts
 
     if request.method == "GET":
+        scripts = discover_scripts()
+        # Only include loadable scripts (load_error is None) for the picker
+        script_list = [
+            {
+                "name": info.name,
+                "description": info.description,
+                "trigger_hint": info.trigger_hint,
+            }
+            for info in scripts.values()
+            if info.load_error is None
+        ]
+        script_list_sorted = sorted(script_list, key=lambda s: s["name"])
         return render(
             request,
             "ui/playbook_form.html",
@@ -2107,7 +2139,7 @@ def playbook_create(request: HttpRequest) -> HttpResponse:
                 trigger_events=TRIGGER_EVENTS,
                 actions=ACTIONS,
                 http_methods=HTTP_METHODS,
-                registered_paths=sorted(registered_actions().keys()),
+                scripts=script_list_sorted,
             ),
         )
 
@@ -2154,11 +2186,10 @@ def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
     """View or edit a playbook.
 
     GET: any authenticated org member.
-    POST (update): requires analyst role or above.
+    POST (update): requires admin or superAdmin role (P5 authz tightening).
     """
-    from automation.dispatcher import TRIGGER_EVENTS
-    from automation.executor import registered_actions
-    from automation.playbooks import ACTIONS, HTTP_METHODS
+    from automation.playbooks import HTTP_METHODS
+    from automation.scripts_loader import discover_scripts
     from identity.scoping import case_visible_q
 
     # Resolve by UUID or name
@@ -2182,6 +2213,25 @@ def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
 
         runs_total = runs_qs.count()
         runs = list(runs_qs[:RAIL_CAP])
+
+        # Build script list for the detail view (includes all discovered, even with errors, for diagnostics)
+        scripts = discover_scripts()
+        script_list = []
+        script_dict = {}
+        for info in scripts.values():
+            script_data = {
+                "name": info.name,
+                "description": info.description,
+                "trigger_hint": info.trigger_hint,
+                "path": str(info.path),
+                "load_error": info.load_error,
+            }
+            # Add source for loadable scripts (for read-only display in detail view)
+            if info.load_error is None and info.run is not None:
+                script_data["source"] = _get_script_source(info.name)
+            script_list.append(script_data)
+            script_dict[info.name] = script_data
+
         return render(
             request,
             "ui/playbook_detail.html",
@@ -2193,12 +2243,13 @@ def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
                 trigger_events=sorted(TRIGGER_EVENTS),
                 actions=ACTIONS,
                 http_methods=HTTP_METHODS,
-                registered_paths=sorted(registered_actions().keys()),
+                scripts=sorted(script_list, key=lambda s: s["name"]),
+                script_dict=script_dict,
             ),
         )
 
-    # POST - update the playbook: requires analyst or above
-    if request.user.role not in ("analyst", "admin", "superAdmin"):
+    # POST - update the playbook: requires admin or superAdmin (P5 authz tightening)
+    if request.user.role not in ("admin", "superAdmin"):
         return render(request, "ui/404.html", status=404)
 
     description = (request.POST.get("description") or "").strip()
@@ -2268,10 +2319,9 @@ def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
             if not action_path:
                 messages.error(request, "Action path is required for Python actions.")
                 return redirect("ui-playbook-detail", playbook_id=playbook_id)
-            from automation.executor import registered_actions
-
-            if action_path not in registered_actions():
-                messages.error(request, "Unknown action path.")
+            known_scripts = script_names()
+            if action_path not in known_scripts:
+                messages.error(request, "Unknown script.")
                 return redirect("ui-playbook-detail", playbook_id=playbook_id)
             config["action_path"] = action_path
 
@@ -2295,8 +2345,11 @@ def playbook_edit(request: HttpRequest, playbook_id: str) -> HttpResponse:
     """Edit a playbook.
 
     GET: any authenticated org member.
-    POST: requires analyst role or above.
+    POST: requires admin or superAdmin role (P5 authz tightening).
     """
+    from automation.playbooks import HTTP_METHODS
+    from automation.scripts_loader import discover_scripts
+
     # Resolve by UUID or name
     playbook = None
     try:
@@ -2310,6 +2363,27 @@ def playbook_edit(request: HttpRequest, playbook_id: str) -> HttpResponse:
     if request.method == "GET":
         # GET: any authenticated org member
         config = playbook.config or {}
+        scripts = discover_scripts()
+        script_list = [
+            {
+                "name": info.name,
+                "description": info.description,
+                "trigger_hint": info.trigger_hint,
+            }
+            for info in scripts.values()
+            if info.load_error is None
+        ]
+        script_list_sorted = sorted(script_list, key=lambda s: s["name"])
+
+        # Find the currently selected script for description display
+        selected_script = None
+        action_path = config.get("action_path", "")
+        if action_path:
+            for s in script_list_sorted:
+                if s["name"] == action_path:
+                    selected_script = s
+                    break
+
         return render(
             request,
             "ui/playbook_form.html",
@@ -2320,12 +2394,13 @@ def playbook_edit(request: HttpRequest, playbook_id: str) -> HttpResponse:
                 trigger_events=sorted(TRIGGER_EVENTS),
                 actions=ACTIONS,
                 http_methods=HTTP_METHODS,
-                registered_paths=sorted(registered_actions().keys()),
+                scripts=script_list_sorted,
+                selected_script=selected_script,
             ),
         )
 
-    # POST - update the playbook: requires analyst or above
-    if request.user.role not in ("analyst", "admin", "superAdmin"):
+    # POST - update the playbook: requires admin or superAdmin (P5 authz tightening)
+    if request.user.role not in ("admin", "superAdmin"):
         return render(request, "ui/404.html", status=404)
 
     # Parse and validate config using shared helper

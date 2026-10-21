@@ -7,11 +7,11 @@ Two rules the shapes follow:
 
 * **Write-time refusal, not run-time failure.** `triggerEvent` must be one of
   `automation.dispatcher.TRIGGER_EVENTS` and `config` must pass `automation.playbooks.validate_config`,
-  so a playbook naming an unknown action or an unregistered `action_path` is a 400 at save time and
+  so a playbook naming an unknown action or an unknown script is a 400 at save time and
   never becomes a `Failed` run nobody is watching (AC6.12-P2-b). The SSRF guard in the executor is
   still the *runtime* boundary — authoring validation is additional, never a replacement.
 * **The vocabulary is read from the code.** `playbook_meta` renders `TRIGGER_EVENTS` and
-  `registered_actions()` directly, so the pickers a UI builds cannot drift from what dispatch and the
+  `script_names()` directly, so the pickers a UI builds cannot drift from what dispatch and the
   executor will actually accept (AC6.12-P2-c).
 
 Permissions: mutating endpoints (POST/PATCH/DELETE on playbooks, POST on run) require
@@ -32,9 +32,9 @@ from rest_framework.response import Response
 
 import identity.scoping
 from automation.dispatcher import TRIGGER_EVENTS, run_now
-from automation.executor import registered_actions
 from automation.models import Playbook
 from automation.playbooks import ACTIONS, HTTP_METHODS, MAX_TIMEOUT_SECONDS, validate_config
+from automation.scripts_loader import discover_scripts
 from core.serializers import automation_run_json, playbook_json
 from identity.permissions import IsAnalystOrAbove
 
@@ -142,9 +142,19 @@ def playbook_meta(request: Request) -> Response:
     """`GET /api/v1/playbook/_meta` — the authoring vocabulary, read from the code (AC6.12-P2-c).
 
     A hand-maintained list here would be a second source of truth for what a playbook may say, and
-    the two would drift the first time an action was registered. Both halves are rendered from the
+    the two would drift the first time a script was added. Both halves are rendered from the
     same objects dispatch and the executor read.
     """
+    scripts = discover_scripts()
+    runnable_scripts = [
+        {
+            "name": info.name,
+            "description": info.description,
+            "triggerHint": info.trigger_hint,
+        }
+        for info in sorted(scripts.values(), key=lambda i: i.name)
+        if info.load_error is None
+    ]
     return Response(
         {
             "triggerEvents": list(TRIGGER_EVENTS),
@@ -157,7 +167,7 @@ def playbook_meta(request: Request) -> Response:
                 },
                 {
                     "action": "python",
-                    "registeredPaths": sorted(registered_actions()),
+                    "scripts": runnable_scripts,
                 },
             ],
             # Echoed so a picker can render "N actions" without parsing the list above.
