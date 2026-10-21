@@ -80,7 +80,9 @@
     {% include "ui/_tab_attachments.html" %}
   </section>
 
-  <section class="tabpanel" role="tabpanel" id="panel-similar" aria-labelledby="tab-similar" tabindex="0" {% if active_tab != "similar" %}hidden{% endif %}>
+  <section class="tabpanel" role="tabpanel" id="panel-similar" aria-labelledby="tab-similar" tabindex="0"
+    {% if active_tab != "similar" %}data-lazy-src="{% url 'ui-case-similar' case.number %}"{% else %}data-loaded{% endif %}
+    {% if active_tab != "similar" %}hidden{% endif %}>
     {% include "ui/_tab_similar.html" %}
   </section>
 

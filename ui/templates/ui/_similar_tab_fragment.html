@@ -1,0 +1,16 @@
+{% load ui_tags %}
+{% comment %}
+  Fragment template for the Similar tab (lazy-load via case_similar_fragment).
+  Context: case, can_mutate, similar_cases, similar_total, similar_alerts, similar_alerts_total, alerts.
+  Root element carries data attributes for the combined count badge.
+{% endcomment %}
+{% with similar_count=similar_total|add:similar_alerts_total %}
+<div
+  data-similar-count="{{ similar_count }}"
+  data-similar-cases="{{ similar_total }}"
+  data-similar-alerts="{{ similar_alerts_total }}"
+>
+  {% include "ui/_similar_cases_card.html" %}
+  {% include "ui/_similar_alerts_card.html" %}
+</div>
+{% endwith %}

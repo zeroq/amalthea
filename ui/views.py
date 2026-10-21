@@ -904,6 +904,34 @@ def _api_error_detail(response: HttpResponse) -> str:
     return f"HTTP {response.status_code}"
 
 
+def _similar_for_case(case: Case, user) -> tuple[list, int, list, int]:
+    """Return (similar_cases, similar_total, similar_alerts, similar_alerts_total) for a case.
+
+    Builds findings from the case's CaseObservables (excluding ignore_similarity),
+    then calls cases_sharing_findings and alerts_fuzzy_similar_to_case.
+    """
+    from observables.extractor import Finding
+
+    # Build findings from this case's CaseObservables, excluding ignore_similarity
+    case_observables = (
+        CaseObservable.objects.filter(case=case)
+        .select_related("observable__data_type")
+        .exclude(observable__ignore_similarity=True)
+    )
+    findings = [
+        Finding(
+            type_name=co.observable.data_type.name,
+            raw=co.observable.data,
+            normalized=co.observable.normalized_data,
+        )
+        for co in case_observables
+    ]
+    similar_cases, similar_total = cases_sharing_findings(findings, user=user, exclude_case=case)
+    # Similar alerts: unlinked alerts fuzzy-similar to this case's attached alerts
+    similar_alerts, similar_alerts_total = alerts_fuzzy_similar_to_case(case, user=user)
+    return similar_cases, similar_total, similar_alerts, similar_alerts_total
+
+
 @login_required
 @require_GET
 def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
@@ -1076,33 +1104,21 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     ttps_total = ttps_qs.count()
     ttps = list(ttps_qs[:RAIL_CAP])
 
-    # Similar cases tab — only query when the tab is rendered (plan: no query when not rendered)
-    similar_cases = []
-    similar_total = 0
-    similar_alerts = []
-    similar_alerts_total = 0
-    if active_tab == "similar":
-        from observables.extractor import Finding
+    # Similar cases/alerts — compute unconditionally for the badge (D1) and for the tab.
+    # The helper is called once per page render (G3, R3).
+    similar_cases, similar_total, similar_alerts, similar_alerts_total = _similar_for_case(
+        case, request.user
+    )
 
-        # Build findings from this case's CaseObservables, excluding ignore_similarity
-        case_observables = (
-            CaseObservable.objects.filter(case=case)
-            .select_related("observable__data_type")
-            .exclude(observable__ignore_similarity=True)
-        )
-        findings = [
-            Finding(
-                type_name=co.observable.data_type.name,
-                raw=co.observable.data,
-                normalized=co.observable.normalized_data,
-            )
-            for co in case_observables
-        ]
-        similar_cases, similar_total = cases_sharing_findings(
-            findings, user=request.user, exclude_case=case
-        )
-        # Similar alerts: unlinked alerts fuzzy-similar to this case's attached alerts
-        similar_alerts, similar_alerts_total = alerts_fuzzy_similar_to_case(case, user=request.user)
+    # Badge for Similar tab: combined count, only when > 0 (so the {% if tab.count is not None %}
+    # guard hides it at 0). Set directly on `tabs` — the `counts`→`tabs` loop above (line ~980)
+    # already ran, so mutating `counts` here would never reach the badge.
+    combined = similar_total + similar_alerts_total
+    if combined > 0:
+        for tab in tabs:
+            if tab["slug"] == "similar":
+                tab["count"] = combined
+                break
 
     # Add-tag dialog (§12.8): `Tag` is global and grows without bound, so the picker is capped at
     # `PICKER_PAGE_SIZE`. Fetching one row past the cap detects truncation without a second `COUNT`
@@ -1195,6 +1211,37 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             task_assignees=task_assignees,
             task_status_options=task_status_options,
         ),
+    )
+
+
+@login_required
+@require_GET
+def case_similar_fragment(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Fragment endpoint for the Similar tab (lazy-load).
+    Returns the two card partials with data attributes for the combined count.
+    Viewer-allowed (read-only); cross-org/unknown -> 404.
+    """
+    case = resolve_case(request.user, case_id, write=False)
+    if case is None:
+        raise Http404()
+
+    similar_cases, similar_total, similar_alerts, similar_alerts_total = _similar_for_case(
+        case, request.user
+    )
+    can_mutate = not is_viewer(request.user)
+
+    return render(
+        request,
+        "ui/_similar_tab_fragment.html",
+        {
+            "case": case,
+            "can_mutate": can_mutate,
+            "similar_cases": similar_cases,
+            "similar_total": similar_total,
+            "similar_alerts": similar_alerts,
+            "similar_alerts_total": similar_alerts_total,
+            "alerts": case.alerts.all(),  # for empty-state check in alerts card
+        },
     )
 
 

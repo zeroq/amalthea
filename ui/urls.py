@@ -40,6 +40,8 @@ urlpatterns = [
     path("tasks/<uuid:task_id>/note", views.task_note, name="ui-task-note"),
     # P2/C2 — Case edit
     path("cases/<str:case_id>/edit", views.case_edit, name="ui-case-edit"),
+    # Similar tab fragment (lazy-load)
+    path("cases/<str:case_id>/similar", views.case_similar_fragment, name="ui-case-similar"),
     # Case sub-resources (P2-P5 UI)
     path("cases/<str:case_id>/export", views.case_export, name="ui-case-export"),
     path("cases/<str:case_id>/tags", views.case_tags, name="ui-case-tags"),

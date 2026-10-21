@@ -201,7 +201,7 @@ WEBHOOK_RATE_IP_PER_MIN = int(os.getenv("AMALTHEA_WEBHOOK_RATE_IP", "300"))
 # SSDEEP similarity threshold (0-100) for the "Similar alerts" card.
 # 80 = strict/high-precision default (favours "same event, different noise").
 # Override with AMALTHEA_ALERT_FUZZY_THRESHOLD env var.
-ALERT_FUZZY_SIMILARITY_THRESHOLD = int(os.getenv("AMALTHEA_ALERT_FUZZY_THRESHOLD", "80"))
+ALERT_FUZZY_SIMILARITY_THRESHOLD = int(os.getenv("AMALTHEA_ALERT_FUZZY_THRESHOLD", "60"))
 
 # --- Cache ---------------------------------------------------------------
 # Backs the webhook rate limiter. `LocMemCache` is per-process, so a multi-process deployment

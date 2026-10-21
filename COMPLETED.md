@@ -1450,9 +1450,52 @@ follow-ups — see the top of [`TODO.md`](./TODO.md).*
 
 ---
 
-*Last updated: 2026-10-21 — **fuzzy alert similarity (SSDEEP/`ppdeep`)** replaces the exact-signal basis of
-the case-detail "Similar alerts" card (title excluded per decision (A); 80-threshold; tenant-safe, viewer
-read-only, 22/22 ACs verified, security APPROVE WITH NOTES), superseding the matching basis of the earlier
-exact-signal card. Plus the earlier **"Similar alerts" card** (11/11 ACs), the **clickable "Seen in" →
+## 2026-10-21 — **Similar tab: lazy-load on click + combined-count badge**
+
+- [x] **Case-detail "Similar" tab now fills on click (no manual refresh) and its tab label carries a
+  combined-count badge — implemented + independently verified 2026-10-21.**
+  `docs/planning/PLAN-2026-10-21-similar-tab-lazy-badge.md` (approved) +
+  `docs/planning/BRIEF-2026-10-21-similar-tab-lazy-badge.md`; verified in
+  `docs/verification/VERIFY-2026-10-21-similar-tab-lazy-badge.md` (**21/21 ACs MET, READY TO COMMIT**).
+  - **Root cause fixed:** tabs are `<a href="?tab=...">` links and `tabs.js` intercepted the click and only
+    toggled `hidden` (no fetch), while the server computed `similar_cases`/`similar_alerts` **only** when
+    `active_tab == "similar"` — so the panel was empty until a real navigation. Now the Similar panel
+    lazy-loads its fragment on first activation.
+  - **New fragment endpoint** (`ui/views.py::case_similar_fragment`, `@login_required @require_GET`;
+    route `cases/<case_id>/similar` → `ui-case-similar`): returns the two cards as HTML with a root
+    `<div data-similar-count|data-similar-cases|data-similar-alerts>`. Viewer-allowed (read-only);
+    cross-org/unknown → 404.
+  - **Shared helper** `_similar_for_case(case, user)` (`ui/views.py`): one source of truth for both the
+    page and the fragment (no drift); `case_detail` calls it **once per render**.
+  - **Badge (D1):** the Similar tab label shows `<span class="count">` with the **combined** count
+    (`similar_total + similar_alerts_total`) computed on every case-detail load, rendered **only when
+    > 0**. Reuses the existing `.count` chip (no new CSS).
+  - **Client (P4):** `#panel-similar` emits `data-lazy-src` only when the server did **not** render the
+    tab (else `data-loaded`); `tabs.js` fetches the fragment once on first activation, swaps the panel
+    content, sets `data-loaded`, and collapses concurrent requests (silent failure, retry allowed, focus
+    unchanged). Progressive enhancement preserved: `?tab=similar` still renders fully with JS off.
+  - **Template split:** `_tab_similar.html` is now an include-only wrapper of `_similar_cases_card.html` +
+    `_similar_alerts_card.html` (unchanged output); fragment wrapper `_similar_tab_fragment.html`.
+  - **Bug fixed during review:** the badge was first assigned to the `counts` dict **after** the
+    `counts`→`tabs` loop, so it never rendered; corrected to set the `tabs` entry directly (plan §14.4).
+  - **Superseded test updated:** `TestTabGating` now asserts the helper runs once on **every** case-detail
+    load (decision D1), replacing the old "not on general" contract (plan §14.5).
+  - **Files:** `ui/views.py`, `ui/urls.py`, `ui/templates/ui/case_detail.html`,
+    `ui/templates/ui/_tab_similar.html`, `ui/templates/ui/_similar_cases_card.html`,
+    `ui/templates/ui/_similar_alerts_card.html`, `ui/templates/ui/_similar_tab_fragment.html`,
+    `ui/static/ui/tabs.js`; new `tests/conformance/test_ui_similar_tab_lazy.py` (15 tests, incl. authz
+    matrix + 4 falsifiability proofs); `test_alert_fuzzy_similarity.py` tab-gating test updated.
+  - **No schema change; no API change; no new CSS** (undefined-class backlog unchanged at 42).
+    `make check` green; targeted pytest → **39 passed**.
+  - **Known minor edge (documented, not fixed):** `tabs.js`'s collapse `return` skips `pushState` on a
+    rapid second activation during an in-flight fetch (visual state correct) — plan §14.6.
+
+---
+
+*Last updated: 2026-10-21 — **Similar tab lazy-load + combined-count badge** (fills on click without a
+manual refresh; tab label badge = similar cases + similar alerts; 21/21 ACs verified), on top of the
+**fuzzy alert similarity (SSDEEP/`ppdeep`)** work that replaced the exact-signal basis of the same card
+(title excluded per decision (A); 80-threshold; tenant-safe, viewer read-only, 22/22 ACs verified, security
+APPROVE WITH NOTES). Plus the earlier **"Similar alerts" card** (11/11 ACs), the **clickable "Seen in" →
 linked-cases modal**, **§10.1 org-scoped user management** (ADR-010) and the Settings/Cases/Alerts UI
 refinements.*

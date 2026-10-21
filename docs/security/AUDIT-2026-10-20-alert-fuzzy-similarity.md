@@ -108,6 +108,14 @@ The test `TestTitleExcludedDecisionA` confirms identical summary+payload → ide
 - **Medium term:** Implement a "title fingerprint" — hash the title separately and require *both* payload similarity ≥80 AND title similarity ≥threshold (or title exact-match) for a match. This preserves the payload signal while adding a title discriminator.
 - **Documentation:** Clearly document the false-positive trade-off in the deployment runbook.
 
+**Update (2026-10-21):** The operator lowered the default `ALERT_FUZZY_SIMILARITY_THRESHOLD`
+from `80` to `60` in `amalthea/settings/base.py` after manual evaluation ("working fine"). This is an
+**accepted, deliberate product decision** on the FIND-05 trade-off: the recall/precision balance is
+moved toward recall (more candidate matches surfaced), so the "80 threshold is the only guard"
+statement above is now "the configured threshold (default 60) is the only guard". The recommended
+opt-in `ALERT_FUZZY_INCLUDE_TITLE` flag and title-fingerprint work remain the correct hardening
+path and are unchanged; the follow-up tracking in `TODO.md` §12.12-fu1 stands.
+
 ---
 
 ### FIND-06: Canonicalization Correctness — Volatile key list may be incomplete for some sources

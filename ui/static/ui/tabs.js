@@ -25,6 +25,9 @@
     }
   });
 
+  // In-flight flag for the Similar tab lazy-load (mirrors live.js pagesRefresh/tasksRefresh)
+  var similarRefresh = null;
+
   function isTyping(target) {
     if (!target) return false;
     if (target.isContentEditable) return true;
@@ -37,37 +40,71 @@
     return false;
   }
 
-  // `push` is false for the initial sync and for popstate: those calls must not add a
-  // history entry, otherwise Back would need two presses to leave the page.
-  function activateTab(tab, push) {
-    if (!tab) return;
-    var slug = tab.getAttribute("href")?.replace("?tab=", "") || "";
-    var panelId = tab.getAttribute("aria-controls");
+// `push` is false for the initial sync and for popstate: those calls must not add a
+// history entry, otherwise Back would need two presses to leave the page.
+function activateTab(tab, push) {
+  if (!tab) return;
+  var slug = tab.getAttribute("href")?.replace("?tab=", "") || "";
+  var panelId = tab.getAttribute("aria-controls");
 
-    // Update all tabs
-    tabs.forEach(function (t) {
-      var isActive = t === tab;
-      t.setAttribute("aria-selected", isActive ? "true" : "false");
-      t.setAttribute("tabindex", isActive ? "0" : "-1");
-      t.classList.toggle("tab-on", isActive);
-    });
+  // Update all tabs
+  tabs.forEach(function (t) {
+    var isActive = t === tab;
+    t.setAttribute("aria-selected", isActive ? "true" : "false");
+    t.setAttribute("tabindex", isActive ? "0" : "-1");
+    t.classList.toggle("tab-on", isActive);
+  });
 
-    // Show/hide panels
-    Object.keys(panels).forEach(function (id) {
-      var p = panels[id];
-      if (p) {
-        p.hidden = (id !== panelId);
-      }
-    });
-
-    // Push state. Focus deliberately stays on the tab (WAI-ARIA APG); we never move it
-    // into the panel, and never steal focus on the initial page load.
-    if (push !== false && slug && window.history && window.history.pushState) {
-      var url = new URL(window.location.href);
-      url.searchParams.set("tab", slug);
-      window.history.pushState({ tab: slug }, "", url.toString());
+  // Show/hide panels
+  Object.keys(panels).forEach(function (id) {
+    var p = panels[id];
+    if (p) {
+      p.hidden = (id !== panelId);
     }
+  });
+
+  // Lazy-load the Similar tab fragment on first activation
+  var panel = panels[panelId];
+  if (panel && panel.dataset.lazySrc && !panel.dataset.loaded) {
+    if (similarRefresh) {
+      // Request already in flight — collapse concurrent requests
+      return;
+    }
+    var lazyUrl = panel.dataset.lazySrc;
+    similarRefresh = fetch(lazyUrl, {
+      credentials: "same-origin",
+      headers: { "X-Requested-With": "fetch" },
+    })
+      .then(function (response) {
+        return response.ok ? response.text() : "";
+      })
+      .then(function (html) {
+        if (!html) return;
+        var fresh = new DOMParser().parseFromString(html, "text/html").querySelector("[data-similar-count]");
+        if (fresh && panel) {
+          // Swap innerHTML to keep the panel element (id, role, aria-labelledby, tabindex) intact
+          panel.innerHTML = fresh.innerHTML;
+          panel.dataset.loaded = "true";
+          // Remove lazy-src to prevent any future attempts
+          delete panel.dataset.lazySrc;
+        }
+      })
+      .catch(function () {
+        /* Silent failure — leave panel as-is, allow retry on next activation */
+      })
+      .then(function () {
+        similarRefresh = null;
+      });
   }
+
+  // Push state. Focus deliberately stays on the tab (WAI-ARIA APG); we never move it
+  // into the panel, and never steal focus on the initial page load.
+  if (push !== false && slug && window.history && window.history.pushState) {
+    var url = new URL(window.location.href);
+    url.searchParams.set("tab", slug);
+    window.history.pushState({ tab: slug }, "", url.toString());
+  }
+}
 
   function getActiveIndex() {
     var active = tablist.querySelector('[aria-selected="true"]');

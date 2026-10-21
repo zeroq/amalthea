@@ -9,7 +9,7 @@ Mapping (test → AC):
  1. TestDeterminism            → AC-A2 (deterministic hash / canonical text)
  2. TestVolatileKeys           → AC-A2 (volatile-only diffs → identical text+hash) [falsifiable]
  3. TestTitleExcludedDecisionA → Plan §3.2 Decision (A)
- 4. TestThresholdBoundary      → AC-B1 + Q3 (default 80, inclusive ``>= threshold``)
+ 4. TestThresholdBoundary      → AC-B1 + Q3 (default 60, inclusive ``>= threshold``)
  5. TestCrossOrgIsolation      → AC-B1/AC-C1 + prior AC-5 (helper, UI, cross-org POST) [falsifiable]
  6. TestAttachedExclusion      → AC-B1 (attached alerts never returned) [falsifiable]
  7. TestThresholdGate          → AC-B1 (below-threshold alert does not leak) [falsifiable]
@@ -18,7 +18,8 @@ Mapping (test → AC):
 10. TestBackfillCommand        → AC-A5 (idempotent, second run updates 0, --dry-run writes nothing)
 11. TestUnhashablePayloads     → AC-A2 (oversize/overdeep/exception → "" without raising)
 12. TestEmptyStates            → AC-C1 (both reworded empty states)
-13. TestTabGating              → AC-B2 (fuzzy helper computed only for tab=similar)
+ 13. TestTabGating              → AC-B2, superseded by PLAN-2026-10-21 §14.5 (D1: the fuzzy
+                                   helper now runs on every case-detail load, once per render)
 
 This module also restores the still-valid guarantees that were stripped from
 ``tests/conformance/test_ui_similar_alerts.py`` during Phase B (tenant isolation #5,
@@ -87,18 +88,14 @@ def _near_dup_payload() -> dict:
 
 
 def _variant_payload() -> dict:
-    """A genuinely different event — scores < 80 against ``_base_payload()`` (measured 68)."""
+    """A genuinely different event — scores well below the shipped default against
+    ``_base_payload()`` (measured 46, i.e. margin > 10 under the default 60)."""
     return {
-        "src_ip": "198.51.100.7",
-        "dst_user": "asmith",
-        "sender": "hr@corp-internal.example",
-        "url": "http://intranet.example/payroll",
-        "file_hash": "00112233445566778899aabbccddeeff",
-        "rule": "BENIGN_SPAM",
-        "action": "allowed",
-        "process": {"name": "chrome.exe", "pid": 12, "timestamp": "2026-10-20T11:00:00Z"},
-        "event": {"id": "evt-555", "severity_hint": "low"},
-        "tags": ["newsletter"],
+        "host": "workstation-42",
+        "user": "asmith",
+        "category": "disk_health",
+        "message": "S.M.A.R.T. warning on /dev/sda",
+        "metric": {"name": "reallocated_sectors", "value": 128},
     }
 
 
@@ -308,8 +305,8 @@ class TestThresholdBoundary:
         score_near = ppdeep.compare(near_dup.payload_ssdeep, attached.payload_ssdeep)
         score_variant = ppdeep.compare(variant.payload_ssdeep, attached.payload_ssdeep)
 
-        # AC-A4: the shipped default is 80 and the crafted pair straddles it.
-        assert settings.ALERT_FUZZY_SIMILARITY_THRESHOLD == 80
+        # AC-A4: the shipped default is 60 and the crafted pair straddles it.
+        assert settings.ALERT_FUZZY_SIMILARITY_THRESHOLD == 60
         assert score_near >= settings.ALERT_FUZZY_SIMILARITY_THRESHOLD
         assert score_variant < settings.ALERT_FUZZY_SIMILARITY_THRESHOLD
 
@@ -827,9 +824,21 @@ class TestEmptyStates:
 
 @pytest.mark.django_db
 class TestTabGating:
-    """AC-B2 — the fuzzy helper runs only when the Similar tab is rendered."""
+    """AC-B2 — the fuzzy helper runs exactly once per case-detail render.
 
-    def test_fuzzy_helper_called_once_on_similar_and_never_on_general(self, db: None):
+    Superseded contract (PLAN-2026-10-21-similar-tab-lazy-badge.md §14.5, decision D1):
+    the helper used to run *only* when the Similar tab was rendered. It now runs on
+    **every** case-detail load, so the Similar tab can carry a combined-count badge.
+    The surviving invariant is "once per render", not "only on the similar tab".
+    """
+
+    def test_fuzzy_helper_called_once_on_general_and_once_on_similar(self, db: None):
+        """D1 (PLAN-2026-10-21 §14.5): once on ?tab=general, once on ?tab=similar.
+
+        The previous name/assertion of this test (``..._never_on_general``) encoded the
+        superseded contract and was intentionally replaced — it was a deliberate
+        behaviour change (D1), not a regression.
+        """
         org = _mk_org("OrgTabGate")
         analyst = _mk_user("analyst", org)
         case = _mk_case("Case Tabs", org)
@@ -845,11 +854,13 @@ class TestTabGating:
         with mock.patch("ui.views.alerts_fuzzy_similar_to_case", return_value=([], 0)) as patched:
             resp_general = client.get(_case_url(case, "general"))
             assert resp_general.status_code == 200
-            assert patched.call_count == 0
+            # The helper now runs on every case-detail load (the badge needs it).
+            assert patched.call_count == 1
 
             resp_similar = client.get(_similar_url(case))
             assert resp_similar.status_code == 200
-            assert patched.call_count == 1
+            # …and still exactly once per render (never twice).
+            assert patched.call_count == 2
 
         # The real helper is what populates the card outside the mock.
         body = client.get(_similar_url(case)).content.decode()

@@ -208,6 +208,11 @@ payload_ssdeep = models.CharField(max_length=160, blank=True, default="")
   `payload_ssdeep` (when payload is hashable).
 - **A4** `settings/base.py` threshold setting + docs. **AC-A4:** setting present, env-overridable,
   default 80.
+  > **Update (2026-10-21):** the shipped default was **lowered to 60** by operator decision after manual
+  > evaluation (traded precision for recall; see Q3 and the FIND-05 update in
+  > `docs/security/AUDIT-2026-10-20-alert-fuzzy-similarity.md`). AC-A4 now reads "default **60**".
+  > The conformance fixtures were re-calibrated to the new default (see §14 of
+  > `PLAN-2026-10-21-similar-tab-lazy-badge.md`).
 - **A5** Backfill command `backfill_alert_ssdeep`. 
   **AC-A5:** idempotent (second run updates 0); `--dry-run` writes nothing; batched via `.iterator()`.
 
@@ -265,7 +270,7 @@ payload_ssdeep = models.CharField(max_length=160, blank=True, default="")
 |---|----------|
 | Q1 | Library = **`ppdeep`** (pure-Python, SSDEEP-compatible, no system deps). |
 | Q2 | Hash a **canonicalized projection** (decision (b)): drop documented volatile keys, recursive key sort, scalar-list sort, deterministic JSON, plus `summary` — **`title` excluded** (decision (A), 2026-10-20; see §3.2). |
-| Q3 | **Global Django setting** `ALERT_FUZZY_SIMILARITY_THRESHOLD` (env `AMALTHEA_ALERT_FUZZY_THRESHOLD`), default **80**; per-source later. |
+| Q3 | **Global Django setting** `ALERT_FUZZY_SIMILARITY_THRESHOLD` (env `AMALTHEA_ALERT_FUZZY_THRESHOLD`), default **80**; per-source later. **Amended 2026-10-21: shipped default is now `60`** (operator decision after manual evaluation — more recall, more candidate matches). |
 | Q4 | **Replace** the exact-signal basis of the "Similar alerts" card with fuzzy similarity; keep the shell/scoping/link action. |
 | Q5 | **Management command** backfill, batched + idempotent; not a data migration. |
 | Q6 | Wire **both** ingest paths via one shared helper. |

@@ -730,6 +730,15 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
     of success when the merge is refused. Pinned by
     `test_alert_fuzzy_similarity.py::TestCrossOrgIsolation::test_superadmin_cross_org_link_is_refused_and_not_persisted`.
     **Not part of the fuzzy feature.**
+- [x] **12.13 — Similar tab was empty until a manual refresh; now lazy-loads on click + combined-count
+  badge. DONE 2026-10-21.** `docs/planning/PLAN-2026-10-21-similar-tab-lazy-badge.md` (21/21 ACs MET;
+  `docs/verification/VERIFY-2026-10-21-similar-tab-lazy-badge.md`). Root cause: `tabs.js` intercepted the
+  tab click and only toggled `hidden` (no fetch) while the server computed the similar data **only** when
+  `active_tab == "similar"`. Fix: fragment endpoint `ui-case-similar` + `_similar_for_case` helper +
+  `tabs.js` one-shot lazy fetch; the **Similar** tab label now shows a `.count` badge =
+  `similar cases + similar alerts` (only when > 0). No schema/API/CSS change; undefined-class backlog 42.
+  Known minor edge: `tabs.js` collapse-`return` can skip `pushState` on a rapid second activation
+  (visual state correct) — plan §14.6, low impact.
 - [ ] **12.3-fu1 — Automatic ingest-time bundling was deferred by decision Q1b (the "more urgent half" of
   Module B).** Plan: `docs/planning/PLAN-2026-10-18-correlation-similar-cases.md` §5.x (scope) and §11 (the
   pre-settled answers, so the trigger design is **not** re-litigated when this starts).

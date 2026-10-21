@@ -1,0 +1,61 @@
+{% load ui_tags %}
+{# Similar alerts card — mirrors _tab_alerts.html table structure #}
+<section class="card" aria-labelledby="h-similar-alerts">
+  <h2 id="h-similar-alerts">Similar alerts</h2>
+
+  {% if similar_alerts %}
+    <div class="table-wrap">
+      <table class="data-table data-table-tight">
+        <caption class="sr-only">Unlinked alerts sharing observables with this case</caption>
+        <thead>
+          <tr>
+            <th scope="col">Source</th>
+            <th scope="col">Title</th>
+            <th scope="col">Severity</th>
+            <th scope="col">Status</th>
+            <th scope="col">Received</th>
+            <th scope="col">Similarity</th>
+            <th scope="col"><span class="sr-only">Action</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for sa in similar_alerts %}
+          <tr>
+            <td>{{ sa.alert.ingestion_source.name|default:sa.alert.source }}</td>
+            <td><a class="linkish" href="{% url 'ui-alert-detail' sa.alert.id %}">{{ sa.alert.title }}</a></td>
+            <td><span class="sev sev-{{ sa.alert.severity|sev_class }}">{{ sa.alert.severity|sev_label }}</span></td>
+            <td><span class="pill pill-{{ sa.alert.status.stage|lower }}">{{ sa.alert.status.value }}</span></td>
+            <td class="mono dim">{{ sa.alert.date|date:"Y-m-d H:i" }}</td>
+            <td class="mono dim">{{ sa.similarity }}%</td>
+            <td>
+              {% if can_mutate %}
+              <form method="post" action="{% url 'ui-case-alert-link' case.number %}">
+                {% csrf_token %}
+                <input type="hidden" name="tab" value="similar">
+                <input type="hidden" name="alert_id" value="{{ sa.alert.id }}">
+                <button type="submit" class="btn btn-sm">Link to case</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {# Honest truncation line #}
+    {% if similar_alerts_total > similar_alerts|length %}
+      <p class="list-summary dim">
+        Showing <strong>{{ similar_alerts|length }}</strong> of <strong>{{ similar_alerts_total }}</strong> similar alerts
+      </p>
+    {% endif %}
+
+  {% else %}
+    {# Two distinct empty states: no alerts to compare vs no matches #}
+    {% if alerts %}
+      <p class="empty">No unlinked alerts are similar enough right now.</p>
+    {% else %}
+      <p class="empty">This case has no alerts to compare against.</p>
+    {% endif %}
+  {% endif %}
+</section>
