@@ -28,6 +28,7 @@ from alerts.escalation import (
     merge_alert_into_case,
     resolve_alert_status,
 )
+from alerts.hashing import compute_payload_ssdeep
 from alerts.models import Alert, AlertObservable, AlertStatus, AlertTagLink
 from cases.models import TTP, Comment, Tag
 from cases.procedures import create_procedure
@@ -278,6 +279,9 @@ def _create_alert(request: Request) -> Response:
         )
 
     warnings: list[str] = []
+    # Compute SSDEEP hash for fuzzy similarity
+    raw_payload = payload if isinstance(payload, dict) else {}
+    payload_ssdeep = compute_payload_ssdeep(str(payload.get("summary") or ""), raw_payload)
     with transaction.atomic():
         alert = Alert.objects.create(
             type=alert_type[:100],
@@ -293,6 +297,7 @@ def _create_alert(request: Request) -> Response:
             flag=bool(payload.get("flag") or False),
             status=resolve_alert_status(str(payload.get("status") or "New"), warnings=warnings),
             owner_org=org,
+            payload_ssdeep=payload_ssdeep,
         )
         # `date` is ms-epoch on the wire (5.8.0 format); keep the ingest path's tolerance.
         date_value = payload.get("date")

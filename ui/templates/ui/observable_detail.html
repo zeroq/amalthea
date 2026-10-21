@@ -198,7 +198,7 @@
           <tr>
             <td><a href="{% url 'ui-case-detail' link.case.number %}">{{ link.case.number }}</a></td>
             <td>{{ link.case.title|truncatechars:50 }}</td>
-            <td><span class="pill sev-{{ link.case.severity }}">{{ link.case.get_status_display }}</span></td>
+            <td><span class="pill sev-{{ link.case.severity }}">{{ link.case.status.value }}</span></td>
             <td><span class="sev sev-{{ link.case.severity }}">{{ link.case.get_severity_display }}</span></td>
             <td>{{ link.case.created_at|date:"Y-m-d H:i" }}</td>
             <td><a class="btn" href="{% url 'ui-case-detail' link.case.number %}">Open</a></td>

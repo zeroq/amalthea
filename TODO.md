@@ -691,6 +691,45 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
   on that path; and `ignore_similarity` is consumed for the first time. Under decision **Q1b**, automatic
   ingest-time bundling was **deferred** — see §12.3-fu1. Tests:
   `tests/conformance/test_correlation_similar_cases.py` (20).
+  **Addendum 2026-10-20:** the Similar tab gained a second **"Similar alerts"** card
+  (`PLAN-2026-10-20-similar-alerts-card.md`; verified 11/11 ACs) — unlinked, same-org alerts ranked by signal
+  overlap with the case's attached alerts, with a one-click **Link to case** action
+  (`alerts_similar_to_case` in `cases/correlation.py`; `ui-case-alert-link` POST view). This is the
+  analyst-driven complement to the deferred automatic bundling (§12.3-fu1 still open).
+  **Addendum 2026-10-21:** the "Similar alerts" card's **matching basis was replaced** by **SSDEEP fuzzy
+  similarity** (`ppdeep`) — see `PLAN-2026-10-20-alert-fuzzy-similarity.md` (verified 22/22 ACs; security
+  APPROVE WITH NOTES). `payload_ssdeep` is computed at ingest; the card ranks by
+  `alerts_fuzzy_similar_to_case`; the old exact-signal function was deleted. Follow-ups below
+  (§12.12).
+- [ ] **12.12 — Fuzzy-similarity follow-ups (security FIND-05/03/06/07/11 + one discovered bug), 2026-10-21.**
+  From `docs/security/AUDIT-2026-10-20-alert-fuzzy-similarity.md` and Phase E verification:
+  - [ ] **12.12-fu1 (High, by design — FIND-05).** Decision (A) excludes `title` from the hash, so two
+    different events with similar payloads can score high; the 80 threshold is the only guard. Decide between
+    an opt-in `ALERT_FUZZY_INCLUDE_TITLE` setting and a require-both **title-fingerprint** pass. **Document
+    the trade-off in the deployment runbook** regardless of which is chosen. (This is a design decision, not
+    a defect — needs a product call.)
+  - [ ] **12.12-fu2 (Medium — FIND-03).** `ppdeep.hash/compare` CPU is unbounded on large canonical text
+    (5 MiB body × 500 candidates). Add `ALERT_FUZZY_MAX_TEXT_SIZE` truncation and/or lower the `case_hashes`
+    cap; **measure on Postgres** (ties to risk R5, blocked on a Postgres harness). Consider async/cached
+    computation for the Similar tab.
+  - [ ] **12.12-fu3 (Medium — FIND-06).** `VOLATILE_KEYS` is a static list and may miss vendor-specific keys
+    (`flow_id`, `session_id`, `correlation_id`, …), causing **false negatives**. Add
+    `ALERT_FUZZY_EXTRA_VOLATILE_KEYS` (settings-extensible) and/or a value-pattern heuristic (UUID/timestamp).
+  - [ ] **12.12-fu4 (Low — FIND-07/FIND-12).** Document that `backfill --force` skips when recomputation
+    yields `""` (does not blank) and that scalar-list sorting collapses order-significant arrays (false-positive
+    risk); consider a `--clear-on-failure` flag and per-source list-sort config later.
+  - [ ] **12.12-fu5 (Low — FIND-11).** `ppdeep`'s hash was hand-added to `requirements/base.txt`; there is no
+    `make lock` recipe (empty `.PHONY` target). Implement `pip-compile --generate-hashes` locking to prevent
+    drift (overlaps the existing `make lock`/`make hooks` follow-up).
+  - [ ] **12.12-fu6 (bug, pre-existing, out of scope).** `ui/views.py::case_alert_link` shows a false
+    **success** banner on a refused cross-org merge: `record_alert_bundled` raises
+    `PermissionDenied("Cross-org alert bundle refused")` for **every** role (superAdmin included), but the
+    view's `messages.success(...)` runs **after** the `except PermissionDenied` branch, so the user is told
+    "Alert linked to case N." while the transaction rolled back. The invariant is correct (cross-org bundling
+    is refused regardless of role) — only the feedback is wrong. Fix: return/relay the error message instead
+    of success when the merge is refused. Pinned by
+    `test_alert_fuzzy_similarity.py::TestCrossOrgIsolation::test_superadmin_cross_org_link_is_refused_and_not_persisted`.
+    **Not part of the fuzzy feature.**
 - [ ] **12.3-fu1 — Automatic ingest-time bundling was deferred by decision Q1b (the "more urgent half" of
   Module B).** Plan: `docs/planning/PLAN-2026-10-18-correlation-similar-cases.md` §5.x (scope) and §11 (the
   pre-settled answers, so the trigger design is **not** re-litigated when this starts).

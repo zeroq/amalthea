@@ -31,6 +31,11 @@ if TYPE_CHECKING:
 # 5 MiB payload can hold thousands of small observables; 1000 bounds memory/CPU.
 MAX_CORRELATION_OBS = 1000
 
+# Hard cap on candidate unlinked alerts compared for fuzzy similarity (Phase B).
+# Candidate set: unlinked + same-org + non-empty hash, ordered -date, sliced here.
+# Comparison cost: len(case_hashes) * len(candidates) ppdeep.compare calls.
+MAX_FUZZY_COMPARISONS = 500
+
 
 @dataclass(frozen=True)
 class SimilarCase:
@@ -39,6 +44,19 @@ class SimilarCase:
     case: Case
     shared_count: int
     shared: list[tuple[str, str]]  # ordered by data_type then data
+
+
+@dataclass(frozen=True)
+class SimilarAlert:
+    """An unlinked alert that is fuzzily similar to this case's attached alerts.
+
+    The exact-overlap fields (shared_count, shared) were retired in Phase B
+    (PLAN-2026-10-20-alert-fuzzy-similarity.md §3.4). Only the fuzzy
+    similarity score is retained.
+    """
+
+    alert: Alert
+    similarity: int  # 0-100, maximum ppdeep.compare score against case's alerts
 
 
 def _json_depth(obj: object, current: int = 0) -> int:
@@ -325,6 +343,89 @@ def candidate_cases_for_alert(
         ]
 
     return similar_cases[:limit]
+
+
+def alerts_fuzzy_similar_to_case(
+    case: Case, *, user: User, threshold: int | None = None, limit: int | None = None
+) -> tuple[list[SimilarAlert], int]:
+    """
+    Rank UNLINKED, same-org alerts by SSDEEP fuzzy similarity to `case`'s attached alerts.
+
+    Signals: `payload_ssdeep` hashes of the case's attached alerts (non-empty).
+    Candidates: unlinked alerts in the same org with non-empty `payload_ssdeep`.
+
+    Scoring: for each candidate, compute the maximum `ppdeep.compare(candidate_hash, h)`
+    over all case alert hashes. Keep candidates with score >= threshold.
+
+    Returns:
+        (top_limit_rows, total_matching) — total is computed BEFORE limit for honest truncation.
+    """
+    from ui.pagination import RAIL_CAP
+
+    if limit is None:
+        limit = RAIL_CAP
+
+    # Resolve threshold (global default, overrideable per-call)
+    threshold = (
+        threshold
+        if threshold is not None
+        else getattr(settings, "ALERT_FUZZY_SIMILARITY_THRESHOLD", 80)
+    )
+
+    # 1. Collect case signal hashes from attached alerts
+    from alerts.models import Alert
+    from identity.scoping import org_q
+
+    case_alerts = (
+        Alert.objects.filter(case=case)
+        .exclude(payload_ssdeep="")
+        .values_list("payload_ssdeep", flat=True)[:MAX_CORRELATION_OBS]
+    )
+
+    case_hashes = [h for h in case_alerts if h]
+    if not case_hashes:
+        return [], 0
+
+    # 2. Candidates: unlinked, same-org, non-empty hash, ordered by -date, capped
+    candidates_qs = (
+        Alert.objects.filter(case__isnull=True)
+        .filter(org_q("owner_org", user))
+        .exclude(payload_ssdeep="")
+        .select_related("status", "owner_org")
+        .order_by("-date")[:MAX_FUZZY_COMPARISONS]
+    )
+
+    # 3. Score each candidate: max ppdeep.compare against case hashes
+    try:
+        import ppdeep  # type: ignore[import-untyped]
+    except ImportError:
+        ppdeep = None
+
+    similar_alerts: list[SimilarAlert] = []
+    if ppdeep is not None:
+        for alert in candidates_qs:
+            candidate_hash = alert.payload_ssdeep
+            if not candidate_hash:
+                continue
+
+            max_score = 0
+            for case_hash in case_hashes:
+                try:
+                    score = ppdeep.compare(candidate_hash, case_hash)
+                    if score > max_score:
+                        max_score = score
+                except (Exception, RecursionError, MemoryError):  # noqa: S112
+                    # Treat comparison failures as score 0
+                    continue
+
+            if max_score >= threshold:
+                similar_alerts.append(SimilarAlert(alert=alert, similarity=max_score))
+
+    # 4. Rank: similarity desc, then -date
+    similar_alerts.sort(key=lambda sa: (-sa.similarity, -sa.alert.date.timestamp()))
+
+    total_matching = len(similar_alerts)
+    return similar_alerts[:limit], total_matching
 
 
 def record_alert_bundled(

@@ -22,6 +22,7 @@ from typing import Any
 from django.db import transaction
 from django.utils import timezone
 
+from alerts.hashing import compute_payload_ssdeep
 from alerts.models import Alert, AlertStatus
 from identity.models import Organisation
 from ingest.models import IngestionSource
@@ -113,6 +114,9 @@ def store_ingested_alert(
 
     status = _resolve_default_status(warnings)
 
+    # Compute SSDEEP hash for fuzzy similarity (only on create, via defaults)
+    payload_ssdeep = compute_payload_ssdeep(summary or "", payload)
+
     with transaction.atomic():
         alert, created = Alert.objects.get_or_create(
             owner_org=owner_org,
@@ -128,6 +132,7 @@ def store_ingested_alert(
                 "date": date or timezone.now(),
                 "raw_payload": payload,
                 "correlation_key": correlation_key,
+                "payload_ssdeep": payload_ssdeep,
                 "ingestion_source": ingestion_source,
                 "owner_org": owner_org,
                 "ingestion_warnings": {

@@ -59,6 +59,7 @@ from automation.executor import registered_actions
 from automation.models import AutomationRun, Playbook
 from automation.playbooks import ACTIONS, HTTP_METHODS
 from cases.correlation import (
+    alerts_fuzzy_similar_to_case,
     candidate_cases_for_alert,
     cases_sharing_findings,
     record_alert_bundled,
@@ -544,6 +545,37 @@ def alert_merge(request: HttpRequest, alert_id: str) -> HttpResponse:
         messages.error(request, str(exc))
         return redirect("ui-alert-detail", alert_id=alert_id)
     messages.success(request, f"Alert merged into case {case.number}.")
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_alert_link(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Link an unlinked alert to this case from the Similar tab."""
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        raise Http404()
+    alert = resolve_alert(request.user, request.POST.get("alert_id") or "", write=True)
+    if alert is None:
+        raise Http404()
+    if alert.case_id is not None:
+        messages.info(request, "Alert is already linked to a case.")
+        return _case_detail_redirect(request, case.number)
+    try:
+        with transaction.atomic():
+            merge_alert_into_case(alert, case, actor=request.user)
+            record_alert_bundled(
+                case,
+                alert,
+                actor=request.user,
+                reason="Alert linked from Similar tab",
+                source="merge",
+            )
+    except PermissionDenied as exc:
+        messages.error(request, str(exc))
+        return _case_detail_redirect(request, case.number)
+    messages.success(request, f"Alert linked to case {case.number}.")
     return _case_detail_redirect(request, case.number)
 
 
@@ -1047,6 +1079,8 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     # Similar cases tab — only query when the tab is rendered (plan: no query when not rendered)
     similar_cases = []
     similar_total = 0
+    similar_alerts = []
+    similar_alerts_total = 0
     if active_tab == "similar":
         from observables.extractor import Finding
 
@@ -1067,6 +1101,8 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
         similar_cases, similar_total = cases_sharing_findings(
             findings, user=request.user, exclude_case=case
         )
+        # Similar alerts: unlinked alerts fuzzy-similar to this case's attached alerts
+        similar_alerts, similar_alerts_total = alerts_fuzzy_similar_to_case(case, user=request.user)
 
     # Add-tag dialog (§12.8): `Tag` is global and grows without bound, so the picker is capped at
     # `PICKER_PAGE_SIZE`. Fetching one row past the cap detects truncation without a second `COUNT`
@@ -1123,6 +1159,9 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             # Similar cases (Module C)
             similar_cases=similar_cases,
             similar_total=similar_total,
+            # Similar alerts (Module C)
+            similar_alerts=similar_alerts,
+            similar_alerts_total=similar_alerts_total,
             # Edit-case modal (case_detail.html §"Edit case"): mirror the edit page's context.
             form_values=case_edit_form_values,
             severity_choices=SEVERITY_CHOICES,

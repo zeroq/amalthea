@@ -102,6 +102,9 @@ class Alert(UUIDModel, TimeStampedModel):
     )
     raw_payload = models.JSONField(blank=True, default=dict)
     correlation_key = models.CharField(max_length=256, blank=True, default="")
+    # SSDEEP-compatible hash of the canonicalized payload (title + summary + payload).
+    # Internal only (not exposed on the wire). Empty string = not fuzzy-comparable.
+    payload_ssdeep = models.CharField(max_length=160, blank=True, default="")
     ingestion_source = models.ForeignKey(
         IngestionSource,
         on_delete=models.SET_NULL,

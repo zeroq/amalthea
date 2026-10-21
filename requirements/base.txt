@@ -600,6 +600,9 @@ packaging==26.3 \
     #   django-csp
     #   incremental
     #   kombu
+ppdeep==20260221 \
+    --hash=sha256:e46d5130afeb0c73155568df9fcab41e2ff1ff04e95a29970b3da5b129f0ec34 \
+    # via -r base.in
 prompt-toolkit==3.0.53 \
     --hash=sha256:01c0891d7f9237d5e339f7d3e42cdae80b7534abb1c7c0e3352efba6231492f2 \
     --hash=sha256:9ec8a0ad96d5c56148b3f914aa79c1564c3fde5d2e6b876e7bc327e353cf8fa6

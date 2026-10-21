@@ -3,6 +3,7 @@
   Similar cases tab — ranked list of cases sharing observables with this case.
   Context: similar_cases (list[SimilarCase]), similar_total (int), case (Case).
   SimilarCase fields: .case, .shared_count (int), .shared (list[tuple[data_type, value]]).
+  The per-case shared observable values are intentionally not rendered here (count only).
 {% endcomment %}
 <section class="card" aria-labelledby="h-similar">
   <h2 id="h-similar">Similar cases</h2>
@@ -22,7 +23,7 @@
           <dl class="similar-meta" aria-label="Case metadata">
             <dt class="sr-only">Status</dt>
             <dd class="similar-status">
-              <span class="pill sev-{{ sc.case.severity }}">{{ sc.case.get_status_display }}</span>
+              <span class="pill sev-{{ sc.case.severity }}">{{ sc.case.status.value }}</span>
             </dd>
             <dt class="sr-only">Severity</dt>
             <dd class="similar-severity">
@@ -35,16 +36,6 @@
           <span class="similar-count" aria-label="{{ sc.shared_count }} shared artifact{{ sc.shared_count|pluralize }}">
             {{ sc.shared_count }} shared
           </span>
-
-          {% if sc.shared %}
-          <ul class="shared-chips" role="list" aria-label="Shared observable values">
-            {% for data_type, value in sc.shared %}
-            <li class="shared-chip mono" title="{{ data_type }}: {{ value }}">
-              {{ data_type }}: {{ value }}
-            </li>
-            {% endfor %}
-          </ul>
-          {% endif %}
         </div>
       </li>
       {% endfor %}
@@ -63,6 +54,67 @@
       <p class="empty">No other case shares artifacts with this one.</p>
     {% else %}
       <p class="empty">This case has no artifacts yet.</p>
+    {% endif %}
+  {% endif %}
+</section>
+
+{# Similar alerts card — mirrors _tab_alerts.html table structure #}
+<section class="card" aria-labelledby="h-similar-alerts">
+  <h2 id="h-similar-alerts">Similar alerts</h2>
+
+  {% if similar_alerts %}
+    <div class="table-wrap">
+      <table class="data-table data-table-tight">
+        <caption class="sr-only">Unlinked alerts sharing observables with this case</caption>
+        <thead>
+          <tr>
+            <th scope="col">Source</th>
+            <th scope="col">Title</th>
+            <th scope="col">Severity</th>
+            <th scope="col">Status</th>
+            <th scope="col">Received</th>
+            <th scope="col">Similarity</th>
+            <th scope="col"><span class="sr-only">Action</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for sa in similar_alerts %}
+          <tr>
+            <td>{{ sa.alert.ingestion_source.name|default:sa.alert.source }}</td>
+            <td><a class="linkish" href="{% url 'ui-alert-detail' sa.alert.id %}">{{ sa.alert.title }}</a></td>
+            <td><span class="sev sev-{{ sa.alert.severity|sev_class }}">{{ sa.alert.severity|sev_label }}</span></td>
+            <td><span class="pill pill-{{ sa.alert.status.stage|lower }}">{{ sa.alert.status.value }}</span></td>
+            <td class="mono dim">{{ sa.alert.date|date:"Y-m-d H:i" }}</td>
+            <td class="mono dim">{{ sa.similarity }}%</td>
+            <td>
+              {% if can_mutate %}
+              <form method="post" action="{% url 'ui-case-alert-link' case.number %}">
+                {% csrf_token %}
+                <input type="hidden" name="tab" value="similar">
+                <input type="hidden" name="alert_id" value="{{ sa.alert.id }}">
+                <button type="submit" class="btn btn-sm">Link to case</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {# Honest truncation line #}
+    {% if similar_alerts_total > similar_alerts|length %}
+      <p class="list-summary dim">
+        Showing <strong>{{ similar_alerts|length }}</strong> of <strong>{{ similar_alerts_total }}</strong> similar alerts
+      </p>
+    {% endif %}
+
+  {% else %}
+    {# Two distinct empty states: no alerts to compare vs no matches #}
+    {% if alerts %}
+      <p class="empty">No unlinked alerts are similar enough right now.</p>
+    {% else %}
+      <p class="empty">This case has no alerts to compare against.</p>
     {% endif %}
   {% endif %}
 </section>

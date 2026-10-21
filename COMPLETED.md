@@ -1354,10 +1354,105 @@ follow-ups — see the top of [`TODO.md`](./TODO.md).*
   - `make check` green; targeted regression: `test_ui_observable_seen_in_modal` (7),
     `test_tenant_scoping` (100), `test_ui_loop` (44), wiring/table/viewer/pagination (178) — all pass.
 
+## 2026-10-20 — **Case detail → Similar: "Similar alerts" card with one-click linking**
+
+- [x] **"Similar alerts" card on the case-detail Similar tab — implemented + independently verified 2026-10-20.**
+  `docs/planning/PLAN-2026-10-20-similar-alerts-card.md` (approved) +
+  `docs/planning/BRIEF-2026-10-20-similar-alerts-card.md`; verified in
+  `docs/verification/VERIFY-2026-10-20-similar-alerts-card.md` (**11/11 ACs MET, READY TO COMMIT**).
+  Below the existing "Similar cases" card, a second card lists **unlinked, same-org alerts** that share
+  signals with the signals of the alerts already attached to the case, each with a one-click
+  **Link to case** button.
+  - **Algorithm** (`cases/correlation.py`: `alerts_similar_to_case(case, *, user, limit=None)` + `SimilarAlert`):
+    signals drawn from the case's attached alerts' `correlation_key` (typed synthetic findings) **and**
+    payload-extracted findings (`find_observables`/`json_leaves`, same vocabulary as
+    `candidate_cases_for_alert`); candidates strictly `case__isnull=True` + `org_q("owner_org", user)`;
+    ranked by `shared_count` desc then newest `date`; bounded (`MAX_CORRELATION_OBS = 1000`,
+    `WEBHOOK_MAX_BODY_SIZE`/`WEBHOOK_MAX_DEPTH`, exception-safe).
+  - **Linking** (`ui/views.py: case_alert_link`, `@not_viewer @login_required @require_POST`; route
+    `cases/<str:case_id>/link-alert` → `ui-case-alert-link`): `transaction.atomic` around
+    `merge_alert_into_case` + `record_alert_bundled(source="merge")`; already-linked → info message,
+    no duplicate ledger (idempotent).
+  - **Tenant-safe:** cross-org alerts never surface (helper org filter **and** `resolve_alert`
+    org-scoping on POST — cross-org POST → 404). Falsifiability proven (tenant + attached-exclusion tests
+    fail when the guard is removed).
+  - **RBAC:** viewers see the card + rows but **no** Link button (`can_mutate` gate); viewer POST refused.
+  - **Tab-gated:** the Similar-alerts query runs only when `active_tab == "similar"` (mock-verified).
+  - **Fixes folded in (AC-11):** `Case.get_status_display()` does not exist → `status.value` in
+    `_tab_similar.html:25` and `observable_detail.html:201` (blank status pills).
+  - **Files:** `cases/correlation.py`, `ui/views.py`, `ui/urls.py`,
+    `ui/templates/ui/_tab_similar.html`, `ui/templates/ui/observable_detail.html`; new
+    `tests/conformance/test_ui_similar_alerts.py` (16 tests, incl. cross-org + viewer + idempotence +
+    falsifiability + AC-11).
+  - **No schema change; no API change; no new CSS** (undefined-class backlog unchanged at 42).
+  - `make check` green; targeted `pytest tests/conformance/test_ui_similar_alerts.py` → 16 passed.
+- [x] **UI refinement (2026-10-20):** the **"Similar cases"** card no longer renders the per-case shared
+  observable chips (`data_type: value`), which cluttered the row; it now shows only the **"N shared"** count.
+  `SimilarCase.shared` remains available (still used by the alert-detail merge dropdown). Dead CSS removed:
+  `.shared-chips` / `.shared-chip` (and the responsive `.shared-chips` rule) deleted from `app.src.css`
+  and the compiled `app.css` regenerated. No test asserted the removed markup; `make check` green,
+  `test_correlation_similar_cases` + `test_ui_similar_alerts` (36) and UI-loop/tenant-scoping (137) pass.
+
 ---
 
-*Last updated: 2026-10-20 — **clickable "Seen in" → linked-cases modal** on the case-detail Observables tab
-(tenant-scoped, viewer-visible, N+1 removed; two QA-caught defects fixed) plus **§10.1 org-scoped user
-management** (ADR-010; verified 24/24 + security reviewed) and the Settings/Cases/Alerts UI refinements
-(filter cards, tri-state case scope, right-aligned in-card actions). Uncommitted in the working tree at the
-time of writing.*
+## 2026-10-21 — **Fuzzy alert similarity (SSDEEP) replaces exact-signal "Similar alerts" basis**
+
+- [x] **"Similar alerts" card now ranks by SSDEEP fuzzy similarity (`ppdeep`) instead of exact signal
+  overlap — implemented, independently verified, security-audited 2026-10-21.**
+  `docs/planning/PLAN-2026-10-20-alert-fuzzy-similarity.md` (approved) +
+  `docs/planning/BRIEF-2026-10-20-alert-fuzzy-similarity.md`; verified in
+  `docs/verification/VERIFY-2026-10-20-alert-fuzzy-similarity.md` (**22/22 ACs MET, READY TO COMMIT**);
+  audited in `docs/security/AUDIT-2026-10-20-alert-fuzzy-similarity.md` (**APPROVE WITH NOTES**).
+  This plan **supersedes** the exact-signal basis of `PLAN-2026-10-20-similar-alerts-card.md` (the card and
+  its one-click linking remain; only the *matching algorithm* changed).
+  - **Hash at ingest** (`alerts/hashing.py`: `canonicalize_payload`, `compute_payload_ssdeep(summary, payload)`):
+    drops `VOLATILE_KEYS` (28 casefold-matched id/timestamp keys), recursively key-sorts, sorts scalar
+    lists, deterministic JSON; bounds via `WEBHOOK_MAX_BODY_SIZE`/`WEBHOOK_MAX_DEPTH`; catches
+    `(Exception, RecursionError, MemoryError)` → `""` (never fails ingest). Depth probe is **iterative**
+    (`_max_json_depth`, security FIND-02 fix). Stored on new field `Alert.payload_ssdeep`
+    (`alerts/models.py`; migration `0017_alert_payload_ssdeep`, additive).
+  - **Decision (A) — `title` is EXCLUDED from the hash.** Measured: including `title` made the 80-threshold
+    fragile because SIEM/EDR titles often embed per-event tokens (title with timestamp → score 33; title
+    with ID → 22; different title + identical payload → 22). Hashed text is **`summary` + canonical
+    payload**; after the change, different title + identical summary+payload → **100**. Trade-off (FIND-05)
+    documented; open remediation (opt-in `ALERT_FUZZY_INCLUDE_TITLE` / title-fingerprint) tracked in `TODO.md`.
+  - **Similarity** (`cases/correlation.py`: `alerts_fuzzy_similar_to_case(case, *, user, threshold=None,
+    limit=None)`, `SimilarAlert{alert, similarity}`): candidates strictly `case__isnull=True` +
+    `org_q("owner_org", user)` + non-empty hash, capped `MAX_FUZZY_COMPARISONS = 500`; score =
+    `max(ppdeep.compare(candidate, case_hash))`; keep `>= threshold` (settings
+    `ALERT_FUZZY_SIMILARITY_THRESHOLD`, default 80, env `AMALTHEA_ALERT_FUZZY_THRESHOLD`); rank similarity
+    desc then newest `date`. The retired exact-signal stub `alerts_similar_to_case` was deleted (zero callers).
+  - **UI** (`ui/templates/ui/_tab_similar.html`): the "Similar alerts" table columns are now
+    Source / Title / Severity / Status / Received / **Similarity** (`{{ sa.similarity }}%`) / Action; empty
+    states reworded; viewer gating, hidden `tab=similar`, one-click link form, truncation line preserved.
+  - **Backfill** (`alerts/management/commands/backfill_alert_ssdeep.py`): `--batch-size` (500), `--org`,
+    `--dry-run`, `--force`; idempotent; per-row `save(update_fields=…)`. **Runbook note: existing rows hashed
+    under the pre-decision-(A) scheme must be re-hashed once after deploy — `backfill_alert_ssdeep --force`.**
+  - **Dependency:** `ppdeep==20260221` (pure-Python, no transitive deps) pinned + hash-pinned in
+    `requirements/base.txt`; `--require-hashes` install verified; supply chain audited (FIND-01, Info).
+  - **Tenant-safe / RBAC / tab-gated:** cross-org alerts never surface; viewers read-only; query runs only
+    when `active_tab == "similar"`. Falsifiability proven for the org filter, `case__isnull=True`, and the
+    threshold gate (removing each fails the corresponding test).
+  - **Files:** `alerts/hashing.py` (new), `alerts/models.py`, `alerts/views.py`, `ingest/pipeline.py`,
+    `cases/correlation.py`, `alerts/management/commands/backfill_alert_ssdeep.py` (new),
+    `alerts/migrations/0017_alert_payload_ssdeep.py` (new), `amalthea/settings/base.py`, `ui/views.py`,
+    `ui/templates/ui/_tab_similar.html`, `requirements/base.txt`; new
+    `tests/conformance/test_alert_fuzzy_similarity.py` (**22 tests**: determinism, volatile-key
+    insensitivity, decision (A), threshold boundary, cross-org (+superAdmin refusal), attached-exclusion,
+    threshold gate, viewer, link-idempotence, backfill-idempotence, unhashable/iterative-depth, empty states,
+    tab-gating; 4 falsifiability proofs).
+  - **No API change; no CSS change** (undefined-class backlog unchanged at 42). `make check` green;
+    targeted pytest → 24 passed (`test_alert_fuzzy_similarity` + `test_ui_similar_alerts`).
+- [x] **Bug discovered during verification (pre-existing, out of scope; tracked in `TODO.md`):**
+  `ui/views.py::case_alert_link` shows a false **success** banner on a refused cross-org merge
+  (`record_alert_bundled` raises `PermissionDenied` for every role incl. superAdmin; the `messages.success`
+  runs after the `except`). The security invariant is correct; only the feedback is wrong.
+
+---
+
+*Last updated: 2026-10-21 — **fuzzy alert similarity (SSDEEP/`ppdeep`)** replaces the exact-signal basis of
+the case-detail "Similar alerts" card (title excluded per decision (A); 80-threshold; tenant-safe, viewer
+read-only, 22/22 ACs verified, security APPROVE WITH NOTES), superseding the matching basis of the earlier
+exact-signal card. Plus the earlier **"Similar alerts" card** (11/11 ACs), the **clickable "Seen in" →
+linked-cases modal**, **§10.1 org-scoped user management** (ADR-010) and the Settings/Cases/Alerts UI
+refinements.*

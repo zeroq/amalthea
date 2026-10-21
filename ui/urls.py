@@ -21,6 +21,7 @@ urlpatterns = [
     # §10.2 — must precede `cases/<str:case_id>` (a literal is otherwise swallowed as a case id).
     path("cases/new", views.case_create, name="ui-case-create"),
     path("cases/<str:case_id>", views.case_detail, name="ui-case-detail"),
+    path("cases/<str:case_id>/link-alert", views.case_alert_link, name="ui-case-alert-link"),
     path("cases/<str:case_id>/status", views.case_set_status, name="ui-case-status"),
     path("cases/<str:case_id>/close", views.case_close, name="ui-case-close"),
     path("cases/<str:case_id>/field", views.case_field_edit, name="ui-case-field-edit"),
