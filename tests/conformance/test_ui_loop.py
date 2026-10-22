@@ -236,6 +236,7 @@ def test_escalating_from_the_page_runs_the_playbook_and_shows_the_result(
     source: IngestionSource,
     mail_playbook: Playbook,
     django_capture_on_commit_callbacks: object,
+    analyst: User,
 ) -> None:
     """The product claim, end to end, through HTML.
 
@@ -268,6 +269,27 @@ def test_escalating_from_the_page_runs_the_playbook_and_shows_the_result(
             reverse("ui-alert-escalate", kwargs={"alert_id": alert.id}),
             {"title": "Phish on finance mailbox", "assign_me": "on"},
         )
+        # Accept suggestions created during escalation (P6: suggestions flow)
+        case = Case.objects.get()
+        from observables.models import ObservableSuggestion
+
+        suggestions = list(
+            ObservableSuggestion.objects.filter(case=case, status="proposed").values_list(
+                "id", flat=True
+            )
+        )
+        if suggestions:
+            # Accept via the API using the same authenticated client
+            from rest_framework.test import APIClient
+
+            api_client = APIClient()
+            api_client.force_authenticate(user=analyst)
+            bulk_accept = api_client.post(
+                "/api/v1/suggestions/bulk-accept/",
+                {"ids": [str(s) for s in suggestions]},
+                format="json",
+            )
+            assert bulk_accept.status_code == 200, bulk_accept.content
     assert response.status_code == 302
 
     case = Case.objects.get()
@@ -498,11 +520,35 @@ def test_re_extracting_does_not_duplicate_artifacts_or_runs(
     source: IngestionSource,
     mail_playbook: Playbook,
     django_capture_on_commit_callbacks: object,
+    analyst: User,
 ) -> None:
     """Pressing the button twice must be safe: the operator will."""
     alert = _ingest(source)
     with django_capture_on_commit_callbacks(execute=True):
         browser.post(reverse("ui-alert-escalate", kwargs={"alert_id": alert.id}), {})
+
+        # Accept suggestions created during escalation (P6: suggestions flow)
+        case = Case.objects.get()
+        from rest_framework.test import APIClient
+
+        from observables.models import ObservableSuggestion
+
+        api_client = APIClient()
+        api_client.force_authenticate(user=analyst)
+
+        suggestions = list(
+            ObservableSuggestion.objects.filter(case=case, status="proposed").values_list(
+                "id", flat=True
+            )
+        )
+        if suggestions:
+            bulk_accept = api_client.post(
+                "/api/v1/suggestions/bulk-accept/",
+                {"ids": [str(s) for s in suggestions]},
+                format="json",
+            )
+            assert bulk_accept.status_code == 200, bulk_accept.content
+
     case = Case.objects.get()
     observables = case.case_observables.count()
     runs = AutomationRun.objects.filter(case=case).count()
@@ -535,7 +581,10 @@ def test_merging_from_the_page_links_the_alert_to_the_case(
 
 
 def test_the_automation_page_shows_runs_and_their_errors(
-    browser: Client, source: IngestionSource, django_capture_on_commit_callbacks: object
+    browser: Client,
+    source: IngestionSource,
+    django_capture_on_commit_callbacks: object,
+    analyst: User,
 ) -> None:
     """A failed playbook must be legible here, not just a red dot on the dashboard."""
     Playbook.objects.create(
@@ -548,11 +597,33 @@ def test_the_automation_page_shows_runs_and_their_errors(
     with django_capture_on_commit_callbacks(execute=True):
         browser.post(reverse("ui-alert-escalate", kwargs={"alert_id": alert.id}), {})
 
+        # Accept suggestions created during escalation (P6: suggestions flow)
+        case = Case.objects.get()
+        from rest_framework.test import APIClient
+
+        from observables.models import ObservableSuggestion
+
+        api_client = APIClient()
+        api_client.force_authenticate(user=analyst)
+
+        suggestions = list(
+            ObservableSuggestion.objects.filter(case=case, status="proposed").values_list(
+                "id", flat=True
+            )
+        )
+        if suggestions:
+            bulk_accept = api_client.post(
+                "/api/v1/suggestions/bulk-accept/",
+                {"ids": [str(s) for s in suggestions]},
+                format="json",
+            )
+            assert bulk_accept.status_code == 200, bulk_accept.content
+
     body = browser.get(reverse("ui-automation-list")).content.decode()
 
     assert "broken" in body
     assert "Failed" in body
-    assert "no registered action" in body, "the failure reason is not shown to the analyst"
+    assert "no discovered script" in body, "the failure reason is not shown to the analyst"
 
 
 def test_the_sources_page_shows_whether_a_secret_is_required(

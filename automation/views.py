@@ -35,6 +35,7 @@ from automation.dispatcher import TRIGGER_EVENTS, run_now
 from automation.models import Playbook
 from automation.playbooks import ACTIONS, HTTP_METHODS, MAX_TIMEOUT_SECONDS, validate_config
 from automation.scripts_loader import discover_scripts
+from automation.services import PlaybookDeleteBlockedError, delete_playbook
 from core.serializers import automation_run_json, playbook_json
 from identity.permissions import IsAnalystOrAbove
 
@@ -179,10 +180,13 @@ def playbook_meta(request: Request) -> Response:
 @api_view(["GET", "PATCH", "DELETE"])
 @renderer_classes([JSONRenderer])
 def playbook_detail(request: Request, playbook_id: str) -> Response:
-    """`GET|PATCH|DELETE /api/v1/playbook/{idOrName}`; DELETE refuses a playbook that has runs.
+    """`GET|PATCH|DELETE /api/v1/playbook/{idOrName}`; DELETE removes the run history too.
 
     GET: any authenticated org member.
     PATCH/DELETE: requires analyst role or above (IsAnalystOrAbove).
+
+    DELETE is refused while a run is `Pending`/`Running`; terminal runs are deleted with the
+    playbook in the same transaction.
     """
     playbook = _resolve(playbook_id)
     if playbook is None:
@@ -197,14 +201,18 @@ def playbook_detail(request: Request, playbook_id: str) -> Response:
             )
 
     if request.method == "DELETE":
-        # `AutomationRun.playbook` is `PROTECT` (REVIEW M14), so letting this fall through would
-        # raise `ProtectedError` and surface as a 500. The plan asks for a clear message instead.
-        if playbook.runs.exists():
-            return _bad(
-                "playbook has runs",
-                {"_id": ["at least one AutomationRun still references this playbook"]},
+        # `AutomationRun.playbook` is `PROTECT` (REVIEW M14), so the service deletes the terminal
+        # run history first and refuses while a run is still live. The schema guard remains the
+        # backstop for any caller that bypasses this route.
+        try:
+            delete_playbook(playbook)
+        except PlaybookDeleteBlockedError as exc:
+            detail = (
+                f"{exc.active_runs} run(s) are still pending or running"
+                if exc.active_runs
+                else str(exc)
             )
-        playbook.delete()
+            return _bad("playbook has runs", {"_id": [detail]})
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     if request.method == "PATCH":

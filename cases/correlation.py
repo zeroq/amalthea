@@ -452,8 +452,8 @@ def record_alert_bundled(
     Details carries only non-secret data: counts, correlation key, source refs.
     """
     from django.core.exceptions import PermissionDenied
-    from django.utils import timezone
 
+    from cases.ledger import append_timeline_event
     from cases.models import TimelineEvent
     from identity.models import AuditLog
     from identity.scoping import is_viewer
@@ -492,10 +492,10 @@ def record_alert_bundled(
         "source": source,  # "escalate" or "merge"
     }
 
-    # Ledger entry
-    event = TimelineEvent.objects.create(
-        case=case,
-        date=timezone.now(),
+    # Ledger entry via the single write path, so the bundle reaches live clients in the case
+    # room and the choke-point scan in tests/conformance/test_realtime.py stays honest.
+    event = append_timeline_event(
+        case,
         title=f"Alert bundled: {alert.title}",
         kind="correlation-bundle",
         description=f"Reason: {reason}. Source: {alert.source}, type {alert.type}, ref {alert.source_ref}",

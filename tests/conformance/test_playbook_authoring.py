@@ -1,7 +1,8 @@
 """AC6.12-P2 - playbook authoring surface (plan §6.1, T2.1-T2.6).
 
 Covers: CRUD, _meta non-drift, config validation matrix, run-now -> run + timeline,
-DELETE-with-runs refused, P12-1 (TaskCompleted emission on completion only).
+DELETE with runs (active refused, terminal history removed), P12-1 (TaskCompleted emission on
+completion only).
 
 L3: role gating — read-only users denied on mutating endpoints.
 """
@@ -10,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from automation.models import AutomationRun
+from automation.models import AutomationRun, Playbook
 from cases.models import Task, TimelineEvent
 from core.enums import VIEWER_ROLE
 from identity.models import Organisation, User
@@ -332,6 +333,69 @@ def test_delete_playbook_with_runs_refused(analyst: User) -> None:
     # delete should be refused
     code = _delete(c, f"/api/v1/playbook/{pb_id}")
     assert code == 400
+
+
+def test_delete_playbook_with_terminal_runs_removes_playbook_and_runs(analyst: User) -> None:
+    """Terminal runs are history, not a guard: deleting the playbook removes them too (AC3)."""
+    c, _ = _api_key_client(analyst, scope="readwrite")
+    code, body = _post(
+        c,
+        "/api/v1/playbook",
+        {
+            "name": "terminal-runs",
+            "triggerEvent": "observable.created",
+            "config": {"action": "python", "action_path": "enrichment_probe"},
+        },
+    )
+    assert code == 201
+    pb_id = body["_id"]
+
+    run = AutomationRun.objects.create(
+        playbook_id=pb_id,
+        playbook_name="terminal-runs",
+        trigger_event="observable.created",
+        status="Success",
+        idempotency_key="delete-terminal-run",
+    )
+
+    assert _delete(c, f"/api/v1/playbook/{pb_id}") == 204
+    assert not Playbook.objects.filter(pk=pb_id).exists()
+    assert not AutomationRun.objects.filter(pk=run.pk).exists()
+
+
+def test_delete_playbook_with_an_active_run_keeps_all_history(analyst: User) -> None:
+    """A live run blocks the delete before any terminal row is removed (AC4)."""
+    c, _ = _api_key_client(analyst, scope="readwrite")
+    code, body = _post(
+        c,
+        "/api/v1/playbook",
+        {
+            "name": "mixed-runs",
+            "triggerEvent": "observable.created",
+            "config": {"action": "python", "action_path": "enrichment_probe"},
+        },
+    )
+    assert code == 201
+    pb_id = body["_id"]
+
+    success_run = AutomationRun.objects.create(
+        playbook_id=pb_id,
+        playbook_name="mixed-runs",
+        trigger_event="observable.created",
+        status="Success",
+        idempotency_key="delete-mixed-success",
+    )
+    pending_run = AutomationRun.objects.create(
+        playbook_id=pb_id,
+        playbook_name="mixed-runs",
+        trigger_event="observable.created",
+        status="Running",
+        idempotency_key="delete-mixed-running",
+    )
+
+    assert _delete(c, f"/api/v1/playbook/{pb_id}") == 400
+    assert Playbook.objects.filter(pk=pb_id).exists()
+    assert AutomationRun.objects.filter(pk__in=[success_run.pk, pending_run.pk]).count() == 2
 
 
 # --- run-now → run + timeline (AC6.12-P2-a) ---------------------------------

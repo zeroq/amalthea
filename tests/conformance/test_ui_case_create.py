@@ -17,7 +17,7 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from cases.models import Case, CaseObservable, CaseStatus, TimelineEvent
+from cases.models import Case, CaseStatus, TimelineEvent
 from identity.models import AuditLog, Organisation, User
 from observables.models import ObservableType
 
@@ -233,7 +233,7 @@ def test_ui_case_create_post_title_only_redirects_to_detail(
 def test_ui_case_create_post_with_extractable_artifact_creates_observable(
     browser: Client, status_in_progress: CaseStatus, analyst: User
 ) -> None:
-    """P2-i (extraction on): description with extractable artifact → Observable linked to case.
+    """P2-i (extraction on): description with extractable artifact → Suggestion created for case.
 
     The extractor vocabulary (observables/extractor.py) recognises:
     - mail: attacker@example.net
@@ -242,6 +242,9 @@ def test_ui_case_create_post_with_extractable_artifact_creates_observable(
     - fqdn: evil.example.com
     - url: http://...
     - file: /path/to/file.txt
+
+    P6: Extraction now creates ObservableSuggestion rows (status=proposed) that must be accepted
+    to become CaseObservable links. This test verifies the suggestion is created.
     """
     url = reverse("ui-case-create")
     # Description contains an email address (mail type)
@@ -256,14 +259,16 @@ def test_ui_case_create_post_with_extractable_artifact_creates_observable(
     assert response.status_code == 302
     case = Case.objects.get(number=1)
 
-    # An observable of type mail should be linked
-    obs_links = CaseObservable.objects.filter(case=case)
-    assert obs_links.exists()
+    # A suggestion of type mail should be created (P6: suggestions flow)
+    from observables.models import ObservableSuggestion
+
+    suggestions = ObservableSuggestion.objects.filter(case=case, status="proposed")
+    assert suggestions.exists()
 
     mail_type = ObservableType.objects.get(name="mail")
-    mail_obs = obs_links.filter(observable__data_type=mail_type).first()
-    assert mail_obs is not None
-    assert mail_obs.observable.normalized_data == "attacker@example.net"
+    mail_suggestion = suggestions.filter(data_type=mail_type).first()
+    assert mail_suggestion is not None
+    assert mail_suggestion.normalized_data == "attacker@example.net"
 
 
 def test_ui_case_create_two_posts_two_distinct_numbers(
@@ -399,11 +404,15 @@ def test_ui_case_create_post_full_field_set_creates_case(
     assert audit.actor == analyst
     assert audit.target_org == analyst.org
 
-    # Extraction (W102-2: unconditional): the embedded mail address is linked as an Observable.
+    # Extraction (W102-2: unconditional): the embedded mail address creates a Suggestion.
     mail_type = ObservableType.objects.get(name="mail")
-    link = CaseObservable.objects.filter(case=case, observable__data_type=mail_type).first()
-    assert link is not None
-    assert link.observable.normalized_data == "attacker@example.net"
+    from observables.models import ObservableSuggestion
+
+    suggestion = ObservableSuggestion.objects.filter(
+        case=case, data_type=mail_type, status="proposed"
+    ).first()
+    assert suggestion is not None
+    assert suggestion.normalized_data == "attacker@example.net"
 
 
 def test_ui_case_create_auto_created_default_status_flashes_warning(

@@ -1,0 +1,25 @@
+{% comment %}
+  Bulk action confirmation modal body for suggestions.
+  Receives: action (accept|reject|ignore), form_id, modal_id
+{% endcomment %}
+<input type="hidden" name="action" value="{{ action }}">
+
+<div class="modal-body-text">
+  {% if action == "accept" %}
+    <p>Accept the selected suggestions? This will link the observables to the case and trigger any associated automation playbooks.</p>
+  {% elif action == "reject" %}
+    <p>Reject the selected suggestions? They will be marked as reviewed but not linked to the case. Re-extraction may re-suggest them.</p>
+  {% elif action == "ignore" %}
+    <p>Ignore the selected suggestions? They will be marked as reviewed and hidden from the proposed list. Re-extraction may re-suggest them.</p>
+  {% endif %}
+</div>
+
+<div class="form-row">
+  <label for="{{ form_id }}-count">Selected count</label>
+  <output id="{{ form_id }}-count" class="mono">{{ selected_count|default:0 }}</output>
+</div>
+
+{% comment %}
+  The actual selected IDs are passed via hidden inputs in the form footer (added by JS when modal opens).
+  This body just shows the confirmation text and count.
+{% endcomment %}

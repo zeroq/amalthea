@@ -40,7 +40,7 @@ from cases.models import (
 )
 from compat.enums import PAP_LABELS, SEVERITY_LABELS, TLP_LABELS
 from identity.models import Organisation, User
-from observables.models import Observable, ObservableType
+from observables.models import Observable, ObservableSuggestion, ObservableType
 
 
 def _iso(value: Any) -> str | None:
@@ -663,3 +663,32 @@ def tag_json(tag: Tag) -> dict[str, Any]:
         "hidden": False,
         "extraData": {},
     }
+
+
+def observable_suggestion_json(suggestion: ObservableSuggestion) -> dict[str, Any]:
+    """`OutputObservableSuggestion` — a suggested observable awaiting analyst review.
+
+    Serializes the suggestion with its provenance, status, and linked observable (if accepted).
+    """
+    payload: dict[str, Any] = {
+        "_id": str(suggestion.id),
+        "id": str(suggestion.id),
+        "_type": "ObservableSuggestion",
+        "dataType": suggestion.data_type.name,
+        "data": suggestion.raw_data,
+        "normalizedData": suggestion.normalized_data,
+        "status": suggestion.status,
+        "sourcePaths": suggestion.source_paths,
+        "reason": suggestion.reason,
+        "filteredOut": suggestion.filtered_out,
+        "filterReason": suggestion.filter_reason,
+        "enrichmentData": suggestion.enrichment_data or {},
+        "sourceAlertId": str(suggestion.source_alert_id) if suggestion.source_alert_id else None,
+        "caseId": str(suggestion.case_id) if suggestion.case_id else None,
+        "observableId": str(suggestion.observable_id) if suggestion.observable_id else None,
+        "reviewedBy": _username(suggestion.reviewed_by),
+        "reviewedAt": _iso(suggestion.reviewed_at),
+        "createdAt": _iso(suggestion.created_at),
+        "updatedAt": _iso(suggestion.updated_at),
+    }
+    return payload

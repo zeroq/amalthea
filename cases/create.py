@@ -10,11 +10,11 @@ entry, so the two surfaces cannot drift.
 
 Two behaviours are deliberately *not* new, because clients already depend on them:
 
-* **Extraction is unconditional.** `extract_into_case` runs over the title and description on
-  every create — that is what `_create_case` did before this module existed, and what
-  `import_alert_to_case` does for a promoted alert. A payload-level `extract`/`observables` pair
-  only *adds* explicit strings to the corpus (the recorded wire contract), it does not gate the
-  text scan.
+* **Extraction is unconditional.** On every create, observable *suggestions* are staged
+  from the title and description — that is what `_create_case` did before this module existed,
+  and what `import_alert_to_case` does for a promoted alert. A payload-level
+  `extract`/`observables` pair only *adds* explicit strings to the corpus (the recorded wire
+  contract), it does not gate the text scan.
 * **An empty enum keeps the model default.** A `null`/`""` `severity`, `tlp` or `pap` is dropped
   rather than rejected (ADR-002 §D11 tolerance), while a non-integer or out-of-range value is
   refused with a 400 instead of reaching a `CHECK` constraint as a 500 (SEC-2026-10-11 L1).
@@ -41,7 +41,7 @@ from cases.update import (
     enforce_close_rule,
 )
 from identity.models import Organisation, User
-from observables.extractor import extract_into_case
+from observables.suggestions import create_suggestions_for_case
 
 #: Status a case is created in when the payload names none. The escalation default, so a manual
 #: case and a promoted alert start in the same stage.
@@ -163,7 +163,7 @@ def create_case(
         if payload.get("extract") or payload.get("observables")
         else []
     )
-    extract_into_case(case, case.title, case.description, *extra)
+    create_suggestions_for_case(case, case.title, case.description, *extra)
 
     append_timeline_event(
         case,

@@ -891,6 +891,12 @@ _UI_WRITE_ONLY_ROUTES: set[str] = {
     "ui-playbook-run",
     "ui-playbook-delete",
     "ui-case-tag-toggle",
+    "ui-suggestion-accept",
+    "ui-suggestion-reject",
+    "ui-suggestion-ignore",
+    "ui-suggestions-bulk-accept",
+    "ui-suggestions-bulk-reject",
+    "ui-suggestions-bulk-ignore",
     "ui-settings-organisations-delete",
     "ui-settings-users-delete",
     "ui-settings-token-create",
@@ -1365,6 +1371,8 @@ class TestRouteEnumerationConformance:
             "case-observable-list": {"case_id": str(self.case1.id)},
             "case-timeline": {"case_id": str(self.case1.id)},
             "case-comment-list": {"case_id": str(self.case1.id)},
+            "case-suggestions-list": {"case_id": str(self.case1.id)},
+            "alert-suggestions-list": {"alert_id": str(self.alert1.id)},
             "case-page-list": {"case_id": str(self.case1.id)},
             "case-page-detail": {"case_id": str(self.case1.id), "page_id": str(self.page1.id)},
             "case-flow": {"case_id": str(self.case1.id)},
@@ -1711,6 +1719,7 @@ class TestUIRouteEnumerationConformance:
             "ui-case-create": {},
             "ui-case-detail": {"case_id": str(self.case1.number)},
             "ui-case-tags": {"case_id": str(self.case1.number)},
+            "ui-case-similar": {"case_id": str(self.case1.number)},
             "ui-case-attachment-list": {"case_id": str(self.case1.number)},
             "ui-case-attachment-detail": {
                 "case_id": str(self.case1.number),
@@ -1827,6 +1836,18 @@ class TestWriteRouteEnumerationConformance:
             trigger_event="observable_created",
             is_active=True,
             config={},
+        )
+
+        from observables.models import ObservableSuggestion
+
+        self.suggestion1 = ObservableSuggestion.objects.create(
+            owner_org=self.org1,
+            data_type=self.obs1.data_type,
+            normalized_data="10.0.0.1",
+            raw_data="10.0.0.1",
+            source_alert=self.alert1,
+            case=self.case1,
+            status="proposed",
         )
 
         # Seed data in org2 (for cross-org tests)
@@ -2120,6 +2141,9 @@ class TestWriteRouteEnumerationConformance:
             "case-share-list": {"case_id": str(self.shared_case.id)},
             "case-page-list": {"case_id": str(self.case1.id)},
             "case-page-detail": {"case_id": str(self.case1.id), "page_id": str(self.page1.id)},
+            "suggestion-accept": {"suggestion_id": str(self.suggestion1.id)},
+            "suggestion-reject": {"suggestion_id": str(self.suggestion1.id)},
+            "suggestion-ignore": {"suggestion_id": str(self.suggestion1.id)},
             "observable-tag-link": {"observable_id": str(self.obs1.id)},
             "observable-bulk-update": {},
             "procedure-bulk-delete": {},

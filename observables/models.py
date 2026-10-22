@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.conf import settings
 from django.db import models, transaction
 
 from core.enums import (
@@ -184,3 +185,128 @@ class ObservableTagLink(models.Model):
 
     def __str__(self) -> str:
         return f"{self.observable_id}:{self.tag_id}"
+
+
+class ObservableSuggestion(UUIDModel, TimeStampedModel):
+    """A suggested observable awaiting analyst review (P1-P4).
+
+    Created during extraction with provenance and filtering applied. Analysts accept/reject
+    to promote to a real `Observable` + `CaseObservable` link. Triggers fire ONLY on acceptance.
+
+    Idempotency: unique constraint on (owner_org, data_type, normalized_data, case, source_alert)
+    ensures re-extraction of the same alert+case doesn't create duplicate suggestions.
+    """
+
+    STATUS_CHOICES = [
+        ("proposed", "Proposed"),
+        ("accepted", "Accepted"),
+        ("rejected", "Rejected"),
+        ("ignored", "Ignored"),
+    ]
+
+    # Mandatory tenant (ADR-004): scoped to organisation
+    owner_org = models.ForeignKey(
+        "identity.Organisation",
+        on_delete=models.CASCADE,
+        related_name="observable_suggestions",
+        db_index=False,
+    )
+    # Observable type vocabulary
+    data_type = models.ForeignKey(
+        ObservableType, on_delete=models.PROTECT, related_name="suggestions", db_index=True
+    )
+    # Normalized value (same normalization as Observable)
+    normalized_data = models.CharField(max_length=512)
+    # Raw value as extracted
+    raw_data = models.TextField()
+    # Review status
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="proposed")
+    # Source alert (nullable: suggestions can come from case text without an alert)
+    source_alert = models.ForeignKey(
+        "alerts.Alert",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="suggestions",
+        db_index=False,
+    )
+    # Provenance: JSON paths from the source payload (dot notation)
+    source_paths = models.JSONField(default=list)
+    # Human-readable reason for the suggestion (extraction context, filter reason, etc.)
+    reason = models.TextField(blank=True)
+    # Review metadata
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_suggestions",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    # Target case (where this suggestion would be linked if accepted)
+    case = models.ForeignKey(
+        "cases.Case",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="suggestions",
+        db_index=False,
+    )
+    # Resolved observable on acceptance (nullable until accepted)
+    observable = models.ForeignKey(
+        Observable,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="suggestions",
+    )
+    # Enrichment preview / internal enrichment data
+    enrichment_data = models.JSONField(blank=True, default=dict)
+    # Filtering: items that matched aggressive filters but are shown for visibility
+    filtered_out = models.BooleanField(default=False)
+    filter_reason = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "observable_suggestion"
+        constraints = [
+            # Idempotent re-extraction: one suggestion per (org, type, value, case, alert).
+            # `source_alert` and `case` are nullable, and both engines treat NULLs as distinct
+            # in a plain composite UNIQUE. Postgres has `nulls_distinct=False`, but SQLite does
+            # not, so the null combinations are enforced by four partial constraints instead.
+            # Their column orders deliberately differ so no one is a left prefix of another.
+            models.UniqueConstraint(
+                fields=["source_alert", "case", "owner_org", "data_type", "normalized_data"],
+                condition=models.Q(source_alert__isnull=False, case__isnull=False),
+                name="uniq_suggestion_alert_case",
+            ),
+            models.UniqueConstraint(
+                fields=["case", "owner_org", "data_type", "normalized_data"],
+                condition=models.Q(case__isnull=False, source_alert__isnull=True),
+                name="uniq_suggestion_case_only",
+            ),
+            models.UniqueConstraint(
+                fields=["source_alert", "owner_org", "data_type", "normalized_data"],
+                condition=models.Q(case__isnull=True, source_alert__isnull=False),
+                name="uniq_suggestion_alert_only",
+            ),
+            models.UniqueConstraint(
+                fields=["owner_org", "data_type", "normalized_data"],
+                condition=models.Q(case__isnull=True, source_alert__isnull=True),
+                name="uniq_suggestion_no_context",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(status__in=["proposed", "accepted", "rejected", "ignored"]),
+                name="observable_suggestion_status_valid",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["owner_org", "-created_at"], name="obssug_org_created_idx"),
+            models.Index(fields=["case", "status", "-created_at"], name="obssug_case_status_idx"),
+            models.Index(fields=["source_alert", "status"], name="obssug_alert_status_idx"),
+            models.Index(
+                fields=["owner_org", "status", "-created_at"], name="obssug_org_status_idx"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Suggestion({self.data_type}:{self.normalized_data}) [{self.status}]"

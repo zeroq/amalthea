@@ -9,6 +9,9 @@
   would leave `x` holding the *last* row's URL and every modal would post to that one row.
 {% endcomment %}
 {% url 'ui-case-observable-create' case.number as observable_create_url %}
+{% url 'ui-suggestions-bulk-accept' case.number as suggestions_bulk_accept_url %}
+{% url 'ui-suggestions-bulk-reject' case.number as suggestions_bulk_reject_url %}
+{% url 'ui-suggestions-bulk-ignore' case.number as suggestions_bulk_ignore_url %}
 
 <section class="card" aria-labelledby="h-obs">
   <div class="page-row">
@@ -32,6 +35,7 @@
             <th scope="col">Type</th>
             <th scope="col">Value</th>
             <th scope="col">Seen in</th>
+            <th scope="col">Source</th>
             {% if can_mutate %}<th scope="col">Actions</th>{% endif %}
           </tr>
         </thead>
@@ -52,6 +56,20 @@
                   </button>
                 {% else %}
                   <span class="dim">0 cases</span>
+                {% endif %}
+              {% endwith %}
+            </td>
+            <td class="mono dim">
+              {% with prov=alert_provenance_by_observable|get_item:link.observable.id %}
+                {% if prov and prov.latest_alert %}
+                  <a href="{% url 'ui-alert-detail' prov.latest_alert.id %}" title="{{ prov.latest_alert.title }}">
+                    alert: {{ prov.latest_alert.title|truncatechars:24 }}
+                  </a>
+                  {% if prov.other_count > 0 %}
+                    <span class="dim"> (+{{ prov.other_count }} other alert{{ prov.other_count|pluralize }})</span>
+                  {% endif %}
+                {% else %}
+                  <span class="dim">—</span>
                 {% endif %}
               {% endwith %}
             </td>
@@ -84,6 +102,331 @@
 </section>
 
 {% comment %}
+  Suggested observables card — collapsible, below the main observables list.
+  Shows proposed, accepted, rejected, ignored, and filtered-out suggestions.
+{% endcomment %}
+{% if suggestions_total is not None and suggestions_total > 0 %}
+<section class="card" aria-labelledby="h-suggestions">
+  <div class="page-row">
+    <h2 id="h-suggestions">
+      Suggested observables
+      <span class="count">{{ suggestions_total }}</span>
+      {% if can_mutate %}
+      <span class="dim" aria-hidden="true">({{ suggestions_proposed|length }} proposed{% if suggestions_filtered_total %}, {{ suggestions_filtered_total }} filtered{% endif %})</span>
+      {% endif %}
+    </h2>
+    {% if can_mutate and suggestions_proposed %}
+    <div class="bulk-actions" role="group" aria-label="Bulk actions for suggested observables">
+      <button type="button" class="btn btn-sm btn-primary" data-modal-open="suggestions-bulk-accept-modal" aria-label="Accept selected suggestions">
+        <i class="fa-solid fa-check" aria-hidden="true"></i> Accept selected
+      </button>
+      <button type="button" class="btn btn-sm" data-modal-open="suggestions-bulk-reject-modal" aria-label="Reject selected suggestions">
+        <i class="fa-solid fa-xmark" aria-hidden="true"></i> Reject selected
+      </button>
+      <button type="button" class="btn btn-sm" data-modal-open="suggestions-bulk-ignore-modal" aria-label="Ignore selected suggestions">
+        <i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Ignore selected
+      </button>
+    </div>
+    {% endif %}
+  </div>
+
+  <details class="collapsible" id="suggestions-collapsible" open>
+    <summary class="collapsible-summary" tabindex="0" role="button" aria-expanded="true" aria-controls="suggestions-panel">
+      <span class="collapsible-title">Suggestions list</span>
+      <i class="fa-solid fa-chevron-down collapsible-icon" aria-hidden="true"></i>
+    </summary>
+    <div class="collapsible-panel" id="suggestions-panel" role="region" aria-label="Suggested observables">
+      {% if suggestions_proposed %}
+      <div class="suggestions-section">
+        <h3 class="section-title">Proposed <span class="count">{{ suggestions_proposed|length }}</span></h3>
+        <div class="table-wrap">
+          <table class="data-table data-table-tight">
+            <caption class="sr-only">Proposed suggested observables</caption>
+            <thead>
+              <tr>
+                <th scope="col"><input type="checkbox" id="suggestions-select-all-proposed" aria-label="Select all proposed suggestions"></th>
+                <th scope="col">Type</th>
+                <th scope="col">Value</th>
+                <th scope="col">Provenance</th>
+                <th scope="col">Enrichment</th>
+                {% if can_mutate %}<th scope="col">Actions</th>{% endif %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for suggestion in suggestions_proposed %}
+              <tr>
+                <td><input type="checkbox" name="suggestion_ids" value="{{ suggestion.id }}" class="suggestion-checkbox" data-status="proposed"></td>
+                <td><span class="badge badge-{{ suggestion.data_type.name|lower }}">{{ suggestion.data_type.name }}</span></td>
+                <td class="mono break">{{ suggestion.raw_data }}</td>
+                <td class="provenance-cell">
+                  {% if suggestion.source_paths %}
+                    <span class="provenance-paths">
+                      {% for path in suggestion.source_paths %}
+                        <code class="provenance-path" title="{{ path }}">{{ path }}</code>
+                      {% endfor %}
+                    </span>
+                  {% endif %}
+                  {% if suggestion.source_alert %}
+                    <span class="provenance-alert dim">from alert <a href="{% url 'ui-alert-detail' suggestion.source_alert.id %}" title="{{ suggestion.source_alert.title }}">{{ suggestion.source_alert.title|truncatechars:24 }}</a></span>
+                  {% endif %}
+                  {% if suggestion.reason %}
+                    <span class="provenance-reason dim">{{ suggestion.reason }}</span>
+                  {% endif %}
+                </td>
+                <td class="enrichment-cell">
+                  {% if suggestion.enrichment_data %}
+                    <button type="button" class="btn btn-sm btn-ghost" data-modal-open="suggestion-enrichment-{{ suggestion.id }}" aria-label="View enrichment for {{ suggestion.raw_data }}">
+                      <i class="fa-solid fa-circle-info" aria-hidden="true"></i> View
+                    </button>
+                  {% else %}
+                    <span class="dim">—</span>
+                  {% endif %}
+                </td>
+                {% if can_mutate %}
+                <td class="actions">
+                  <form method="post" action="{% url 'ui-suggestion-accept' suggestion.id %}" class="inline-form suggestion-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="tab" value="observables">
+                    <button type="submit" class="btn btn-sm btn-primary" aria-label="Accept {{ suggestion.raw_data }}">
+                      <i class="fa-solid fa-check" aria-hidden="true"></i> Accept
+                    </button>
+                  </form>
+                  <form method="post" action="{% url 'ui-suggestion-reject' suggestion.id %}" class="inline-form suggestion-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="tab" value="observables">
+                    <button type="submit" class="btn btn-sm" aria-label="Reject {{ suggestion.raw_data }}">
+                      <i class="fa-solid fa-xmark" aria-hidden="true"></i> Reject
+                    </button>
+                  </form>
+                  <form method="post" action="{% url 'ui-suggestion-ignore' suggestion.id %}" class="inline-form suggestion-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="tab" value="observables">
+                    <button type="submit" class="btn btn-sm" aria-label="Ignore {{ suggestion.raw_data }}">
+                      <i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> Ignore
+                    </button>
+                  </form>
+                </td>
+                {% endif %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if suggestions_accepted %}
+      <details class="collapsible suggestions-section" open>
+        <summary class="collapsible-summary section-title" tabindex="0" role="button" aria-expanded="true">
+          Accepted <span class="count">{{ suggestions_accepted|length }}</span>
+          <i class="fa-solid fa-chevron-down collapsible-icon" aria-hidden="true"></i>
+        </summary>
+        <div class="collapsible-panel">
+          <div class="table-wrap">
+            <table class="data-table data-table-tight">
+              <caption class="sr-only">Accepted suggested observables</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Type</th>
+                  <th scope="col">Value</th>
+                  <th scope="col">Provenance</th>
+                  <th scope="col">Linked</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for suggestion in suggestions_accepted %}
+                <tr>
+                  <td><span class="badge badge-{{ suggestion.data_type.name|lower }}">{{ suggestion.data_type.name }}</span></td>
+                  <td class="mono break">
+                    {% if suggestion.observable %}
+                      <a href="{% url 'ui-observable-detail' suggestion.observable.id %}">{{ suggestion.raw_data }}</a>
+                    {% else %}
+                      {{ suggestion.raw_data }}
+                    {% endif %}
+                  </td>
+                  <td class="provenance-cell">
+                    {% if suggestion.source_paths %}
+                      <span class="provenance-paths">
+                        {% for path in suggestion.source_paths %}
+                          <code class="provenance-path" title="{{ path }}">{{ path }}</code>
+                        {% endfor %}
+                      </span>
+                    {% endif %}
+                    {% if suggestion.source_alert %}
+                      <span class="provenance-alert dim">from alert <a href="{% url 'ui-alert-detail' suggestion.source_alert.id %}" title="{{ suggestion.source_alert.title }}">{{ suggestion.source_alert.title|truncatechars:24 }}</a></span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if suggestion.observable %}
+                      <span class="badge badge-success">Linked</span>
+                    {% else %}
+                      <span class="dim">Not linked</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </details>
+      {% endif %}
+
+      {% if suggestions_rejected %}
+      <details class="collapsible suggestions-section">
+        <summary class="collapsible-summary section-title" tabindex="0" role="button" aria-expanded="false">
+          Rejected <span class="count">{{ suggestions_rejected|length }}</span>
+          <i class="fa-solid fa-chevron-down collapsible-icon" aria-hidden="true"></i>
+        </summary>
+        <div class="collapsible-panel">
+          <div class="table-wrap">
+            <table class="data-table data-table-tight">
+              <caption class="sr-only">Rejected suggested observables</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Type</th>
+                  <th scope="col">Value</th>
+                  <th scope="col">Provenance</th>
+                  <th scope="col">Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for suggestion in suggestions_rejected %}
+                <tr>
+                  <td><span class="badge badge-{{ suggestion.data_type.name|lower }}">{{ suggestion.data_type.name }}</span></td>
+                  <td class="mono break">{{ suggestion.raw_data }}</td>
+                  <td class="provenance-cell">
+                    {% if suggestion.source_paths %}
+                      <span class="provenance-paths">
+                        {% for path in suggestion.source_paths %}
+                          <code class="provenance-path" title="{{ path }}">{{ path }}</code>
+                        {% endfor %}
+                      </span>
+                    {% endif %}
+                    {% if suggestion.source_alert %}
+                      <span class="provenance-alert dim">from alert <a href="{% url 'ui-alert-detail' suggestion.source_alert.id %}" title="{{ suggestion.source_alert.title }}">{{ suggestion.source_alert.title|truncatechars:24 }}</a></span>
+                    {% endif %}
+                  </td>
+                  <td class="dim">{{ suggestion.reason|default:"—" }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </details>
+      {% endif %}
+
+      {% if suggestions_ignored %}
+      <details class="collapsible suggestions-section">
+        <summary class="collapsible-summary section-title" tabindex="0" role="button" aria-expanded="false">
+          Ignored <span class="count">{{ suggestions_ignored|length }}</span>
+          <i class="fa-solid fa-chevron-down collapsible-icon" aria-hidden="true"></i>
+        </summary>
+        <div class="collapsible-panel">
+          <div class="table-wrap">
+            <table class="data-table data-table-tight">
+              <caption class="sr-only">Ignored suggested observables</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Type</th>
+                  <th scope="col">Value</th>
+                  <th scope="col">Provenance</th>
+                  <th scope="col">Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for suggestion in suggestions_ignored %}
+                <tr>
+                  <td><span class="badge badge-{{ suggestion.data_type.name|lower }}">{{ suggestion.data_type.name }}</span></td>
+                  <td class="mono break">{{ suggestion.raw_data }}</td>
+                  <td class="provenance-cell">
+                    {% if suggestion.source_paths %}
+                      <span class="provenance-paths">
+                        {% for path in suggestion.source_paths %}
+                          <code class="provenance-path" title="{{ path }}">{{ path }}</code>
+                        {% endfor %}
+                      </span>
+                    {% endif %}
+                    {% if suggestion.source_alert %}
+                      <span class="provenance-alert dim">from alert <a href="{% url 'ui-alert-detail' suggestion.source_alert.id %}" title="{{ suggestion.source_alert.title }}">{{ suggestion.source_alert.title|truncatechars:24 }}</a></span>
+                    {% endif %}
+                  </td>
+                  <td class="dim">{{ suggestion.reason|default:"—" }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </details>
+      {% endif %}
+
+      {% if suggestions_filtered %}
+      <details class="collapsible suggestions-section">
+        <summary class="collapsible-summary section-title" tabindex="0" role="button" aria-expanded="false">
+          Filtered out <span class="count">{{ suggestions_filtered|length }}</span>
+          <i class="fa-solid fa-chevron-down collapsible-icon" aria-hidden="true"></i>
+        </summary>
+        <div class="collapsible-panel">
+          <p class="dim mb-md">These suggestions matched aggressive filtering rules but are shown for visibility. Accept to override the filter.</p>
+          <div class="table-wrap">
+            <table class="data-table data-table-tight">
+              <caption class="sr-only">Filtered out suggested observables</caption>
+              <thead>
+                <tr>
+                  <th scope="col"><input type="checkbox" id="suggestions-select-all-filtered" aria-label="Select all filtered suggestions"></th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Value</th>
+                  <th scope="col">Provenance</th>
+                  <th scope="col">Filter reason</th>
+                  {% if can_mutate %}<th scope="col">Actions</th>{% endif %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for suggestion in suggestions_filtered %}
+                <tr class="filtered-row">
+                  <td><input type="checkbox" name="suggestion_ids" value="{{ suggestion.id }}" class="suggestion-checkbox" data-status="filtered"></td>
+                  <td><span class="badge badge-{{ suggestion.data_type.name|lower }}">{{ suggestion.data_type.name }}</span></td>
+                  <td class="mono break">{{ suggestion.raw_data }}</td>
+                  <td class="provenance-cell">
+                    {% if suggestion.source_paths %}
+                      <span class="provenance-paths">
+                        {% for path in suggestion.source_paths %}
+                          <code class="provenance-path" title="{{ path }}">{{ path }}</code>
+                        {% endfor %}
+                      </span>
+                    {% endif %}
+                    {% if suggestion.source_alert %}
+                      <span class="provenance-alert dim">from alert <a href="{% url 'ui-alert-detail' suggestion.source_alert.id %}" title="{{ suggestion.source_alert.title }}">{{ suggestion.source_alert.title|truncatechars:24 }}</a></span>
+                    {% endif %}
+                  </td>
+                  <td class="filter-reason dim">{{ suggestion.filter_reason|default:"—" }}</td>
+                  {% if can_mutate %}
+                  <td class="actions">
+                    <form method="post" action="{% url 'ui-suggestion-accept' suggestion.id %}" class="inline-form suggestion-form">
+                      {% csrf_token %}
+                      <input type="hidden" name="tab" value="observables">
+                      <button type="submit" class="btn btn-sm btn-primary" aria-label="Accept {{ suggestion.raw_data }} (override filter)">
+                        <i class="fa-solid fa-check" aria-hidden="true"></i> Accept
+                      </button>
+                    </form>
+                  </td>
+                  {% endif %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </details>
+      {% endif %}
+    </div>
+  </details>
+</section>
+{% endif %}
+
+{% comment %}
   "Seen in" modals — rendered for ALL roles (not gated by can_mutate).
   One modal per observable that has a non-empty visible linked-cases bucket.
   `get_item` needs the UUID key, but `add:` needs a string (Django's `add` returns '' for a UUID
@@ -96,6 +439,19 @@
     {% endif %}
   {% endwith %}
 {% endfor %}
+
+{% comment %}
+  Enrichment modals for suggestions
+{% endcomment %}
+{% if suggestions_proposed %}
+  {% for suggestion in suggestions_proposed %}
+    {% if suggestion.enrichment_data %}
+      {% with enrich_title=suggestion.data_type.name|add:": "|add:suggestion.raw_data %}
+      {% include "ui/_modal.html" with modal_id="suggestion-enrichment-"|add:suggestion.id|stringformat:"s" title=enrich_title body_template="ui/_suggestion_enrichment_modal_body.html" size="lg" suggestion=suggestion show_cancel=False close_url=request.path %}
+      {% endwith %}
+    {% endif %}
+  {% endfor %}
+{% endif %}
 
 {% if can_mutate %}
 {% include "ui/_modal.html" with modal_id="observable-create-modal" form_id="observable-create-form" body_template="ui/_observable_form_modal_body.html" title="New artifact" confirm_text="Add artifact" form_action=observable_create_url size="lg" %}
@@ -114,4 +470,11 @@
   {% include "ui/_modal.html" with modal_id="observable-remove-"|add:oid form_id="observable-remove-form-"|add:oid body_template="ui/_observable_remove_modal.html" title="Remove artifact from case?" confirm_text="Remove" confirm_class="btn-err" form_action=obs_remove_url size="md" observable=obs %}
   {% endwith %}
 {% endfor %}
+
+{% comment %}
+  Bulk action modals for suggestions
+{% endcomment %}
+{% include "ui/_modal.html" with modal_id="suggestions-bulk-accept-modal" form_id="suggestions-bulk-accept-form" body_template="ui/_suggestions_bulk_action_modal_body.html" title="Accept selected suggestions?" confirm_text="Accept" form_action=suggestions_bulk_accept_url size="md" action="accept" %}
+{% include "ui/_modal.html" with modal_id="suggestions-bulk-reject-modal" form_id="suggestions-bulk-reject-form" body_template="ui/_suggestions_bulk_action_modal_body.html" title="Reject selected suggestions?" confirm_text="Reject" confirm_class="btn-err" form_action=suggestions_bulk_reject_url size="md" action="reject" %}
+{% include "ui/_modal.html" with modal_id="suggestions-bulk-ignore-modal" form_id="suggestions-bulk-ignore-form" body_template="ui/_suggestions_bulk_action_modal_body.html" title="Ignore selected suggestions?" confirm_text="Ignore" form_action=suggestions_bulk_ignore_url size="md" action="ignore" %}
 {% endif %}

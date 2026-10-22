@@ -172,6 +172,15 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     ("observables", "Observable", "data_type"): models.PROTECT,
     # PROTECT on owner_org: a tenant with observables cannot be deleted (ADR-004).
     ("observables", "Observable", "owner_org"): models.PROTECT,
+    # ObservableSuggestion is staging data, not evidence: it dies with its case/org. A deleted
+    # alert or observable only clears the provenance pointer, and the type is still vocabulary
+    # (PROTECT), exactly as for a promoted Observable.
+    ("observables", "ObservableSuggestion", "owner_org"): models.CASCADE,
+    ("observables", "ObservableSuggestion", "data_type"): models.PROTECT,
+    ("observables", "ObservableSuggestion", "source_alert"): models.SET_NULL,
+    ("observables", "ObservableSuggestion", "reviewed_by"): models.SET_NULL,
+    ("observables", "ObservableSuggestion", "case"): models.CASCADE,
+    ("observables", "ObservableSuggestion", "observable"): models.SET_NULL,
     # ---- AutomationRun: the Module D ledger -------------------------------------------
     ("automation", "AutomationRun", "playbook"): models.PROTECT,
     # A finished (or failed) run is audit evidence; it outlives the case that triggered it.
@@ -252,10 +261,12 @@ def test_fk_audit_covers_the_whole_model_inventory() -> None:
         f"stale={sorted(set(EXPECTED_ON_DELETE) - set(actual))}"
     )
     # 59 = 57 + TaskNote x2 (task, created_by).
-    # 61 = 60 + IngestionSource.organisation (ADR-009: the feed became tenant data). Kept as a
-    # literal on purpose: it is a tripwire for a model silently dropping out of `OWN_APPS`, and
-    # `EXPECTED_ON_DELETE` already pins the exact set, so a bump here is always a real change.
-    assert len(actual) == 61, f"expected the full FK set, found only {len(actual)}"
+    # 61 = 60 + IngestionSource.organisation (ADR-009: the feed became tenant data).
+    # 67 = 61 + ObservableSuggestion x6 (owner_org, data_type, source_alert, reviewed_by, case,
+    # observable). Kept as a literal on purpose: it is a tripwire for a model silently dropping
+    # out of `OWN_APPS`, and `EXPECTED_ON_DELETE` already pins the exact set, so a bump here is
+    # always a real change.
+    assert len(actual) == 67, f"expected the full FK set, found only {len(actual)}"
 
 
 @pytest.mark.django_db
@@ -318,6 +329,10 @@ def test_no_cascade_is_reachable_from_a_longer_lived_row() -> None:
         ("alerts", "AlertCustomFieldValue", "custom_field"),
         ("alerts", "AlertObservable", "alert"),
         ("alerts", "AlertObservable", "observable"),
+        # ObservableSuggestion is staging data for one case/tenant, not evidence: an unaccepted
+        # suggestion cannot outlive the case or organisation it was staged for.
+        ("observables", "ObservableSuggestion", "case"),
+        ("observables", "ObservableSuggestion", "owner_org"),
         ("identity", "ApiKey", "user"),
         ("identity", "IngestionToken", "source"),
         # M2M join rows (L-2): pure edges with no independent lifetime, so no parent can

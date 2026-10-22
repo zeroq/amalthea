@@ -150,4 +150,61 @@
       select.disabled = !reassign;
     }
   });
+
+  // Bulk action handling for Observable Suggestions (P6)
+  // When a bulk action modal opens, collect selected suggestion IDs and populate the form
+  document.addEventListener("click", function (event) {
+    var opener = event.target.closest("[data-modal-open]");
+    if (!opener) {
+      return;
+    }
+    var modalId = opener.getAttribute("data-modal-open");
+    if (!modalId || !modalId.startsWith("suggestions-bulk-")) {
+      return;
+    }
+    var modal = document.getElementById(modalId);
+    if (!modal) {
+      return;
+    }
+    // Collect checked suggestion checkboxes
+    var checkboxes = document.querySelectorAll('input[name="suggestion_ids"]:checked');
+    var form = modal.querySelector("form");
+    if (!form) {
+      return;
+    }
+    // Remove any existing suggestion_id hidden inputs
+    var existing = form.querySelectorAll('input[name="suggestion_ids"][type="hidden"]');
+    for (var i = 0; i < existing.length; i++) {
+      existing[i].remove();
+    }
+    // Add hidden inputs for each selected suggestion
+    for (var j = 0; j < checkboxes.length; j++) {
+      var hidden = document.createElement("input");
+      hidden.type = "hidden";
+      hidden.name = "suggestion_ids";
+      hidden.value = checkboxes[j].value;
+      form.appendChild(hidden);
+    }
+    // Update count display
+    var countEl = modal.querySelector("[id$='-count']");
+    if (countEl) {
+      countEl.textContent = checkboxes.length;
+    }
+  });
+
+  // Select all checkboxes in suggestions tables
+  document.addEventListener("change", function (event) {
+    var target = event.target;
+    if (!target.matches("#suggestions-select-all-proposed, #suggestions-select-all-filtered")) {
+      return;
+    }
+    var table = target.closest("table");
+    if (!table) {
+      return;
+    }
+    var checkboxes = table.querySelectorAll('input[name="suggestion_ids"]');
+    for (var i = 0; i < checkboxes.length; i++) {
+      checkboxes[i].checked = target.checked;
+    }
+  });
 })();

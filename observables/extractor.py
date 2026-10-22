@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from django.db import transaction
@@ -176,11 +176,18 @@ _STOPLIST: frozenset[str] = frozenset(
 
 @dataclass(frozen=True)
 class Finding:
-    """One extracted artifact: its type, the value as written, and the normalized form."""
+    """One extracted artifact: its type, the value as written, and the normalized form.
+
+    Provenance fields (P1): track where in the source JSON this finding originated,
+    so analysts can distinguish "hash from `sha256` field" vs "hash from `agent_id` field".
+    """
 
     type_name: str
     raw: str
     normalized: str
+    source_paths: list[str] = field(default_factory=list)
+    source_alert_id: str | None = None
+    source_context: dict[str, Any] = field(default_factory=dict)
 
     def __str__(self) -> str:
         return f"{self.type_name}:{self.normalized}"
@@ -248,26 +255,109 @@ def _walk(node: Any) -> list[str]:
     return [str(node)]
 
 
+def _walk_with_paths(node: Any, prefix: str = "") -> list[tuple[str, Any]]:
+    """Walk a JSON document and return (path, value) pairs for all leaf values.
+
+    Paths use dot notation for dict keys and bracket notation for list indices.
+    Example: `{"device": {"external_ip": "1.2.3.4"}, "tags": ["a", "b"]}`
+    → `[("device.external_ip", "1.2.3.4"), ("tags[0]", "a"), ("tags[1]", "b")]`
+
+    Only string values are returned (matching `_walk` behavior for extraction).
+    """
+    if isinstance(node, str):
+        return [(prefix, node)]
+    if isinstance(node, dict):
+        out: list[tuple[str, Any]] = []
+        for key, value in node.items():
+            new_prefix = f"{prefix}.{key}" if prefix else key
+            out.extend(_walk_with_paths(value, new_prefix))
+        return out
+    if isinstance(node, (list, tuple)):
+        out = []
+        for idx, item in enumerate(node):
+            new_prefix = f"{prefix}[{idx}]"
+            out.extend(_walk_with_paths(item, new_prefix))
+        return out
+    if isinstance(node, bool) or node is None:
+        return []
+    return [(prefix, str(node))]
+
+
+def json_paths_and_values(payload: Any) -> list[tuple[str, Any]]:
+    """Return all (path, value) pairs from a JSON document using dot notation.
+
+    Unlike `json_leaves()`, this preserves the JSON path context for each value,
+    enabling provenance tracking (which field a hash/URL/IP came from).
+
+    Example:
+        >>> json_paths_and_values({"sha256": "abc123", "device": {"ip": "1.2.3.4"}})
+        [("sha256", "abc123"), ("device.ip", "1.2.3.4")]
+
+    Args:
+        payload: Any JSON-serializable value (dict, list, primitive).
+
+    Returns:
+        List of (path, value) tuples where path uses dot/bracket notation.
+    """
+    return _walk_with_paths(payload)
+
+
 def json_leaves(payload: Any) -> str:
     """Flatten a JSON document to newline-joined text, for extraction over `raw_payload`."""
     return "\n".join(_walk(payload))
 
 
-def find_observables(*texts: str, types: dict[str, ObservableType]) -> list[Finding]:
-    """Extract typed findings from free text and JSON leaves.
+def find_observables(
+    *texts: str,
+    types: dict[str, ObservableType],
+    source_alert_id: str | None = None,
+    path_values: list[tuple[str, str]] | None = None,
+) -> list[Finding]:
+    """Extract typed findings from free text and/or JSON path-value pairs.
 
     `types` is the vocabulary (`{name: ObservableType}`); a pattern whose type is absent from it is
     skipped, so extending the vocabulary is what enables a new detector. The longest-priority match
     claims its span and any later, narrower pattern overlapping it is dropped — that is how an
     address inside a URL does not also become a `fqdn`.
+
+    Provenance (P1): when `path_values` is provided, each finding records which JSON paths
+    contributed the matched value. `source_alert_id` is attached to all findings for traceability.
+
+    Args:
+        *texts: Free-text strings to search (e.g., case title, description, alert title).
+        types: Vocabulary of observable types `{name: ObservableType}`.
+        source_alert_id: Optional alert ID these findings originated from.
+        path_values: Optional list of (json_path, value) pairs from `json_paths_and_values()`.
+                     When provided, provenance is tracked per finding.
+
+    Returns:
+        List of Finding objects with type, raw value, normalized value, and provenance.
     """
-    haystack = "\n".join(t for t in texts if t)
+    # Build the haystack once, and remember exactly where the payload values start. The offset
+    # must be computed from the same pieces that are joined, otherwise a caller that passes only
+    # `path_values` shifts every provenance path by the leading separator.
+    free_text = "\n".join(t for t in texts if t)
+    payload_values = [v for _, v in path_values or [] if v]
+    parts = ([free_text] if free_text else []) + payload_values
+    haystack = "\n".join(parts)
+
     if not haystack.strip() or not types:
         return []
 
     found: list[Finding] = []
     seen: set[tuple[str, str]] = set()
     consumed: list[tuple[int, int]] = []
+
+    # For provenance tracking: map each position in haystack to its source paths.
+    pos_to_paths: dict[int, list[str]] = {}
+    if path_values:
+        pos = len(free_text) + 1 if free_text else 0
+        for path, value in path_values:
+            if not value:
+                continue
+            for i in range(len(value)):
+                pos_to_paths.setdefault(pos + i, []).append(path)
+            pos += len(value) + 1  # +1 for the newline joining the next value
 
     for type_name, pattern in PATTERNS:
         obs_type = types.get(type_name)
@@ -290,14 +380,61 @@ def find_observables(*texts: str, types: dict[str, ObservableType]) -> list[Find
             if key in seen:
                 continue
             seen.add(key)
-            found.append(Finding(type_name=type_name, raw=raw, normalized=normalized))
+
+            # Collect provenance: which JSON paths contributed to this match?
+            source_paths: list[str] = []
+            if path_values:
+                for pos in range(start, end):
+                    source_paths.extend(pos_to_paths.get(pos, []))
+                # Deduplicate while preserving order
+                seen_paths = set()
+                unique_paths = []
+                for p in source_paths:
+                    if p not in seen_paths:
+                        seen_paths.add(p)
+                        unique_paths.append(p)
+                source_paths = unique_paths
+
+            # Build source_context with parent key hints
+            source_context: dict[str, Any] = {}
+            if source_paths:
+                # Extract the immediate parent keys from paths
+                parent_keys = []
+                for p in source_paths:
+                    parts = p.split(".")
+                    if len(parts) >= 2:
+                        parent_keys.append(parts[-2])  # parent of the leaf
+                    elif "[" in p:
+                        # Array element - parent is the array name
+                        array_part = p.split("[")[0]
+                        if array_part:
+                            parent_keys.append(array_part)
+                if parent_keys:
+                    source_context["parent_keys"] = list(dict.fromkeys(parent_keys))  # dedupe
+
+            found.append(
+                Finding(
+                    type_name=type_name,
+                    raw=raw,
+                    normalized=normalized,
+                    source_paths=source_paths,
+                    source_alert_id=source_alert_id,
+                    source_context=source_context,
+                )
+            )
 
     return found
 
 
 @transaction.atomic
-def extract_into_case(case: Case, *texts: str) -> list[Observable]:
-    """Extract from `texts`, dedupe per-org, link every finding to `case`, and fire the trigger.
+def extract_into_case(
+    case: Case,
+    *texts: str,
+    source_alert_id: str | None = None,
+    path_values: list[tuple[str, str]] | None = None,
+) -> list[Observable]:
+    """Extract from `texts` and/or `path_values`, dedupe per-org, link every finding to `case`,
+    and fire the trigger.
 
     Re-running the extractor over the same text is idempotent: the second pass resolves the
     existing rows and adds nothing, because both the `Observable` and the `CaseObservable` link are
@@ -308,6 +445,15 @@ def extract_into_case(case: Case, *texts: str) -> list[Observable]:
     before the `CaseObservable` row exists, so a receiver would have no case to scope the event to.
 
     The `owner_org` is taken from the case's organisation. Auto-linking stays within one org.
+
+    Args:
+        case: Case to link observables to.
+        *texts: Free-text strings (title, description, etc.).
+        source_alert_id: Optional alert ID for provenance tracking.
+        path_values: Optional (path, value) pairs from `json_paths_and_values()` for provenance.
+
+    Returns:
+        List of linked Observable objects.
     """
     from automation.registry import dispatch_observable_linked
     from cases.models import CaseObservable
@@ -315,7 +461,9 @@ def extract_into_case(case: Case, *texts: str) -> list[Observable]:
     org = case.owner_org
     vocabulary = {t.name: t for t in ObservableType.objects.all()}
     linked: list[Observable] = []
-    for finding in find_observables(*texts, types=vocabulary):
+    for finding in find_observables(
+        *texts, types=vocabulary, source_alert_id=source_alert_id, path_values=path_values
+    ):
         obs_type = vocabulary[finding.type_name]
         canonical = canonical_value_under(
             finding.normalized, case_sensitive=obs_type.is_case_sensitive

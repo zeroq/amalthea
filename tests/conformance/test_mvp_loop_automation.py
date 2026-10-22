@@ -31,7 +31,7 @@ from automation.models import AutomationRun, Playbook
 from cases.models import Case, CaseObservable, CaseStatus, TimelineEvent
 from identity.models import Organisation, User
 from ingest.models import IngestionSource
-from observables.models import Observable, ObservableType
+from observables.models import Observable, ObservableSuggestion, ObservableType
 
 PHISHING_PAYLOAD = {
     "event": "mailbox.rule.created",
@@ -148,6 +148,21 @@ def test_mvp_loop_with_automation(
     with django_capture_on_commit_callbacks(execute=True):
         case = _escalate(anonymous_api, api, source)
 
+    # Accept suggestions created during escalation (P6: suggestions flow)
+    with django_capture_on_commit_callbacks(execute=True):
+        suggestions = list(
+            ObservableSuggestion.objects.filter(case=case, status="proposed").values_list(
+                "id", flat=True
+            )
+        )
+        if suggestions:
+            bulk_accept = api.post(
+                "/api/v1/suggestions/bulk-accept/",
+                {"ids": [str(s) for s in suggestions]},
+                format="json",
+            )
+            assert bulk_accept.status_code == 200, bulk_accept.content
+
     # AC6.1 — extraction fired the bound playbook, and the run reached Success with output.
     runs = list(AutomationRun.objects.filter(case=case).order_by("playbook_name"))
     assert runs, "extracting an observable did not fire observable.created"
@@ -208,6 +223,21 @@ def test_dispatch_waits_for_the_commit(
     """
     with django_capture_on_commit_callbacks(execute=False):
         case = _escalate(anonymous_api, api, source)
+
+        # Accept suggestions to trigger the observable.created dispatch
+        suggestions = list(
+            ObservableSuggestion.objects.filter(case=case, status="proposed").values_list(
+                "id", flat=True
+            )
+        )
+        if suggestions:
+            bulk_accept = api.post(
+                "/api/v1/suggestions/bulk-accept/",
+                {"ids": [str(s) for s in suggestions]},
+                format="json",
+            )
+            assert bulk_accept.status_code == 200, bulk_accept.content
+
         pending = AutomationRun.objects.filter(case=case)
         assert pending.exists(), "dispatch created no pending run to queue"
         assert all(r.status == "Pending" for r in pending), (
@@ -227,6 +257,21 @@ def test_automation_fires_only_on_a_new_link(
     """Re-extraction over the same text does not re-run every playbook on the case."""
     with django_capture_on_commit_callbacks(execute=True):
         case = _escalate(anonymous_api, api, source)
+
+        # Accept suggestions to trigger the observable.created dispatch
+        suggestions = list(
+            ObservableSuggestion.objects.filter(case=case, status="proposed").values_list(
+                "id", flat=True
+            )
+        )
+        if suggestions:
+            bulk_accept = api.post(
+                "/api/v1/suggestions/bulk-accept/",
+                {"ids": [str(s) for s in suggestions]},
+                format="json",
+            )
+            assert bulk_accept.status_code == 200, bulk_accept.content
+
     baseline = AutomationRun.objects.filter(case=case).count()
     assert baseline > 0
 
@@ -315,7 +360,9 @@ def test_a_failing_action_records_failure_without_raising(
 
     run = AutomationRun.objects.get(playbook_name="broken")
     assert run.status == "Failed"
-    assert "no registered action" in run.error
+    # Playbook scripts now live on disk (`automation/scripts/`), so the failure is reported as a
+    # missing discovered script rather than a missing registry entry.
+    assert "no discovered script" in run.error
     # The originating call is unaffected: the failure is a ledger row, not a raised exception.
     assert api.get(f"/api/v1/case/{case.number}").status_code == 200
 

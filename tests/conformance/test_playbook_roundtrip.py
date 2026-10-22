@@ -36,6 +36,18 @@ def analyst(org: Organisation) -> User:
 
 
 @pytest.fixture
+def admin(org: Organisation) -> User:
+    return User.objects.create(
+        login="admin",
+        username="admin",
+        email="admin@example.net",
+        org=org,
+        is_active=True,
+        role="admin",
+    )
+
+
+@pytest.fixture
 def read_only_user(org: Organisation) -> User:
     return User.objects.create(
         login="readonly",
@@ -51,6 +63,13 @@ def read_only_user(org: Organisation) -> User:
 def client_analyst(analyst: User) -> Client:
     c = Client()
     c.force_login(analyst)
+    return c
+
+
+@pytest.fixture
+def client_admin(admin: User) -> Client:
+    c = Client()
+    c.force_login(admin)
     return c
 
 
@@ -114,7 +133,7 @@ class TestPlaybookRoundTripHTTP:
     """Round-trip tests for HTTP playbooks."""
 
     def test_http_playbook_get_edit_prepopulates(
-        self, client_analyst: Client, org: Organisation
+        self, client_admin: Client, org: Organisation
     ) -> None:
         """GET /edit shows stored HTTP config pre-selected."""
         # Create an HTTP playbook via UI POST
@@ -135,7 +154,7 @@ class TestPlaybookRoundTripHTTP:
 
         # GET the edit page
         url = reverse("ui-playbook-edit", kwargs={"playbook_id": str(playbook.id)})
-        resp = _get_form(client_analyst, url)
+        resp = _get_form(client_admin, url)
         assert resp.status_code == 200
 
         # Check pre-population
@@ -192,7 +211,7 @@ class TestPlaybookRoundTripHTTP:
         # Note: the exact value depends on template logic; at least 4 rows should render
 
     def test_http_body_cannot_break_out_of_textarea(
-        self, client_analyst: Client, org: Organisation
+        self, client_admin: Client, org: Organisation
     ) -> None:
         """Regression: a stored body containing ``</textarea>`` must be escaped, not raw.
 
@@ -214,7 +233,7 @@ class TestPlaybookRoundTripHTTP:
         )
 
         url = reverse("ui-playbook-edit", kwargs={"playbook_id": str(playbook.id)})
-        resp = _get_form(client_analyst, url)
+        resp = _get_form(client_admin, url)
         assert resp.status_code == 200
         content = resp.content.decode()
 
@@ -223,7 +242,7 @@ class TestPlaybookRoundTripHTTP:
         assert "</textarea><img" not in content
         assert 'onerror="alert(1)"' not in content
 
-    def test_header_count_is_bounded(self, client_analyst: Client, org: Organisation) -> None:
+    def test_header_count_is_bounded(self, client_admin: Client, org: Organisation) -> None:
         """A form-controlled ``header_count`` must not drive an unbounded server-side loop."""
         playbook = Playbook.objects.create(
             name="http-headers-dos",
@@ -239,7 +258,7 @@ class TestPlaybookRoundTripHTTP:
         )
 
         url = reverse("ui-playbook-edit", kwargs={"playbook_id": str(playbook.id)})
-        resp = _get_form(client_analyst, url)
+        resp = _get_form(client_admin, url)
         form_values = _parse_form_values(resp)
         form_values["csrfmiddlewaretoken"] = _extract_csrf(resp)
         form_values["action"] = "http"
@@ -247,7 +266,7 @@ class TestPlaybookRoundTripHTTP:
         form_values["http_method"] = "POST"
         form_values["header_count"] = "1000000"
 
-        post_resp = client_analyst.post(url, form_values, follow=True)
+        post_resp = client_admin.post(url, form_values, follow=True)
         assert "Too many headers" in post_resp.content.decode()
 
         # Rejected, not silently clamped: nothing was persisted.
@@ -255,7 +274,7 @@ class TestPlaybookRoundTripHTTP:
         assert playbook.config["headers"] == {"Authorization": "Bearer token"}
 
     def test_playbook_edit_rejects_unsupported_method(
-        self, client_analyst: Client, org: Organisation
+        self, client_admin: Client, org: Organisation
     ) -> None:
         """Only GET/POST are routed to the edit view (no DELETE/PUT)."""
         playbook = Playbook.objects.create(
@@ -265,11 +284,11 @@ class TestPlaybookRoundTripHTTP:
             config={"action": "http", "url": "https://api.example.com/x", "method": "GET"},
         )
         url = reverse("ui-playbook-edit", kwargs={"playbook_id": str(playbook.id)})
-        assert client_analyst.delete(url).status_code == 405
-        assert client_analyst.put(url).status_code == 405
+        assert client_admin.delete(url).status_code == 405
+        assert client_admin.put(url).status_code == 405
 
     def test_http_playbook_post_unchanged_is_noop(
-        self, client_analyst: Client, org: Organisation
+        self, client_admin: Client, org: Organisation
     ) -> None:
         """POST unchanged form data → config unchanged (no-op round-trip)."""
         playbook = Playbook.objects.create(
@@ -289,7 +308,7 @@ class TestPlaybookRoundTripHTTP:
 
         # GET the edit page
         url = reverse("ui-playbook-edit", kwargs={"playbook_id": str(playbook.id)})
-        resp = _get_form(client_analyst, url)
+        resp = _get_form(client_admin, url)
         assert resp.status_code == 200
 
         # Parse form values and POST them back unchanged
@@ -308,7 +327,7 @@ class TestPlaybookRoundTripHTTP:
         form_values.setdefault("is_active", "on")
 
         # POST back
-        resp = _post_form(client_analyst, url, form_values)
+        resp = _post_form(client_admin, url, form_values)
         assert resp.status_code == 200  # Redirect followed
 
         # Refresh and verify config is identical (including header order)
@@ -331,7 +350,7 @@ class TestPlaybookRoundTripHTTP:
         assert playbook.is_active is True
 
     def test_http_playbook_header_order_preserved(
-        self, client_analyst: Client, org: Organisation
+        self, client_admin: Client, org: Organisation
     ) -> None:
         """Header order is preserved through GET→POST cycle."""
         playbook = Playbook.objects.create(
@@ -347,7 +366,7 @@ class TestPlaybookRoundTripHTTP:
         )
 
         url = reverse("ui-playbook-edit", kwargs={"playbook_id": str(playbook.id)})
-        resp = _get_form(client_analyst, url)
+        resp = _get_form(client_admin, url)
         assert resp.status_code == 200
 
         form_values = _parse_form_values(resp)
@@ -364,7 +383,7 @@ class TestPlaybookRoundTripHTTP:
         form_values.setdefault("http_body", "")
         form_values.setdefault("is_active", "on")
 
-        resp = _post_form(client_analyst, url, form_values)
+        resp = _post_form(client_admin, url, form_values)
         assert resp.status_code == 200
 
         playbook.refresh_from_db()
@@ -375,7 +394,7 @@ class TestPlaybookRoundTripPython:
     """Round-trip tests for Python playbooks."""
 
     def test_python_playbook_get_edit_prepopulates(
-        self, client_analyst: Client, org: Organisation
+        self, client_admin: Client, org: Organisation
     ) -> None:
         """GET /edit shows stored Python config pre-selected."""
         playbook = Playbook.objects.create(
@@ -385,12 +404,12 @@ class TestPlaybookRoundTripPython:
             is_active=False,
             config={
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         )
 
         url = reverse("ui-playbook-edit", kwargs={"playbook_id": str(playbook.id)})
-        resp = _get_form(client_analyst, url)
+        resp = _get_form(client_admin, url)
         assert resp.status_code == 200
 
         content = resp.content.decode()
@@ -409,14 +428,14 @@ class TestPlaybookRoundTripPython:
         assert 'value="python"' in content and "selected" in content
 
         # Action path selected
-        assert 'value="amalthea.automation.executor.enrichment_probe"' in content
+        assert 'value="enrichment_probe"' in content
         assert "selected" in content
 
         # is_active unchecked
         assert "checked" not in content or 'id="id_is_active"' in content
 
     def test_python_playbook_post_unchanged_is_noop(
-        self, client_analyst: Client, org: Organisation
+        self, client_admin: Client, org: Organisation
     ) -> None:
         """POST unchanged Python form data → config unchanged."""
         playbook = Playbook.objects.create(
@@ -425,12 +444,12 @@ class TestPlaybookRoundTripPython:
             is_active=True,
             config={
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         )
 
         url = reverse("ui-playbook-edit", kwargs={"playbook_id": str(playbook.id)})
-        resp = _get_form(client_analyst, url)
+        resp = _get_form(client_admin, url)
         assert resp.status_code == 200
 
         form_values = _parse_form_values(resp)
@@ -440,17 +459,17 @@ class TestPlaybookRoundTripPython:
         form_values.setdefault("description", "")
         form_values.setdefault("trigger_event", "task.completed")
         form_values.setdefault("action", "python")
-        form_values.setdefault("action_path", "amalthea.automation.executor.enrichment_probe")
+        form_values.setdefault("action_path", "enrichment_probe")
         form_values.setdefault("is_active", "on")
 
-        resp = _post_form(client_analyst, url, form_values)
+        resp = _post_form(client_admin, url, form_values)
         assert resp.status_code == 200
 
         playbook.refresh_from_db()
         config = playbook.config
 
         assert config["action"] == "python"
-        assert config["action_path"] == "amalthea.automation.executor.enrichment_probe"
+        assert config["action_path"] == "enrichment_probe"
         assert playbook.trigger_event == "task.completed"
         assert playbook.is_active is True
 
@@ -505,10 +524,8 @@ class TestPlaybookEditAuthz:
         # POST requires analyst/admin/superAdmin → uniform 404
         assert resp.status_code == 404
 
-    def test_analyst_user_post_edit_allowed(
-        self, client_analyst: Client, org: Organisation
-    ) -> None:
-        """Analyst user can POST to edit."""
+    def test_analyst_user_post_edit_denied(self, client_analyst: Client, org: Organisation) -> None:
+        """Analyst can read the edit form but cannot save it (P5 authz tightening)."""
         playbook = Playbook.objects.create(
             name="analyst-edit",
             trigger_event="observable.created",
@@ -530,37 +547,39 @@ class TestPlaybookEditAuthz:
         form_values.setdefault("url", "https://example.com")
         form_values.setdefault("http_body", "")
         form_values.setdefault("is_active", "on")
+        form_values["description"] = "analyst should not be able to write this"
 
         resp = _post_form(client_analyst, url, form_values)
-        # Should redirect to detail (success)
-        assert resp.status_code == 200
+        assert resp.status_code == 404
+        playbook.refresh_from_db()
+        assert playbook.description == ""
 
 
 class TestPlaybookEditNotFound:
     """404 handling for non-existent playbooks."""
 
-    def test_edit_nonexistent_uuid_404(self, client_analyst: Client) -> None:
+    def test_edit_nonexistent_uuid_404(self, client_admin: Client) -> None:
         """Edit non-existent UUID returns 404."""
         url = reverse(
             "ui-playbook-edit", kwargs={"playbook_id": "00000000-0000-0000-0000-000000000000"}
         )
-        resp = _get_form(client_analyst, url)
+        resp = _get_form(client_admin, url)
         assert resp.status_code == 404
 
-    def test_edit_nonexistent_name_404(self, client_analyst: Client) -> None:
+    def test_edit_nonexistent_name_404(self, client_admin: Client) -> None:
         """Edit non-existent name returns 404."""
         url = reverse("ui-playbook-edit", kwargs={"playbook_id": "no-such-playbook"})
-        resp = _get_form(client_analyst, url)
+        resp = _get_form(client_admin, url)
         assert resp.status_code == 404
 
 
 class TestPlaybookCreateStillWorks:
     """Regression tests: playbook_create behaviour unchanged."""
 
-    def test_create_http_playbook_via_ui(self, client_analyst: Client, org: Organisation) -> None:
+    def test_create_http_playbook_via_ui(self, client_admin: Client, org: Organisation) -> None:
         """Creating an HTTP playbook via UI still works."""
         url = reverse("ui-playbook-create")
-        resp = _get_form(client_analyst, url)
+        resp = _get_form(client_admin, url)
         assert resp.status_code == 200
 
         form_values = _parse_form_values(resp)
@@ -578,7 +597,7 @@ class TestPlaybookCreateStillWorks:
         form_values["http_body"] = '{"key": "{observable}"}'
         form_values["is_active"] = "on"
 
-        resp = _post_form(client_analyst, url, form_values)
+        resp = _post_form(client_admin, url, form_values)
         assert resp.status_code == 200
 
         # Verify created
@@ -590,10 +609,10 @@ class TestPlaybookCreateStillWorks:
         assert pb.config["headers"] == {"X-API-Key": "secret"}
         assert pb.config["body"] == '{"key": "{observable}"}'
 
-    def test_create_python_playbook_via_ui(self, client_analyst: Client, org: Organisation) -> None:
+    def test_create_python_playbook_via_ui(self, client_admin: Client, org: Organisation) -> None:
         """Creating a Python playbook via UI still works."""
         url = reverse("ui-playbook-create")
-        resp = _get_form(client_analyst, url)
+        resp = _get_form(client_admin, url)
         assert resp.status_code == 200
 
         form_values = _parse_form_values(resp)
@@ -602,15 +621,15 @@ class TestPlaybookCreateStillWorks:
         form_values["description"] = "Python test"
         form_values["trigger_event"] = "alert.ingested"
         form_values["action"] = "python"
-        form_values["action_path"] = "amalthea.automation.executor.enrichment_probe"
+        form_values["action_path"] = "enrichment_probe"
         form_values["is_active"] = "on"
 
-        resp = _post_form(client_analyst, url, form_values)
+        resp = _post_form(client_admin, url, form_values)
         assert resp.status_code == 200
 
         pb = Playbook.objects.get(name="new-python-pb")
         assert pb.config["action"] == "python"
-        assert pb.config["action_path"] == "amalthea.automation.executor.enrichment_probe"
+        assert pb.config["action_path"] == "enrichment_probe"
 
     def test_create_readonly_user_denied(self, client_readonly: Client, org: Organisation) -> None:
         """Read-only (viewer) user cannot create a playbook (GET/POST → 404)."""
@@ -625,7 +644,7 @@ class TestPlaybookCreateStillWorks:
                 "description": "",
                 "trigger_event": "observable.created",
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
                 "is_active": "on",
             },
         )

@@ -58,18 +58,12 @@
             {% endwith %}
           </td>
           <td>
-            <span class="pill">{{ pb.runs.count }}</span>
+            <span class="pill">{{ pb.run_count }}</span>
           </td>
           <td>
             {% if can_mutate %}
             <a class="icon-link" href="{% url 'ui-playbook-detail' pb.id %}" aria-label="Open playbook {{ pb.name }}"><i class="fa-regular fa-eye" aria-hidden="true"></i></a>
-            {% if pb.runs.count == 0 %}
-            {% url 'ui-playbook-delete' pb.id as delete_url %}
-            {% with modal_id="delete-playbook-"|add:pb.id|stringformat:"s" %}
-            {% include "ui/_modal.html" with modal_id=modal_id title="Delete playbook?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
-            {% endwith %}
-            <button type="button" class="icon-link icon-link-err" data-modal-open="delete-playbook-{{ pb.id }}" aria-label="Delete playbook {{ pb.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
-            {% endif %}
+            {% include "ui/_playbook_delete_action.html" with pb=pb run_count=pb.run_count active_run_count=pb.active_run_count icon_only=True %}
             {% else %}
             <span class="dim">—</span>
             {% endif %}
@@ -128,18 +122,12 @@
             {% endwith %}
           </td>
           <td>
-            <span class="pill">{{ pb.runs.count }}</span>
+            <span class="pill">{{ pb.run_count }}</span>
           </td>
           <td>
             {% if can_mutate %}
             <a class="icon-link" href="{% url 'ui-playbook-detail' pb.id %}" aria-label="Open playbook {{ pb.name }}"><i class="fa-regular fa-eye" aria-hidden="true"></i></a>
-            {% if pb.runs.count == 0 %}
-            {% url 'ui-playbook-delete' pb.id as delete_url %}
-            {% with modal_id="delete-playbook-"|add:pb.id|stringformat:"s" %}
-            {% include "ui/_modal.html" with modal_id=modal_id title="Delete playbook?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
-            {% endwith %}
-            <button type="button" class="icon-link icon-link-err" data-modal-open="delete-playbook-{{ pb.id }}" aria-label="Delete playbook {{ pb.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
-            {% endif %}
+            {% include "ui/_playbook_delete_action.html" with pb=pb run_count=pb.run_count active_run_count=pb.active_run_count icon_only=True %}
             {% else %}
             <span class="dim">—</span>
             {% endif %}

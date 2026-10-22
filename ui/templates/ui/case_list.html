@@ -33,6 +33,9 @@
         <tr>
           <th scope="col">Case</th><th scope="col">Severity</th><th scope="col">Status</th>
           <th scope="col">Title</th><th scope="col">Assignee</th><th scope="col">Started</th>
+          {% if request.user.role == "superAdmin" %}
+          <th scope="col">Actions</th>
+          {% endif %}
         </tr>
       </thead>
       <tbody>
@@ -44,6 +47,18 @@
             <td><a href="{% url 'ui-case-detail' case.number %}">{{ case.title }}</a></td>
             <td>{{ case.assignee.login|default:"—" }}</td>
             <td class="mono dim">{{ case.start_date|date:"Y-m-d H:i" }}</td>
+            {% if request.user.role == "superAdmin" %}
+            <td>
+              <button class="btn btn-ghost btn-sm" data-modal-open="delete-case-{{ case.id }}"
+                      aria-label="Delete case {{ case.title }}">
+                <i class="fa-solid fa-trash" aria-hidden="true"></i>
+              </button>
+              {% url 'ui-case-delete' case.id as case_delete_url %}
+              {% with case_oid=case.id|stringformat:"s" %}
+              {% include "ui/_modal.html" with modal_id="delete-case-"|add:case_oid title="Delete case?" body="This will permanently delete the case and all its children (tasks, timeline, observables, attachments). Alerts linked to this case will be unlinked but preserved. This action cannot be undone." confirm_text="Delete" confirm_class="btn-err" form_action=case_delete_url size="sm" %}
+              {% endwith %}
+            </td>
+            {% endif %}
           </tr>
         {% endfor %}
       </tbody>
@@ -60,7 +75,7 @@
     {% else %}
       {% include "ui/_pager.html" with entity_name="Case" %}
     {% endif %}
-  {% else %}
+{% else %}
     {# Legacy path — view not yet converted to paginate() #}
     {% if cases %}
       <div class="table-wrap">
@@ -70,6 +85,9 @@
           <tr>
             <th scope="col">Case</th><th scope="col">Severity</th><th scope="col">Status</th>
             <th scope="col">Title</th><th scope="col">Assignee</th><th scope="col">Started</th>
+            {% if request.user.role == "superAdmin" %}
+            <th scope="col">Actions</th>
+            {% endif %}
           </tr>
         </thead>
         <tbody>
@@ -81,6 +99,18 @@
               <td><a href="{% url 'ui-case-detail' case.number %}">{{ case.title }}</a></td>
               <td>{{ case.assignee.login|default:"—" }}</td>
               <td class="mono dim">{{ case.start_date|date:"Y-m-d H:i" }}</td>
+              {% if request.user.role == "superAdmin" %}
+              <td>
+                <button class="btn btn-ghost btn-sm" data-modal-open="delete-case-{{ case.id }}"
+                        aria-label="Delete case {{ case.title }}">
+                  <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                </button>
+                {% url 'ui-case-delete' case.id as case_delete_url %}
+                {% with case_oid=case.id|stringformat:"s" %}
+                {% include "ui/_modal.html" with modal_id="delete-case-"|add:case_oid title="Delete case?" body="This will permanently delete the case and all its children (tasks, timeline, observables, attachments). Alerts linked to this case will be unlinked but preserved. This action cannot be undone." confirm_text="Delete" confirm_class="btn-err" form_action=case_delete_url size="sm" %}
+                {% endwith %}
+              </td>
+              {% endif %}
             </tr>
           {% endfor %}
         </tbody>

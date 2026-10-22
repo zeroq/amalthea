@@ -68,8 +68,8 @@
     {# Per-org create modal #}
     {% url 'ui-settings-users' as user_create_url %}
     {% with org_id=org_ctx.org.id|stringformat:"s" %}
-    {% with modal_id="user-create-modal-"|add:org_id form_id="user-create-form-"|add:org_id %}
-    {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_user_create_form.html" title="New user in {{ org_ctx.org.name }}" confirm_text="Create" confirm_class="btn-primary" cancel_text="Cancel" form_action=user_create_url size="lg" selected_org=org_ctx.org is_superadmin=True all_orgs=all_orgs %}
+    {% with modal_id="user-create-modal-"|add:org_id form_id="user-create-form-"|add:org_id modal_title="New user in "|add:org_ctx.org.name %}
+    {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_user_create_form.html" title=modal_title confirm_text="Create" confirm_class="btn-primary" cancel_text="Cancel" form_action=user_create_url size="lg" selected_org=org_ctx.org is_superadmin=True all_orgs=all_orgs %}
     {% endwith %}
     {% endwith %}
   </div>

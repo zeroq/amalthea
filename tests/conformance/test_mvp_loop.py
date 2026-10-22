@@ -25,6 +25,7 @@ from alerts.models import Alert
 from cases.models import Case, CaseObservable, CaseStatus
 from identity.models import Organisation, User
 from ingest.models import IngestionSource
+from observables.models import ObservableSuggestion
 
 PHISHING_PAYLOAD = {
     "event": "mailbox.rule.created",
@@ -129,6 +130,20 @@ def test_mvp_loop_ingest_escalate_extract(
     assert alert.case_id == case.pk
     assert alert.status.value == "Imported"
 
+    # Accept suggestions created during escalation (P6: suggestions flow)
+    suggestions = list(
+        ObservableSuggestion.objects.filter(case=case, status="proposed").values_list(
+            "id", flat=True
+        )
+    )
+    if suggestions:
+        bulk_accept = api.post(
+            "/api/v1/suggestions/bulk-accept/",
+            {"ids": [str(s) for s in suggestions]},
+            format="json",
+        )
+        assert bulk_accept.status_code == 200, bulk_accept.content
+
     values = {
         link.observable.normalized_data
         for link in CaseObservable.objects.filter(case=case).select_related("observable")
@@ -165,6 +180,20 @@ def test_mvp_loop_merge_into_existing_case(
         merged = api.post(f"/api/v1/alert/{alert_id}/merge/{case.number}", {}, format="json")
         assert merged.status_code == 200, merged.content
 
+    # Accept suggestions created during merges (P6: suggestions flow)
+    suggestions = list(
+        ObservableSuggestion.objects.filter(case=case, status="proposed").values_list(
+            "id", flat=True
+        )
+    )
+    if suggestions:
+        bulk_accept = api.post(
+            "/api/v1/suggestions/bulk-accept/",
+            {"ids": [str(s) for s in suggestions]},
+            format="json",
+        )
+        assert bulk_accept.status_code == 200, bulk_accept.content
+
     mails = list(
         CaseObservable.objects.filter(case=case)
         .select_related("observable__data_type")
@@ -193,6 +222,21 @@ def test_extraction_is_idempotent_across_repeated_merges(
     case = Case.objects.create(title="Repeat", description="", status=status, owner_org=analyst.org)
     alert_id = _post_alert(anonymous_api, source)
     api.post(f"/api/v1/alert/{alert_id}/merge/{case.number}", {}, format="json")
+
+    # Accept suggestions from the first merge
+    suggestions = list(
+        ObservableSuggestion.objects.filter(case=case, status="proposed").values_list(
+            "id", flat=True
+        )
+    )
+    if suggestions:
+        bulk_accept = api.post(
+            "/api/v1/suggestions/bulk-accept/",
+            {"ids": [str(s) for s in suggestions]},
+            format="json",
+        )
+        assert bulk_accept.status_code == 200, bulk_accept.content
+
     before = CaseObservable.objects.filter(case=case).count()
     assert before > 0
 

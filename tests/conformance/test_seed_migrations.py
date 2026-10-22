@@ -254,8 +254,16 @@ def test_m10_a_seed_neither_overwrites_nor_deletes_a_pre_existing_row() -> None:
     from observables.models import ObservableType
 
     migrate([("observables", "0001_initial")])
-    ObservableType.objects.filter(name="hash").delete()
-    analyst_row = ObservableType.objects.create(name="hash", is_case_sensitive=True)
+    # At 0001 the current model's reverse relations (e.g. `ObservableSuggestion.data_type`)
+    # do not exist yet, so deleting through it makes the collector query a table the
+    # historical schema has never had. Use the historical model for the pre-seed writes.
+    historical = (
+        MigrationExecutor(connection)
+        .loader.project_state([("observables", "0001_initial")])
+        .apps.get_model("observables", "ObservableType")
+    )
+    historical.objects.filter(name="hash").delete()
+    analyst_row = historical.objects.create(name="hash", is_case_sensitive=True)
 
     migrate([("observables", "0002_seed")])
     assert ObservableType.objects.get(pk=analyst_row.pk).is_case_sensitive is True, (

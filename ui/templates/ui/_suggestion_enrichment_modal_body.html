@@ -1,0 +1,60 @@
+{% load ui_tags %}
+{% comment %}
+  Enrichment data modal body for a suggestion.
+  Receives: suggestion (ObservableSuggestion instance)
+{% endcomment %}
+{% if suggestion.enrichment_data %}
+  <div class="enrichment-content">
+    <div class="enrichment-section">
+      <h4 class="enrichment-section-title">Internal Enrichment</h4>
+      <pre class="enrichment-json">{{ suggestion.enrichment_data|prettyjson }}</pre>
+    </div>
+
+    {% if suggestion.enrichment_data.first_seen %}
+    <div class="enrichment-section">
+      <h4 class="enrichment-section-title">First Seen</h4>
+      <p class="mono">{{ suggestion.enrichment_data.first_seen }}</p>
+    </div>
+    {% endif %}
+
+    {% if suggestion.enrichment_data.seen_in_cases %}
+    <div class="enrichment-section">
+      <h4 class="enrichment-section-title">Seen in Cases</h4>
+      <ul class="enrichment-case-list">
+        {% for case_info in suggestion.enrichment_data.seen_in_cases %}
+        <li>
+          <a href="{% url 'ui-case-detail' case_info.number %}" class="mono">#{{ case_info.number }}</a>
+          <span class="dim">{{ case_info.title }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    {% if suggestion.enrichment_data.related_observables %}
+    <div class="enrichment-section">
+      <h4 class="enrichment-section-title">Related Observables</h4>
+      <table class="data-table data-table-tight">
+        <thead>
+          <tr>
+            <th scope="col">Type</th>
+            <th scope="col">Value</th>
+            <th scope="col">Relationship</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for rel in suggestion.enrichment_data.related_observables %}
+          <tr>
+            <td>{{ rel.type }}</td>
+            <td class="mono break">{{ rel.value }}</td>
+            <td>{{ rel.relationship }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+{% else %}
+  <p class="dim">No enrichment data available for this suggestion.</p>
+{% endif %}

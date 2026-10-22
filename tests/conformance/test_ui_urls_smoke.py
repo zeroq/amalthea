@@ -132,6 +132,7 @@ def test_every_get_routable_ui_page_renders(browser: Client, case: Case) -> None
     # Users is org-scoped for admin and global for superAdmin, but the gate is the same: analyst
     # never reaches it (ADR-010).
     admin_or_superadmin = {
+        "ui-playbook-create",
         "ui-settings",
         "ui-settings-sources",
         "ui-settings-users",

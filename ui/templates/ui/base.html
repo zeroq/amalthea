@@ -30,10 +30,24 @@ Accessibility notes that are not optional:
 
 <div class="shell">
   <nav class="rail" aria-label="Primary">
-    <a class="brand" href="{% url 'ui-dashboard' %}">
-      <span class="brand-mark" aria-hidden="true">A</span>
-      <span class="brand-text">Amalthea</span>
-    </a>
+    <div class="rail-head">
+      <a class="brand" href="{% url 'ui-dashboard' %}">
+        <span class="brand-mark" aria-hidden="true">A</span>
+        <span class="brand-text">Amalthea</span>
+      </a>
+      {% if request.user.is_authenticated %}
+        {% if request.user.org or request.user.role == "superAdmin" %}
+          <div class="rail-org">
+            <span class="rail-org-label">Organisation:</span>
+            {% if request.user.org %}
+              <span class="rail-org-name" title="{{ request.user.org.name }}">{{ request.user.org.name }}</span>
+            {% else %}
+              <a class="rail-org-name" href="{% url 'ui-settings-organisations' %}">All organisations</a>
+            {% endif %}
+          </div>
+        {% endif %}
+      {% endif %}
+    </div>
 
     <ul class="rail-links">
       <li>
@@ -143,16 +157,32 @@ Accessibility notes that are not optional:
 
     <div class="rail-foot">
       {% if request.user.is_authenticated %}
-        {% if request.user.org %}
-          <p class="dim tenant-indicator">{{ request.user.org.name }}</p>
-        {% elif request.user.role == "superAdmin" %}
-          <a class="dim tenant-indicator" href="{% url 'ui-settings-organisations' %}">All organisations</a>
-        {% endif %}
-        <a class="linkish" href="{% url 'ui-password-change' %}">Change password</a>
-        <button type="button" class="linkish" data-modal-open="cheatsheet-modal">Keyboard shortcuts <span class="k">?</span></button>
-        <form method="post" action="{% url 'logout' %}">{% csrf_token %}
-          <button type="submit" class="linkish">Sign out {{ request.user.login }}</button>
-        </form>
+        <details class="rail-user">
+          <summary class="rail-user-trigger" aria-label="Account menu for {{ request.user.login }}" title="Account menu">
+            <span class="rail-user-avatar"><i class="fa-solid fa-user" aria-hidden="true"></i></span>
+            <span class="rail-user-name" title="{{ request.user.login }}">{{ request.user.login }}</span>
+          </summary>
+          <ul class="rail-user-menu" id="rail-user-menu">
+            <li>
+              <a class="rail-user-menu-item" href="{% url 'ui-password-change' %}">
+                <i class="fa-solid fa-key" aria-hidden="true"></i> Change password
+              </a>
+            </li>
+            <li>
+              <button type="button" class="rail-user-menu-item" data-modal-open="cheatsheet-modal">
+                <i class="fa-solid fa-circle-question" aria-hidden="true"></i> Keyboard shortcuts
+                <span class="k">?</span>
+              </button>
+            </li>
+            <li class="rail-user-menu-sep">
+              <form method="post" action="{% url 'logout' %}">{% csrf_token %}
+                <button type="submit" class="rail-user-menu-item">
+                  <i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i> Sign out
+                </button>
+              </form>
+            </li>
+          </ul>
+        </details>
       {% else %}
         <a href="{% url 'login' %}">Sign in</a>
       {% endif %}
@@ -219,5 +249,6 @@ Accessibility notes that are not optional:
 <script src="{% static 'ui/messages.js' %}" defer></script>
 <script src="{% static 'ui/picker.js' %}" defer></script>
 <script src="{% static 'ui/clipboard.js' %}" defer></script>
+<script src="{% static 'ui/rail-user.js' %}" defer></script>
 </body>
 </html>

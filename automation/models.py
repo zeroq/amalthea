@@ -9,6 +9,10 @@ from core.enums import (
 )
 from core.models import TimeStampedModel, UUIDModel
 
+#: A run in one of these states may still be written to by a worker, so a playbook cannot be
+#: deleted while one exists (`automation.services.delete_playbook` refuses).
+ACTIVE_RUN_STATUSES: tuple[str, ...] = ("Pending", "Running")
+
 
 class Playbook(UUIDModel, TimeStampedModel):
     name = models.CharField(max_length=200, unique=True)
@@ -35,6 +39,10 @@ class AutomationRun(UUIDModel, TimeStampedModel):
     the name at dispatch time. They are deliberately not one field: the ledger must keep
     reading "we ran the playbook called X" even after X is renamed, and the FK is what
     stops a run referencing a playbook that does not exist (REVIEW M14).
+
+    `PROTECT` is the backstop, not the whole delete policy: `automation.services.delete_playbook`
+    explicitly removes a playbook's terminal run history in one transaction before deleting the
+    playbook, and refuses while a run is still active.
     """
 
     # db_index=False: `case` is the left prefix of ar_case_started_idx below (M1).

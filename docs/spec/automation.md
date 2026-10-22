@@ -33,6 +33,13 @@ extension** (deviation **P12-2** — TheHive 5 / `thehive4py` 2.1.0 expose no pl
 | `playbook/<idOrName>` | GET, PATCH, DELETE | `playbook_detail` |
 | `playbook/<idOrName>/run` | POST | `playbook_run` |
 
+**Deletion** (`automation.services.delete_playbook`): DELETE removes the playbook **and its run
+history** in one transaction. It is refused while any run is `Pending`/`Running`; terminal
+(`Success`/`Failed`) runs are deleted with the playbook. `AutomationRun.playbook` remains
+`PROTECT` (REVIEW M14) as the schema backstop — the service deletes the runs first, so the
+invariant "no run outlives its playbook" still holds. Case timeline entries are not FK-linked to
+runs and survive.
+
 **Write-time validation** (`automation.playbooks.validate_config`, mirrors `executor.execute`):
 - `action` ∈ `{"http","python"}`.
 - `http`: `url` required; `method` ∈ standard verbs; `headers` string→string; `timeoutSeconds` >0 ≤ 30s.

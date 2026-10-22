@@ -1,0 +1,13 @@
+{% if active_run_count %}
+<p class="modal-body-text">
+  This playbook has {{ active_run_count }} run{{ active_run_count|pluralize }} still pending or running. Deletion is blocked while {{ active_run_count|pluralize:"it is,they are" }} still active. Wait for {{ active_run_count|pluralize:"it,them" }} to finish, or deactivate the playbook instead.
+</p>
+{% elif run_count %}
+<p class="modal-body-text">
+  This playbook has {{ run_count }} past run{{ run_count|pluralize }}, which indicates it is in use. Deleting it also permanently removes its run history. Case timeline entries are kept. This cannot be undone.
+</p>
+{% else %}
+<p class="modal-body-text">
+  This cannot be undone. The playbook will be permanently removed.
+</p>
+{% endif %}

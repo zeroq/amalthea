@@ -26,6 +26,7 @@
     <dl class="meta">
       <dt>Severity</dt><dd>{{ alert.severity|sev_label }} ({{ alert.severity }})</dd>
       <dt>Status</dt><dd>{{ alert.status.value }}</dd>
+      <dt>Verdict</dt><dd>{{ alert_verdict|default:"undefined" }}</dd>
       <dt>Type</dt><dd class="mono">{{ alert.type }}</dd>
       <dt>Source</dt><dd class="mono">{{ alert.source }}</dd>
       <dt>Source ref</dt><dd class="mono">{{ alert.source_ref|default:"—" }}</dd>
@@ -72,6 +73,44 @@
       <p class="empty">Read-only access — triage actions are unavailable.</p>
       {% endif %}
     </section>
+
+    {% if alert_observables %}
+    <section class="card" aria-labelledby="h-observables">
+      <h2 id="h-observables">Observables <span class="count">{{ alert_observables|length }}</span></h2>
+      <div class="table-wrap">
+        <table class="data-table data-table-tight">
+          <caption class="sr-only">Observables extracted from this alert</caption>
+          <thead>
+            <tr>
+              <th scope="col">Type</th>
+              <th scope="col">Value</th>
+              <th scope="col">Appears in cases</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in alert_observables %}
+            <tr>
+              <td>{{ item.observable.data_type.name }}</td>
+              <td class="mono break">
+                <a href="{% url 'ui-observable-detail' item.observable.id %}">{{ item.observable.data }}</a>
+              </td>
+              <td class="mono dim">
+                {% if item.cases %}
+                  {% for c in item.cases %}
+                    <a href="{% url 'ui-case-detail' c.number %}" class="case-link">#{{ c.number }}</a>{% if not forloop.last %}, {% endif %}
+                  {% endfor %}
+                {% else %}
+                  <span class="dim">—</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
     {% if can_mutate and not alert.case %}
       <section class="card" aria-labelledby="h-escalate">
         <h2 id="h-escalate">Escalate</h2>

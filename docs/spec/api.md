@@ -304,7 +304,7 @@ code paths that deliberately circumvent the service layer.
   - `python`: `action_path` must name a discovered script (resolver `automation.scripts_loader.script_names()`).
   - Unknown `action` ⇒ 400.
 - `_meta` (AC6.12-P2-c): `{"triggerEvents":[…], "actions":[{"action":"http",…},{"action":"python","scripts":[{"name":…,"description":…,"triggerHint":…}]}], "actionNames":["http","python"]}` — rendered from the live script folder so the UI pickers cannot drift.
-- `playbook/<idOrName>`: lookup by UUID or `name`; PATCH ⇒ **204 no body** (deviation); DELETE ⇒ **204** or **400** if the playbook has any `AutomationRun` (FK is `PROTECT`).
+- `playbook/<idOrName>`: lookup by UUID or `name`; PATCH ⇒ **204 no body** (deviation); DELETE ⇒ **204** after deleting the playbook and its run history in one transaction; **400** while any `AutomationRun` is `Pending`/`Running` (a live worker may still write to it). Terminal run history is removed with the playbook; the FK stays `PROTECT` as a backstop.
 - `playbook/<idOrName>/run`: body `{"case"?: idOrNumber, "observable"?: id}` with at least one required; returns **202** + run JSON (`triggeredBy: "manual"`); enqueues a non-deduping run (key `manual:<uuid4>`); result lands in `output_log` **and** case timeline (AC6.12-P2-a).
 
 ## Identity — `user`, `organisation` (T2/Phase P1)

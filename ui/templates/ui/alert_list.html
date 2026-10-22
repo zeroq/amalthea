@@ -28,6 +28,9 @@
           <th scope="col">Severity</th><th scope="col">Title</th><th scope="col">Type</th>
           <th scope="col">Source</th><th scope="col">Seen</th>
           <th scope="col">State</th>
+          {% if request.user.role == "superAdmin" %}
+          <th scope="col">Actions</th>
+          {% endif %}
         </tr>
       </thead>
       <tbody>
@@ -43,6 +46,18 @@
                 <a href="{% url 'ui-case-detail' alert.case.number %}">#{{ alert.case.number }}</a>
               {% else %}{{ alert.status.value }}{% endif %}
             </td>
+            {% if request.user.role == "superAdmin" %}
+            <td>
+              <button class="btn btn-ghost btn-sm" data-modal-open="delete-alert-{{ alert.id }}"
+                      aria-label="Delete alert {{ alert.title }}">
+                <i class="fa-solid fa-trash" aria-hidden="true"></i>
+              </button>
+              {% url 'ui-alert-delete' alert.id as alert_delete_url %}
+              {% with alert_oid=alert.id|stringformat:"s" %}
+              {% include "ui/_modal.html" with modal_id="delete-alert-"|add:alert_oid title="Delete alert?" body="This will permanently delete the alert. This action cannot be undone." confirm_text="Delete" confirm_class="btn-err" form_action=alert_delete_url size="sm" %}
+              {% endwith %}
+            </td>
+            {% endif %}
           </tr>
         {% endfor %}
       </tbody>
@@ -72,6 +87,9 @@
             <th scope="col">Severity</th><th scope="col">Title</th><th scope="col">Type</th>
             <th scope="col">Source</th><th scope="col">Seen</th>
             <th scope="col">State</th>
+            {% if request.user.role == "superAdmin" %}
+            <th scope="col">Actions</th>
+            {% endif %}
           </tr>
         </thead>
         <tbody>
@@ -87,6 +105,18 @@
                   <a href="{% url 'ui-case-detail' alert.case.number %}">#{{ alert.case.number }}</a>
                 {% else %}{{ alert.status.value }}{% endif %}
               </td>
+              {% if request.user.role == "superAdmin" %}
+              <td>
+                <button class="btn btn-ghost btn-sm" data-modal-open="delete-alert-{{ alert.id }}"
+                        aria-label="Delete alert {{ alert.title }}">
+                  <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                </button>
+                {% url 'ui-alert-delete' alert.id as alert_delete_url %}
+                {% with alert_oid=alert.id|stringformat:"s" %}
+                {% include "ui/_modal.html" with modal_id="delete-alert-"|add:alert_oid title="Delete alert?" body="This will permanently delete the alert. This action cannot be undone." confirm_text="Delete" confirm_class="btn-err" form_action=alert_delete_url size="sm" %}
+                {% endwith %}
+              </td>
+              {% endif %}
             </tr>
           {% endfor %}
         </tbody>

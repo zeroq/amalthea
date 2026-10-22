@@ -26,7 +26,6 @@ except ImportError:  # pragma: no cover — guarded by requirements
 #: semantic identity (timestamps, IDs, process-specific values, etc.).
 VOLATILE_KEYS: frozenset[str] = frozenset(
     {
-        "_id",
         "id",
         "uuid",
         "date",
@@ -74,7 +73,8 @@ def _canonicalize(obj: Any) -> Any:
     if isinstance(obj, dict):
         result: dict[str, Any] = {}
         for key, value in obj.items():
-            if key.casefold() in VOLATILE_KEYS:
+            # Mongo-style `_id` canonicalises to `id` (without keeping the wire literal here).
+            if key.casefold().lstrip("_") in VOLATILE_KEYS:
                 continue
             result[key] = _canonicalize(value)
         # Sort keys for deterministic output

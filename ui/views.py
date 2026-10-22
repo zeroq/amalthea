@@ -41,7 +41,7 @@ from django.contrib.auth.views import (  # noqa: F401 (re-exported for ui/urls.p
 from django.core.exceptions import PermissionDenied
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Count, Max
+from django.db.models import Count, Max, Q
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy  # noqa: F401 (re-exported for ui/urls.py)
@@ -55,9 +55,10 @@ from alerts.escalation import (
 )
 from alerts.models import Alert, AlertStatus
 from automation.dispatcher import TRIGGER_EVENTS
-from automation.models import AutomationRun, Playbook
+from automation.models import ACTIVE_RUN_STATUSES, AutomationRun, Playbook
 from automation.playbooks import ACTIONS, HTTP_METHODS
 from automation.scripts_loader import discover_scripts, script_names
+from automation.services import PlaybookDeleteBlockedError, delete_playbook
 from cases.correlation import (
     alerts_fuzzy_similar_to_case,
     candidate_cases_for_alert,
@@ -121,8 +122,9 @@ from identity.services import (
     serializes_superadmin_changes,
 )
 from ingest.models import IngestionSource
-from observables.extractor import add_observable_with_status, extract_into_case
-from observables.models import Observable, ObservableType
+from observables.extractor import add_observable_with_status
+from observables.models import Observable, ObservableSuggestion, ObservableType
+from observables.suggestions import create_suggestions_for_case
 from realtime.publisher import publish_case_event
 from ui.pagination import PICKER_PAGE_SIZE, paginate
 
@@ -481,6 +483,49 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
     )
     # Correlation-ranked merge candidates (P2) with plain open-case fallback
     merge_candidates = candidate_cases_for_alert(alert, user=request.user)
+
+    # Observables linked to this alert via AlertObservable, with their cases
+    from alerts.models import AlertObservable
+    from cases.models import CaseObservable
+
+    alert_observables = (
+        AlertObservable.objects.filter(alert=alert)
+        .select_related("observable__data_type")
+        .order_by("-created_at")
+    )
+
+    # For each alert observable, find the cases this observable appears in (via CaseObservable).
+    # One query scoped to the cases the caller may see, rather than a visibility check per row.
+    observable_ids = [ao.observable_id for ao in alert_observables]
+    visible_case_ids = Case.objects.filter(case_visible_q(request.user)).values("pk")
+    case_observable_links = (
+        CaseObservable.objects.filter(
+            observable_id__in=observable_ids,
+            case_id__in=visible_case_ids,
+        )
+        .select_related("observable", "case")
+        .order_by("-case__start_date")
+    )
+
+    # Group cases by observable
+    from collections import defaultdict
+
+    cases_by_observable = defaultdict(list)
+    for co in case_observable_links:
+        if co.case_id:
+            cases_by_observable[co.observable_id].append(co.case)
+
+    # Build the alert_observables list with cases for the template
+    alert_observables_with_cases = []
+    for ao in alert_observables:
+        alert_observables_with_cases.append(
+            {
+                "observable": ao.observable,
+                "cases": cases_by_observable.get(ao.observable_id, []),
+                "created_at": ao.created_at,
+            }
+        )
+
     return render(
         request,
         "ui/alert_detail.html",
@@ -492,6 +537,8 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
             alert_status_options=alert_status_options,
             tlp_choices=TLP_CHOICES,
             pap_choices=PAP_CHOICES,
+            alert_observables=alert_observables_with_cases,
+            alert_verdict=alert.verdict,
         ),
     )
 
@@ -597,6 +644,44 @@ def case_alert_link(request: HttpRequest, case_id: str) -> HttpResponse:
         return _case_detail_redirect(request, case.number)
     messages.success(request, f"Alert linked to case {case.number}.")
     return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def alert_delete_ui(request: HttpRequest, alert_id: str) -> HttpResponse:
+    """Delete an alert — superAdmin only (UI endpoint)."""
+    from core.enums import SUPER_ADMIN_ROLE
+
+    if request.user.role != SUPER_ADMIN_ROLE:
+        return render(request, "ui/404.html", status=404)
+
+    alert = resolve_alert(request.user, alert_id, write=True)
+    if alert is None:
+        return render(request, "ui/404.html", status=404)
+
+    alert.delete()
+    messages.success(request, "Alert deleted.")
+    return redirect("ui-alert-list")
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_delete_ui(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Delete a case — superAdmin only (UI endpoint)."""
+    from core.enums import SUPER_ADMIN_ROLE
+
+    if request.user.role != SUPER_ADMIN_ROLE:
+        return render(request, "ui/404.html", status=404)
+
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        return render(request, "ui/404.html", status=404)
+
+    case.delete()
+    messages.success(request, "Case deleted.")
+    return redirect("ui-case-list")
 
 
 def _case_create_form_context(
@@ -1049,6 +1134,20 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     observables_total = observables_qs.count()
     observables = list(observables_qs[:RAIL_CAP])
 
+    # Suggestions: fetch for this case, grouped by status
+    suggestions_qs = case.suggestions.select_related(
+        "data_type", "source_alert", "observable__data_type"
+    ).order_by("-created_at")
+    suggestions_total = suggestions_qs.count()
+    suggestions_proposed = list(suggestions_qs.filter(status="proposed", filtered_out=False))
+    suggestions_accepted = list(suggestions_qs.filter(status="accepted"))
+    suggestions_rejected = list(suggestions_qs.filter(status="rejected"))
+    suggestions_ignored = list(suggestions_qs.filter(status="ignored"))
+    # Disjoint from the status sections below: a filtered suggestion that is later accepted
+    # belongs under "Accepted", not also under "Filtered out".
+    suggestions_filtered = list(suggestions_qs.filter(status="proposed", filtered_out=True))
+    suggestions_filtered_total = len(suggestions_filtered)
+
     # "Seen in" modal payload (plan 2026-10-20): the cases each rendered artifact has been seen in.
     # Scoped through case_visible_q so a share/cross-org link can never leak a case number/title.
     # `case_visible_q` describes *Case* fields (`owner_org_id`/`shares__organisation_id`), so it must
@@ -1080,6 +1179,25 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
                     "severity": cl.case.severity,
                 }
             )
+
+    # Alert provenance for observables: map observable_id -> {latest_alert, other_count, alerts[]}
+    # Fetch AlertObservable links for the rendered observables, ordered by alert created_at desc
+    from alerts.models import AlertObservable
+
+    alert_obs_links = (
+        AlertObservable.objects.filter(observable_id__in=observable_ids)
+        .select_related("alert")
+        .order_by("observable_id", "-alert__created_at")
+    )
+    alert_provenance_by_observable: dict[uuid.UUID, dict] = {}
+    for ao in alert_obs_links:
+        bucket = alert_provenance_by_observable.setdefault(ao.observable_id, {"alerts": []})
+        bucket["alerts"].append(ao.alert)
+    # Post-process to extract latest_alert and other_count
+    for _obs_id, bucket in alert_provenance_by_observable.items():
+        alerts_list = bucket["alerts"]
+        bucket["latest_alert"] = alerts_list[0] if alerts_list else None
+        bucket["other_count"] = len(alerts_list) - 1 if len(alerts_list) > 1 else 0
 
     # Attachments: order by -created_at (newest first), so simple slice is correct
     attachments_total = attachments_qs.count()
@@ -1130,8 +1248,8 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
         case, request.user
     )
 
-    # Badge for Similar tab: combined count, only when > 0 (so the {% if tab.count is not None %}
-    # guard hides it at 0). Set directly on `tabs` — the `counts`→`tabs` loop above (line ~980)
+    # Badge for Similar tab: combined count, only when > 0 (the template's count-is-not-None guard
+    # hides it at 0). Set directly on `tabs` — the `counts`→`tabs` loop above (line ~980)
     # already ran, so mutating `counts` here would never reach the badge.
     combined = similar_total + similar_alerts_total
     if combined > 0:
@@ -1164,6 +1282,7 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             observables=observables,
             observables_total=observables_total,
             linked_cases_by_observable=linked_cases_by_observable,
+            alert_provenance_by_observable=alert_provenance_by_observable,
             tasks=tasks,
             tasks_total=tasks_total,
             pages=pages,
@@ -1230,6 +1349,14 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             # Task tab create/edit modal
             task_assignees=task_assignees,
             task_status_options=task_status_options,
+            # Suggestions (P6)
+            suggestions_total=suggestions_total,
+            suggestions_proposed=suggestions_proposed,
+            suggestions_accepted=suggestions_accepted,
+            suggestions_rejected=suggestions_rejected,
+            suggestions_ignored=suggestions_ignored,
+            suggestions_filtered=suggestions_filtered,
+            suggestions_filtered_total=suggestions_filtered_total,
         ),
     )
 
@@ -1955,20 +2082,39 @@ def case_page_delete(request: HttpRequest, case_id: str, page_id: str) -> HttpRe
 @login_required
 @require_POST
 def case_extract_observables(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Re-run extraction over the case text, firing automation for anything newly linked.
+    """Re-run extraction over the case text, creating suggestions for review.
 
-    The hand-pressable version of the Module D loop. Extraction dispatches `observable.created` only
-    for a *new* `CaseObservable` link, so pressing this repeatedly is safe and a press after editing
-    the description picks up what was missed.
+    The hand-pressable version of the Module D loop. Creates/updates `ObservableSuggestion`
+    rows idempotently. Analysts review and accept suggestions to link observables and fire automation.
     """
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
         raise Http404()
     with transaction.atomic():
-        found = extract_into_case(case, case.title, case.description)
+        # Re-extract must reproduce the same unique keys as the original ingestion, otherwise it
+        # creates a second set of suggestions (the unique constraint includes `source_alert`).
+        # Mirror escalation: one pass per linked alert with that alert's payload, plus the case
+        # text alone when the case has no linked alert.
+        alerts = list(case.alerts.all())
+        if alerts:
+            suggestions = []
+            for alert in alerts:
+                suggestions.extend(
+                    create_suggestions_for_case(
+                        case,
+                        case.title,
+                        case.description,
+                        alert.title,
+                        source_alert=alert,
+                        raw_payload=alert.raw_payload,
+                    )
+                )
+        else:
+            suggestions = create_suggestions_for_case(case, case.title, case.description)
+    proposed_count = sum(1 for s in suggestions if s.status == "proposed")
     messages.success(
         request,
-        f"Extracted {len(found)} new artifact(s); automation dispatched for each new link.",
+        f"Extraction complete: {proposed_count} new suggestion(s) created for review.",
     )
     return _case_detail_redirect(request, case.number)
 
@@ -2089,8 +2235,20 @@ def sources_list(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_GET
 def playbook_list(request: HttpRequest) -> HttpResponse:
-    """List all playbooks with their trigger, action, and last run status."""
-    queryset = Playbook.objects.prefetch_related("runs").order_by("name")
+    """List all playbooks with their trigger, action, and last run status.
+
+    `run_count`/`active_run_count` are annotated once per row: the delete modal needs both to
+    tell "past runs" from "still running", and deriving them in the template would be an N+1.
+    """
+    active_runs = Q(runs__status__in=ACTIVE_RUN_STATUSES)
+    queryset = (
+        Playbook.objects.annotate(
+            run_count=Count("runs"),
+            active_run_count=Count("runs", filter=active_runs),
+        )
+        .prefetch_related("runs")
+        .order_by("name")
+    )
     page_obj = paginate(request, queryset)
     filtered_from = None  # No filters on this list
     return render(
@@ -2099,6 +2257,7 @@ def playbook_list(request: HttpRequest) -> HttpResponse:
         _base_context(
             request,
             page_obj=page_obj,
+            playbooks=queryset,
             filtered_from=filtered_from,
         ),
     )
@@ -2213,6 +2372,10 @@ def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
 
         runs_total = runs_qs.count()
         runs = list(runs_qs[:RAIL_CAP])
+        # The delete guard is global, so the modal warning must be global too: a playbook can be
+        # referenced by runs on cases this user cannot see.
+        run_count = playbook.runs.count()
+        active_run_count = playbook.runs.filter(status__in=ACTIVE_RUN_STATUSES).count()
 
         # Build script list for the detail view (includes all discovered, even with errors, for diagnostics)
         scripts = discover_scripts()
@@ -2240,6 +2403,8 @@ def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
                 playbook=playbook,
                 runs=runs,
                 runs_total=runs_total,
+                run_count=run_count,
+                active_run_count=active_run_count,
                 trigger_events=sorted(TRIGGER_EVENTS),
                 actions=ACTIONS,
                 http_methods=HTTP_METHODS,
@@ -2434,7 +2599,10 @@ def playbook_edit(request: HttpRequest, playbook_id: str) -> HttpResponse:
 @login_required
 @require_POST
 def playbook_delete(request: HttpRequest, playbook_id: str) -> HttpResponse:
-    """Delete a playbook if it has no runs. Requires analyst role or above."""
+    """Delete a playbook and its run history. Requires analyst role or above.
+
+    Refused while any run is `Pending`/`Running`; terminal runs are deleted with the playbook.
+    """
     if request.user.role not in ("analyst", "admin", "superAdmin"):
         return render(request, "ui/404.html", status=404)
 
@@ -2446,13 +2614,31 @@ def playbook_delete(request: HttpRequest, playbook_id: str) -> HttpResponse:
     except ValueError:
         playbook = get_object_or_404(Playbook, name=playbook_id)
 
-    if playbook.runs.exists():
-        messages.error(request, "Cannot delete playbook: it has associated runs.")
+    name = playbook.name
+    try:
+        run_count = delete_playbook(playbook)
+    except PlaybookDeleteBlockedError as exc:
+        if exc.active_runs:
+            run_word = "run is" if exc.active_runs == 1 else "runs are"
+            pronoun = "it" if exc.active_runs == 1 else "them"
+            messages.error(
+                request,
+                f"Cannot delete playbook: {exc.active_runs} {run_word} still pending or running. "
+                f"Wait for {pronoun} to finish or deactivate the playbook.",
+            )
+        else:
+            messages.error(request, f"Cannot delete playbook: {exc}.")
         return redirect("ui-playbook-detail", playbook_id=playbook_id)
 
-    name = playbook.name
-    playbook.delete()
-    messages.success(request, f"Playbook '{name}' deleted.")
+    if run_count:
+        run_word = "run" if run_count == 1 else "runs"
+        verb = "was" if run_count == 1 else "were"
+        messages.success(
+            request,
+            f"Playbook '{name}' deleted. {run_count} {run_word} of history {verb} also removed.",
+        )
+    else:
+        messages.success(request, f"Playbook '{name}' deleted.")
     return redirect("ui-playbook-list")
 
 
@@ -3690,6 +3876,189 @@ def case_observable_remove(
 
     messages.success(request, "Artifact removed from case.")
     return _case_detail_redirect(request, case.number)
+
+
+# --- Observable Suggestions (P6) ---
+
+
+@not_viewer
+@login_required
+@require_POST
+def suggestion_accept(request: HttpRequest, suggestion_id: uuid.UUID) -> HttpResponse:
+    """Accept a single suggestion, creating the CaseObservable link and firing triggers."""
+    from observables.suggestions import AcceptSuggestionError, accept_suggestion
+
+    suggestion = get_object_or_404(
+        ObservableSuggestion.objects.select_related(
+            "case", "data_type", "owner_org", "source_alert"
+        ),
+        pk=suggestion_id,
+    )
+    if suggestion.case_id is None:
+        messages.error(request, "Suggestion is not associated with a case.")
+        return redirect("ui-case-list")
+
+    case = resolve_case(request.user, str(suggestion.case_id), write=True)
+    if case is None:
+        raise Http404()
+
+    if suggestion.status == "accepted":
+        messages.success(request, "Suggestion accepted and linked to case.")
+        return _case_detail_redirect(request, case.number)
+
+    try:
+        accept_suggestion(suggestion, actor=request.user)
+    except AcceptSuggestionError:
+        messages.error(request, "Failed to accept suggestion: unknown observable type")
+        return _case_detail_redirect(request, case.number)
+
+    messages.success(request, "Suggestion accepted and linked to case.")
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def suggestion_reject(request: HttpRequest, suggestion_id: uuid.UUID) -> HttpResponse:
+    """Reject a single suggestion."""
+    from django.utils import timezone
+
+    suggestion = get_object_or_404(
+        ObservableSuggestion.objects.select_related("case", "data_type", "owner_org"),
+        pk=suggestion_id,
+    )
+    case = suggestion.case
+    if case is None:
+        messages.error(request, "Suggestion is not associated with a case.")
+        return redirect("ui-case-list")
+
+    case = resolve_case(request.user, str(case.id), write=True)
+    if case is None:
+        raise Http404()
+
+    if suggestion.status == "rejected":
+        messages.success(request, "Suggestion rejected.")
+        return _case_detail_redirect(request, case.number)
+
+    if suggestion.status == "accepted":
+        messages.error(request, "Cannot reject an accepted suggestion")
+        return _case_detail_redirect(request, case.number)
+
+    suggestion.status = "rejected"
+    suggestion.reviewed_by = request.user
+    suggestion.reviewed_at = timezone.now()
+    suggestion.save(update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"])
+
+    messages.success(request, "Suggestion rejected.")
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def suggestion_ignore(request: HttpRequest, suggestion_id: uuid.UUID) -> HttpResponse:
+    """Ignore a single suggestion."""
+    from django.utils import timezone
+
+    suggestion = get_object_or_404(
+        ObservableSuggestion.objects.select_related("case", "data_type", "owner_org"),
+        pk=suggestion_id,
+    )
+    case = suggestion.case
+    if case is None:
+        messages.error(request, "Suggestion is not associated with a case.")
+        return redirect("ui-case-list")
+
+    case = resolve_case(request.user, str(case.id), write=True)
+    if case is None:
+        raise Http404()
+
+    if suggestion.status == "ignored":
+        messages.success(request, "Suggestion ignored.")
+        return _case_detail_redirect(request, case.number)
+
+    if suggestion.status == "accepted":
+        messages.error(request, "Cannot ignore an accepted suggestion")
+        return _case_detail_redirect(request, case.number)
+
+    suggestion.status = "ignored"
+    suggestion.reviewed_by = request.user
+    suggestion.reviewed_at = timezone.now()
+    suggestion.save(update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"])
+
+    messages.success(request, "Suggestion ignored.")
+    return _case_detail_redirect(request, case.number)
+
+
+def _bulk_suggestion_action(
+    request: HttpRequest,
+    case_id: str,
+    target_status: str,
+    verb: str,
+) -> HttpResponse:
+    """Apply a review status to the selected suggestions of one case.
+
+    Shared by the bulk accept/reject/ignore UI actions. The suggestions are scoped to the case
+    the analyst can write to (`resolve_case(..., write=True)`), so a bulk action can never reach
+    a suggestion in another case or another org.
+
+    The per-item semantics live in `observables.suggestions.bulk_review_suggestions`, which the
+    JSON API uses too — the UI and the API cannot drift.
+    """
+    from observables.suggestions import bulk_review_suggestions
+
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        raise Http404()
+
+    suggestion_ids = request.POST.getlist("suggestion_ids")
+    if not suggestion_ids:
+        messages.error(request, "No suggestions selected.")
+        return _case_detail_redirect(request, case.number)
+
+    suggestions = ObservableSuggestion.objects.select_related(
+        "case", "source_alert", "data_type", "owner_org"
+    ).filter(id__in=suggestion_ids, case=case)
+
+    with transaction.atomic():
+        results = bulk_review_suggestions(
+            suggestions, target_status=target_status, actor=request.user
+        )
+
+    errors = [error for _suggestion, error in results if error is not None]
+    succeeded = len(results) - len(errors)
+    if errors:
+        messages.error(
+            request,
+            f"{verb} {succeeded} suggestion(s); {len(errors)} failed: {errors[0]}",
+        )
+    else:
+        messages.success(request, f"{verb} {succeeded} suggestion(s).")
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def suggestions_bulk_accept(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Bulk accept selected suggestions."""
+    return _bulk_suggestion_action(request, case_id, "accepted", "Accepted")
+
+
+@not_viewer
+@login_required
+@require_POST
+def suggestions_bulk_reject(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Bulk reject selected suggestions."""
+    return _bulk_suggestion_action(request, case_id, "rejected", "Rejected")
+
+
+@not_viewer
+@login_required
+@require_POST
+def suggestions_bulk_ignore(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Bulk ignore selected suggestions."""
+    return _bulk_suggestion_action(request, case_id, "ignored", "Ignored")
 
 
 # --- Case share management (P7) ---
@@ -5343,8 +5712,8 @@ def settings_token_create(request: HttpRequest) -> HttpResponse:
             break
 
     # Show-once render. The secret is rendered into the `token-created-modal` dialog on the Sources
-    # page (an `{% if token_created %}` include in `settings_sources.html`) instead of into a bare
-    # partial: a partial with no `{% extends %}` arrived as a document with no shell and no
+    # page (a token-created conditional include in `settings_sources.html`) instead of into a bare
+    # partial: a partial with no base-template extends arrived as a document with no shell and no
     # stylesheets, so the one secret we can never show again landed on an unstyled page. Re-rendering
     # the list also means its new row is already behind the modal when the modal is dismissed.
     #

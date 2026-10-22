@@ -15,12 +15,14 @@ urlpatterns = [
     path("alerts/<uuid:alert_id>", views.alert_detail, name="ui-alert-detail"),
     path("alerts/<uuid:alert_id>/escalate", views.alert_escalate, name="ui-alert-escalate"),
     path("alerts/<uuid:alert_id>/merge", views.alert_merge, name="ui-alert-merge"),
+    path("alerts/<uuid:alert_id>/delete", views.alert_delete_ui, name="ui-alert-delete"),
     # P2/C1 — Alert status change
     path("alerts/<uuid:alert_id>/status", views.alert_status, name="ui-alert-status"),
     path("cases", views.case_list, name="ui-case-list"),
     # §10.2 — must precede `cases/<str:case_id>` (a literal is otherwise swallowed as a case id).
     path("cases/new", views.case_create, name="ui-case-create"),
     path("cases/<str:case_id>", views.case_detail, name="ui-case-detail"),
+    path("cases/<str:case_id>/delete", views.case_delete_ui, name="ui-case-delete"),
     path("cases/<str:case_id>/link-alert", views.case_alert_link, name="ui-case-alert-link"),
     path("cases/<str:case_id>/status", views.case_set_status, name="ui-case-status"),
     path("cases/<str:case_id>/close", views.case_close, name="ui-case-close"),
@@ -125,6 +127,37 @@ urlpatterns = [
         "cases/<str:case_id>/observable/<uuid:observable_id>/remove",
         views.case_observable_remove,
         name="ui-case-observable-remove",
+    ),
+    # Observable Suggestions (P6)
+    path(
+        "cases/<str:case_id>/suggestions/bulk-accept",
+        views.suggestions_bulk_accept,
+        name="ui-suggestions-bulk-accept",
+    ),
+    path(
+        "cases/<str:case_id>/suggestions/bulk-reject",
+        views.suggestions_bulk_reject,
+        name="ui-suggestions-bulk-reject",
+    ),
+    path(
+        "cases/<str:case_id>/suggestions/bulk-ignore",
+        views.suggestions_bulk_ignore,
+        name="ui-suggestions-bulk-ignore",
+    ),
+    path(
+        "suggestions/<uuid:suggestion_id>/accept",
+        views.suggestion_accept,
+        name="ui-suggestion-accept",
+    ),
+    path(
+        "suggestions/<uuid:suggestion_id>/reject",
+        views.suggestion_reject,
+        name="ui-suggestion-reject",
+    ),
+    path(
+        "suggestions/<uuid:suggestion_id>/ignore",
+        views.suggestion_ignore,
+        name="ui-suggestion-ignore",
     ),
     # Case templates
     path("case-templates", views.case_template_list, name="ui-case-template-list"),

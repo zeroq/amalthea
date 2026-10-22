@@ -13,9 +13,9 @@ Both are the same transaction: the link, the status transition, the observable e
 timeline entry either all land or none do. A case that exists without the evidence that created it
 is worse than no case, because nothing in the ledger records that the evidence was expected.
 
-Escalation is also where observables first appear for a case: `extract_into_case` runs over the
-alert's human text **and** its `raw_payload` leaves, so an address buried three levels deep in a
-SIEM event still becomes a typed artifact.
+Escalation is also where observable *suggestions* first appear for a case: extraction runs
+over the alert's human text **and** its `raw_payload` leaves, so an address buried three levels
+deep in a SIEM event still becomes a typed suggestion the analyst can accept.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from django.utils import timezone
 from alerts.models import Alert, AlertStatus
 from cases.ledger import append_timeline_event
 from cases.models import Case, CaseStatus, TimelineEvent
-from observables.extractor import extract_into_case, json_leaves
+from observables.suggestions import create_suggestions_for_case
 
 
 def resolve_alert_status(value: str, *, warnings: list[str]) -> AlertStatus:
@@ -99,8 +99,13 @@ def import_alert_to_case(
     alert.status = resolve_alert_status("Imported", warnings=warnings)
     alert.save(update_fields=["case", "status", "updated_at"])
 
-    extract_into_case(
-        case, case.title, case.description, alert.title, json_leaves(alert.raw_payload)
+    create_suggestions_for_case(
+        case,
+        case.title,
+        case.description,
+        alert.title,
+        source_alert=alert,
+        raw_payload=alert.raw_payload,
     )
 
     append_timeline_event(
@@ -140,8 +145,13 @@ def merge_alert_into_case(
         alert.status = resolve_alert_status("Imported", warnings=warnings)
         alert.save(update_fields=["case", "status", "updated_at"])
 
-    extract_into_case(
-        case, alert.title, alert.summary, alert.description, json_leaves(alert.raw_payload)
+    create_suggestions_for_case(
+        case,
+        alert.title,
+        alert.summary,
+        alert.description,
+        source_alert=alert,
+        raw_payload=alert.raw_payload,
     )
 
     return append_timeline_event(

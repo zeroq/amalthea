@@ -376,17 +376,13 @@ def test_password_change_shows_unusable_password_message(
 
 
 def test_base_html_has_password_change_link(browser: Client) -> None:
-    """T3: base.html rail-foot has Change password link next to Sign out."""
+    """T3: base.html rail-foot has Change password in the account menu before Sign out."""
     url = reverse("ui-dashboard")
     response = browser.get(url)
     assert response.status_code == 200
 
     content = response.content.decode()
-    # Change password link should be in rail-foot
-    assert (
-        'href="/password/change"' in content or "href=\"{% url 'ui-password-change' %}\"" in content
-    )
-    # Actually check rendered URL
+    # Change password link should be in rail-foot inside the rail-user menu
     password_url = reverse("ui-password-change")
     assert f'href="{password_url}"' in content
     assert "Change password" in content
@@ -394,6 +390,89 @@ def test_base_html_has_password_change_link(browser: Client) -> None:
     change_pos = content.index(f'href="{password_url}"')
     signout_pos = content.index("Sign out")
     assert change_pos < signout_pos
+
+
+def test_rail_user_menu_authenticated(browser: Client, analyst: User) -> None:
+    """Authenticated page: rail-user disclosure with avatar, username, and ordered actions."""
+    url = reverse("ui-dashboard")
+    response = browser.get(url)
+    assert response.status_code == 200
+
+    content = response.content.decode()
+
+    # .rail-user exists inside .rail-foot
+    assert 'class="rail-user"' in content
+    rail_foot_pos = content.index('class="rail-foot"')
+    rail_user_pos = content.index('class="rail-user"')
+    assert rail_user_pos > rail_foot_pos
+
+    # summary aria-label contains the login
+    assert f'aria-label="Account menu for {analyst.login}"' in content
+
+    # avatar contains fa-user icon
+    assert 'class="rail-user-avatar"' in content
+    assert 'class="fa-solid fa-user"' in content
+
+    # username appears in .rail-user-name with matching title
+    assert 'class="rail-user-name"' in content
+    assert f'title="{analyst.login}"' in content
+    assert f">{analyst.login}<" in content
+
+    # three menu actions in order: Change password < Keyboard shortcuts < Sign out
+    change_pos = content.index("Change password")
+    shortcuts_pos = content.index("Keyboard shortcuts")
+    signout_pos = content.index("Sign out")
+    assert change_pos < shortcuts_pos < signout_pos
+
+    # logout form posts to reverse("logout")
+    logout_url = reverse("logout")
+    assert f'action="{logout_url}"' in content
+    assert 'method="post"' in content
+    assert "csrfmiddlewaretoken" in content
+
+
+def test_rail_user_menu_signed_out() -> None:
+    """Signed-out login page: no .rail-user, no menu actions, Sign in present."""
+    client = Client()
+    url = reverse("login")
+    response = client.get(url)
+    assert response.status_code == 200
+
+    content = response.content.decode()
+
+    # No .rail-user block
+    assert 'class="rail-user"' not in content
+    # No menu actions in rail-foot (the cheatsheet modal has "Keyboard shortcuts" but that's separate)
+    assert 'class="rail-user-menu"' not in content
+    # The old flat controls should be gone
+    assert 'class="linkish"' not in content
+    # Sign in link still in rail-foot
+    assert "Sign in" in content
+    assert 'class="rail-foot"' in content
+    login_url = reverse("login")
+    assert f'href="{login_url}"' in content
+
+
+def test_rail_user_js_referenced_and_exists(browser: Client) -> None:
+    """rail-user.js is referenced by base.html and exists on disk."""
+    from pathlib import Path
+
+    url = reverse("ui-dashboard")
+    response = browser.get(url)
+    assert response.status_code == 200
+
+    content = response.content.decode()
+    # Script tag with defer
+    assert (
+        'src="/static/ui/rail-user.js"' in content
+        or "src=\"{% static 'ui/rail-user.js' %}\"" in content
+    )
+    assert "rail-user.js" in content
+    assert "defer" in content
+
+    # File exists on disk
+    js_path = Path(__file__).resolve().parents[2] / "ui" / "static" / "ui" / "rail-user.js"
+    assert js_path.exists(), f"rail-user.js not found at {js_path}"
 
 
 # --------------------------------------------------------------------------
@@ -691,6 +770,90 @@ def test_dashboard_shows_org_name_for_superadmin_with_org(db: None, org: Organis
     content = response.content.decode()
     assert org.name in content
     assert "All organisations" not in content
+
+
+# --------------------------------------------------------------------------
+# Rail organisation placement tests (BRIEF-2026-10-22)
+# --------------------------------------------------------------------------
+
+
+def test_rail_org_block_user_with_org(browser: Client, analyst: User, org: Organisation) -> None:
+    """User with an org: rail-head > rail-org > rail-links > rail-foot; label + name present."""
+    url = reverse("ui-dashboard")
+    response = browser.get(url)
+    assert response.status_code == 200
+    content = response.content.decode()
+
+    # Order: rail-head appears before rail-org, before rail-links, before rail-foot
+    head_pos = content.index('class="rail-head"')
+    org_pos = content.index('class="rail-org"')
+    links_pos = content.index('class="rail-links"')
+    foot_pos = content.index('class="rail-foot"')
+    assert head_pos < org_pos < links_pos < foot_pos
+
+    # Label and org name present
+    assert "Organisation:" in content
+    assert org.name in content
+    # Org name is in a span with title attribute (full value in tooltip)
+    assert f'title="{org.name}"' in content
+    assert 'class="rail-org-name"' in content
+
+
+def test_rail_org_block_superadmin_without_org(db: None) -> None:
+    """SuperAdmin without an org: rail-org contains 'All organisations' link.
+
+    Uses RequestFactory with a mock user since UserManager assigns a default org
+    to all real users. The template branch is exercised directly.
+    """
+    from django.template.loader import render_to_string
+    from django.test import RequestFactory
+
+    factory = RequestFactory()
+    request = factory.get("/")
+
+    # Mock user with no org (theoretical superAdmin without org membership)
+    class MockSuperAdmin:
+        is_authenticated = True
+        org = None
+        role = "superAdmin"
+        login = "superadmin"
+
+    request.user = MockSuperAdmin()
+
+    # Render just the rail-head portion to exercise the template branch
+    content = render_to_string(
+        "ui/base.html",
+        {"request": request},
+        request=request,
+    )
+
+    # rail-org block exists
+    assert 'class="rail-org"' in content
+    # Label present
+    assert "Organisation:" in content
+    # All organisations link present (sentence-case, points to ui-settings-organisations)
+    org_url = reverse("ui-settings-organisations")
+    assert f'href="{org_url}"' in content
+    assert "All organisations" in content
+    # Link has rail-org-name class
+    assert 'class="rail-org-name"' in content
+
+
+def test_rail_org_block_signed_out() -> None:
+    """Signed-out login page: no rail-org block, no Organisation: label."""
+    client = Client()
+    url = reverse("login")
+    response = client.get(url)
+    assert response.status_code == 200
+    content = response.content.decode()
+
+    # No rail-org block
+    assert 'class="rail-org"' not in content
+    # No Organisation: label
+    assert "Organisation:" not in content
+    # Sign in link still in rail-foot
+    assert "Sign in" in content
+    assert 'class="rail-foot"' in content
 
 
 # --------------------------------------------------------------------------

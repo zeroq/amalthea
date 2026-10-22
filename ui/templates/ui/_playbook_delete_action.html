@@ -1,0 +1,24 @@
+{% comment %}
+Delete trigger and modal for one playbook.
+
+Parameters:
+  pb                 Playbook instance (required).
+  run_count          Total runs; enables the "past runs" warning.
+  active_run_count   Pending/Running runs; disables the confirm and explains the block.
+  icon_only          True on the list (trash icon); false on the detail page (text button).
+{% endcomment %}
+{% url 'ui-playbook-delete' pb.id as delete_url %}
+{% with playbook_key=pb.id|stringformat:"s" %}
+{% with modal_id="delete-playbook-"|add:playbook_key %}
+{% if active_run_count %}
+{% include "ui/_modal.html" with modal_id=modal_id title="Cannot delete playbook yet" body_template="ui/_playbook_delete_body.html" confirm_text="Delete" confirm_class="btn-err" confirm_disabled=True form_action=delete_url size="sm" run_count=run_count active_run_count=active_run_count %}
+{% else %}
+{% include "ui/_modal.html" with modal_id=modal_id title="Delete playbook?" body_template="ui/_playbook_delete_body.html" confirm_text="Delete" confirm_class="btn-err" form_action=delete_url size="sm" run_count=run_count active_run_count=active_run_count %}
+{% endif %}
+{% if icon_only %}
+<button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete playbook {{ pb.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+{% else %}
+<button type="button" class="btn btn-err" data-modal-open="{{ modal_id }}">Delete playbook</button>
+{% endif %}
+{% endwith %}
+{% endwith %}

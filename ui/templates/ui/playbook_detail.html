@@ -51,14 +51,11 @@
         <dd>{{ playbook.updated_at|date:"Y-m-d H:i" }}</dd>
       </dl>
 
+      {% if can_mutate %}
       <div class="card-actions">
-        <button type="button" class="btn btn-err" data-modal-open="delete-playbook-{{ playbook.id|stringformat:"s" }}">Delete playbook</button>
+        {% include "ui/_playbook_delete_action.html" with pb=playbook run_count=run_count active_run_count=active_run_count icon_only=False %}
       </div>
-
-      {% url 'ui-playbook-delete' playbook.id as delete_url %}
-      {% with modal_id="delete-playbook-"|add:playbook.id|stringformat:"s" %}
-      {% include "ui/_modal.html" with modal_id=modal_id title="Delete playbook?" body="This cannot be undone. The playbook and all its runs will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
-      {% endwith %}
+      {% endif %}
 
       <div class="card">
         <h3>Action configuration</h3>

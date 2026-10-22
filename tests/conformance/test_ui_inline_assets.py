@@ -151,3 +151,47 @@ def test_no_multiline_inline_comment(path: Path) -> None:
         + " has no closing `#}` on the same line. Django's `{# #}` comment is single-line "
         "only, so it is rendered as literal text; use `{% comment %}...{% endcomment %}`."
     )
+
+
+def _multiline_tag_lines(text: str) -> list[int]:
+    """Line numbers where a `{% … %}` or `{{ … }}` is not closed on the same line.
+
+    Django's lexer does not use `re.DOTALL`, so a block tag or expression whose closer is on a
+    later line is not parsed as a tag at all — it is emitted into the page as literal text.
+    `{% comment %}` bodies are stripped first because they are inert by design.
+    """
+    without_blocks = _COMMENT_BLOCK.sub("", text)
+    offenders: list[int] = []
+    for opener, closer in (("{%", "%}"), ("{{", "}}")):
+        pos = without_blocks.find(opener)
+        while pos != -1:
+            line_end = without_blocks.find("\n", pos)
+            close = without_blocks.find(closer, pos)
+            if close == -1 or (line_end != -1 and close > line_end):
+                offenders.append(without_blocks.count("\n", 0, pos) + 1)
+            pos = without_blocks.find(opener, pos + 1)
+    return sorted(set(offenders))
+
+
+@pytest.mark.parametrize("path", _templates(), ids=lambda p: p.name)
+def test_no_multiline_template_tags(path: Path) -> None:
+    # A block tag/expression closed on a later line is rendered verbatim, not executed.
+    lines = _multiline_tag_lines(path.read_text(encoding="utf-8"))
+    assert lines == [], (
+        str(path.name)
+        + ": multi-line `{% … %}`/`{{ … }}` starting at line(s) "
+        + str(lines)
+        + " is rendered as literal text (Django's lexer is line-based); keep the tag on one line."
+    )
+
+
+@pytest.mark.parametrize("path", _templates(), ids=lambda p: p.name)
+def test_no_template_expression_inside_block_tag(path: Path) -> None:
+    # `{% include … title="{{ obj.name }}" %}` passes the *literal* string `{{ obj.name }}`:
+    # quoted tag arguments are constants and are not re-parsed. Pass an unquoted variable or a
+    # `{% with %}` alias instead.
+    match = re.search(r"\{%[^%]*?\{\{", _strip_comments(path.read_text(encoding="utf-8")))
+    assert match is None, (
+        f"{path.name}: `{{{{ … }}}}` inside a block tag is literal text — use an unquoted "
+        f"variable or a `{{% with %}}` alias"
+    )
