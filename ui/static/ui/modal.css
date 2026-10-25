@@ -100,13 +100,19 @@ dialog.cheatsheet-modal {
 .modal-body {
   padding: 16px 20px;
   /* The only scrollable region of a tall modal; `min-height: 0` lets this flex item shrink below
-   * its content height, which is what makes the header and footer stay put. */
+   * its content height, which is what makes the header and footer stay put. `min-width: 0` allows
+   * the flex item to shrink below its intrinsic content width so long text wraps instead of
+   * forcing horizontal overflow (same pattern used in .token-code-wrap > code). */
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
 }
 .modal-body-text {
   margin: 0;
   color: var(--color-text-dim);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
 }
 .modal-footer {
   display: flex;
