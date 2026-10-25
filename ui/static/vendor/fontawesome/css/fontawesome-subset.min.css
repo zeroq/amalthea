@@ -170,3 +170,4 @@
 .fa-comments::before { content: "\f086"; }
 .fa-list-check::before { content: "\f0ae"; }
 .fa-paperclip::before { content: "\f0c6"; }
+.fa-ban::before{content:"\f05e"}.fa-toggle-off::before{content:"\f204"}
