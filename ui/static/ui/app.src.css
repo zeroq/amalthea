@@ -982,11 +982,37 @@ a.rail-org-name:hover {
   transform: translateX(-50%) translateY(2px);
 }
 
+/* In data tables: align tooltip LEFT (not centered) so it grows rightward from
+   the icon and never pushes past the right edge of .table-wrap. Also cap
+   max-width so long labels wrap instead of extending the scroll area. */
+.data-table .tooltip[data-tooltip]::before {
+  left: 0;
+  transform: none;
+  max-width: 220px;
+  white-space: normal;
+  word-break: break-word;
+}
+.data-table .tooltip[data-tooltip]::after {
+  left: 14px; /* align arrow with icon center (~16px icon + 4px padding) */
+  transform: rotate(45deg);
+}
+.data-table .tooltip:hover[data-tooltip]::before,
+.data-table .tooltip:focus-within[data-tooltip]::before {
+  transform: translateY(2px);
+}
+
 /* Allow tooltips in table action cells to visually overflow without triggering
    the .table-wrap horizontal scrollbar. The tooltip is absolutely positioned
    within .tooltip, which sits inside .control-row inside the td. */
 .data-table .control-row {
   overflow: visible;
+}
+
+/* Prevent table cells from forcing width via content; let the table
+   distribute space naturally. The Actions column gets min-width: 0 so it
+   shrinks instead of expanding to fit tooltip pseudo-elements. */
+.data-table td:last-child {
+  min-width: 0;
 }
 
 /* ============================================================================
