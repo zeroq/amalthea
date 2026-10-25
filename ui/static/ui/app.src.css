@@ -926,6 +926,70 @@ a.rail-org-name:hover {
 }
 
 /* ============================================================================
+   Tooltip — CSS-only, dark-theme, for icon buttons in table cells
+   Positioned BELOW the trigger to avoid horizontal overflow in .table-wrap
+   ============================================================================ */
+.tooltip {
+  position: relative;
+  display: inline-flex;
+}
+.tooltip[data-tooltip]::before {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--color-text);
+  background: var(--color-bg-raised);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 20;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.tooltip[data-tooltip]::after {
+  content: "";
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 6px;
+  height: 6px;
+  background: var(--color-bg-raised);
+  border: 1px solid var(--color-line-strong);
+  border-right: none;
+  border-bottom: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 19;
+}
+.tooltip:hover[data-tooltip]::before,
+.tooltip:hover[data-tooltip]::after,
+.tooltip:focus-within[data-tooltip]::before,
+.tooltip:focus-within[data-tooltip]::after {
+  opacity: 1;
+}
+.tooltip:hover[data-tooltip]::before,
+.tooltip:focus-within[data-tooltip]::before {
+  transform: translateX(-50%) translateY(2px);
+}
+
+/* Allow tooltips in table action cells to visually overflow without triggering
+   the .table-wrap horizontal scrollbar. The tooltip is absolutely positioned
+   within .tooltip, which sits inside .control-row inside the td. */
+.data-table .control-row {
+  overflow: visible;
+}
+
+/* ============================================================================
    Similar cases list — ranked correlation results (PLAN-2026-10-18 P1)
    ============================================================================ */
 .similar-list {
