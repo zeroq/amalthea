@@ -1008,6 +1008,15 @@ a.rail-org-name:hover {
   overflow: visible;
 }
 
+/* Prevent unwanted vertical scrollbar on .table-wrap.
+   Setting only overflow-x:auto implicitly forces overflow-y:auto in many browsers.
+   Explicitly set overflow-y:visible so tooltips (which overflow via
+   .data-table .control-row {overflow:visible}) can display without clipping
+   and no vertical scrollbar appears when content fits. */
+.table-wrap {
+  overflow-y: visible;
+}
+
 /* Prevent table cells from forcing width via content; let the table
    distribute space naturally. The Actions column gets min-width: 0 so it
    shrinks instead of expanding to fit tooltip pseudo-elements. */
