@@ -1,0 +1,9 @@
+{% comment %}
+Initial body of the "Full alert payload" modal. The trigger swaps in
+`ui/_task_source_payload.html` with HTMX; without HTMX the trigger is a plain link to
+the alert page, where the raw payload is already available.
+{% endcomment %}
+<p class="dim">Loading the full payload…</p>
+<p>
+  <a href="{% url 'ui-alert-detail' source_payload_alert.id %}">Open the source alert instead</a>
+</p>

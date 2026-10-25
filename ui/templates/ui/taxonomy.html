@@ -6,22 +6,53 @@
 {% block content %}
 <div class="cols">
   <div class="stack">
-    <div class="card">
-      <h3>Case Statuses</h3>
+    <section class="card" aria-labelledby="h-case-statuses">
+      <div class="page-row">
+        <h2 id="h-case-statuses">Case Statuses</h2>
+        {% if can_manage_taxonomy %}
+        <button type="button" class="btn btn-sm" data-modal-open="case-status-create-modal">
+          <i class="fa-solid fa-plus" aria-hidden="true"></i> Add status
+        </button>
+        {% endif %}
+      </div>
       {% if case_statuses %}
       <div class="table-wrap">
       <table class="data-table">
         <caption class="sr-only">Case statuses</caption>
         <thead>
-          <tr><th scope="col">Value</th><th scope="col">Stage</th><th scope="col">Order</th><th scope="col">Hidden</th></tr>
+          <tr><th scope="col">Value</th><th scope="col">Stage</th><th scope="col">Order</th><th scope="col">Hidden</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
         </thead>
         <tbody>
           {% for s in case_statuses %}
           <tr>
-            <td class="mono">{{ s.value }}</td>
+            <td class="mono">{{ s.value }}{% if s.hidden %} <span class="badge">Hidden</span>{% endif %}</td>
             <td>{{ s.stage }}</td>
             <td>{{ s.order }}</td>
             <td>{{ s.hidden|yesno:"Yes,No" }}</td>
+            <td>
+              {% if can_manage_taxonomy %}
+              {% with modal_id="case-status-edit-"|add:s.id|stringformat:"s" form_id="case-status-edit-form-"|add:s.id|stringformat:"s" %}
+              {% url 'ui-taxonomy-case-status-edit' s.id as edit_url %}
+              <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit case status {{ s.value }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
+              {% if form_state.modal_id == modal_id %}
+              {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_case_status_form.html" title="Edit case status" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" extra_fields=None obj=s is_edit=True stage_choices=case_stage_choices form_values=form_state.values errors=form_state.errors size="md" %}
+              {% else %}
+              {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_case_status_form.html" title="Edit case status" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" extra_fields=None obj=s is_edit=True stage_choices=case_stage_choices size="md" %}
+              {% endif %}
+              {% endwith %}
+              {% if s.case_count %}
+              <button type="button" class="icon-link icon-link-err" disabled title="In use by {{ s.case_count }} case{{ s.case_count|pluralize }}" aria-label="Cannot delete case status {{ s.value }}: in use by {{ s.case_count }} case{{ s.case_count|pluralize }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+              {% else %}
+              {% with modal_id="case-status-delete-"|add:s.id|stringformat:"s" %}
+              {% url 'ui-taxonomy-case-status-delete' s.id as delete_url %}
+              {% include "ui/_modal.html" with modal_id=modal_id title="Delete case status?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="case status" identifier=s.value usage_count=0 %}
+              <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete case status {{ s.value }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+              {% endwith %}
+              {% endif %}
+              {% else %}
+              <span class="dim">—</span>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -30,24 +61,66 @@
       {% else %}
       <p class="empty">No case statuses defined.</p>
       {% endif %}
-    </div>
 
-    <div class="card">
-      <h3>Alert Statuses</h3>
+      {% if can_manage_taxonomy %}
+      {% url 'ui-taxonomy-case-status-create' as create_url %}
+      {% with modal_id="case-status-create-modal" form_id="case-status-create-form" %}
+      {% if form_state.modal_id == modal_id %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_case_status_form.html" title="New case status" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False stage_choices=case_stage_choices form_values=form_state.values errors=form_state.errors size="md" %}
+      {% else %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_case_status_form.html" title="New case status" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False stage_choices=case_stage_choices size="md" %}
+      {% endif %}
+      {% endwith %}
+      {% endif %}
+    </section>
+
+    <section class="card" aria-labelledby="h-alert-statuses">
+      <div class="page-row">
+        <h2 id="h-alert-statuses">Alert Statuses</h2>
+        {% if can_manage_taxonomy %}
+        <button type="button" class="btn btn-sm" data-modal-open="alert-status-create-modal">
+          <i class="fa-solid fa-plus" aria-hidden="true"></i> Add status
+        </button>
+        {% endif %}
+      </div>
       {% if alert_statuses %}
       <div class="table-wrap">
       <table class="data-table">
         <caption class="sr-only">Alert statuses</caption>
         <thead>
-          <tr><th scope="col">Value</th><th scope="col">Stage</th><th scope="col">Order</th><th scope="col">Hidden</th></tr>
+          <tr><th scope="col">Value</th><th scope="col">Stage</th><th scope="col">Order</th><th scope="col">Hidden</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
         </thead>
         <tbody>
           {% for s in alert_statuses %}
           <tr>
-            <td class="mono">{{ s.value }}</td>
+            <td class="mono">{{ s.value }}{% if s.hidden %} <span class="badge">Hidden</span>{% endif %}</td>
             <td>{{ s.stage }}</td>
             <td>{{ s.order }}</td>
             <td>{{ s.hidden|yesno:"Yes,No" }}</td>
+            <td>
+              {% if can_manage_taxonomy %}
+              {% with modal_id="alert-status-edit-"|add:s.id|stringformat:"s" form_id="alert-status-edit-form-"|add:s.id|stringformat:"s" %}
+              {% url 'ui-taxonomy-alert-status-edit' s.id as edit_url %}
+              <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit alert status {{ s.value }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
+              {% if form_state.modal_id == modal_id %}
+              {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_alert_status_form.html" title="Edit alert status" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=s is_edit=True stage_choices=alert_stage_choices form_values=form_state.values errors=form_state.errors size="md" %}
+              {% else %}
+              {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_alert_status_form.html" title="Edit alert status" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=s is_edit=True stage_choices=alert_stage_choices size="md" %}
+              {% endif %}
+              {% endwith %}
+              {% if s.alert_count %}
+              <button type="button" class="icon-link icon-link-err" disabled title="In use by {{ s.alert_count }} alert{{ s.alert_count|pluralize }}" aria-label="Cannot delete alert status {{ s.value }}: in use by {{ s.alert_count }} alert{{ s.alert_count|pluralize }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+              {% else %}
+              {% with modal_id="alert-status-delete-"|add:s.id|stringformat:"s" %}
+              {% url 'ui-taxonomy-alert-status-delete' s.id as delete_url %}
+              {% include "ui/_modal.html" with modal_id=modal_id title="Delete alert status?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="alert status" identifier=s.value usage_count=0 %}
+              <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete alert status {{ s.value }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+              {% endwith %}
+              {% endif %}
+              {% else %}
+              <span class="dim">—</span>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -56,18 +129,34 @@
       {% else %}
       <p class="empty">No alert statuses defined.</p>
       {% endif %}
-    </div>
-  </div>
 
-  <div class="stack">
-    <div class="card">
-      <h3>Observable Types</h3>
+      {% if can_manage_taxonomy %}
+      {% url 'ui-taxonomy-alert-status-create' as create_url %}
+      {% with modal_id="alert-status-create-modal" form_id="alert-status-create-form" %}
+      {% if form_state.modal_id == modal_id %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_alert_status_form.html" title="New alert status" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False stage_choices=alert_stage_choices form_values=form_state.values errors=form_state.errors size="md" %}
+      {% else %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_alert_status_form.html" title="New alert status" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False stage_choices=alert_stage_choices size="md" %}
+      {% endif %}
+      {% endwith %}
+      {% endif %}
+    </section>
+
+        <section class="card" aria-labelledby="h-observable-types">
+      <div class="page-row">
+        <h2 id="h-observable-types">Observable Types</h2>
+        {% if can_manage_taxonomy %}
+        <button type="button" class="btn btn-sm" data-modal-open="observable-type-create-modal">
+          <i class="fa-solid fa-plus" aria-hidden="true"></i> Add type
+        </button>
+        {% endif %}
+      </div>
       {% if observable_types %}
       <div class="table-wrap">
       <table class="data-table">
         <caption class="sr-only">Observable types</caption>
         <thead>
-          <tr><th scope="col">Name</th><th scope="col">Case Sensitive</th><th scope="col">Attachment</th></tr>
+          <tr><th scope="col">Name</th><th scope="col">Case Sensitive</th><th scope="col">Attachment</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
         </thead>
         <tbody>
           {% for t in observable_types %}
@@ -75,6 +164,30 @@
             <td class="mono">{{ t.name }}</td>
             <td>{{ t.is_case_sensitive|yesno:"Yes,No" }}</td>
             <td>{{ t.is_attachment|yesno:"Yes,No" }}</td>
+            <td>
+              {% if can_manage_taxonomy %}
+              {% with modal_id="observable-type-edit-"|add:t.id|stringformat:"s" form_id="observable-type-edit-form-"|add:t.id|stringformat:"s" %}
+              {% url 'ui-taxonomy-observable-type-edit' t.id as edit_url %}
+              <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit observable type {{ t.name }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
+              {% if form_state.modal_id == modal_id %}
+              {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_observable_type_form.html" title="Edit observable type" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=t is_edit=True form_values=form_state.values errors=form_state.errors size="md" %}
+              {% else %}
+              {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_observable_type_form.html" title="Edit observable type" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=t is_edit=True size="md" %}
+              {% endif %}
+              {% endwith %}
+              {% if t.observable_count %}
+              <button type="button" class="icon-link icon-link-err" disabled title="In use by {{ t.observable_count }} observable{{ t.observable_count|pluralize }}" aria-label="Cannot delete observable type {{ t.name }}: in use by {{ t.observable_count }} observable{{ t.observable_count|pluralize }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+              {% else %}
+              {% with modal_id="observable-type-delete-"|add:t.id|stringformat:"s" %}
+              {% url 'ui-taxonomy-observable-type-delete' t.id as delete_url %}
+              {% include "ui/_modal.html" with modal_id=modal_id title="Delete observable type?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="observable type" identifier=t.name usage_count=0 %}
+              <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete observable type {{ t.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+              {% endwith %}
+              {% endif %}
+              {% else %}
+              <span class="dim">—</span>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -83,93 +196,356 @@
       {% else %}
       <p class="empty">No observable types defined.</p>
       {% endif %}
-    </div>
-  </div>
 
-  <div class="stack">
-    <div class="card">
-      <h3>Case Scope</h3>
+      {% if can_manage_taxonomy %}
+      {% url 'ui-taxonomy-observable-type-create' as create_url %}
+      {% with modal_id="observable-type-create-modal" form_id="observable-type-create-form" %}
+      {% if form_state.modal_id == modal_id %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_observable_type_form.html" title="New observable type" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False form_values=form_state.values errors=form_state.errors size="md" %}
+      {% else %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_observable_type_form.html" title="New observable type" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False size="md" %}
+      {% endif %}
+      {% endwith %}
+      {% endif %}
+    </section>
+
+    <section class="card" aria-labelledby="h-case-scope">
+      <div class="page-row">
+        <h2 id="h-case-scope">Case Scope</h2>
+        {% if can_manage_taxonomy %}
+        <button type="button" class="btn btn-sm" data-modal-open="taxonomy-term-create-case_scope-modal">
+          <i class="fa-solid fa-plus" aria-hidden="true"></i> Add term
+        </button>
+        {% endif %}
+      </div>
+      {% if taxonomy_terms_by_category.case_scope %}
       <div class="table-wrap">
         <table class="data-table">
           <caption class="sr-only">Case scope</caption>
           <thead>
-            <tr><th scope="col">Code</th><th scope="col">Label</th></tr>
+            <tr><th scope="col">Code</th><th scope="col">Label</th><th scope="col">Order</th><th scope="col">Hidden</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
           </thead>
           <tbody>
-            {% for val, label in scope_choices %}
-              <tr><td class="mono">{{ val }}</td><td>{{ label }}</td></tr>
+            {% for t in taxonomy_terms_by_category.case_scope %}
+              <tr>
+                <td class="mono">{{ t.code }}{% if t.hidden %} <span class="badge">Hidden</span>{% endif %}{% if t.protected %} <span class="badge">Protected</span>{% endif %}</td>
+                <td>{{ t.label }}</td>
+                <td>{{ t.order }}</td>
+                <td>{{ t.hidden|yesno:"Yes,No" }}</td>
+                <td>
+                  {% if can_manage_taxonomy %}
+                  {% with modal_id="taxonomy-term-edit-"|add:t.id|stringformat:"s" form_id="taxonomy-term-edit-form-"|add:t.id|stringformat:"s" %}
+                  {% url 'ui-taxonomy-term-edit' t.id as edit_url %}
+                  <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit case scope {{ t.code }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
+                  {% if form_state.modal_id == modal_id %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="Edit taxonomy term" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=t is_edit=True category=t.category form_values=form_state.values errors=form_state.errors size="md" %}
+                  {% else %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="Edit taxonomy term" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=t is_edit=True category=t.category size="md" %}
+                  {% endif %}
+                  {% endwith %}
+                  {% if t.protected or t.in_use_count %}
+                  <button type="button" class="icon-link icon-link-err" disabled title="{% if t.protected %}Protected term{% elif t.in_use_count %}In use{% endif %}" aria-label="Cannot delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+                  {% else %}
+                  {% with modal_id="taxonomy-term-delete-"|add:t.id|stringformat:"s" %}
+                  {% url 'ui-taxonomy-term-delete' t.id as delete_url %}
+                  {% include "ui/_modal.html" with modal_id=modal_id title="Delete taxonomy term?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="taxonomy term" identifier=t.code usage_count=0 %}
+                  <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+                  {% endwith %}
+                  {% endif %}
+                  {% else %}
+                  <span class="dim">—</span>
+                  {% endif %}
+                </td>
+              </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
-    </div>
+      {% else %}
+      <p class="empty">No terms defined.</p>
+      {% endif %}
+      {% if can_manage_taxonomy %}
+      {% url 'ui-taxonomy-term-create' as create_url %}
+      {% with modal_id="taxonomy-term-create-case_scope-modal" form_id="taxonomy-term-create-case_scope-form" %}
+      {% if form_state.modal_id == modal_id %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="New case scope term" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False category="case_scope" form_values=form_state.values errors=form_state.errors size="md" %}
+      {% else %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="New case scope term" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False category="case_scope" size="md" %}
+      {% endif %}
+      {% endwith %}
+      {% endif %}
+    </section>
+  </div>
 
-    <div class="card">
-      <h3>Case Phase</h3>
+  <div class="stack">
+    <section class="card" aria-labelledby="h-case-phase">
+      <div class="page-row">
+        <h2 id="h-case-phase">Case Phase</h2>
+        {% if can_manage_taxonomy %}
+        <button type="button" class="btn btn-sm" data-modal-open="taxonomy-term-create-case_phase-modal">
+          <i class="fa-solid fa-plus" aria-hidden="true"></i> Add term
+        </button>
+        {% endif %}
+      </div>
+      {% if taxonomy_terms_by_category.case_phase %}
       <div class="table-wrap">
         <table class="data-table">
           <caption class="sr-only">Case phase</caption>
           <thead>
-            <tr><th scope="col">Code</th><th scope="col">Label</th></tr>
+            <tr><th scope="col">Code</th><th scope="col">Label</th><th scope="col">Order</th><th scope="col">Hidden</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
           </thead>
           <tbody>
-            {% for val, label in phase_choices %}
-              <tr><td class="mono">{{ val }}</td><td>{{ label }}</td></tr>
+            {% for t in taxonomy_terms_by_category.case_phase %}
+              <tr>
+                <td class="mono">{{ t.code }}{% if t.hidden %} <span class="badge">Hidden</span>{% endif %}{% if t.protected %} <span class="badge">Protected</span>{% endif %}</td>
+                <td>{{ t.label }}</td>
+                <td>{{ t.order }}</td>
+                <td>{{ t.hidden|yesno:"Yes,No" }}</td>
+                <td>
+                  {% if can_manage_taxonomy %}
+                  {% with modal_id="taxonomy-term-edit-"|add:t.id|stringformat:"s" form_id="taxonomy-term-edit-form-"|add:t.id|stringformat:"s" %}
+                  {% url 'ui-taxonomy-term-edit' t.id as edit_url %}
+                  <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit case phase {{ t.code }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
+                  {% if form_state.modal_id == modal_id %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="Edit taxonomy term" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=t is_edit=True category=t.category form_values=form_state.values errors=form_state.errors size="md" %}
+                  {% else %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="Edit taxonomy term" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=t is_edit=True category=t.category size="md" %}
+                  {% endif %}
+                  {% endwith %}
+                  {% if t.protected or t.in_use_count %}
+                  <button type="button" class="icon-link icon-link-err" disabled title="{% if t.protected %}Protected term{% elif t.in_use_count %}In use{% endif %}" aria-label="Cannot delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+                  {% else %}
+                  {% with modal_id="taxonomy-term-delete-"|add:t.id|stringformat:"s" %}
+                  {% url 'ui-taxonomy-term-delete' t.id as delete_url %}
+                  {% include "ui/_modal.html" with modal_id=modal_id title="Delete taxonomy term?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="taxonomy term" identifier=t.code usage_count=0 %}
+                  <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+                  {% endwith %}
+                  {% endif %}
+                  {% else %}
+                  <span class="dim">—</span>
+                  {% endif %}
+                </td>
+              </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
-    </div>
+      {% else %}
+      <p class="empty">No terms defined.</p>
+      {% endif %}
+      {% if can_manage_taxonomy %}
+      {% url 'ui-taxonomy-term-create' as create_url %}
+      {% with modal_id="taxonomy-term-create-case_phase-modal" form_id="taxonomy-term-create-case_phase-form" %}
+      {% if form_state.modal_id == modal_id %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="New case phase term" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False category="case_phase" form_values=form_state.values errors=form_state.errors size="md" %}
+      {% else %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="New case phase term" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False category="case_phase" size="md" %}
+      {% endif %}
+      {% endwith %}
+      {% endif %}
+    </section>
 
-    <div class="card">
-      <h3>Case Type</h3>
+    <section class="card" aria-labelledby="h-case-type">
+      <div class="page-row">
+        <h2 id="h-case-type">Case Type</h2>
+        {% if can_manage_taxonomy %}
+        <button type="button" class="btn btn-sm" data-modal-open="taxonomy-term-create-case_type-modal">
+          <i class="fa-solid fa-plus" aria-hidden="true"></i> Add term
+        </button>
+        {% endif %}
+      </div>
+      {% if taxonomy_terms_by_category.case_type %}
       <div class="table-wrap">
         <table class="data-table">
           <caption class="sr-only">Case type</caption>
           <thead>
-            <tr><th scope="col">Code</th><th scope="col">Label</th></tr>
+            <tr><th scope="col">Code</th><th scope="col">Label</th><th scope="col">Order</th><th scope="col">Hidden</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
           </thead>
           <tbody>
-            {% for val, label in case_type_choices %}
-              <tr><td class="mono">{{ val }}</td><td>{{ label }}</td></tr>
+            {% for t in taxonomy_terms_by_category.case_type %}
+              <tr>
+                <td class="mono">{{ t.code }}{% if t.hidden %} <span class="badge">Hidden</span>{% endif %}{% if t.protected %} <span class="badge">Protected</span>{% endif %}</td>
+                <td>{{ t.label }}</td>
+                <td>{{ t.order }}</td>
+                <td>{{ t.hidden|yesno:"Yes,No" }}</td>
+                <td>
+                  {% if can_manage_taxonomy %}
+                  {% with modal_id="taxonomy-term-edit-"|add:t.id|stringformat:"s" form_id="taxonomy-term-edit-form-"|add:t.id|stringformat:"s" %}
+                  {% url 'ui-taxonomy-term-edit' t.id as edit_url %}
+                  <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit case type {{ t.code }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
+                  {% if form_state.modal_id == modal_id %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="Edit taxonomy term" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=t is_edit=True category=t.category form_values=form_state.values errors=form_state.errors size="md" %}
+                  {% else %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="Edit taxonomy term" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=t is_edit=True category=t.category size="md" %}
+                  {% endif %}
+                  {% endwith %}
+                  {% if t.protected or t.in_use_count %}
+                  <button type="button" class="icon-link icon-link-err" disabled title="{% if t.protected %}Protected term{% elif t.in_use_count %}In use{% endif %}" aria-label="Cannot delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+                  {% else %}
+                  {% with modal_id="taxonomy-term-delete-"|add:t.id|stringformat:"s" %}
+                  {% url 'ui-taxonomy-term-delete' t.id as delete_url %}
+                  {% include "ui/_modal.html" with modal_id=modal_id title="Delete taxonomy term?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="taxonomy term" identifier=t.code usage_count=0 %}
+                  <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+                  {% endwith %}
+                  {% endif %}
+                  {% else %}
+                  <span class="dim">—</span>
+                  {% endif %}
+                </td>
+              </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
-    </div>
+      {% else %}
+      <p class="empty">No terms defined.</p>
+      {% endif %}
+      {% if can_manage_taxonomy %}
+      {% url 'ui-taxonomy-term-create' as create_url %}
+      {% with modal_id="taxonomy-term-create-case_type-modal" form_id="taxonomy-term-create-case_type-form" %}
+      {% if form_state.modal_id == modal_id %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="New case type term" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False category="case_type" form_values=form_state.values errors=form_state.errors size="md" %}
+      {% else %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="New case type term" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False category="case_type" size="md" %}
+      {% endif %}
+      {% endwith %}
+      {% endif %}
+    </section>
 
-    <div class="card">
-      <h3>Data Classification</h3>
+    <section class="card" aria-labelledby="h-data-classification">
+      <div class="page-row">
+        <h2 id="h-data-classification">Data Classification</h2>
+        {% if can_manage_taxonomy %}
+        <button type="button" class="btn btn-sm" data-modal-open="taxonomy-term-create-data_classification-modal">
+          <i class="fa-solid fa-plus" aria-hidden="true"></i> Add term
+        </button>
+        {% endif %}
+      </div>
+      {% if taxonomy_terms_by_category.data_classification %}
       <div class="table-wrap">
         <table class="data-table">
           <caption class="sr-only">Data classification</caption>
           <thead>
-            <tr><th scope="col">Code</th><th scope="col">Label</th></tr>
+            <tr><th scope="col">Code</th><th scope="col">Label</th><th scope="col">Order</th><th scope="col">Hidden</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
           </thead>
           <tbody>
-            {% for val, label in data_classification_choices %}
-              <tr><td class="mono">{{ val }}</td><td>{{ label }}</td></tr>
+            {% for t in taxonomy_terms_by_category.data_classification %}
+              <tr>
+                <td class="mono">{{ t.code }}{% if t.hidden %} <span class="badge">Hidden</span>{% endif %}{% if t.protected %} <span class="badge">Protected</span>{% endif %}</td>
+                <td>{{ t.label }}</td>
+                <td>{{ t.order }}</td>
+                <td>{{ t.hidden|yesno:"Yes,No" }}</td>
+                <td>
+                  {% if can_manage_taxonomy %}
+                  {% with modal_id="taxonomy-term-edit-"|add:t.id|stringformat:"s" form_id="taxonomy-term-edit-form-"|add:t.id|stringformat:"s" %}
+                  {% url 'ui-taxonomy-term-edit' t.id as edit_url %}
+                  <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit data classification {{ t.code }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
+                  {% if form_state.modal_id == modal_id %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="Edit taxonomy term" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=t is_edit=True category=t.category form_values=form_state.values errors=form_state.errors size="md" %}
+                  {% else %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="Edit taxonomy term" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=t is_edit=True category=t.category size="md" %}
+                  {% endif %}
+                  {% endwith %}
+                  {% if t.protected or t.in_use_count %}
+                  <button type="button" class="icon-link icon-link-err" disabled title="{% if t.protected %}Protected term{% elif t.in_use_count %}In use{% endif %}" aria-label="Cannot delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+                  {% else %}
+                  {% with modal_id="taxonomy-term-delete-"|add:t.id|stringformat:"s" %}
+                  {% url 'ui-taxonomy-term-delete' t.id as delete_url %}
+                  {% include "ui/_modal.html" with modal_id=modal_id title="Delete taxonomy term?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="taxonomy term" identifier=t.code usage_count=0 %}
+                  <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+                  {% endwith %}
+                  {% endif %}
+                  {% else %}
+                  <span class="dim">—</span>
+                  {% endif %}
+                </td>
+              </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
-    </div>
+      {% else %}
+      <p class="empty">No terms defined.</p>
+      {% endif %}
+      {% if can_manage_taxonomy %}
+      {% url 'ui-taxonomy-term-create' as create_url %}
+      {% with modal_id="taxonomy-term-create-data_classification-modal" form_id="taxonomy-term-create-data_classification-form" %}
+      {% if form_state.modal_id == modal_id %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="New data classification term" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False category="data_classification" form_values=form_state.values errors=form_state.errors size="md" %}
+      {% else %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="New data classification term" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False category="data_classification" size="md" %}
+      {% endif %}
+      {% endwith %}
+      {% endif %}
+    </section>
 
-    <div class="card">
-      <h3>Verdict</h3>
+    <section class="card" aria-labelledby="h-verdict">
+      <div class="page-row">
+        <h2 id="h-verdict">Verdict</h2>
+        {% if can_manage_taxonomy %}
+        <button type="button" class="btn btn-sm" data-modal-open="taxonomy-term-create-case_verdict-modal">
+          <i class="fa-solid fa-plus" aria-hidden="true"></i> Add term
+        </button>
+        {% endif %}
+      </div>
+      {% if taxonomy_terms_by_category.case_verdict %}
       <div class="table-wrap">
         <table class="data-table">
           <caption class="sr-only">Case verdict</caption>
           <thead>
-            <tr><th scope="col">Code</th><th scope="col">Label</th></tr>
+            <tr><th scope="col">Code</th><th scope="col">Label</th><th scope="col">Order</th><th scope="col">Closing</th><th scope="col">Hidden</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
           </thead>
           <tbody>
-            {% for val, label in verdict_choices %}
-              <tr><td class="mono">{{ val }}</td><td>{{ label }}</td></tr>
+            {% for t in taxonomy_terms_by_category.case_verdict %}
+              <tr>
+                <td class="mono">{{ t.code }}</td>
+                <td>{{ t.label }}</td>
+                <td>{{ t.order }}</td>
+                <td>{{ t.is_closing|yesno:"Yes,No" }}</td>
+                <td>{{ t.hidden|yesno:"Yes,No" }}</td>
+                <td>
+                  {% if can_manage_taxonomy %}
+                  {% with modal_id="taxonomy-term-edit-"|add:t.id|stringformat:"s" form_id="taxonomy-term-edit-form-"|add:t.id|stringformat:"s" %}
+                  {% url 'ui-taxonomy-term-edit' t.id as edit_url %}
+                  <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit verdict {{ t.code }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
+                  {% if form_state.modal_id == modal_id %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="Edit taxonomy term" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=t is_edit=True category=t.category form_values=form_state.values errors=form_state.errors size="md" %}
+                  {% else %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="Edit taxonomy term" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=t is_edit=True category=t.category size="md" %}
+                  {% endif %}
+                  {% endwith %}
+                  {% if t.protected or t.in_use_count %}
+                  <button type="button" class="icon-link icon-link-err" disabled title="{% if t.protected %}Protected term{% elif t.in_use_count %}In use{% endif %}" aria-label="Cannot delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+                  {% else %}
+                  {% with modal_id="taxonomy-term-delete-"|add:t.id|stringformat:"s" %}
+                  {% url 'ui-taxonomy-term-delete' t.id as delete_url %}
+                  {% include "ui/_modal.html" with modal_id=modal_id title="Delete taxonomy term?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="taxonomy term" identifier=t.code usage_count=0 %}
+                  <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+                  {% endwith %}
+                  {% endif %}
+                  {% else %}
+                  <span class="dim">—</span>
+                  {% endif %}
+                </td>
+              </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
-    </div>
+      {% else %}
+      <p class="empty">No terms defined.</p>
+      {% endif %}
+      {% if can_manage_taxonomy %}
+      {% url 'ui-taxonomy-term-create' as create_url %}
+      {% with modal_id="taxonomy-term-create-case_verdict-modal" form_id="taxonomy-term-create-case_verdict-form" %}
+      {% if form_state.modal_id == modal_id %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="New verdict term" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False category="case_verdict" form_values=form_state.values errors=form_state.errors size="md" %}
+      {% else %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="New verdict term" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False category="case_verdict" size="md" %}
+      {% endif %}
+      {% endwith %}
+      {% endif %}
+    </section>
   </div>
+</div>
 {% endblock %}

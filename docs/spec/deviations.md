@@ -64,6 +64,7 @@ The identity/vocabulary/tag/`describe` surface. Verified against `thehive4py` 2.
 | **P1-3** | types listed via `POST /query` `listObservableType` | **`GET /observable/type`** collection added | TheHive's only collection read is the query DSL; the REST list (and the symmetric `POST /observable/type`, which *is* parity) makes the vocabulary editable without one. `observables/views.py::observable_type_collection` · `test_t2_p1_surface.py` |
 | **P1-4** | `describe/{model}` | `describe/{model}` **+ `describe/_all`** | `_all` (the whole catalogue keyed by model name) is an Amalthea convenience; `{model}` follows the recorded per-entity shape. `compat/views.py::describe_*` · `test_t2_p1_surface.py` |
 | **P1-5** | global org directory | **tenant-scoped** | A foreign org id/name is the *same 404* as "does not exist" (no tenant-enumeration oracle); PATCH only writes the caller's own org. `identity/views.py::_own_org` · `test_t2_p1_surface.py` |
+| **P1-6** | vocabulary CRUD open to any writer | **taxonomy writes are `superAdmin`-only; renames allowed** | The three vocabularies are global and feed every case/alert/observable, so a non-superAdmin mutation would cross every tenant. Unsafe methods return a uniform 404 (not 403) before target resolution. `value`/`name` are mutable because `Case.status`/`Alert.status`/`Observable.data_type` are FKs; `stage` stays immutable. `core/taxonomy.py`, `cases/views.py`, `alerts/views.py`, `observables/views.py` · `test_t2_p1_surface.py` |
 
 ## Wave 6.1 — T2 Phase P2 (2026-10-09)
 

@@ -7,14 +7,8 @@ from django.db.models import Q
 from django.utils import timezone
 
 from core.enums import (
-    CASE_PHASE_CHOICES,
-    CASE_SCOPE_CHOICES,
     CASE_STAGES,
-    CASE_TYPE_CHOICES,
-    CASE_VERDICT_CHOICES,
-    CASE_VERDICT_VALUES,
     CUSTOM_FIELD_TYPES,
-    DATA_CLASSIFICATION_CHOICES,
     PAP_CHOICES,
     PAP_MAX,
     PAP_MIN,
@@ -117,20 +111,11 @@ class Case(UUIDModel, TimeStampedModel):
     # (`identity/scoping.py`) decides which organisation a caller may see; the two share a word
     # and nothing else (Q-D10). Defaults are the vocabulary's own `unset` so a fresh case says
     # "not yet classified" (Q-D8); `phase` starts at `initial_triage`.
-    scope = models.CharField(max_length=32, choices=list(CASE_SCOPE_CHOICES), default="unset")
-    case_type = models.CharField(max_length=32, choices=list(CASE_TYPE_CHOICES), default="unset")
-    data_classification = models.CharField(
-        max_length=32, choices=list(DATA_CLASSIFICATION_CHOICES), default="unset"
-    )
-    phase = models.CharField(
-        max_length=32, choices=list(CASE_PHASE_CHOICES), default="initial_triage"
-    )
-    # Plan-2026-10-17 case verdict (§12.8(3), decision D3). Answers "was this a real
-    # incident?" and gates closure: a case may not enter the Closed stage while this is still
-    # `undefined` (see cases/update.py::enforce_close_rule). Tokens, not labels.
-    verdict = models.CharField(
-        max_length=32, choices=list(CASE_VERDICT_CHOICES), default="undefined"
-    )
+    scope = models.CharField(max_length=32, default="unset")
+    case_type = models.CharField(max_length=32, default="unset")
+    data_classification = models.CharField(max_length=32, default="unset")
+    phase = models.CharField(max_length=32, default="initial_triage")
+    verdict = models.CharField(max_length=32, default="undefined")
     summary = models.TextField(blank=True)
     # NOT NULL with a default: on Postgres `ORDER BY start_date DESC` returns NULLs
     # FIRST, so a nullable start_date put undated cases at the top of the queue (L5).
@@ -162,15 +147,6 @@ class Case(UUIDModel, TimeStampedModel):
             in_range("case_severity_range", "severity", SEVERITY_MIN, SEVERITY_MAX),
             in_range("case_tlp_range", "tlp", TLP_MIN, TLP_MAX),
             in_range("case_pap_range", "pap", PAP_MIN, PAP_MAX),
-            in_values("case_scope_valid", "scope", tuple(v for v, _ in CASE_SCOPE_CHOICES)),
-            in_values("case_type_valid", "case_type", tuple(v for v, _ in CASE_TYPE_CHOICES)),
-            in_values(
-                "case_data_classification_valid",
-                "data_classification",
-                tuple(v for v, _ in DATA_CLASSIFICATION_CHOICES),
-            ),
-            in_values("case_phase_valid", "phase", tuple(v for v, _ in CASE_PHASE_CHOICES)),
-            in_values("case_verdict_valid", "verdict", CASE_VERDICT_VALUES),
         ]
 
     def __str__(self) -> str:
@@ -601,11 +577,9 @@ class CaseTemplate(UUIDModel, TimeStampedModel):
     # deliberately does NOT carry `data_classification` — that is a per-incident judgement
     # about what data was touched, and applying a template must not set it (nor overwrite a
     # classification an analyst already made).
-    scope = models.CharField(max_length=32, choices=list(CASE_SCOPE_CHOICES), default="unset")
-    case_type = models.CharField(max_length=32, choices=list(CASE_TYPE_CHOICES), default="unset")
-    phase = models.CharField(
-        max_length=32, choices=list(CASE_PHASE_CHOICES), default="initial_triage"
-    )
+    scope = models.CharField(max_length=32, default="unset")
+    case_type = models.CharField(max_length=32, default="unset")
+    phase = models.CharField(max_length=32, default="initial_triage")
     flag = models.BooleanField(default=False)
     summary = models.TextField(blank=True)
     # `[{"title", "group", "description", "order", "mandatory"}]`.
@@ -620,17 +594,6 @@ class CaseTemplate(UUIDModel, TimeStampedModel):
             in_range("case_template_severity_range", "severity", SEVERITY_MIN, SEVERITY_MAX),
             in_range("case_template_tlp_range", "tlp", TLP_MIN, TLP_MAX),
             in_range("case_template_pap_range", "pap", PAP_MIN, PAP_MAX),
-            in_values(
-                "case_template_scope_valid", "scope", tuple(v for v, _ in CASE_SCOPE_CHOICES)
-            ),
-            in_values(
-                "case_template_case_type_valid",
-                "case_type",
-                tuple(v for v, _ in CASE_TYPE_CHOICES),
-            ),
-            in_values(
-                "case_template_phase_valid", "phase", tuple(v for v, _ in CASE_PHASE_CHOICES)
-            ),
         ]
 
     def __str__(self) -> str:

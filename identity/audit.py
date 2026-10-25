@@ -363,3 +363,43 @@ def record_ingestion_source_mapping_applied(
         },
         ip=_get_client_ip(request),
     )
+
+
+def record_taxonomy_change(
+    request: HttpRequest,
+    *,
+    actor: User,
+    action: str,
+    target_type: str,
+    target_id: str,
+    details: dict[str, object],
+) -> None:
+    """Record a taxonomy vocabulary change (create/update/rename/delete).
+
+    Args:
+        request: The HTTP request (for IP extraction).
+        actor: The user performing the action (must be superAdmin).
+        action: One of "taxonomy.case_status.created", "taxonomy.case_status.updated",
+            "taxonomy.case_status.renamed", "taxonomy.case_status.deleted", and the
+            alert_status / observable_type equivalents.
+        target_type: One of "CaseStatus", "AlertStatus", "ObservableType".
+        target_id: The UUID of the taxonomy row (as string).
+        details: Structured detail with non-secret field names and identifiers only.
+            Example: {"changed": ["value", "order"], "old": {"value": "Containment"},
+            "new": {"value": "Contained", "order": 3}}
+
+    The `target_org` is always None because taxonomy is global (not org-scoped).
+    """
+    from identity.models import AuditLog
+
+    ip = _get_client_ip(request)
+    AuditLog.objects.create(
+        actor=actor,
+        actor_org=getattr(actor, "org", None),
+        target_org=None,
+        action=action,
+        target_type=target_type,
+        target_id=str(target_id),
+        details=details,
+        ip=ip,
+    )

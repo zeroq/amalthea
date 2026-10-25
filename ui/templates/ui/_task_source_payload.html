@@ -1,0 +1,17 @@
+{% comment %}
+Body for the lazy-loaded "Full alert payload" modal on the task detail page.
+
+Rendered by `ui.views.task_source_payload` into `task-source-payload-<task.id>-body`
+via HTMX. `payload_json` is a plain string: the template engine escapes it, so a
+payload containing HTML cannot execute. The modal chrome stays in `_modal.html`.
+{% endcomment %}
+{% if alert %}
+<p class="dim">
+  From alert
+  <a href="{{ payload_url }}">{{ alert.title }}</a>
+  <span class="mono">· {{ alert.created_at|date:"Y-m-d H:i:s" }}</span>
+</p>
+<pre class="body mono">{{ payload_json }}</pre>
+{% else %}
+<p class="empty">No alert is linked to this case, so there is no source payload to show.</p>
+{% endif %}

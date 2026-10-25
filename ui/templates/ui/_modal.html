@@ -67,7 +67,7 @@ Parameters:
 {% load static %}
 
 {% with form_id=form_id|default:modal_id %}
-<dialog id="{{ modal_id }}" class="modal modal--{{ size|default:'md' }}" role="dialog" aria-modal="true" aria-labelledby="{{ modal_id }}-title"{% if autoopen %} data-autoopen="1"{% endif %}{% if modal_static %} data-modal-static{% endif %}>
+<dialog id="{{ modal_id }}" class="modal modal--{{ size|default:'md' }}" role="dialog" aria-modal="true" aria-labelledby="{{ modal_id }}-title"{% if autoopen or open_modal_id == modal_id %} data-autoopen="1"{% endif %}{% if modal_static %} data-modal-static{% endif %}>
   <div class="modal-content">
     <header class="modal-header">
       <h2 id="{{ modal_id }}-title" class="modal-title">{{ title }}</h2>

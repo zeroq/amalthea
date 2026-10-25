@@ -1,0 +1,34 @@
+{% comment %}
+Body of the observable-type create/edit modal.
+
+A case-sensitivity flip re-hashes every observable of this type, so the help text says so.
+See `_taxonomy_case_status_form.html` for the HTMX contract.
+{% endcomment %}
+
+<div class="field-row">
+  <label for="{{ modal_id }}-name">Name <span class="required" aria-hidden="true">*</span></label>
+  <input type="text" id="{{ modal_id }}-name" name="name" maxlength="100" required autofocus
+         form="{{ form_id }}"
+         value="{% if form_values %}{{ form_values.name }}{% else %}{{ obj.name|default:'' }}{% endif %}"
+         {% if errors and errors.name %}aria-invalid="true" aria-describedby="{{ modal_id }}-name-error"{% endif %}>
+</div>
+{% if errors and errors.name %}<p id="{{ modal_id }}-name-error" class="field-error">{{ errors.name }}</p>{% endif %}
+
+<div class="field-row">
+  <label class="check">
+    <input type="checkbox" name="is_attachment" value="on" form="{{ form_id }}"
+           {% if form_values %}{% if form_values.is_attachment %}checked{% endif %}{% else %}{% if obj.is_attachment %}checked{% endif %}{% endif %}>
+    Attachment
+  </label>
+</div>
+
+<div class="field-row">
+  <label class="check">
+    <input type="checkbox" name="is_case_sensitive" value="on" form="{{ form_id }}"
+           {% if form_values %}{% if form_values.is_case_sensitive %}checked{% endif %}{% else %}{% if obj.is_case_sensitive %}checked{% endif %}{% endif %}>
+    Case sensitive
+  </label>
+  <p class="hint">Changing this re-hashes every existing observable of this type.</p>
+</div>
+
+{% if errors and errors.non_field %}<p class="field-error">{{ errors.non_field }}</p>{% endif %}

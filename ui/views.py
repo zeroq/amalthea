@@ -23,6 +23,7 @@ Three choices worth stating, because each is a deviation from "just render the A
 
 from __future__ import annotations
 
+import copy
 import datetime
 import json
 import logging
@@ -46,6 +47,7 @@ from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy  # noqa: F401 (re-exported for ui/urls.py)
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from rest_framework.response import Response
 
@@ -80,11 +82,20 @@ from cases.models import (
     Task,
     TaskNote,
 )
+from cases.template_defaults import (
+    DEFAULT_TEMPLATE_CUSTOM_FIELDS,
+    DEFAULT_TEMPLATE_TASKS,
+    earliest_alert_for_case,
+    format_full_payload,
+    has_source_payload_sentinel,
+)
 from cases.update import CaseUpdateError, apply_case_update
 from cases.views import (
+    _apply_template,
     _as_uuid,
     _observable_affected_cases,
     _observable_cross_case_guard,
+    _resolve_case_template,
     _resolve_login,
     _resolve_ttp_value,
     _set_observable_fields,
@@ -94,6 +105,7 @@ from core.enums import (
     CASE_CLOSING_VERDICTS,
     CASE_PHASE_CHOICES,
     CASE_SCOPE_CHOICES,
+    CASE_STAGES,
     CASE_TYPE_CHOICES,
     CASE_VERDICT_CHOICES,
     DATA_CLASSIFICATION_CHOICES,
@@ -103,6 +115,7 @@ from core.enums import (
     TLP_CHOICES,
 )
 from core.serializers import page_json, task_json
+from identity.audit import maybe_record_cross_org_read
 from identity.models import AuditLog, IngestionToken, Organisation, User
 from identity.ratelimit import check_login_rate_limit, record_failed_login, record_successful_login
 from identity.scoping import (
@@ -1911,9 +1924,31 @@ def task_detail(request: HttpRequest, task_id: str) -> HttpResponse:
     if task is None:
         raise Http404()
     case = task.case
+
+    # Audit superAdmin cross-org read (same target/type as the API task-detail view).
+    maybe_record_cross_org_read(
+        request,
+        actor=request.user,
+        target_obj=case,
+        target_type="Task",
+        target_id=str(task.id),
+        target_org_field="owner_org",
+    )
+
     can_mutate = not is_viewer(request.user)
 
     notes = task.notes.select_related("created_by").order_by("created_at")
+
+    # The source-payload modal is opt-in: the sentinel is written by `_apply_template`, the
+    # alert must still exist, and the caller must be able to read that alert directly. A case
+    # sharee can read the task (and therefore the 64 KiB excerpt in its description) but alerts
+    # have no shares, so they must not receive the raw payload through this side door.
+    source_payload_alert = earliest_alert_for_case(case)
+    show_source_payload = bool(
+        source_payload_alert is not None
+        and has_source_payload_sentinel(task.description)
+        and resolve_alert(request.user, str(source_payload_alert.id)) is not None
+    )
 
     return render(
         request,
@@ -1925,6 +1960,13 @@ def task_detail(request: HttpRequest, task_id: str) -> HttpResponse:
             notes=notes,
             can_mutate=can_mutate,
             task_status_options=TASK_STATUS_CHOICES,
+            show_source_payload=show_source_payload,
+            source_payload_alert=source_payload_alert,
+            source_payload_url=(
+                reverse("ui-task-source-payload", kwargs={"task_id": task.id})
+                if show_source_payload
+                else None
+            ),
             # The edit modal's assignee picker needs the same org-scoped list the tab
             # passes (capped at PICKER_PAGE_SIZE); without it the <select> would render empty
             # and a save would clear the assignee. Same query as `case_detail`'s `task_assignees`.
@@ -1932,6 +1974,47 @@ def task_detail(request: HttpRequest, task_id: str) -> HttpResponse:
                 "login"
             )[:PICKER_PAGE_SIZE],
         ),
+    )
+
+
+@never_cache
+@login_required
+@require_GET
+def task_source_payload(request: HttpRequest, task_id: str) -> HttpResponse:
+    """Lazy-loaded body for the task's full alert-payload modal.
+
+    The 64 KiB excerpt lives in the task description; this fragment is the complete
+    (pretty-printed, 8 MiB display-capped) payload from the earliest linked alert. It is
+    deliberately not cached: the response contains raw alert data.
+    """
+    task = resolve_task(request.user, task_id, write=False)
+    if task is None:
+        raise Http404()
+    alert = earliest_alert_for_case(task.case)
+    if alert is None:
+        return render(request, "ui/_task_source_payload.html", {"alert": None})
+    # Alerts are org-owned and carry no shares; do not let a case sharee read them here.
+    if resolve_alert(request.user, str(alert.id)) is None:
+        raise Http404()
+
+    # Audit superAdmin cross-org read of the task's full source payload.
+    maybe_record_cross_org_read(
+        request,
+        actor=request.user,
+        target_obj=task.case,
+        target_type="Task",
+        target_id=str(task.id),
+        target_org_field="owner_org",
+    )
+
+    return render(
+        request,
+        "ui/_task_source_payload.html",
+        {
+            "alert": alert,
+            "payload_json": format_full_payload(alert),
+            "payload_url": reverse("ui-alert-detail", kwargs={"alert_id": alert.id}),
+        },
     )
 
 
@@ -2780,13 +2863,13 @@ def case_apply_template(request: HttpRequest, case_id: str) -> HttpResponse:
             _base_context(request, case=case, templates=templates),
         )
     # POST
-    template_id = request.POST.get("template_id")
+    template_id = (request.POST.get("template_id") or "").strip()
     if not template_id:
         messages.error(request, "Template is required.")
         return redirect("ui-case-apply-template", case_id=case.number)
-    template = get_object_or_404(CaseTemplate, pk=template_id)
-    from cases.views import _apply_template
-
+    template = _resolve_case_template(template_id)
+    if template is None:
+        raise Http404()
     _apply_template(case, template, actor=request.user)
     messages.success(request, f"Applied template '{template.name}' to case {case.number}.")
     return _case_detail_redirect(request, case.number)
@@ -2876,7 +2959,15 @@ def case_template_create(request: HttpRequest) -> HttpResponse:
     POST: requires analyst role or above (excludes read-only).
     """
     if request.method == "GET":
-        return render(request, "ui/case_template_form.html", _base_context(request))
+        return render(
+            request,
+            "ui/case_template_form.html",
+            _base_context(
+                request,
+                form_tasks=copy.deepcopy(DEFAULT_TEMPLATE_TASKS),
+                form_custom_fields=copy.deepcopy(DEFAULT_TEMPLATE_CUSTOM_FIELDS),
+            ),
+        )
 
     # POST - requires analyst role or above (mirrors playbook_create gate)
     if request.user.role not in ("analyst", "admin", "superAdmin"):
@@ -2887,6 +2978,14 @@ def case_template_create(request: HttpRequest) -> HttpResponse:
     except ValueError as exc:
         messages.error(request, str(exc))
         return redirect("ui-case-template-create")
+
+    # The create form ships prefilled; keep the defaults when the submission is empty so a
+    # template created without editing still seeds the runbook. API-created templates remain
+    # explicit and are never injected with defaults.
+    if not data["tasks"]:
+        data["tasks"] = copy.deepcopy(DEFAULT_TEMPLATE_TASKS)
+    if not data["custom_fields"]:
+        data["custom_fields"] = copy.deepcopy(DEFAULT_TEMPLATE_CUSTOM_FIELDS)
 
     if CaseTemplate.objects.filter(name=data["name"]).exists():
         messages.error(request, "Template with that name already exists.")
@@ -2942,7 +3041,13 @@ def case_template_edit(request: HttpRequest, template_id: str) -> HttpResponse:
         return render(
             request,
             "ui/case_template_form.html",
-            _base_context(request, template=template, mode="edit"),
+            _base_context(
+                request,
+                template=template,
+                mode="edit",
+                form_tasks=template.tasks,
+                form_custom_fields=template.custom_fields,
+            ),
         )
 
     # POST - requires analyst role or above (mirrors playbook_detail update gate)
@@ -4156,17 +4261,14 @@ def case_share_revoke(request: HttpRequest, case_id: str, share_id: str) -> Http
 # --- Taxonomy ---
 
 
-@login_required
-@require_GET
-def taxonomy(request: HttpRequest) -> HttpResponse:
-    """Aggregate taxonomy page for UI pickers.
+def _taxonomy_context(request: HttpRequest, **extra: Any) -> dict[str, Any]:
+    """Context for `/taxonomy`, shared by the page and its mutation error re-renders.
 
-    ``Tag`` and ``CaseTemplate`` are imported at module level from ``cases.models`` — there
-    is no ``tags`` app. (Commit 3255f1f added a local ``from tags.models import Tag`` here,
-    which made ``/taxonomy`` raise ``ModuleNotFoundError`` → HTTP 500.)
+    Hidden rows stay on this page (they are excluded from pickers, not from the editor), and
+    the usage counts feed the delete dialogs so an in-use row never offers a doomed button.
     """
-    from alerts.models import AlertStatus
-    from cases.models import CaseStatus
+    from django.db.models import Count
+
     from core.enums import (
         CASE_PHASE_CHOICES,
         CASE_SCOPE_CHOICES,
@@ -4174,24 +4276,75 @@ def taxonomy(request: HttpRequest) -> HttpResponse:
         CASE_VERDICT_CHOICES,
         DATA_CLASSIFICATION_CHOICES,
     )
-    from observables.models import ObservableType
+    from core.models import TaxonomyTerm
 
-    return render(
+    # Usage counts for terms
+    terms = list(TaxonomyTerm.objects.all())
+    # annotate usage
+    for t in terms:
+        if t.category == "case_scope":
+            t.case_count = Case.objects.filter(scope=t.code).count()
+            t.template_count = CaseTemplate.objects.filter(scope=t.code).count()
+            t.in_use_count = t.case_count + t.template_count
+        elif t.category == "case_phase":
+            t.case_count = Case.objects.filter(phase=t.code).count()
+            t.template_count = CaseTemplate.objects.filter(phase=t.code).count()
+            t.in_use_count = t.case_count + t.template_count
+        elif t.category == "case_type":
+            t.case_count = Case.objects.filter(case_type=t.code).count()
+            t.template_count = CaseTemplate.objects.filter(case_type=t.code).count()
+            t.in_use_count = t.case_count + t.template_count
+        elif t.category == "data_classification":
+            t.case_count = Case.objects.filter(data_classification=t.code).count()
+            t.in_use_count = t.case_count
+        elif t.category == "case_verdict":
+            t.case_count = Case.objects.filter(verdict=t.code).count()
+            t.in_use_count = t.case_count
+        else:
+            t.in_use_count = 0
+
+    return _base_context(
         request,
-        "ui/taxonomy.html",
-        _base_context(
-            request,
-            case_statuses=CaseStatus.objects.filter(hidden=False).order_by("order", "value"),
-            alert_statuses=AlertStatus.objects.filter(hidden=False).order_by("order", "value"),
-            observable_types=ObservableType.objects.all().order_by("name"),
-            tags=Tag.objects.all().order_by("name"),
-            scope_choices=CASE_SCOPE_CHOICES,
-            phase_choices=CASE_PHASE_CHOICES,
-            case_type_choices=CASE_TYPE_CHOICES,
-            data_classification_choices=DATA_CLASSIFICATION_CHOICES,
-            verdict_choices=CASE_VERDICT_CHOICES,
-        ),
+        case_statuses=CaseStatus.objects.annotate(
+            case_count=Count("cases", distinct=True)
+        ).order_by("order", "value"),
+        alert_statuses=AlertStatus.objects.annotate(
+            alert_count=Count("alerts", distinct=True)
+        ).order_by("order", "value"),
+        observable_types=ObservableType.objects.annotate(
+            observable_count=Count("observables", distinct=True)
+        ).order_by("name"),
+        tags=Tag.objects.all().order_by("name"),
+        taxonomy_terms=terms,
+        taxonomy_terms_by_category={
+            "case_scope": [t for t in terms if t.category == "case_scope"],
+            "case_phase": [t for t in terms if t.category == "case_phase"],
+            "case_type": [t for t in terms if t.category == "case_type"],
+            "data_classification": [t for t in terms if t.category == "data_classification"],
+            "case_verdict": [t for t in terms if t.category == "case_verdict"],
+        },
+        scope_choices=CASE_SCOPE_CHOICES,
+        phase_choices=CASE_PHASE_CHOICES,
+        case_type_choices=CASE_TYPE_CHOICES,
+        data_classification_choices=DATA_CLASSIFICATION_CHOICES,
+        verdict_choices=CASE_VERDICT_CHOICES,
+        case_stage_choices=CASE_STAGES,
+        alert_stage_choices=ALERT_STAGES,
+        can_manage_taxonomy=getattr(request.user, "role", "") == "superAdmin",
+        **extra,
     )
+
+
+@login_required
+@require_GET
+def taxonomy(request: HttpRequest) -> HttpResponse:
+    """Aggregate taxonomy page for UI pickers and the vocabulary editor.
+
+    ``Tag`` and ``CaseTemplate`` are imported at module level from ``cases.models`` — there
+    is no ``tags`` app. (Commit 3255f1f added a local ``from tags.models import Tag`` here,
+    which made ``/taxonomy`` raise ``ModuleNotFoundError`` → HTTP 500.)
+    """
+    return render(request, "ui/taxonomy.html", _taxonomy_context(request))
 
 
 @not_viewer
@@ -5180,8 +5333,6 @@ def settings_source_detail(request: HttpRequest, source_id) -> HttpResponse:
 
     if request.method == "POST":
         return _source_mapping_post(request, source)
-
-    from identity.audit import maybe_record_cross_org_read
 
     maybe_record_cross_org_read(
         request,

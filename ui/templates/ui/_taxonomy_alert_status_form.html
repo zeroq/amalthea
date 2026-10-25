@@ -1,0 +1,54 @@
+{% comment %}
+Body of the alert-status create/edit modal. Mirrors the case-status form; the stage list is
+the only difference. See `_taxonomy_case_status_form.html` for the HTMX contract.
+{% endcomment %}
+
+<div class="field-row">
+  <label for="{{ modal_id }}-value">Value <span class="required" aria-hidden="true">*</span></label>
+  <input type="text" id="{{ modal_id }}-value" name="value" maxlength="64" required autofocus
+         form="{{ form_id }}"
+         value="{% if form_values %}{{ form_values.value }}{% else %}{{ obj.value|default:'' }}{% endif %}"
+         {% if errors and errors.value %}aria-invalid="true" aria-describedby="{{ modal_id }}-value-error"{% endif %}>
+</div>
+{% if errors and errors.value %}<p id="{{ modal_id }}-value-error" class="field-error">{{ errors.value }}</p>{% endif %}
+
+<div class="field-row">
+  <label for="{{ modal_id }}-stage">Stage</label>
+  {% if is_edit %}
+  <p class="mono" id="{{ modal_id }}-stage">{{ obj.stage }}</p>
+  <p class="hint">The stage is fixed at creation; rename the value instead.</p>
+  {% else %}
+  <select id="{{ modal_id }}-stage" name="stage" form="{{ form_id }}"
+          {% if errors and errors.stage %}aria-invalid="true" aria-describedby="{{ modal_id }}-stage-error"{% endif %}>
+    {% for stage in stage_choices %}
+    <option value="{{ stage }}"{% if form_values %}{% if form_values.stage == stage %} selected{% endif %}{% elif forloop.first %} selected{% endif %}>{{ stage }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+</div>
+{% if errors and errors.stage %}<p id="{{ modal_id }}-stage-error" class="field-error">{{ errors.stage }}</p>{% endif %}
+
+<div class="field-row">
+  <label for="{{ modal_id }}-order">Order</label>
+  <input type="number" id="{{ modal_id }}-order" name="order" step="1"
+         form="{{ form_id }}"
+         value="{% if form_values %}{{ form_values.order }}{% else %}{{ obj.order|default:0 }}{% endif %}"
+         {% if errors and errors.order %}aria-invalid="true" aria-describedby="{{ modal_id }}-order-error"{% endif %}>
+  <p class="hint">Lower numbers render first.</p>
+</div>
+{% if errors and errors.order %}<p id="{{ modal_id }}-order-error" class="field-error">{{ errors.order }}</p>{% endif %}
+
+<div class="field-row">
+  <label for="{{ modal_id }}-description">Description</label>
+  <textarea id="{{ modal_id }}-description" name="description" rows="3" form="{{ form_id }}">{% if form_values %}{{ form_values.description }}{% else %}{{ obj.description|default:'' }}{% endif %}</textarea>
+</div>
+
+<div class="field-row">
+  <label class="check">
+    <input type="checkbox" name="hidden" value="on" form="{{ form_id }}"
+           {% if form_values %}{% if form_values.hidden %}checked{% endif %}{% else %}{% if obj.hidden %}checked{% endif %}{% endif %}>
+    Hidden from pickers
+  </label>
+</div>
+
+{% if errors and errors.non_field %}<p class="field-error">{{ errors.non_field }}</p>{% endif %}

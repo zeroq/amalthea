@@ -76,7 +76,19 @@
     </div>
 
     <div class="card">
-      <h3>Description</h3>
+      <div class="card-header">
+        <h3>Description</h3>
+        {% if show_source_payload %}
+        <a class="btn" href="{% url 'ui-alert-detail' source_payload_alert.id %}"
+           data-modal-open="task-source-payload-{{ task.id }}"
+           hx-get="{{ source_payload_url }}"
+           hx-target="#task-source-payload-{{ task.id }}-body"
+           hx-swap="innerHTML">
+          <i class="fa-solid fa-code" aria-hidden="true"></i>
+          View full alert payload
+        </a>
+        {% endif %}
+      </div>
       {% if task.description %}
       <div class="body md">{{ task.description|markdown }}</div>
       {% else %}
@@ -113,6 +125,14 @@
     </div>
   </div>
 </div>
+
+{% comment %} Full alert payload modal (opt-in, lazy-loaded) {% endcomment %}
+{% if show_source_payload %}
+  {% url 'ui-task-detail' task.id as task_detail_url %}
+  {% with tid=task.id|stringformat:"s" %}
+  {% include "ui/_modal.html" with modal_id="task-source-payload-"|add:tid title="Full alert payload" body_template="ui/_task_source_payload_loading.html" show_cancel=False close_url=task_detail_url confirm_text="Close" size="xl" %}
+  {% endwith %}
+{% endif %}
 
 {% comment %} Edit modal {% endcomment %}
 {% if can_mutate %}

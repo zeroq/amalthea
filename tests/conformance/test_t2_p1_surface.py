@@ -27,7 +27,7 @@ from rest_framework.test import APIClient
 
 from alerts.models import AlertStatus
 from cases.models import CaseStatus, CaseTagLink, Tag
-from identity.models import Organisation, User
+from identity.models import AuditLog, Organisation, User
 from observables.models import ObservableType
 
 from ._t1_seed import _alert, _case, _observable
@@ -49,6 +49,40 @@ def analyst(org: Organisation) -> User:
 def api(analyst: User) -> APIClient:
     client = APIClient()
     client.force_authenticate(user=analyst)
+    return client
+
+
+@pytest.fixture
+def superadmin(org: Organisation) -> User:
+    return User.objects.create_user(
+        username="root",
+        login="root",
+        password="hunter2",
+        email="root@example.net",
+        org=org,
+        role="superAdmin",
+    )
+
+
+@pytest.fixture
+def superadmin_api(superadmin: User) -> APIClient:
+    client = APIClient()
+    client.force_authenticate(user=superadmin)
+    return client
+
+
+@pytest.fixture
+def admin_api(org: Organisation) -> APIClient:
+    admin = User.objects.create_user(
+        username="admin-user",
+        login="admin-user",
+        password="hunter2",
+        email="admin@example.net",
+        org=org,
+        role="admin",
+    )
+    client = APIClient()
+    client.force_authenticate(user=admin)
     return client
 
 
@@ -116,7 +150,7 @@ def test_organisation_patch_updates_the_callers_own_org(api: APIClient, analyst:
 
 
 def test_observable_type_crud_and_not_shadowed_by_observable_detail(
-    api: APIClient, db: None
+    superadmin_api: APIClient, api: APIClient, db: None
 ) -> None:
     """`observable/type` must resolve to the type collection, not to `observable/<id>`.
 
@@ -124,7 +158,7 @@ def test_observable_type_crud_and_not_shadowed_by_observable_detail(
     `amalthea/urls.py`. If that order were reversed the POST below would be a 404 (or a 405), so
     the create succeeding is the proof the mount order holds.
     """
-    created = api.post(
+    created = superadmin_api.post(
         "/api/v1/observable/type",
         {"name": "sha256", "isCaseSensitive": False},
         format="json",
@@ -135,22 +169,34 @@ def test_observable_type_crud_and_not_shadowed_by_observable_detail(
     assert body["name"] == "sha256"
     assert body["isCaseSensitive"] is False
 
+    # Reads stay open to an analyst.
     listed = api.get("/api/v1/observable/type")
     assert listed.status_code == 200, listed.content
     assert any(entry["name"] == "sha256" for entry in listed.json())
 
-    patched = api.patch("/api/v1/observable/type/sha256", {"isCaseSensitive": True}, format="json")
+    patched = superadmin_api.patch(
+        "/api/v1/observable/type/sha256", {"isCaseSensitive": True}, format="json"
+    )
     assert patched.status_code == 204, patched.content
     assert ObservableType.objects.get(name="sha256").is_case_sensitive is True
 
-    deleted = api.delete("/api/v1/observable/type/sha256")
+    renamed = superadmin_api.patch(
+        "/api/v1/observable/type/sha256", {"name": "sha-256"}, format="json"
+    )
+    assert renamed.status_code == 204, renamed.content
+    assert ObservableType.objects.filter(name="sha-256").exists()
+    assert superadmin_api.get("/api/v1/observable/type/sha256").status_code == 404
+
+    deleted = superadmin_api.delete("/api/v1/observable/type/sha-256")
     assert deleted.status_code == 204, deleted.content
-    assert not ObservableType.objects.filter(name="sha256").exists()
+    assert not ObservableType.objects.filter(name="sha-256").exists()
 
 
-def test_observable_type_in_use_is_a_400_not_a_cascade(api: APIClient, org: Organisation) -> None:
+def test_observable_type_in_use_is_a_400_not_a_cascade(
+    superadmin_api: APIClient, org: Organisation
+) -> None:
     _observable("10.20.30.40", org=org)  # creates type "ip" with one observable behind it
-    response = api.delete("/api/v1/observable/type/ip")
+    response = superadmin_api.delete("/api/v1/observable/type/ip")
     assert response.status_code == 400, response.content
     assert response.json()["type"] == "BadRequest"
     assert ObservableType.objects.filter(name="ip").exists()
@@ -159,41 +205,141 @@ def test_observable_type_in_use_is_a_400_not_a_cascade(api: APIClient, org: Orga
 # --- AC-P1-3 — status vocabularies -----------------------------------------
 
 
-def test_case_status_requires_a_known_stage_and_is_immutable(api: APIClient, db: None) -> None:
-    bad = api.post("/api/v1/caseStatus", {"value": "Weird", "stage": "Bogus"}, format="json")
+def test_case_status_requires_a_known_stage_and_is_immutable(
+    superadmin_api: APIClient, superadmin: User, db: None
+) -> None:
+    bad = superadmin_api.post(
+        "/api/v1/caseStatus", {"value": "Weird", "stage": "Bogus"}, format="json"
+    )
     assert bad.status_code == 400, bad.content
     assert bad.json()["type"] == "BadRequest"
     assert not CaseStatus.objects.filter(value="Weird").exists()
 
-    ok = api.post(
+    ok = superadmin_api.post(
         "/api/v1/caseStatus",
         {"value": "Containment", "stage": "InProgress", "order": 3},
         format="json",
     )
     assert ok.status_code == 201, ok.content
+    status_id = ok.json()["_id"]
     assert ok.json()["_type"] == "CaseStatus"
     assert ok.json()["stage"] == "InProgress"
 
     # `value`/`stage` are immutable, so a body carrying only `stage` has nothing to write.
     assert (
-        api.patch("/api/v1/caseStatus/Containment", {"stage": "Closed"}, format="json").status_code
+        superadmin_api.patch(
+            "/api/v1/caseStatus/Containment", {"stage": "Closed"}, format="json"
+        ).status_code
         == 400
     )
     assert (
-        api.patch("/api/v1/caseStatus/Containment", {"order": 9}, format="json").status_code == 204
+        superadmin_api.patch(
+            "/api/v1/caseStatus/Containment", {"order": 9}, format="json"
+        ).status_code
+        == 204
     )
     assert CaseStatus.objects.get(value="Containment").order == 9
 
+    renamed = superadmin_api.patch(
+        f"/api/v1/caseStatus/{status_id}", {"value": "Quarantined"}, format="json"
+    )
+    assert renamed.status_code == 204, renamed.content
+    assert CaseStatus.objects.filter(value="Quarantined").exists()
+    assert superadmin_api.get("/api/v1/caseStatus/Containment").status_code == 404
+    assert superadmin_api.get(f"/api/v1/caseStatus/{status_id}").status_code == 200
 
-def test_alert_status_lists_and_refuses_an_unknown_stage(api: APIClient, db: None) -> None:
+    audit = AuditLog.objects.get(
+        action="taxonomy.case_status.renamed", target_id=str(status_id), actor=superadmin
+    )
+    assert audit.details["old"] == {"value": "Containment"}
+    assert audit.details["new"] == {"value": "Quarantined"}
+
+
+def test_alert_status_lists_and_refuses_an_unknown_stage(
+    superadmin_api: APIClient, db: None
+) -> None:
     AlertStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})
-    listed = api.get("/api/v1/alertStatus")
+    listed = superadmin_api.get("/api/v1/alertStatus")
     assert listed.status_code == 200, listed.content
     assert any(entry["value"] == "New" for entry in listed.json())
 
-    bad = api.post("/api/v1/alertStatus", {"value": "X", "stage": "Nope"}, format="json")
+    bad = superadmin_api.post("/api/v1/alertStatus", {"value": "X", "stage": "Nope"}, format="json")
     assert bad.status_code == 400, bad.content
     assert not AlertStatus.objects.filter(value="X").exists()
+
+
+@pytest.mark.parametrize("client_fixture", ["admin_api", "api"])
+def test_taxonomy_writes_require_superadmin(
+    client_fixture: str, request: pytest.FixtureRequest
+) -> None:
+    client = request.getfixturevalue(client_fixture)
+    case_status = CaseStatus.objects.create(value="Triage", stage="New", order=1, description="")
+    alert_status = AlertStatus.objects.create(value="Triage", stage="New", order=1, description="")
+    otype = ObservableType.objects.create(name="url-perm-test", is_attachment=False)
+
+    assert (
+        client.post(
+            "/api/v1/caseStatus",
+            {"value": "Sneaky", "stage": "New"},
+            format="json",
+        ).status_code
+        == 404
+    )
+    assert (
+        client.patch(
+            f"/api/v1/caseStatus/{case_status.id}",
+            {"value": "Renamed"},
+            format="json",
+        ).status_code
+        == 404
+    )
+    assert client.delete(f"/api/v1/caseStatus/{case_status.id}").status_code == 404
+
+    assert (
+        client.post(
+            "/api/v1/alertStatus",
+            {"value": "Sneaky", "stage": "New"},
+            format="json",
+        ).status_code
+        == 404
+    )
+    assert (
+        client.patch(
+            f"/api/v1/alertStatus/{alert_status.id}",
+            {"value": "Renamed"},
+            format="json",
+        ).status_code
+        == 404
+    )
+    assert client.delete(f"/api/v1/alertStatus/{alert_status.id}").status_code == 404
+
+    assert (
+        client.post(
+            "/api/v1/observable/type",
+            {"name": "sneaky"},
+            format="json",
+        ).status_code
+        == 404
+    )
+    assert (
+        client.patch(
+            f"/api/v1/observable/type/{otype.id}",
+            {"name": "renamed"},
+            format="json",
+        ).status_code
+        == 404
+    )
+    assert client.delete(f"/api/v1/observable/type/{otype.id}").status_code == 404
+
+    case_status.refresh_from_db()
+    alert_status.refresh_from_db()
+    otype.refresh_from_db()
+    assert case_status.value == "Triage"
+    assert alert_status.value == "Triage"
+    assert otype.name == "url-perm-test"
+    assert not CaseStatus.objects.filter(value="Sneaky").exists()
+    assert not AlertStatus.objects.filter(value="Sneaky").exists()
+    assert not ObservableType.objects.filter(name="sneaky").exists()
 
 
 # --- AC-P1-4 / AC-P1-5 — tags and links ------------------------------------

@@ -82,12 +82,17 @@
 
     <div class="meta-inline">
       <label for="id_tasks">Tasks (JSON array of objects)</label>
-      <textarea id="id_tasks" name="tasks" rows="4" placeholder='[{"title": "Task 1", "status": "Waiting"}]'>{{ template.tasks|prettyjson }}</textarea>
+      <textarea id="id_tasks" name="tasks" rows="8" placeholder='[{"title": "Task 1", "status": "Waiting"}]'>{{ form_tasks|prettyjson }}</textarea>
+      <p class="dim">
+        Put <code>&#123;&#123; alert.raw_payload &#125;&#125;</code> in a task description to
+        embed the earliest linked alert's payload. It is capped at 64 KiB; the task page links
+        to the complete payload.
+      </p>
     </div>
 
     <div class="meta-inline">
       <label for="id_custom_fields">Custom Fields (JSON array)</label>
-      <textarea id="id_custom_fields" name="custom_fields" rows="4" placeholder='[{"name": "Field", "type": "string", "value": ""}]'>{{ template.custom_fields|prettyjson }}</textarea>
+      <textarea id="id_custom_fields" name="custom_fields" rows="6" placeholder='[{"name": "Field", "type": "string", "value": ""}]'>{{ form_custom_fields|prettyjson }}</textarea>
     </div>
 
     <button class="btn btn-primary" type="submit">{% if template and mode == "edit" %}Update{% elif template %}View{% else %}Create{% endif %}</button>

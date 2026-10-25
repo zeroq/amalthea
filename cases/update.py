@@ -17,7 +17,6 @@ from cases.ledger import append_timeline_event
 from cases.models import Case, CaseTagLink, Tag
 from cases.tagging import tag_names_from_payload
 from core.enums import (
-    CASE_CLOSING_VERDICTS,
     CASE_PHASE_CHOICES,
     CASE_SCOPE_CHOICES,
     CASE_TYPE_CHOICES,
@@ -212,11 +211,26 @@ def enforce_close_rule(case: Case, payload: Mapping[str, Any], *, previous_stage
     if previous_stage == "Closed" or new_stage != "Closed":
         return
 
+    from core.models import TaxonomyTerm
+
     verdict = payload.get("verdict", case.verdict)
-    if verdict not in CASE_CLOSING_VERDICTS:
-        allowed = ", ".join(CASE_CLOSING_VERDICTS)
-        message = f"Closing a case requires a verdict ({allowed})."
-        raise CaseUpdateError("ValidationError", message, {"verdict": [message]})
+    try:
+        term = TaxonomyTerm.objects.get(category="case_verdict", code=verdict)
+        if not term.is_closing:
+            raise TaxonomyTerm.DoesNotExist
+        allowed = list(
+            TaxonomyTerm.objects.filter(category="case_verdict", is_closing=True)
+            .order_by("order", "code")
+            .values_list("code", flat=True)
+        )
+    except TaxonomyTerm.DoesNotExist:
+        allowed = list(
+            TaxonomyTerm.objects.filter(category="case_verdict", is_closing=True)
+            .order_by("order", "code")
+            .values_list("code", flat=True)
+        )
+        message = f"Closing a case requires a verdict ({', '.join(allowed) or 'true_positive, false_positive'})."
+        raise CaseUpdateError("ValidationError", message, {"verdict": [message]}) from None
 
     comment = str(payload.get("comment") or "").strip()
     if not comment:

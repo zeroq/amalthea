@@ -59,6 +59,7 @@ from cases.models import (
 )
 from cases.procedures import create_procedure
 from cases.tagging import tag_names_from_payload
+from cases.template_defaults import render_source_alert_payload
 from cases.update import (
     CaseUpdateError,
     _apply_case_tags,
@@ -75,7 +76,6 @@ from compat.time import parse_timestamp, to_epoch_ms
 from core.enums import (
     CASE_PHASE_CHOICES,
     CASE_SCOPE_CHOICES,
-    CASE_STAGES,
     CASE_TYPE_CHOICES,
     TASK_STATUS_CHOICES,
 )
@@ -98,7 +98,13 @@ from core.serializers import (
     task_json,
     ttp_json,
 )
-from identity.audit import maybe_record_cross_org_read
+from core.taxonomy import (
+    TaxonomyError,
+    create_case_status,
+    delete_case_status,
+    update_case_status,
+)
+from identity.audit import maybe_record_cross_org_read, record_taxonomy_change
 from identity.models import Organisation
 from observables.extractor import add_observable, extract_into_case
 from observables.models import Observable, ObservableTagLink, ObservableType
@@ -123,6 +129,22 @@ def _bad(message: str, fields: dict[str, list[str]]) -> Response:
         {"type": "BadRequest", "message": message, "fields": fields},
         status=status.HTTP_400_BAD_REQUEST,
     )
+
+
+def _require_superadmin_for_write(request: Request) -> Response | None:
+    """Return a 404 response for unsafe methods if the user is not a superAdmin.
+
+    GET remains open to all authenticated users. For POST, PATCH, PUT, DELETE,
+    non-superAdmin users receive a uniform 404 (NotFoundError) to avoid
+    object-existence leakage. The guard runs before resolving the target row.
+    """
+    if request.method in ("POST", "PATCH", "PUT", "DELETE"):
+        user = getattr(request, "user", None)
+        if not (
+            getattr(user, "is_authenticated", False) and getattr(user, "role", "") == "superAdmin"
+        ):
+            return _not_found("Resource")
+    return None
 
 
 def _as_uuid(value: Any) -> UUID | None:
@@ -1190,7 +1212,14 @@ def _resolve_case_status(identifier: str) -> CaseStatus | None:
 @api_view(["GET", "POST"])
 @renderer_classes([JSONRenderer])
 def case_status_collection(request: Request) -> Response:
-    """`GET /api/v1/caseStatus` lists; `POST /api/v1/caseStatus` creates (201)."""
+    """`GET /api/v1/caseStatus` lists; `POST /api/v1/caseStatus` creates (201).
+
+    POST requires superAdmin; GET is open to all authenticated users.
+    """
+    guard = _require_superadmin_for_write(request)
+    if guard:
+        return guard
+
     if request.method == "POST":
         return _create_case_status(request)
     return Response(
@@ -1203,29 +1232,36 @@ def case_status_collection(request: Request) -> Response:
 
 def _create_case_status(request: Request) -> Response:
     payload = request.data if isinstance(request.data, dict) else {}
-    value = str(payload.get("value") or "").strip()
-    stage = str(payload.get("stage") or "").strip()
-    missing = {key: ["required"] for key, val in (("value", value), ("stage", stage)) if not val}
-    if missing:
-        return _bad("value and stage are required", missing)
-    if stage not in CASE_STAGES:
-        return _bad(
-            f"unknown stage {stage!r}",
-            {"stage": [f"must be one of {', '.join(CASE_STAGES)}"]},
-        )
-    if CaseStatus.objects.filter(value=value[:64]).exists():
-        return _bad("value already exists", {"value": ["already exists"]})
     try:
         order = int(payload.get("order", 0))
     except (TypeError, ValueError):
         return _bad("order must be an integer", {"order": ["must be an integer"]})
-    status_obj = CaseStatus.objects.create(
-        value=value[:64],
-        stage=stage,
-        order=order,
-        description=str(payload.get("description") or ""),
-        hidden=bool(payload.get("hidden") or False),
-    )
+
+    try:
+        with transaction.atomic():
+            status_obj, result = create_case_status(
+                value=str(payload.get("value") or ""),
+                stage=str(payload.get("stage") or ""),
+                order=order,
+                description=str(payload.get("description") or ""),
+                hidden=bool(payload.get("hidden") or False),
+            )
+            record_taxonomy_change(
+                request,
+                actor=request.user,
+                action=f"taxonomy.case_status.{result.action}",
+                target_type=result.target_type,
+                target_id=result.target_id,
+                details={
+                    "changed": result.changed,
+                    "old": {"value": result.old_identifier} if result.old_identifier else {},
+                    "new": {"value": result.new_identifier} if result.new_identifier else {},
+                },
+            )
+    except TaxonomyError as exc:
+        fields = {exc.field: [exc.message]} if exc.field else {}
+        return _bad(exc.message, fields)
+
     return Response(case_status_json(status_obj), status=status.HTTP_201_CREATED)
 
 
@@ -1234,44 +1270,87 @@ def _create_case_status(request: Request) -> Response:
 def case_status_detail(request: Request, status_id: str) -> Response:
     """`GET|PATCH|DELETE /api/v1/caseStatus/{idOrValue}`.
 
-    `value` and `stage` are immutable (the recorded `InputCreateCaseStatus` says so), so PATCH only
-    moves `order`/`description`/`hidden`. DELETE refuses a status still in use with a **400**;
-    `Case.status` is `PROTECT` and the database's 500 is not the contract a triage queue wants.
+    PATCH accepts `value` (rename), `order`, `description`, `hidden`. `stage` remains immutable.
+    DELETE refuses a status still in use with a **400**.
+    POST/PATCH/DELETE require superAdmin; GET is open to all authenticated users.
     """
+    guard = _require_superadmin_for_write(request)
+    if guard:
+        return guard
+
     status_obj = _resolve_case_status(status_id)
     if status_obj is None:
         return _not_found("CaseStatus")
+
     if request.method == "DELETE":
-        if status_obj.cases.exists():
-            return _bad(
-                "Case status is in use",
-                {"_id": ["at least one case uses this status"]},
-            )
-        status_obj.delete()
+        try:
+            with transaction.atomic():
+                result = delete_case_status(status_obj)
+                record_taxonomy_change(
+                    request,
+                    actor=request.user,
+                    action=f"taxonomy.case_status.{result.action}",
+                    target_type=result.target_type,
+                    target_id=result.target_id,
+                    details={
+                        "changed": result.changed,
+                        "old": {"value": result.old_identifier} if result.old_identifier else {},
+                        "new": {},
+                    },
+                )
+        except TaxonomyError as exc:
+            fields = {exc.field: [exc.message]} if exc.field else {}
+            return _bad(exc.message, fields)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
     if request.method == "PATCH":
         return _update_case_status(status_obj, request)
+
     return Response(case_status_json(status_obj))
 
 
 def _update_case_status(status_obj: CaseStatus, request: Request) -> Response:
     payload = request.data if isinstance(request.data, dict) else {}
-    fields: list[str] = []
-    if "order" in payload:
+
+    # Extract only the fields we allow to be updated
+    value = payload.get("value")
+    order = payload.get("order")
+    description = payload.get("description")
+    hidden = payload.get("hidden")
+
+    # Convert order to int if present
+    if order is not None:
         try:
-            status_obj.order = int(payload["order"])
+            order = int(order)
         except (TypeError, ValueError):
             return _bad("order must be an integer", {"order": ["must be an integer"]})
-        fields.append("order")
-    if "description" in payload:
-        status_obj.description = str(payload["description"] or "")
-        fields.append("description")
-    if "hidden" in payload:
-        status_obj.hidden = bool(payload["hidden"])
-        fields.append("hidden")
-    if not fields:
-        return _bad("No updatable field supplied", {})
-    status_obj.save(update_fields=[*fields, "updated_at"])
+
+    try:
+        with transaction.atomic():
+            result = update_case_status(
+                status_obj,
+                value=str(value) if value is not None else None,
+                order=order,
+                description=str(description) if description is not None else None,
+                hidden=bool(hidden) if hidden is not None else None,
+            )
+            details: dict[str, object] = {"changed": result.changed}
+            if result.old_identifier is not None:
+                details["old"] = {"value": result.old_identifier}
+            if result.new_identifier is not None:
+                details["new"] = {"value": result.new_identifier}
+            record_taxonomy_change(
+                request,
+                actor=request.user,
+                action=f"taxonomy.case_status.{result.action}",
+                target_type=result.target_type,
+                target_id=result.target_id,
+                details=details,
+            )
+    except TaxonomyError as exc:
+        fields = {exc.field: [exc.message]} if exc.field else {}
+        return _bad(exc.message, fields)
+
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -2098,7 +2177,7 @@ def _apply_template(
             case=case,
             title=str(spec["title"])[:500],
             group=str(spec.get("group") or "")[:100],
-            description=str(spec.get("description") or ""),
+            description=render_source_alert_payload(str(spec.get("description") or ""), case),
             order=_as_int(spec.get("order")) or 0,
             mandatory=bool(spec.get("mandatory") or False),
         )

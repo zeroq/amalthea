@@ -1,0 +1,87 @@
+{% comment %}
+Body of the taxonomy term create/edit modal.
+{% endcomment %}
+
+<div class="field-row">
+  <label for="{{ modal_id }}-category">Category</label>
+  {% if is_edit %}
+  <p class="mono" id="{{ modal_id }}-category">{{ category }}</p>
+  {% else %}
+  <select id="{{ modal_id }}-category" name="category" form="{{ form_id }}"
+          {% if errors and errors.category %}aria-invalid="true" aria-describedby="{{ modal_id }}-category-error"{% endif %}>
+    {% if form_values %}
+    <option value="case_scope"{% if form_values.category == "case_scope" or category == "case_scope" %} selected{% endif %}>case_scope</option>
+    <option value="case_phase"{% if form_values.category == "case_phase" or category == "case_phase" %} selected{% endif %}>case_phase</option>
+    <option value="case_type"{% if form_values.category == "case_type" or category == "case_type" %} selected{% endif %}>case_type</option>
+    <option value="data_classification"{% if form_values.category == "data_classification" or category == "data_classification" %} selected{% endif %}>data_classification</option>
+    <option value="case_verdict"{% if form_values.category == "case_verdict" or category == "case_verdict" %} selected{% endif %}>case_verdict</option>
+    {% else %}
+    <option value="case_scope"{% if category == "case_scope" %} selected{% endif %}>case_scope</option>
+    <option value="case_phase"{% if category == "case_phase" %} selected{% endif %}>case_phase</option>
+    <option value="case_type"{% if category == "case_type" %} selected{% endif %}>case_type</option>
+    <option value="data_classification"{% if category == "data_classification" %} selected{% endif %}>data_classification</option>
+    <option value="case_verdict"{% if category == "case_verdict" %} selected{% endif %}>case_verdict</option>
+    {% endif %}
+  </select>
+  {% endif %}
+</div>
+{% if errors and errors.category %}<p id="{{ modal_id }}-category-error" class="field-error">{{ errors.category }}</p>{% endif %}
+
+<div class="field-row">
+  <label for="{{ modal_id }}-code">Code <span class="required" aria-hidden="true">*</span></label>
+  {% if is_edit %}
+  <p class="mono" id="{{ modal_id }}-code">{{ obj.code }}</p>
+  {% else %}
+  <input type="text" id="{{ modal_id }}-code" name="code" maxlength="64" required
+         form="{{ form_id }}"
+         value="{% if form_values %}{{ form_values.code }}{% else %}{{ obj.code|default:'' }}{% endif %}"
+         {% if errors and errors.code %}aria-invalid="true" aria-describedby="{{ modal_id }}-code-error"{% endif %}>
+  {% endif %}
+</div>
+{% if errors and errors.code %}<p id="{{ modal_id }}-code-error" class="field-error">{{ errors.code }}</p>{% endif %}
+
+<div class="field-row">
+  <label for="{{ modal_id }}-label">Label <span class="required" aria-hidden="true">*</span></label>
+  <input type="text" id="{{ modal_id }}-label" name="label" maxlength="128" required
+         form="{{ form_id }}"
+         value="{% if form_values %}{{ form_values.label }}{% else %}{{ obj.label|default:'' }}{% endif %}"
+         {% if errors and errors.label %}aria-invalid="true" aria-describedby="{{ modal_id }}-label-error"{% endif %}>
+</div>
+{% if errors and errors.label %}<p id="{{ modal_id }}-label-error" class="field-error">{{ errors.label }}</p>{% endif %}
+
+<div class="field-row">
+  <label for="{{ modal_id }}-order">Order</label>
+  <input type="number" id="{{ modal_id }}-order" name="order" step="1"
+         form="{{ form_id }}"
+         value="{% if form_values %}{{ form_values.order }}{% else %}{{ obj.order|default:0 }}{% endif %}"
+         {% if errors and errors.order %}aria-invalid="true" aria-describedby="{{ modal_id }}-order-error"{% endif %}>
+</div>
+{% if errors and errors.order %}<p id="{{ modal_id }}-order-error" class="field-error">{{ errors.order }}</p>{% endif %}
+
+<div class="field-row check">
+  <input type="checkbox" id="{{ modal_id }}-hidden" name="hidden" form="{{ form_id }}"
+         {% if form_values %}{% if form_values.hidden %}checked{% endif %}{% elif obj and obj.hidden %}checked{% endif %}>
+  <label for="{{ modal_id }}-hidden">Hidden</label>
+</div>
+
+{% if category == "case_verdict" %}
+<div class="field-row check">
+  <input type="checkbox" id="{{ modal_id }}-is_closing" name="is_closing" form="{{ form_id }}"
+         {% if form_values %}{% if form_values.is_closing %}checked{% endif %}{% elif obj and obj.is_closing %}checked{% endif %}>
+  <label for="{{ modal_id }}-is_closing">Is closing verdict</label>
+</div>
+{% elif form_values and form_values.category == "case_verdict" %}
+<div class="field-row check">
+  <input type="checkbox" id="{{ modal_id }}-is_closing" name="is_closing" form="{{ form_id }}"
+         {% if form_values.is_closing %}checked{% endif %}>
+  <label for="{{ modal_id }}-is_closing">Is closing verdict</label>
+</div>
+{% elif obj and obj.category == "case_verdict" %}
+<div class="field-row check">
+  <input type="checkbox" id="{{ modal_id }}-is_closing" name="is_closing" form="{{ form_id }}"
+         {% if obj.is_closing %}checked{% endif %}>
+  <label for="{{ modal_id }}-is_closing">Is closing verdict</label>
+</div>
+{% endif %}
+
+{% if errors and errors.non_field %}<p class="field-error">{{ errors.non_field }}</p>{% endif %}

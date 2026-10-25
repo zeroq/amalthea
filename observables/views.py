@@ -26,6 +26,13 @@ from rest_framework.response import Response
 
 import identity.scoping
 from core.serializers import observable_suggestion_json, observable_type_json
+from core.taxonomy import (
+    TaxonomyError,
+    create_observable_type,
+    delete_observable_type,
+    update_observable_type,
+)
+from identity.audit import record_taxonomy_change
 from observables.models import ObservableSuggestion, ObservableType
 from observables.suggestions import (
     AcceptSuggestionError,
@@ -48,6 +55,22 @@ def _bad(message: str, fields: dict[str, list[str]]) -> Response:
     )
 
 
+def _require_superadmin_for_write(request: Request) -> Response | None:
+    """Return a 404 response for unsafe methods if the user is not a superAdmin.
+
+    GET remains open to all authenticated users. For POST, PATCH, PUT, DELETE,
+    non-superAdmin users receive a uniform 404 (NotFoundError) to avoid
+    object-existence leakage. The guard runs before resolving the target row.
+    """
+    if request.method in ("POST", "PATCH", "PUT", "DELETE"):
+        user = getattr(request, "user", None)
+        if not (
+            getattr(user, "is_authenticated", False) and getattr(user, "role", "") == "superAdmin"
+        ):
+            return _not_found("Resource")
+    return None
+
+
 def _as_uuid(value: object) -> UUID | None:
     try:
         return UUID(str(value))
@@ -68,7 +91,14 @@ def _lookup(identifier: str) -> ObservableType | None:
 @api_view(["GET", "POST"])
 @renderer_classes([JSONRenderer])
 def observable_type_collection(request: Request) -> Response:
-    """`GET` lists the vocabulary; `POST` adds a type (201)."""
+    """`GET` lists the vocabulary; `POST` adds a type (201).
+
+    POST requires superAdmin; GET is open to all authenticated users.
+    """
+    guard = _require_superadmin_for_write(request)
+    if guard:
+        return guard
+
     if request.method == "POST":
         return _create_type(request)
     return Response(
@@ -78,16 +108,30 @@ def observable_type_collection(request: Request) -> Response:
 
 def _create_type(request: Request) -> Response:
     payload = request.data if isinstance(request.data, dict) else {}
-    name = str(payload.get("name") or "").strip()
-    if not name:
-        return _bad("name is required", {"name": ["required"]})
-    if ObservableType.objects.filter(name=name[:100]).exists():
-        return _bad("name already exists", {"name": ["already exists"]})
-    otype = ObservableType.objects.create(
-        name=name[:100],
-        is_attachment=bool(payload.get("isAttachment") or False),
-        is_case_sensitive=bool(payload.get("isCaseSensitive") or False),
-    )
+
+    try:
+        with transaction.atomic():
+            otype, result = create_observable_type(
+                name=str(payload.get("name") or ""),
+                is_attachment=bool(payload.get("isAttachment") or False),
+                is_case_sensitive=bool(payload.get("isCaseSensitive") or False),
+            )
+            record_taxonomy_change(
+                request,
+                actor=request.user,
+                action=f"taxonomy.observable_type.{result.action}",
+                target_type=result.target_type,
+                target_id=result.target_id,
+                details={
+                    "changed": result.changed,
+                    "old": {"name": result.old_identifier} if result.old_identifier else {},
+                    "new": {"name": result.new_identifier} if result.new_identifier else {},
+                },
+            )
+    except TaxonomyError as exc:
+        fields = {exc.field: [exc.message]} if exc.field else {}
+        return _bad(exc.message, fields)
+
     return Response(observable_type_json(otype), status=status.HTTP_201_CREATED)
 
 
@@ -96,42 +140,82 @@ def _create_type(request: Request) -> Response:
 def observable_type_detail(request: Request, type_id: str) -> Response:
     """`GET|PATCH|DELETE /api/v1/observable/type/{typeId}`.
 
-    DELETE is guarded: an `ObservableType` in use is a **400**, not a cascade that would silently
-    take a case's evidence with it, and not the FK `PROTECT`'s 500. The check is the same shape
-    the recorded OpenAPI documents ("An observable type can't be deleted while at least one
-    observable uses it").
+    PATCH accepts `name` (rename), `isAttachment`, `isCaseSensitive`.
+    DELETE refuses a type still in use with a **400**.
+    POST/PATCH/DELETE require superAdmin; GET is open to all authenticated users.
     """
+    guard = _require_superadmin_for_write(request)
+    if guard:
+        return guard
+
     otype = _lookup(type_id)
     if otype is None:
         return _not_found("ObservableType")
+
     if request.method == "DELETE":
-        if otype.observables.exists():
-            return _bad(
-                "Observable type is in use",
-                {"_id": ["at least one observable uses this type"]},
-            )
-        otype.delete()
+        try:
+            with transaction.atomic():
+                result = delete_observable_type(otype)
+                record_taxonomy_change(
+                    request,
+                    actor=request.user,
+                    action=f"taxonomy.observable_type.{result.action}",
+                    target_type=result.target_type,
+                    target_id=result.target_id,
+                    details={
+                        "changed": result.changed,
+                        "old": {"name": result.old_identifier} if result.old_identifier else {},
+                        "new": {},
+                    },
+                )
+        except TaxonomyError as exc:
+            fields = {exc.field: [exc.message]} if exc.field else {}
+            return _bad(exc.message, fields)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
     if request.method == "PATCH":
         return _update_type(otype, request)
+
     return Response(observable_type_json(otype))
 
 
 def _update_type(otype: ObservableType, request: Request) -> Response:
     payload = request.data if isinstance(request.data, dict) else {}
-    fields: list[str] = []
-    for key, attr in (
-        ("isAttachment", "is_attachment"),
-        ("isCaseSensitive", "is_case_sensitive"),
-    ):
-        if key in payload:
-            setattr(otype, attr, bool(payload[key]))
-            fields.append(attr)
-    if not fields:
-        return _bad("No updatable field supplied", {})
+
+    # Extract only the fields we allow to be updated
+    name = payload.get("name")
+    is_attachment = payload.get("isAttachment")
+    is_case_sensitive = payload.get("isCaseSensitive")
+
+    try:
+        with transaction.atomic():
+            result = update_observable_type(
+                otype,
+                name=str(name) if name is not None else None,
+                is_attachment=bool(is_attachment) if is_attachment is not None else None,
+                is_case_sensitive=bool(is_case_sensitive)
+                if is_case_sensitive is not None
+                else None,
+            )
+            details: dict[str, object] = {"changed": result.changed}
+            if result.old_identifier is not None:
+                details["old"] = {"name": result.old_identifier}
+            if result.new_identifier is not None:
+                details["new"] = {"name": result.new_identifier}
+            record_taxonomy_change(
+                request,
+                actor=request.user,
+                action=f"taxonomy.observable_type.{result.action}",
+                target_type=result.target_type,
+                target_id=result.target_id,
+                details=details,
+            )
+    except TaxonomyError as exc:
+        fields = {exc.field: [exc.message]} if exc.field else {}
+        return _bad(exc.message, fields)
+
     # `save()` is where the re-hash hook lives; it reads the persisted flag before writing, so a
     # partial write still detects the case-rule flip and re-hashes the type's observables.
-    otype.save(update_fields=[*fields, "updated_at"])
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 

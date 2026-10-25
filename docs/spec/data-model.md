@@ -88,8 +88,11 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 ## alerts
 
 ### AlertStatus (`alert_status`)
-- `value` — **unique** · `stage` — choices `ALERT_STAGE_CHOICES` (`New/InProgress/Closed/Imported`).
+- `value` — **unique, mutable** (rename allowed; `Alert.status` is an FK, so references follow) ·
+  `stage` — choices `ALERT_STAGE_CHOICES` (`New/InProgress/Closed/Imported`), **immutable**.
 - `order`, `description`, `hidden`. Constraint: `alert_status_stage_valid`.
+- Global vocabulary, not per-organisation. Mutations are `superAdmin`-only; in-use rows cannot be
+  deleted (`Alert.status` is `PROTECT`). Rename/new-value edits are audited.
 - (Deviations M12 / plan §13: statuses are **DB rows**, not free enums; `Imported` stage exists.)
   Seeded rows: `New`(1), `Triaged`(InProgress,2), `Dismissed`(Closed,3), `Imported`(4), and
   `Closed`(Closed,5) added 2026-10-17 (§12.8(5), deviation **V-2**) — case close-propagation
@@ -147,8 +150,11 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 ## cases
 
 ### CaseStatus (`case_status`)
-- `value` unique · `stage` — `CASE_STAGES ("New","InProgress","Closed")` · `order`,
-  `description`, `hidden`. Constraint: `case_status_stage_valid`.
+- `value` unique, **mutable** (rename allowed; `Case.status` is an FK, so references follow) ·
+  `stage` — `CASE_STAGES ("New","InProgress","Closed")`, **immutable** · `order`, `description`,
+  `hidden`. Constraint: `case_status_stage_valid`.
+- Global vocabulary, not per-organisation. Mutations are `superAdmin`-only; in-use rows cannot be
+  deleted (`Case.status` is `PROTECT`). Rename/new-value edits are audited.
 
 ### Tag (`tag`)
 - `name` unique · `colour` · `description`.
@@ -276,6 +282,18 @@ analyst's position in the incident-response loop. The two axes are deliberately 
 - `tags` — JSONB list · `tasks` — JSONB list of task definitions · `custom_fields` — JSONB list.
 - Applying a template **copies** these definitions into the case (tasks/tag links/custom-field
   values); nothing is shared with the template row (AC6.1-P4-c).
+- A task definition's `description` may contain the literal token `{{ alert.raw_payload }}`. On
+  apply, `cases.template_defaults.render_source_alert_payload` replaces it with the earliest alert
+  linked to the case (same organisation; ordered by `date`, `created_at`, `id`) as pretty JSON. The
+  JSON is capped at 64 KiB UTF-8 bytes, wrapped in a dynamically sized fenced block, and followed
+  by a visible truncation marker only when capped. An invisible Markdown link-reference sentinel
+  (`[//]: # (amalthea:source-alert-payload)`) is appended once so the task page can offer the full
+  payload modal. The full payload is not stored on the task; the modal reads it from the alert and
+  is restricted by `resolve_alert`.
+- `custom_fields` items are applied only when a global `CustomField` with the same name already
+  exists; a template never creates the vocabulary. The UI create form pre-fills an `Example Field`
+  (`string`, value `example`) and a `Triage/Analysis` task; API-created templates stay explicit.
+- No schema change or migration: the token and sentinel live inside the JSON/Markdown text.
 
 ### TTP (`ttp`, extends `UUIDModel` + `TimeStampedModel`) — T2 P5
 - `name` **unique** · `ttp_code`(64) · `tactic`(100) · `description` (Text).
@@ -293,9 +311,11 @@ analyst's position in the incident-response loop. The two axes are deliberately 
 ## observables
 
 ### ObservableType (`observable_type`)
-- `name` unique · `is_attachment` · `is_case_sensitive` (default False).
+- `name` unique, **mutable** (rename allowed; `Observable.data_type` is an FK) · `is_attachment` ·
+  `is_case_sensitive` (default False).
 - `save()` intercepts an `is_case_sensitive` change and re-hashes all matching observables in one
   `transaction.atomic()` via `observables/rehash.py::rehash_for_type` (REVIEW round-3 H3-1).
+- Global vocabulary. Mutations are `superAdmin`-only; in-use rows cannot be deleted.
 
 ### Observable (`observable`, extends `UUIDModel` + `TimeStampedModel`)
 - `data_type` — FK → `ObservableType`, `PROTECT`, `db_index=True` · `owner_org` — FK →

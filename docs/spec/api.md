@@ -257,9 +257,18 @@ code paths that deliberately circumvent the service layer.
   TheHive's `POST /case/_merge/{ids}`. An extension `POST /alert/{id}/merge/<case_id>` was already
   present; `POST /alert/{id}/import/<case_id>` is a synonym.
 - `case/_bulk/caseTemplate` applies a template's tag/task/custom-field defaults to `{"ids":[…]}`.
+  Task descriptions may contain `{{ alert.raw_payload }}`; application resolves it from the
+  earliest alert linked to each case (same organisation, ordered by `date`, `created_at`, `id`), as
+  pretty JSON capped at 64 KiB UTF-8 bytes with a truncation marker. The response is unchanged:
+  the rendered task description is not inlined into the apply response.
 - `case/template` is the template CRUD; `taxonomy` aggregates the editable vocabularies
   (`caseStatus`, `alertStatus`, `observableType`, `caseTemplate`, `tag`, TTP) for the UI. Both are
   Amalthea extensions (no thehive4py module) — deviations **P4-1**…**P4-3**.
+- `POST case/template` remains explicit: omitted/empty `tasks` and `customFields` stay empty. The
+  UI create form pre-fills defaults, but that is an authoring aid, not an API default.
+- The UI exposes the complete source-alert payload at `GET /tasks/<uuid:task_id>/source-payload`
+  (session auth, `ui-task-source-payload`). It is tenant-scoped through `resolve_alert` and
+  `never_cache`; there is no public API equivalent.
 
 ### Procedures, TTP and export (T2/Phase P5)
 
@@ -353,9 +362,13 @@ code paths that deliberately circumvent the service layer.
 - `{typeId}` resolves as a UUID first, then as the unique `name`. The collection GET/POST is an
   **extension** (TheHive lists types only through `POST /query`; its single detail path is
   `GET|PATCH|DELETE /observable/type/{typeId}`).
-- PATCH writes `isAttachment`/`isCaseSensitive` (the recorded `InputUpdateObservableType`) and goes
-  through `ObservableType.save()` so a case-rule flip re-hashes that type's observables. Empty body
-  ⇒ 400. DELETE ⇒ **204**, but an in-use type ⇒ **400** (not the FK `PROTECT`'s 500).
+- GET is open to every authenticated role. **POST/PATCH/DELETE require `superAdmin`**; any other
+  authenticated role receives the same **404 `NotFoundError`** (not 403), before the target is
+  resolved, so the route does not become an existence oracle.
+- PATCH writes `name`, `isAttachment`, and `isCaseSensitive` and goes through
+  `ObservableType.save()` so a case-rule flip re-hashes that type's observables. A rename is
+  allowed; the old name then resolves as **404**. Empty body ⇒ 400. DELETE ⇒ **204**, but an
+  in-use type ⇒ **400** (not the FK `PROTECT`'s 500).
 
 ## Statuses and tags (T2/Phase P1)
 
@@ -372,9 +385,14 @@ code paths that deliberately circumvent the service layer.
 | `observable/<id>/tag`, `…/` | POST, DELETE | `observable_tag_link` |
 
 - `{idOrValue}` resolves as a UUID first, then the unique `value` (caseStatus/alertStatus) or `name`
-  (tag). `value`/`stage` are **immutable**: a PATCH carrying only those has nothing to write and is a
-  400. Unknown `stage` ⇒ 400 naming the vocabulary (`CASE_STAGES`/`ALERT_STAGES`). DELETE refuses an
-  in-use row with a **400** (`Case.status`/`Alert.status` are `PROTECT`).
+  (tag). `caseStatus`/`alertStatus` `value` is **mutable** (rename); `stage` is immutable. A PATCH
+  carrying only `stage` has nothing to write and is a 400. An unknown `stage` ⇒ 400 naming the
+  vocabulary (`CASE_STAGES`/`ALERT_STAGES`). DELETE refuses an in-use row with a **400**
+  (`Case.status`/`Alert.status` are `PROTECT`).
+- GET is open to every authenticated role. **POST/PATCH/DELETE for `caseStatus`, `alertStatus`, and
+  `observable/type` require `superAdmin`**; any other authenticated role receives the same **404
+  `NotFoundError`**, before the target is resolved, so the route does not become an existence
+  oracle. Renames audit `taxonomy.{case,alert}_status.renamed`.
 - Statuses `InputCreate*` `colour` is accepted-and-ignored (no model column; ADR D11).
 - `tag` collection GET/POST and the three link routes are an **extension** (TheHive has only
   `GET|PATCH|DELETE /tag/{tagId}` and attaches tags through the create/update body). PATCH accepts

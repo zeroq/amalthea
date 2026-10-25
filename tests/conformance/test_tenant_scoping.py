@@ -1733,6 +1733,7 @@ class TestUIRouteEnumerationConformance:
             # The task routes use a `<uuid:task_id>` converter; a non-UUID placeholder never
             # resolves, so own-org would 404 before the view runs. Point it at the org1 fixture.
             "ui-task-detail": {"task_id": str(self.task1.id)},
+            "ui-task-source-payload": {"task_id": str(self.task1.id)},
             "ui-case-export": {"case_id": str(self.case1.number)},
             "ui-case-edit": {"case_id": str(self.case1.number)},
             "ui-observable-list": {},

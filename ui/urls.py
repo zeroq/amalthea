@@ -7,7 +7,7 @@ made by someone who has read the other side of the codebase.
 
 from django.urls import path, reverse_lazy
 
-from . import views
+from . import taxonomy_views, views
 
 urlpatterns = [
     path("", views.dashboard, name="ui-dashboard"),
@@ -37,6 +37,11 @@ urlpatterns = [
     ),
     # Task-scoped routes (CRUD + detail + notes)
     path("tasks/<uuid:task_id>", views.task_detail, name="ui-task-detail"),
+    path(
+        "tasks/<uuid:task_id>/source-payload",
+        views.task_source_payload,
+        name="ui-task-source-payload",
+    ),
     path("tasks/<uuid:task_id>/edit", views.case_task_edit, name="ui-case-task-edit"),
     path("tasks/<uuid:task_id>/delete", views.case_task_delete, name="ui-case-task-delete"),
     path("tasks/<uuid:task_id>/note", views.task_note, name="ui-task-note"),
@@ -194,6 +199,51 @@ urlpatterns = [
     ),
     # Taxonomy / vocabularies
     path("taxonomy", views.taxonomy, name="ui-taxonomy"),
+    path(
+        "taxonomy/case-statuses/new",
+        taxonomy_views.case_status_create,
+        name="ui-taxonomy-case-status-create",
+    ),
+    path(
+        "taxonomy/case-statuses/<uuid:status_id>/edit",
+        taxonomy_views.case_status_edit,
+        name="ui-taxonomy-case-status-edit",
+    ),
+    path(
+        "taxonomy/case-statuses/<uuid:status_id>/delete",
+        taxonomy_views.case_status_delete,
+        name="ui-taxonomy-case-status-delete",
+    ),
+    path(
+        "taxonomy/alert-statuses/new",
+        taxonomy_views.alert_status_create,
+        name="ui-taxonomy-alert-status-create",
+    ),
+    path(
+        "taxonomy/alert-statuses/<uuid:status_id>/edit",
+        taxonomy_views.alert_status_edit,
+        name="ui-taxonomy-alert-status-edit",
+    ),
+    path(
+        "taxonomy/alert-statuses/<uuid:status_id>/delete",
+        taxonomy_views.alert_status_delete,
+        name="ui-taxonomy-alert-status-delete",
+    ),
+    path(
+        "taxonomy/observable-types/new",
+        taxonomy_views.observable_type_create,
+        name="ui-taxonomy-observable-type-create",
+    ),
+    path(
+        "taxonomy/observable-types/<uuid:type_id>/edit",
+        taxonomy_views.observable_type_edit,
+        name="ui-taxonomy-observable-type-edit",
+    ),
+    path(
+        "taxonomy/observable-types/<uuid:type_id>/delete",
+        taxonomy_views.observable_type_delete,
+        name="ui-taxonomy-observable-type-delete",
+    ),
     # Automation/Playbooks
     path("automation", views.automation_list, name="ui-automation-list"),
     path("automation/playbooks", views.playbook_list, name="ui-playbook-list"),
@@ -274,5 +324,16 @@ urlpatterns = [
         "settings/users/<uuid:user_id>/delete",
         views.settings_users_delete,
         name="ui-settings-users-delete",
+    ),
+    path("taxonomy/terms/new", taxonomy_views.taxonomy_term_create, name="ui-taxonomy-term-create"),
+    path(
+        "taxonomy/terms/<uuid:term_id>/edit",
+        taxonomy_views.taxonomy_term_edit,
+        name="ui-taxonomy-term-edit",
+    ),
+    path(
+        "taxonomy/terms/<uuid:term_id>/delete",
+        taxonomy_views.taxonomy_term_delete,
+        name="ui-taxonomy-term-delete",
     ),
 ]

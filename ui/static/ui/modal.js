@@ -46,6 +46,16 @@
     }
   });
 
+  // HTMX treats 4xx as "do not swap" by default. A modal form's 422 carries the bound field
+  // values and errors and targets the modal body, so it *must* swap; otherwise the user sees
+  // the dialog unchanged and no explanation. Only 422 is opted in — 400/403/404/500 stay errors.
+  document.addEventListener("htmx:beforeSwap", function (event) {
+    if (event.detail.xhr && event.detail.xhr.status === 422) {
+      event.detail.shouldSwap = true;
+      event.detail.isError = false;
+    }
+  });
+
   document.addEventListener("click", function (event) {
     var opener = event.target.closest("[data-modal-open]");
     if (opener) {

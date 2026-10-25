@@ -1,0 +1,15 @@
+{% comment %}
+Body of a taxonomy delete confirmation modal. When `error` is set (in-use or race),
+it is rendered instead of the normal confirmation text; the modal footer's confirm
+button stays disabled only if rendered via the static attributes, but the view keeps
+the modal open on error so the message is visible.
+{% endcomment %}
+{% if error %}
+<p class="modal-body-text">{{ error }}</p>
+{% else %}
+<p class="modal-body-text">Delete <span class="mono">{{ identifier }}</span> ({{ entity_label }})?</p>
+<p class="hint">This cannot be undone.</p>
+{% endif %}
+{% if usage_count %}
+<p class="hint">Currently used by {{ usage_count }} object{{ usage_count|pluralize }}.</p>
+{% endif %}
