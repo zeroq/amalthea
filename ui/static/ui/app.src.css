@@ -413,6 +413,7 @@ dialog.cheatsheet-modal{border:1px solid var(--color-line);border-radius:var(--r
   text-decoration: none;
   vertical-align: baseline;
   display: inline-block;
+  cursor: pointer;
 }
 .icon-link > i {
   font-size: 1em;
@@ -437,11 +438,12 @@ dialog.cheatsheet-modal{border:1px solid var(--color-line);border-radius:var(--r
    signalled by colour alone, per the design spec). */
 .icon-link-err {
   color: var(--color-err);
+  cursor: pointer;
 }
 .icon-link-err:hover,
 .icon-link-err:focus-visible {
   color: var(--color-err);
-  filter: brightness(1.15);
+  filter: brightness(1.25);
 }
 
 /* Inline validation errors in the task modal (plan Q10). `.field-row` is a shared flex row used by
@@ -825,9 +827,6 @@ a.rail-org-name:hover {
   display: inline-flex;
   margin: 0;
 }
-.tag-list .chip-x {
-  cursor: pointer;
-}
 
 /* Single-column field (label above its control) in the General-tab dialogs. Modelled
    on the `.form-grid` label treatment but sized for a narrow modal body. */
@@ -1119,10 +1118,21 @@ a.rail-org-name:hover {
   font-weight: 500;
   width: 100%;
   text-align: left;
+  border-radius: var(--radius);
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .collapsible-summary::-webkit-details-marker {
   display: none;
+}
+
+.collapsible-summary:hover {
+  background: var(--color-bg-inset);
+  color: var(--color-text);
+}
+
+.collapsible-summary:hover .collapsible-icon {
+  color: var(--color-text);
 }
 
 .collapsible-summary:focus-visible {

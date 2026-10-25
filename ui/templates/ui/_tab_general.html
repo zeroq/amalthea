@@ -89,7 +89,7 @@
         <form method="post" action="{% url 'ui-case-tag-remove' case.number %}" class="inline-form">{% csrf_token %}
           <input type="hidden" name="tag" value="{{ tag.name }}">
           <input type="hidden" name="tab" value="general">
-          <button type="submit" class="chip-x" aria-label="Remove tag {{ tag.name }}">✕</button>
+          <button type="submit" class="icon-link icon-link-err" aria-label="Remove tag {{ tag.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
         </form>
         {% endif %}
       </li>

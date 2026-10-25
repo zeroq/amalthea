@@ -51,83 +51,73 @@
           <td class="mono dim">{{ token.created_at|date:"Y-m-d H:i" }}</td>
           <td class="mono dim">{{ token.last_used_at|date:"Y-m-d H:i"|default:"never" }}</td>
           <td class="dim">{{ token.created_by.login|default:"—" }}</td>
+
+          {# --- Status column --- #}
           <td>
-            {# Revoked supersedes a pause: a token that was deactivated then revoked reads "Revoked". #}
             {% if token.is_revoked %}
-          </td>
-          <td>
               <span class="pill pill-off">Revoked</span>
               <span class="mono dim token-revoked-at">{{ token.revoked_at|date:"Y-m-d H:i" }}</span>
-          </td>
-          <td>
-              <div class="control-row">
-                {% url 'ui-settings-token-delete' token.id as delete_url %}
-                {% with sid=token.id|stringformat:"s" %}
-                {% with modal_id="delete-token-"|add:sid form_id="delete-token-"|add:sid|add:"-form" %}
-                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_delete_form.html" title="Delete token?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
-                {% endwith %}
-                {% endwith %}
-                <button type="button" class="icon-link icon-link-err" data-modal-open="delete-token-{{ token.id }}" aria-label="Delete token {{ token.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
-              </div>
             {% elif token.is_deactivated %}
-          </td>
-          <td>
               <span class="pill pill-pending">Deactivated</span>
               <span class="mono dim token-deactivated-at">{{ token.deactivated_at|date:"Y-m-d H:i" }}</span>
-          </td>
-          <td>
-              <div class="control-row">
-                <form method="post" action="{% url 'ui-settings-token-activate' token.id %}" class="inline-form">{% csrf_token %}
-                  <button type="submit" class="btn btn-sm">Activate</button>
-                </form>
-                {% url 'ui-settings-token-delete' token.id as delete_url %}
-                {% with sid=token.id|stringformat:"s" %}
-                {% with modal_id="delete-token-"|add:sid form_id="delete-token-"|add:sid|add:"-form" %}
-                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_delete_form.html" title="Delete token?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
-                {% endwith %}
-                {% endwith %}
-                <button type="button" class="icon-link icon-link-err" data-modal-open="delete-token-{{ token.id }}" aria-label="Delete token {{ token.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
-              </div>
-            {% elif token.is_deactivated %}
-          </td>
-          <td>
-              <span class="pill pill-pending">Deactivated</span>
-              <span class="mono dim token-deactivated-at">{{ token.deactivated_at|date:"Y-m-d H:i" }}</span>
-          </td>
-          <td>
-              <div class="control-row">
-                <form method="post" action="{% url 'ui-settings-token-activate' token.id %}" class="inline-form">{% csrf_token %}
-                  <button type="submit" class="btn btn-sm">Activate</button>
-                </form>
-                {% url 'ui-settings-token-delete' token.id as delete_url %}
-                {% with sid=token.id|stringformat:"s" %}
-                {% with modal_id="delete-token-"|add:sid form_id="delete-token-"|add:sid|add:"-form" %}
-                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_delete_form.html" title="Delete token?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
-                {% endwith %}
-                {% endwith %}
-                <button type="button" class="icon-link icon-link-err" data-modal-open="delete-token-{{ token.id }}" aria-label="Delete token {{ token.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
-              </div>
             {% else %}
               <span class="pill pill-on">Active</span>
+            {% endif %}
           </td>
+
+          {# --- Actions column --- #}
           <td>
-              <div class="control-row">
+            <div class="control-row">
+              {% if token.is_revoked %}
+                {# Revoked: only delete #}
+                {% url 'ui-settings-token-delete' token.id as delete_url %}
+                {% with sid=token.id|stringformat:"s" %}
+                {% with modal_id="delete-token-"|add:sid form_id="delete-token-"|add:sid|add:"-form" %}
+                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_delete_form.html" title="Delete token?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
+                {% endwith %}
+                {% endwith %}
+                <button type="button" class="icon-link icon-link-err" data-modal-open="delete-token-{{ token.id }}" aria-label="Delete token {{ token.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+
+              {% elif token.is_deactivated %}
+                {# Deactivated: activate + delete #}
+                <form method="post" action="{% url 'ui-settings-token-activate' token.id %}" class="inline-form">{% csrf_token %}
+                  <button type="submit" class="icon-link" aria-label="Activate token {{ token.name }}"><i class="fa-solid fa-toggle-on" aria-hidden="true"></i></button>
+                </form>
+                {% url 'ui-settings-token-delete' token.id as delete_url %}
+                {% with sid=token.id|stringformat:"s" %}
+                {% with modal_id="delete-token-"|add:sid form_id="delete-token-"|add:sid|add:"-form" %}
+                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_delete_form.html" title="Delete token?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
+                {% endwith %}
+                {% endwith %}
+                <button type="button" class="icon-link icon-link-err" data-modal-open="delete-token-{{ token.id }}" aria-label="Delete token {{ token.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+
+              {% else %}
+                {# Active: deactivate + revoke + delete #}
                 {% url 'ui-settings-token-deactivate' token.id as deactivate_url %}
                 {% with sid=token.id|stringformat:"s" %}
                 {% with modal_id="deactivate-token-"|add:sid form_id="deactivate-token-"|add:sid|add:"-form" %}
                 {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_deactivate_form.html" title="Deactivate token?" confirm_text="Deactivate" cancel_text="Cancel" form_action=deactivate_url size="md" %}
                 {% endwith %}
                 {% endwith %}
-                <button type="button" class="icon-link" data-modal-open="deactivate-token-{{ token.id }}" aria-label="Deactivate token {{ token.name }}"><i class="fa-solid fa-toggle-off" aria-hidden="true"></i></button>
+                <button type="button" class="icon-link" data-modal-open="deactivate-token-{{ token.id }}" aria-label="Deactivate token {{ token.name }}" title="Deactivate token {{ token.name }}"><i class="fa-solid fa-toggle-off" aria-hidden="true"></i></button>
+
                 {% url 'ui-settings-token-revoke' token.id as revoke_url %}
                 {% with sid=token.id|stringformat:"s" %}
                 {% with modal_id="revoke-token-"|add:sid form_id="revoke-token-"|add:sid|add:"-form" %}
                 {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_revoke_form.html" title="Revoke token?" confirm_text="Revoke" confirm_class="btn-err" cancel_text="Cancel" form_action=revoke_url size="md" %}
                 {% endwith %}
                 {% endwith %}
-                <button type="button" class="icon-link icon-link-err" data-modal-open="revoke-token-{{ token.id }}" aria-label="Revoke token {{ token.name }}"><i class="fa-solid fa-ban" aria-hidden="true"></i></button>
-              </div>
-            {% endif %}
+                <button type="button" class="icon-link icon-link-err" data-modal-open="revoke-token-{{ token.id }}" aria-label="Revoke token {{ token.name }}" title="Revoke token {{ token.name }}"><i class="fa-solid fa-ban" aria-hidden="true"></i></button>
+
+                {% url 'ui-settings-token-delete' token.id as delete_url %}
+                {% with sid=token.id|stringformat:"s" %}
+                {% with modal_id="delete-token-"|add:sid form_id="delete-token-"|add:sid|add:"-form" %}
+                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_delete_form.html" title="Delete token?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
+                {% endwith %}
+                {% endwith %}
+                <button type="button" class="icon-link icon-link-err" data-modal-open="delete-token-{{ token.id }}" aria-label="Delete token {{ token.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+              {% endif %}
+            </div>
           </td>
         </tr>
         {% empty %}
@@ -136,135 +126,12 @@
     </table>
     </div>
     {% include "ui/_pager.html" with entity_name="Token" %}
-  {% else %}
-    {# Legacy path — view not yet converted to paginate() #}
-    <div class="table-wrap">
-    <table class="data-table">
-      <caption class="sr-only">Ingestion tokens</caption>
-      <thead>
-        <tr>
-          <th scope="col">Source</th>
-          {% if show_org_column %}
-          <th scope="col">Organisation</th>
-          {% endif %}
-          <th scope="col">Name</th>
-          <th scope="col">Prefix</th>
-          <th scope="col">Created</th>
-          <th scope="col">Last used</th>
-          <th scope="col">Issued by</th>
-          <th scope="col">Status</th>
-          <th scope="col">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for token in tokens %}
-        <tr data-token-id="{{ token.id }}">
-          <td>
-            {{ token.source.name }} <span class="mono dim">({{ token.source.slug }})</span>
-          </td>
-          {% if show_org_column %}
-          <td>{{ token.organisation.name }}</td>
-          {% endif %}
-          <td>{{ token.name }}</td>
-          <td class="mono">{{ token.prefix }}</td>
-          <td class="mono dim">{{ token.created_at|date:"Y-m-d H:i" }}</td>
-          <td class="mono dim">{{ token.last_used_at|date:"Y-m-d H:i"|default:"never" }}</td>
-          <td class="dim">{{ token.created_by.login|default:"—" }}</td>
-          <td>
-            {# Revoked supersedes a pause: a token that was deactivated then revoked reads "Revoked". #}
-            {% if token.is_revoked %}
-          </td>
-          <td>
-              <span class="pill pill-off">Revoked</span>
-              <span class="mono dim token-revoked-at">{{ token.revoked_at|date:"Y-m-d H:i" }}</span>
-          </td>
-          <td>
-              <div class="control-row">
-                {% url 'ui-settings-token-delete' token.id as delete_url %}
-                {% with sid=token.id|stringformat:"s" %}
-                {% with modal_id="delete-token-"|add:sid form_id="delete-token-"|add:sid|add:"-form" %}
-                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_delete_form.html" title="Delete token?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
-                {% endwith %}
-                {% endwith %}
-                <button type="button" class="icon-link icon-link-err" data-modal-open="delete-token-{{ token.id }}" aria-label="Delete token {{ token.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
-              </div>
-            {% elif token.is_deactivated %}
-          </td>
-          <td>
-              <span class="pill pill-pending">Deactivated</span>
-              <span class="mono dim token-deactivated-at">{{ token.deactivated_at|date:"Y-m-d H:i" }}</span>
-          </td>
-          <td>
-              <div class="control-row">
-                <form method="post" action="{% url 'ui-settings-token-activate' token.id %}" class="inline-form">{% csrf_token %}
-                  <button type="submit" class="btn btn-sm">Activate</button>
-                </form>
-                {% url 'ui-settings-token-delete' token.id as delete_url %}
-                {% with sid=token.id|stringformat:"s" %}
-                {% with modal_id="delete-token-"|add:sid form_id="delete-token-"|add:sid|add:"-form" %}
-                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_delete_form.html" title="Delete token?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
-                {% endwith %}
-                {% endwith %}
-                <button type="button" class="icon-link icon-link-err" data-modal-open="delete-token-{{ token.id }}" aria-label="Delete token {{ token.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
-              </div>
-            {% elif token.is_deactivated %}
-          </td>
-          <td>
-              <span class="pill pill-pending">Deactivated</span>
-              <span class="mono dim token-deactivated-at">{{ token.deactivated_at|date:"Y-m-d H:i" }}</span>
-          </td>
-          <td>
-              <div class="control-row">
-                <form method="post" action="{% url 'ui-settings-token-activate' token.id %}" class="inline-form">{% csrf_token %}
-                  <button type="submit" class="btn btn-sm">Activate</button>
-                </form>
-                {% url 'ui-settings-token-delete' token.id as delete_url %}
-                {% with sid=token.id|stringformat:"s" %}
-                {% with modal_id="delete-token-"|add:sid form_id="delete-token-"|add:sid|add:"-form" %}
-                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_delete_form.html" title="Delete token?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
-                {% endwith %}
-                {% endwith %}
-                <button type="button" class="icon-link icon-link-err" data-modal-open="delete-token-{{ token.id }}" aria-label="Delete token {{ token.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
-              </div>
-            {% else %}
-              <span class="pill pill-on">Active</span>
-          </td>
-          <td>
-              <div class="control-row">
-                {% url 'ui-settings-token-deactivate' token.id as deactivate_url %}
-                {% with sid=token.id|stringformat:"s" %}
-                {% with modal_id="deactivate-token-"|add:sid form_id="deactivate-token-"|add:sid|add:"-form" %}
-                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_deactivate_form.html" title="Deactivate token?" confirm_text="Deactivate" cancel_text="Cancel" form_action=deactivate_url size="md" %}
-                {% endwith %}
-                {% endwith %}
-                <button type="button" class="icon-link" data-modal-open="deactivate-token-{{ token.id }}" aria-label="Deactivate token {{ token.name }}"><i class="fa-solid fa-toggle-off" aria-hidden="true"></i></button>
-                {% url 'ui-settings-token-revoke' token.id as revoke_url %}
-                {% with sid=token.id|stringformat:"s" %}
-                {% with modal_id="revoke-token-"|add:sid form_id="revoke-token-"|add:sid|add:"-form" %}
-                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_revoke_form.html" title="Revoke token?" confirm_text="Revoke" confirm_class="btn-err" cancel_text="Cancel" form_action=revoke_url size="md" %}
-                {% endwith %}
-                {% endwith %}
-                <button type="button" class="icon-link icon-link-err" data-modal-open="revoke-token-{{ token.id }}" aria-label="Revoke token {{ token.name }}"><i class="fa-solid fa-ban" aria-hidden="true"></i></button>
-              </div>
-            {% endif %}
-          </td>
-        </tr>
-        {% empty %}
-        <tr>
-          <td colspan="{% if show_org_column %}8{% else %}7{% endif %}" class="empty">
-            No ingestion tokens yet. <a href="#" data-modal-open="token-create-modal">Create one</a> to let a source send alerts.
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
-  {% endif %}
 
   {# Honest empty state for paginated path #}
   {% if page_obj and page_obj.paginator.count == 0 %}
     <p class="empty">No ingestion tokens yet. <a href="#" data-modal-open="token-create-modal">Create one</a> to let a source send alerts.</p>
   {% endif %}
+{% endif %}
 </div>
 
 {# Create token modal — fields rendered server-side (no inline JS, CSP-safe) #}

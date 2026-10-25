@@ -38,7 +38,7 @@
       {% if can_mutate %}
       <form method="post" action="{% url 'ui-case-tag-toggle' case.number tag.id %}" class="inline-form">
         {% csrf_token %}
-        <button type="submit" class="linkish chip-x" aria-label="Remove tag {{ tag.name }}">✕</button>
+        <button type="submit" class="icon-link icon-link-err" aria-label="Remove tag {{ tag.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
       </form>
       {% endif %}
     </li>
