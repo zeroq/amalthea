@@ -226,15 +226,17 @@ def test_general_tab_shows_human_labels(analyst_user: User, org: Organisation, c
     resp = _login(analyst_user).get(reverse("ui-case-detail", kwargs={"case_id": case.number}))
     assert resp.status_code == 200
     body = resp.content.decode()
-    # Each <dd> now carries an inline edit affordance after the value (§12.8), so pin the
-    # contract as "label → value, value first inside the <dd>" rather than a literal string.
+    # Each row uses <span class="meta-label">Label</span><span class="meta-value">Value</span>
     for label, value in (
         ("Scope", "Single Department"),
         ("Type", "Phishing"),
         ("Classification", "Personal Data (PII)"),
         ("Phase", "Analysis"),
     ):
-        assert re.search(rf"<dt>{label}</dt>\s*<dd>\s*{re.escape(value)}", body), label
+        assert re.search(
+            rf'<span class="meta-label">{label}</span>\s*<span class="meta-value[^"]*">\s*{re.escape(value)}',
+            body,
+        ), label
 
 
 @pytest.mark.django_db
@@ -343,7 +345,10 @@ def test_viewer_sees_classification_on_general_tab(
     resp = _login(viewer_user).get(reverse("ui-case-detail", kwargs={"case_id": case.number}))
     assert resp.status_code == 200
     body = resp.content.decode()
-    assert re.search(r"<dt>Classification</dt>\s*<dd>\s*Personal Data \(PII\)", body)
+    assert re.search(
+        r'<span class="meta-label">Classification</span>\s*<span class="meta-value[^"]*">\s*Personal Data \(PII\)',
+        body,
+    )
 
 
 @pytest.mark.django_db

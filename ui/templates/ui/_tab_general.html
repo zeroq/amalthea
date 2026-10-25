@@ -3,47 +3,22 @@
 <section class="card" aria-labelledby="h-meta">
   <div class="case-meta">
     <div class="meta-grid" role="list">
-      <dl class="meta meta-col" role="listitem">
-        <dt>Status</dt><dd>{{ case.status.value }}</dd>
-        <dt>Assignee</dt><dd>{{ case.assignee.login|default:"Unassigned" }}</dd>
-        <dt>Owner org</dt><dd>{{ case.owner_org.name }}</dd>
-        <dt>Started</dt><dd class="mono">{{ case.start_date|date:"Y-m-d H:i" }}</dd>
-        <dt>TLP / PAP</dt><dd>{{ case.tlp|choice_name:tlp_choices }} / {{ case.pap|choice_name:pap_choices }}</dd>
-        {% if case.closed_date %}<dt>Closed</dt><dd class="mono">{{ case.closed_date|date:"Y-m-d H:i" }}</dd>{% endif %}
-      </dl>
-      <dl class="meta meta-col" role="listitem">
-        <dt>Severity</dt>
-        <dd>
-          <span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span>
-          {% if can_mutate %}<button type="button" class="meta-edit" data-modal-open="case-field-severity" aria-label="Edit severity"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}
-        </dd>
-        <dt>Scope</dt>
-        <dd>
-          {{ case.scope|choice_label:scope_choices }}
-          {% if can_mutate %}<button type="button" class="meta-edit" data-modal-open="case-field-scope" aria-label="Edit scope"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}
-        </dd>
-        <dt>Type</dt>
-        <dd>
-          {{ case.case_type|choice_label:case_type_choices }}
-          {% if can_mutate %}<button type="button" class="meta-edit" data-modal-open="case-field-case_type" aria-label="Edit type"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}
-        </dd>
-        <dt>Classification</dt>
-        <dd>
-          {{ case.data_classification|choice_label:data_classification_choices }}
-          {# Classification is admin-gated in the applier, so the icon is hidden from non-admins. #}
-          {% if can_classify %}<button type="button" class="meta-edit" data-modal-open="case-field-data_classification" aria-label="Edit classification"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}
-        </dd>
-        <dt>Phase</dt>
-        <dd>
-          {{ case.phase|choice_label:phase_choices }}
-          {% if can_mutate %}<button type="button" class="meta-edit" data-modal-open="case-field-phase" aria-label="Edit phase"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}
-        </dd>
-        <dt>Verdict</dt>
-        <dd>
-          {{ case.verdict|choice_label:verdict_choices }}
-          {% if can_mutate %}<button type="button" class="meta-edit" data-modal-open="case-field-verdict" aria-label="Edit verdict"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}
-        </dd>
-      </dl>
+      <div class="meta meta-col" role="listitem">
+        <div class="meta-row"><span class="meta-label">Status</span><span class="meta-value">{{ case.status.value }}</span></div>
+        <div class="meta-row"><span class="meta-label">Assignee</span><span class="meta-value">{{ case.assignee.login|default:"Unassigned" }}</span></div>
+        <div class="meta-row"><span class="meta-label">Owner org</span><span class="meta-value">{{ case.owner_org.name }}</span></div>
+        <div class="meta-row"><span class="meta-label">Started</span><span class="meta-value mono">{{ case.start_date|date:"Y-m-d H:i" }}</span></div>
+        <div class="meta-row"><span class="meta-label">TLP / PAP</span><span class="meta-value">{{ case.tlp|choice_name:tlp_choices }} / {{ case.pap|choice_name:pap_choices }}</span></div>
+        {% if case.closed_date %}<div class="meta-row"><span class="meta-label">Closed</span><span class="meta-value mono">{{ case.closed_date|date:"Y-m-d H:i" }}</span></div>{% endif %}
+      </div>
+      <div class="meta meta-col" role="listitem">
+        <div class="meta-row"><span class="meta-label">Severity</span><span class="meta-value"><span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span>{% if can_mutate %}<button type="button" class="meta-edit" data-modal-open="case-field-severity" aria-label="Edit severity"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}</span></div>
+        <div class="meta-row"><span class="meta-label">Scope</span><span class="meta-value">{{ case.scope|choice_label:scope_choices }}{% if can_mutate %}<button type="button" class="meta-edit" data-modal-open="case-field-scope" aria-label="Edit scope"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}</span></div>
+        <div class="meta-row"><span class="meta-label">Type</span><span class="meta-value">{{ case.case_type|choice_label:case_type_choices }}{% if can_mutate %}<button type="button" class="meta-edit" data-modal-open="case-field-case_type" aria-label="Edit type"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}</span></div>
+        <div class="meta-row"><span class="meta-label">Classification</span><span class="meta-value">{{ case.data_classification|choice_label:data_classification_choices }}{% if can_classify %}<button type="button" class="meta-edit" data-modal-open="case-field-data_classification" aria-label="Edit classification"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}</span></div>
+        <div class="meta-row"><span class="meta-label">Phase</span><span class="meta-value">{{ case.phase|choice_label:phase_choices }}{% if can_mutate %}<button type="button" class="meta-edit" data-modal-open="case-field-phase" aria-label="Edit phase"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}</span></div>
+        <div class="meta-row"><span class="meta-label">Verdict</span><span class="meta-value">{{ case.verdict|choice_label:verdict_choices }}{% if can_mutate %}<button type="button" class="meta-edit" data-modal-open="case-field-verdict" aria-label="Edit verdict"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>{% endif %}</span></div>
+      </div>
     </div>
 
     {% if can_mutate %}
