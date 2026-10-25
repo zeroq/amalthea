@@ -20,7 +20,7 @@
   {% if page_obj %}
     {% include "ui/_list_summary.html" with entity_name="token" entity_name_plural="tokens" %}
     <div class="table-wrap">
-    <table class="data-table">
+    <table class="data-table data-table--sources{% if show_org_column %} data-table--with-org{% endif %}">
       <caption class="sr-only">Ingestion tokens</caption>
       <thead>
         <tr>
