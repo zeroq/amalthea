@@ -13,6 +13,40 @@
     // Store all options
     const allOptions = Array.from(datalist.querySelectorAll('option')).map(opt => opt.value);
     
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Tab') {
+        const value = input.value;
+        const lastCommaIndex = value.lastIndexOf(',');
+        let currentToken = '';
+        let prefix = '';
+        if (lastCommaIndex >= 0) {
+          prefix = value.substring(0, lastCommaIndex + 1);
+          const afterComma = value.substring(lastCommaIndex + 1);
+          if (afterComma.match(/^\s/)) {
+            prefix += afterComma.match(/^\s*/)[0];
+          }
+          currentToken = value.substring(lastCommaIndex + 1).trim();
+        } else {
+          currentToken = value.trim();
+        }
+        
+        if (currentToken) {
+          // Find best match (starts with)
+          const usedTags = value.split(',').map(t => t.trim().toLowerCase()).filter(t => t && t !== currentToken.toLowerCase());
+          const match = allOptions.find(opt => 
+            opt.toLowerCase().indexOf(currentToken.toLowerCase()) === 0 && 
+            !usedTags.includes(opt.toLowerCase())
+          );
+          if (match) {
+            e.preventDefault();
+            input.value = prefix + match;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            return;
+          }
+        }
+      }
+    });
+    
     input.addEventListener('input', function() {
       const value = input.value;
       // Find the current tag being typed (after last comma)
@@ -21,7 +55,6 @@
       let prefix = '';
       if (lastCommaIndex >= 0) {
         prefix = value.substring(0, lastCommaIndex + 1);
-        // Keep space if there was one
         const afterComma = value.substring(lastCommaIndex + 1);
         if (afterComma.match(/^\s/)) {
           prefix += afterComma.match(/^\s*/)[0];
