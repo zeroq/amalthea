@@ -1,4 +1,5 @@
 {% extends "ui/base.html" %}
+{% load static %}
 {% load ui_tags %}
 {% block title %}{{ alert.title }} · Amalthea{% endblock %}
 {% block heading %}
@@ -20,143 +21,166 @@
 {% endblock %}
 
 {% block content %}
-<div class="cols">
-  <section class="card" aria-labelledby="h-meta">
-    <h2 id="h-meta">Alert</h2>
-    <dl class="meta">
-      <dt>Severity</dt><dd>{{ alert.severity|sev_label }} ({{ alert.severity }})</dd>
-      <dt>Status</dt><dd>{{ alert.status.value }}</dd>
-      <dt>Verdict</dt><dd>{{ alert_verdict|default:"undefined" }}</dd>
-      <dt>Type</dt><dd class="mono">{{ alert.type }}</dd>
-      <dt>Source</dt><dd class="mono">{{ alert.source }}</dd>
-      <dt>Source ref</dt><dd class="mono">{{ alert.source_ref|default:"—" }}</dd>
-      <dt>Feed</dt><dd class="mono">{% if alert.ingestion_source %}{{ alert.ingestion_source.slug }}{% else %}—{% endif %}</dd>
-      <dt>Correlation key</dt><dd class="mono">{{ alert.correlation_key|default:"—" }}</dd>
-      <dt>Seen</dt><dd class="mono">{{ alert.date|date:"Y-m-d H:i:s" }}</dd>
-      <dt>Ingested</dt><dd class="mono">{{ alert.created_at|date:"Y-m-d H:i:s" }}</dd>
-      <dt>TLP / PAP</dt><dd>{{ alert.tlp|choice_name:tlp_choices }} / {{ alert.pap|choice_name:pap_choices }}</dd>
-      <dt>Owner org</dt><dd>{{ alert.owner_org.name }}</dd>
-    </dl>
+<div class="tabs" role="tablist" aria-label="Alert sections">
+  {% for tab in tabs %}
+    <a class="tab {% if tab.slug == active_tab %}tab-on{% endif %}"
+       role="tab"
+       id="tab-{{ tab.slug }}"
+       href="?tab={{ tab.slug }}"
+       aria-controls="panel-{{ tab.slug }}"
+       aria-selected="{% if tab.slug == active_tab %}true{% else %}false{% endif %}"
+       tabindex="{% if tab.slug == active_tab %}0{% else %}-1{% endif %}"
+       aria-keyshortcuts="{{ forloop.counter }}">
+      {% if tab.slug == "general" %}<i class="fa-solid fa-circle-info" aria-hidden="true"></i> {% endif %}
+      {% if tab.slug == "raw-data" %}<i class="fa-solid fa-code" aria-hidden="true"></i> {% endif %}
+      {{ tab.label }}
+    </a>
+  {% endfor %}
+</div>
 
-    {% if alert.summary or alert.description %}
-      <h3>Description</h3>
-      <pre class="body">{{ alert.summary|default:alert.description }}</pre>
-    {% endif %}
+<div class="tabpanels">
+  <section class="tabpanel" role="tabpanel" id="panel-general" aria-labelledby="tab-general" tabindex="0" {% if active_tab != "general" %}hidden{% endif %}>
+    <div class="cols">
+      <section class="card" aria-labelledby="h-meta">
+        <h2 id="h-meta">Alert</h2>
+        <dl class="meta">
+          <dt>Severity</dt><dd>{{ alert.severity|sev_label }} ({{ alert.severity }})</dd>
+          <dt>Status</dt><dd>{{ alert.status.value }}</dd>
+          <dt>Verdict</dt><dd>{{ alert_verdict|default:"undefined" }}</dd>
+          <dt>Type</dt><dd class="mono">{{ alert.type }}</dd>
+          <dt>Source</dt><dd class="mono">{{ alert.source }}</dd>
+          <dt>Source ref</dt><dd class="mono">{{ alert.source_ref|default:"—" }}</dd>
+          <dt>Feed</dt><dd class="mono">{% if alert.ingestion_source %}{{ alert.ingestion_source.slug }}{% else %}—{% endif %}</dd>
+          <dt>Correlation key</dt><dd class="mono">{{ alert.correlation_key|default:"—" }}</dd>
+          <dt>Seen</dt><dd class="mono">{{ alert.date|date:"Y-m-d H:i:s" }}</dd>
+          <dt>Ingested</dt><dd class="mono">{{ alert.created_at|date:"Y-m-d H:i:s" }}</dd>
+          <dt>TLP / PAP</dt><dd>{{ alert.tlp|choice_name:tlp_choices }} / {{ alert.pap|choice_name:pap_choices }}</dd>
+          <dt>Owner org</dt><dd>{{ alert.owner_org.name }}</dd>
+        </dl>
 
-    {% include "ui/_mapping_resolution.html" with mapping=alert.ingestion_warnings.mapping %}
+        {% if alert.summary or alert.description %}
+          <h3>Description</h3>
+          <pre class="body">{{ alert.summary|default:alert.description }}</pre>
+        {% endif %}
 
-    {% if alert.ingestion_warnings.warnings %}
-      <h3>Ingestion warnings</h3>
-      <ul class="warns">
-        {% for warning in alert.ingestion_warnings.warnings %}<li>{{ warning }}</li>{% endfor %}
-      </ul>
-    {% endif %}
-  </section>
+        {% include "ui/_mapping_resolution.html" with mapping=alert.ingestion_warnings.mapping %}
 
-  <div class="stack">
-    <section class="card" aria-labelledby="h-triage">
-      <h2 id="h-triage">Triage</h2>
-      <p class="hint">
-        Status vocabulary mirrors <code>core.enums.ALERT_STAGES</code> (New / Triaged / Dismissed).
-      </p>
-      {% if can_mutate %}
-      <form method="post" action="{% url 'ui-alert-status' alert.id %}" class="inline-form">{% csrf_token %}
-        <label for="f-status">Alert status</label>
-        <select id="f-status" name="status">
-          {% for opt in alert_status_options %}
-            <option value="{{ opt.value }}" {% if alert.status.pk == opt.pk %}selected{% endif %}>{{ opt.value }}</option>
-          {% endfor %}
-        </select>
-        <button type="submit" class="btn">Set status</button>
-      </form>
-      {% else %}
-      <p class="empty">Read-only access — triage actions are unavailable.</p>
-      {% endif %}
-    </section>
-
-    {% if alert_observables %}
-    <section class="card" aria-labelledby="h-observables">
-      <h2 id="h-observables">Observables <span class="count">{{ alert_observables|length }}</span></h2>
-      <div class="table-wrap">
-        <table class="data-table data-table-tight">
-          <caption class="sr-only">Observables extracted from this alert</caption>
-          <thead>
-            <tr>
-              <th scope="col">Type</th>
-              <th scope="col">Value</th>
-              <th scope="col">Appears in cases</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for item in alert_observables %}
-            <tr>
-              <td>{{ item.observable.data_type.name }}</td>
-              <td class="mono break">
-                <a href="{% url 'ui-observable-detail' item.observable.id %}">{{ item.observable.data }}</a>
-              </td>
-              <td class="mono dim">
-                {% if item.cases %}
-                  {% for c in item.cases %}
-                    <a href="{% url 'ui-case-detail' c.number %}" class="case-link">#{{ c.number }}</a>{% if not forloop.last %}, {% endif %}
-                  {% endfor %}
-                {% else %}
-                  <span class="dim">—</span>
-                {% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </section>
-    {% endif %}
-
-    {% if can_mutate and not alert.case %}
-      <section class="card" aria-labelledby="h-escalate">
-        <h2 id="h-escalate">Escalate</h2>
-        <p class="hint">
-          Promotes this alert into a new case, extracts artifacts from its payload, and fires any
-          playbook bound to <code>observable.created</code>.
-        </p>
-        <form method="post" action="{% url 'ui-alert-escalate' alert.id %}">{% csrf_token %}
-          <label for="f-title">Case title</label>
-          <input id="f-title" name="title" value="{{ alert.title }}" maxlength="500">
-
-          <label for="f-desc">Description</label>
-          <textarea id="f-desc" name="description" rows="3" placeholder="Optional investigation notes"></textarea>
-
-          <label class="check"><input type="checkbox" name="assign_me" checked> Assign to me</label>
-
-          <button type="submit" class="btn btn-primary">Escalate to case</button>
-        </form>
-      </section>
-
-      <section class="card" aria-labelledby="h-merge">
-        <h2 id="h-merge">Merge into an existing case</h2>
-        {% if merge_candidates %}
-          <form method="post" action="{% url 'ui-alert-merge' alert.id %}">{% csrf_token %}
-            <label for="f-case">Case</label>
-            <select id="f-case" name="case_id" required>
-              {% for sc in merge_candidates %}
-                {% with c=sc.case shared_count=sc.shared_count shared=sc.shared %}
-                  {% if shared_count > 0 %}
-                    <option value="{{ c.number }}">
-                      #{{ c.number }} — {{ c.title }} ({{ shared_count }} shared artifact{{ shared_count|pluralize }}: {% for dt, val in shared %}{{ dt }}: {{ val }}{% if not forloop.last %}, {% endif %}{% endfor %})
-                    </option>
-                  {% else %}
-                    <option value="{{ c.number }}">#{{ c.number }} — {{ c.title }}</option>
-                  {% endif %}
-                {% endwith %}
-              {% endfor %}
-            </select>
-            <button type="submit" class="btn">Merge alert</button>
-          </form>
-        {% else %}
-          <p class="empty">No open cases to merge into.</p>
+        {% if alert.ingestion_warnings.warnings %}
+          <h3>Ingestion warnings</h3>
+          <ul class="warns">
+            {% for warning in alert.ingestion_warnings.warnings %}<li>{{ warning }}</li>{% endfor %}
+          </ul>
         {% endif %}
       </section>
-    {% endif %}
 
+      <div class="stack">
+        <section class="card" aria-labelledby="h-triage">
+          <h2 id="h-triage">Triage</h2>
+          <p class="hint">
+            Status vocabulary mirrors <code>core.enums.ALERT_STAGES</code> (New / Triaged / Dismissed).
+          </p>
+          {% if can_mutate %}
+          <form method="post" action="{% url 'ui-alert-status' alert.id %}" class="inline-form">{% csrf_token %}
+            <label for="f-status">Alert status</label>
+            <select id="f-status" name="status">
+              {% for opt in alert_status_options %}
+                <option value="{{ opt.value }}" {% if alert.status.pk == opt.pk %}selected{% endif %}>{{ opt.value }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="btn">Set status</button>
+          </form>
+          {% else %}
+          <p class="empty">Read-only access — triage actions are unavailable.</p>
+          {% endif %}
+        </section>
+
+        {% if alert_observables %}
+        <section class="card" aria-labelledby="h-observables">
+          <h2 id="h-observables">Observables <span class="count">{{ alert_observables|length }}</span></h2>
+          <div class="table-wrap">
+            <table class="data-table data-table-tight">
+              <caption class="sr-only">Observables extracted from this alert</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Type</th>
+                  <th scope="col">Value</th>
+                  <th scope="col">Appears in cases</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in alert_observables %}
+                <tr>
+                  <td>{{ item.observable.data_type.name }}</td>
+                  <td class="mono break">
+                    <a href="{% url 'ui-observable-detail' item.observable.id %}">{{ item.observable.data }}</a>
+                  </td>
+                  <td class="mono dim">
+                    {% if item.cases %}
+                      {% for c in item.cases %}
+                        <a href="{% url 'ui-case-detail' c.number %}" class="case-link">#{{ c.number }}</a>{% if not forloop.last %}, {% endif %}
+                      {% endfor %}
+                    {% else %}
+                      <span class="dim">—</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        {% endif %}
+
+        {% if can_mutate and not alert.case %}
+          <section class="card" aria-labelledby="h-escalate">
+            <h2 id="h-escalate">Escalate</h2>
+            <p class="hint">
+              Promotes this alert into a new case, extracts artifacts from its payload, and fires any
+              playbook bound to <code>observable.created</code>.
+            </p>
+            <form method="post" action="{% url 'ui-alert-escalate' alert.id %}">{% csrf_token %}
+              <label for="f-title">Case title</label>
+              <input id="f-title" name="title" value="{{ alert.title }}" maxlength="500">
+
+              <label for="f-desc">Description</label>
+              <textarea id="f-desc" name="description" rows="3" placeholder="Optional investigation notes"></textarea>
+
+              <label class="check"><input type="checkbox" name="assign_me" checked> Assign to me</label>
+
+              <button type="submit" class="btn btn-primary">Escalate to case</button>
+            </form>
+          </section>
+
+          <section class="card" aria-labelledby="h-merge">
+            <h2 id="h-merge">Merge into an existing case</h2>
+            {% if merge_candidates %}
+              <form method="post" action="{% url 'ui-alert-merge' alert.id %}">{% csrf_token %}
+                <label for="f-case">Case</label>
+                <select id="f-case" name="case_id" required>
+                  {% for sc in merge_candidates %}
+                    {% with c=sc.case shared_count=sc.shared_count shared=sc.shared %}
+                      {% if shared_count > 0 %}
+                        <option value="{{ c.number }}">
+                          #{{ c.number }} — {{ c.title }} ({{ shared_count }} shared artifact{{ shared_count|pluralize }}: {% for dt, val in shared %}{{ dt }}: {{ val }}{% if not forloop.last %}, {% endif %}{% endfor %})
+                        </option>
+                      {% else %}
+                        <option value="{{ c.number }}">#{{ c.number }} — {{ c.title }}</option>
+                      {% endif %}
+                    {% endwith %}
+                  {% endfor %}
+                </select>
+                <button type="submit" class="btn">Merge alert</button>
+              </form>
+            {% else %}
+              <p class="empty">No open cases to merge into.</p>
+            {% endif %}
+          </section>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="tabpanel" role="tabpanel" id="panel-raw-data" aria-labelledby="tab-raw-data" tabindex="0" {% if active_tab != "raw-data" %}hidden{% endif %}>
     <section class="card" aria-labelledby="h-raw">
       <h2 id="h-raw">Raw payload</h2>
       <details>
@@ -164,6 +188,8 @@
         <pre class="body mono">{{ alert.raw_payload|pprint }}</pre>
       </details>
     </section>
-  </div>
+  </section>
 </div>
+
+<script src="{% static 'ui/tabs.js' %}" defer></script>
 {% endblock %}

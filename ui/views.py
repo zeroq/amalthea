@@ -539,6 +539,14 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
             }
         )
 
+    tabs = [
+        {"slug": "general", "label": "General"},
+        {"slug": "raw-data", "label": "Raw data"},
+    ]
+    active_tab = request.GET.get("tab", "general")
+    if active_tab not in {t["slug"] for t in tabs}:
+        active_tab = "general"
+
     return render(
         request,
         "ui/alert_detail.html",
@@ -552,6 +560,8 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
             pap_choices=PAP_CHOICES,
             alert_observables=alert_observables_with_cases,
             alert_verdict=alert.verdict,
+            tabs=tabs,
+            active_tab=active_tab,
         ),
     )
 
