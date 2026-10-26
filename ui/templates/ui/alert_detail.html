@@ -183,10 +183,8 @@
   <section class="tabpanel" role="tabpanel" id="panel-raw-data" aria-labelledby="tab-raw-data" tabindex="0" {% if active_tab != "raw-data" %}hidden{% endif %}>
     <section class="card" aria-labelledby="h-raw">
       <h2 id="h-raw">Raw payload</h2>
-      <details>
-        <summary>Show {{ alert.raw_payload|length }} bytes as sent</summary>
-        <pre class="body mono">{{ alert.raw_payload|pprint }}</pre>
-      </details>
+      <p class="hint">Show {{ alert.raw_payload|length }} bytes as sent</p>
+      <pre class="body mono">{{ alert.raw_payload|pprint }}</pre>
     </section>
   </section>
 </div>
