@@ -11,7 +11,7 @@
 
 {% block content %}
 <div class="card">
-  <form method="post" class="stack">
+  <form id="template-form" method="post" class="stack">
     {% csrf_token %}
 
     <div class="meta-inline">
@@ -77,7 +77,12 @@
 
     <div class="meta-inline">
       <label for="id_tags">Tags (comma-separated)</label>
-      <input type="text" id="id_tags" name="tags" value="{{ template.tags|join:', '|default:'' }}" maxlength="500">
+      <input type="text" id="id_tags" name="tags" value="{{ template.tags|join:', '|default:'' }}" maxlength="500" list="tag-names">
+      <datalist id="tag-names">
+        {% for tag_name in all_tag_names %}
+        <option value="{{ tag_name }}">
+        {% endfor %}
+      </datalist>
     </div>
 
     <div class="meta-inline">
@@ -95,8 +100,52 @@
       <textarea id="id_custom_fields" name="custom_fields" rows="6" placeholder='[{"name": "Field", "type": "string", "value": ""}]'>{{ form_custom_fields|prettyjson }}</textarea>
     </div>
 
-    <button class="btn btn-primary" type="submit">{% if template and mode == "edit" %}Update{% elif template %}View{% else %}Create{% endif %}</button>
+    {% if template and mode == "edit" %}
+    {% comment %}
+      With JS (modal.js) this opens the choice dialog; without it the button is a plain submit
+      that updates the template only, so the page still works with no scripting.
+    {% endcomment %}
+    <button class="btn btn-primary" type="submit" name="apply_to_existing" value="0" data-modal-open="template-update-modal">Update</button>
+    {% elif template %}
+    <button class="btn btn-primary" type="submit">View</button>
+    {% else %}
+    <button class="btn btn-primary" type="submit">Create</button>
+    {% endif %}
     <a class="btn" href="{% url 'ui-case-template-list' %}">Cancel</a>
   </form>
 </div>
+
+{% if template and mode == "edit" %}
+{% comment %}
+  Two-action dialog: "update template only" vs "update and re-apply to the cases it seeded".
+  Written out rather than included from `_modal.html` because that component's footer carries a
+  single confirm form; both buttons here submit the same page form via its `form` attribute.
+  The dialog chrome/behaviour is the shared `_modal` pattern (modal.css + modal.js).
+{% endcomment %}
+<dialog id="template-update-modal" class="modal modal--md" role="dialog" aria-modal="true" aria-labelledby="template-update-modal-title">
+  <div class="modal-content">
+    <header class="modal-header">
+      <h2 id="template-update-modal-title" class="modal-title">Update template?</h2>
+      <button type="button" class="modal-close" aria-label="Close" data-modal-close="template-update-modal">&times;</button>
+    </header>
+    <div class="modal-body">
+      <p class="modal-body-text">Choose whether to update the template only, or also re-apply its defaults to the cases it created.</p>
+      {% if source_case_count %}
+      <p class="modal-body-text">
+        This template seeded <strong>{{ source_case_count }}</strong> case{{ source_case_count|pluralize }} you can update.
+        Re-applying refreshes severity, TLP, PAP, flag, scope, type, phase and summary, and adds tags,
+        custom fields and tasks that are missing. Existing tasks and values are not duplicated.
+      </p>
+      {% else %}
+      <p class="modal-body-text">No cases you can update were created from this template, so there is nothing to re-apply.</p>
+      {% endif %}
+    </div>
+    <footer class="modal-footer">
+      <button type="button" class="btn modal-cancel" data-modal-close="template-update-modal">Cancel</button>
+      <button type="submit" form="template-form" name="apply_to_existing" value="0" class="btn">Update Template Only</button>
+      <button type="submit" form="template-form" name="apply_to_existing" value="1" class="btn btn-primary"{% if not source_case_count %} disabled{% endif %}>Update &amp; Apply to Cases</button>
+    </footer>
+  </div>
+</dialog>
+{% endif %}
 {% endblock %}

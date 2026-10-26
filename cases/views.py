@@ -24,7 +24,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import ProtectedError, Q
 from django.http import FileResponse
 from django.utils import timezone
 from rest_framework import status
@@ -2137,13 +2137,24 @@ def _resolve_case_template(identifier: str) -> CaseTemplate | None:
 
 
 def _apply_template(
-    case: Case, template: CaseTemplate, *, actor: Any, update_title_prefix: bool = False
+    case: Case,
+    template: CaseTemplate,
+    *,
+    actor: Any,
+    update_title_prefix: bool = False,
+    resync: bool = False,
 ) -> None:
     """Copy `template`'s defaults onto `case` (AC6.1-P4-c).
 
     Scalars overwrite; the description is only filled when the case has none, because a template's
     prose must not clobber what the analyst already wrote. Task and custom-field defaults are
     copied once, tags are attached. One provenance ledger entry records the template's name.
+
+    `resync=True` is the "edited template, re-apply to the cases it seeded" path. It refreshes the
+    scalars but only **adds** runbook rows that are missing: tags and custom-field values already
+    use `get_or_create`, and tasks are matched on `(title, group)` so a second pass cannot duplicate
+    the runbook. The ledger entry is distinguished so an analyst can tell an initial application
+    from a later resync.
     """
     case.severity = template.severity
     case.tlp = template.tlp
@@ -2163,6 +2174,9 @@ def _apply_template(
         and not case.title.startswith(template.title_prefix)
     ):
         case.title = f"{template.title_prefix}{case.title}"[:500]
+    # Provenance: every application records the template the case's defaults came from. PROTECT on
+    # the FK also means a template that seeded cases cannot be deleted out from under them.
+    case.source_template = template
     case.save()
 
     for name in template.tags or []:
@@ -2170,17 +2184,26 @@ def _apply_template(
             tag, _created = Tag.objects.get_or_create(name=name.strip()[:100])
             CaseTagLink.objects.get_or_create(case=case, tag=tag)
 
+    existing_tasks: set[tuple[str, str]] = set()
+    if resync:
+        existing_tasks = set(case.tasks.values_list("title", "group"))
     for spec in template.tasks or []:
         if not isinstance(spec, Mapping) or not str(spec.get("title") or "").strip():
             continue
+        title = str(spec["title"])[:500]
+        group = str(spec.get("group") or "")[:100]
+        key = (title, group)
+        if resync and key in existing_tasks:
+            continue
         Task.objects.create(
             case=case,
-            title=str(spec["title"])[:500],
-            group=str(spec.get("group") or "")[:100],
+            title=title,
+            group=group,
             description=render_source_alert_payload(str(spec.get("description") or ""), case),
             order=_as_int(spec.get("order")) or 0,
             mandatory=bool(spec.get("mandatory") or False),
         )
+        existing_tasks.add(key)
 
     for spec in template.custom_fields or []:
         if not isinstance(spec, Mapping):
@@ -2200,8 +2223,12 @@ def _apply_template(
 
     append_timeline_event(
         case,
-        title=f"Template applied: {template.name}",
-        kind="template-applied",
+        title=(
+            f"Template re-applied: {template.name}"
+            if resync
+            else f"Template applied: {template.name}"
+        ),
+        kind="template-reapplied" if resync else "template-applied",
         actor=actor,
         metadata={"template": template.name},
     )
@@ -2325,7 +2352,13 @@ def case_template_detail(request: Request, template_id: str) -> Response:
     if template is None:
         return _not_found("CaseTemplate")
     if request.method == "DELETE":
-        template.delete()
+        try:
+            template.delete()
+        except ProtectedError:
+            return _bad(
+                "CaseTemplate still seeds cases",
+                {"template": ["in use by cases"]},
+            )
         return Response(status=status.HTTP_204_NO_CONTENT)
     if request.method == "PATCH":
         return _update_case_template(template, request)

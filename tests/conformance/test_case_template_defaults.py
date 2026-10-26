@@ -23,6 +23,7 @@ from cases.models import (
     Case,
     CaseStatus,
     CaseTemplate,
+    CustomField,
     Share,
     Task,
     TimelineEvent,
@@ -371,6 +372,188 @@ def test_ui_apply_template_non_uuid_is_404_not_500(db: None) -> None:
     )
 
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Template provenance + re-apply to seeded cases
+# ---------------------------------------------------------------------------
+
+
+def test_ui_apply_template_records_source_template(db: None) -> None:
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    case = _mk_case(org)
+    template = CaseTemplate.objects.create(name="provenance")
+    client = Client()
+    _login(client, user)
+
+    response = client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+
+    assert response.status_code == 302
+    case.refresh_from_db()
+    assert case.source_template_id == template.id
+
+
+def test_edit_apply_to_existing_resyncs_seeded_cases_additively(db: None) -> None:
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    seeded = _mk_case(org, "Seeded")
+    unrelated = _mk_case(org, "Unrelated")
+    existing_field = CustomField.objects.create(name="existing-field", type="string")
+    fresh_field = CustomField.objects.create(name="fresh-field", type="string")
+    template = CaseTemplate.objects.create(
+        name="resync",
+        severity=1,
+        tlp=0,
+        pap=0,
+        summary="old summary",
+        description="old description",
+        tags=["existing-tag"],
+        # Same title in two groups is two distinct template tasks.
+        tasks=[
+            {"title": "Task A", "group": "G1"},
+            {"title": "Task A", "group": "G2"},
+        ],
+        custom_fields=[{"name": "existing-field", "value": "keep-me"}],
+    )
+    client = Client()
+    _login(client, user)
+    assert (
+        client.post(
+            reverse("ui-case-apply-template", kwargs={"case_id": seeded.number}),
+            {"template_id": str(template.id)},
+        ).status_code
+        == 302
+    )
+
+    seeded.refresh_from_db()
+    assert seeded.source_template_id == template.id
+    assert seeded.summary == "old summary"
+    assert seeded.description == "old description"
+    assert seeded.tasks.count() == 2
+    assert seeded.custom_field_values.get(custom_field=existing_field).value == "keep-me"
+
+    # Move the template forward, then re-apply through the edit form.
+    template.severity = 4
+    template.tlp = 3
+    template.pap = 2
+    template.flag = True
+    template.scope = "enterprise"
+    template.case_type = "incident"
+    template.phase = "containment"
+    template.tags = ["existing-tag", "new-tag"]
+    template.tasks = [
+        {"title": "Task A", "group": "G1"},  # present -> skipped
+        {"title": "Task A", "group": "G2"},  # present -> skipped
+        {"title": "Task A", "group": "G3"},  # new group -> added
+        {"title": "Task B", "group": "G1"},  # new title -> added
+    ]
+    template.custom_fields = [
+        {"name": "existing-field", "value": "must-not-overwrite"},
+        {"name": "fresh-field", "value": "new-value"},
+    ]
+    template.save()
+
+    edit_url = reverse("ui-case-template-edit", kwargs={"template_id": str(template.id)})
+    page = client.get(edit_url)
+    assert page.status_code == 200
+    html = page.content.decode()
+    # The choice dialog knows how many writable seeded cases a resync would touch.
+    assert "template-update-modal" in html
+    assert "Update &amp; Apply to Cases" in html
+    assert "<strong>1</strong> case" in html
+
+    response = client.post(
+        edit_url,
+        {
+            "name": template.name,
+            "summary": "new summary",
+            "description": "new description",
+            "flag": "on",
+            "severity": "4",
+            "tlp": "3",
+            "pap": "2",
+            "tags": "existing-tag, new-tag",
+            "tasks": json.dumps(template.tasks),
+            "custom_fields": json.dumps(template.custom_fields),
+            "apply_to_existing": "1",
+        },
+    )
+
+    assert response.status_code == 302
+    seeded.refresh_from_db()
+    assert (seeded.severity, seeded.tlp, seeded.pap, seeded.flag) == (4, 3, 2, True)
+    assert (seeded.scope, seeded.case_type, seeded.phase) == (
+        "enterprise",
+        "incident",
+        "containment",
+    )
+    # The template's summary overwrites; its prose never clobbers a description the case owns.
+    assert seeded.summary == "new summary"
+    assert seeded.description == "old description"
+    # Tags are additive, not replaced.
+    assert set(seeded.tags.values_list("name", flat=True)) == {"existing-tag", "new-tag"}
+    # Runbook rows are matched, not re-created: existing values win, missing rows are added.
+    assert set(seeded.tasks.values_list("title", "group")) == {
+        ("Task A", "G1"),
+        ("Task A", "G2"),
+        ("Task A", "G3"),
+        ("Task B", "G1"),
+    }
+    assert seeded.tasks.count() == 4
+    assert seeded.custom_field_values.get(custom_field=existing_field).value == "keep-me"
+    assert seeded.custom_field_values.get(custom_field=fresh_field).value == "new-value"
+    assert TimelineEvent.objects.filter(case=seeded, kind="template-reapplied").count() == 1
+
+    unrelated.refresh_from_db()
+    assert unrelated.severity == 2
+    assert unrelated.source_template_id is None
+    assert unrelated.tasks.count() == 0
+    assert not TimelineEvent.objects.filter(case=unrelated).exists()
+
+
+def test_edit_apply_to_existing_is_scoped_to_writable_cases(db: None) -> None:
+    """A global template must not become a cross-tenant write (ADR-004)."""
+    my_org = _mk_org("Mine")
+    other_org = _mk_org("Other")
+    user = _mk_user("analyst", my_org)
+    template = CaseTemplate.objects.create(name="shared-blueprint")
+    mine = _mk_case(my_org)
+    theirs = _mk_case(other_org)
+    Case.objects.filter(pk__in=[mine.pk, theirs.pk]).update(source_template=template)
+    client = Client()
+    _login(client, user)
+
+    response = client.post(
+        reverse("ui-case-template-edit", kwargs={"template_id": str(template.id)}),
+        {"name": template.name, "severity": "4", "apply_to_existing": "1"},
+    )
+
+    assert response.status_code == 302
+    mine.refresh_from_db()
+    theirs.refresh_from_db()
+    assert mine.severity == 4
+    assert theirs.severity == 2
+
+
+def test_delete_template_seeded_cases_is_refused(db: None) -> None:
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    case = _mk_case(org)
+    template = CaseTemplate.objects.create(name="undeletable")
+    Case.objects.filter(pk=case.pk).update(source_template=template)
+    client = Client()
+    _login(client, user)
+
+    response = client.post(
+        reverse("ui-case-template-delete", kwargs={"template_id": str(template.id)})
+    )
+
+    assert response.status_code == 302
+    assert CaseTemplate.objects.filter(pk=template.pk).exists()
 
 
 # ---------------------------------------------------------------------------

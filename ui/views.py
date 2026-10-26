@@ -42,7 +42,7 @@ from django.contrib.auth.views import (  # noqa: F401 (re-exported for ui/urls.p
 from django.core.exceptions import PermissionDenied
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Count, Max, Q
+from django.db.models import Count, Max, ProtectedError, Q, QuerySet
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy  # noqa: F401 (re-exported for ui/urls.py)
@@ -2959,6 +2959,7 @@ def case_template_create(request: HttpRequest) -> HttpResponse:
     POST: requires analyst role or above (excludes read-only).
     """
     if request.method == "GET":
+        all_tag_names = list(Tag.objects.order_by("name").values_list("name", flat=True))
         return render(
             request,
             "ui/case_template_form.html",
@@ -2966,6 +2967,7 @@ def case_template_create(request: HttpRequest) -> HttpResponse:
                 request,
                 form_tasks=copy.deepcopy(DEFAULT_TEMPLATE_TASKS),
                 form_custom_fields=copy.deepcopy(DEFAULT_TEMPLATE_CUSTOM_FIELDS),
+                all_tag_names=all_tag_names,
             ),
         )
 
@@ -3020,6 +3022,23 @@ def case_template_detail(request: HttpRequest, template_id: str) -> HttpResponse
     )
 
 
+def _template_source_cases(user: User) -> QuerySet[Case]:
+    """Cases seeded by a template that `user` is allowed to **write** to.
+
+    Templates are global definitions, but cases are tenant-owned (ADR-004). Editing a global
+    template must not turn "apply to existing cases" into a cross-tenant write, so this mirrors
+    `resolve_case(..., write=True)`: the caller's own org, or a share that grants `write`.
+    """
+    if getattr(user, "role", "") == "superAdmin":
+        return Case.objects.all()
+    org_id = getattr(user, "org_id", None)
+    if org_id is None:
+        return Case.objects.none()
+    return Case.objects.filter(
+        Q(owner_org_id=org_id) | Q(shares__organisation_id=org_id, shares__permissions__write=True)
+    ).distinct()
+
+
 @not_viewer
 @login_required
 @require_http_methods(["GET", "POST"])
@@ -3028,6 +3047,10 @@ def case_template_edit(request: HttpRequest, template_id: str) -> HttpResponse:
 
     GET: any authenticated user.
     POST: requires analyst role or above (excludes read-only).
+
+    `apply_to_existing=1` re-applies the edited defaults to the cases this template seeded
+    (`Case.source_template`). Re-application is additive for the runbook (tags, custom fields and
+    tasks that already exist are left alone) so editing a template is idempotent.
     """
     try:
         import uuid
@@ -3038,6 +3061,10 @@ def case_template_edit(request: HttpRequest, template_id: str) -> HttpResponse:
         template = get_object_or_404(CaseTemplate, name=template_id)
 
     if request.method == "GET":
+        all_tag_names = list(Tag.objects.order_by("name").values_list("name", flat=True))
+        source_case_count = (
+            _template_source_cases(request.user).filter(source_template=template).count()
+        )
         return render(
             request,
             "ui/case_template_form.html",
@@ -3047,6 +3074,8 @@ def case_template_edit(request: HttpRequest, template_id: str) -> HttpResponse:
                 mode="edit",
                 form_tasks=template.tasks,
                 form_custom_fields=template.custom_fields,
+                all_tag_names=all_tag_names,
+                source_case_count=source_case_count,
             ),
         )
 
@@ -3070,6 +3099,17 @@ def case_template_edit(request: HttpRequest, template_id: str) -> HttpResponse:
         setattr(template, field, value)
     template.save()
 
+    apply_to_existing = request.POST.get("apply_to_existing") == "1"
+    reapplied = 0
+    if apply_to_existing:
+        # Only the cases this template seeded, and only those the caller may already write to.
+        # One transaction so a failure halfway through does not leave half a runbook resynced.
+        source_cases = _template_source_cases(request.user).filter(source_template=template)
+        with transaction.atomic():
+            for case in source_cases:
+                _apply_template(case, template, actor=request.user, resync=True)
+                reapplied += 1
+
     # Audit the mutation (mirror API audit pattern)
     from identity.models import AuditLog
 
@@ -3080,10 +3120,17 @@ def case_template_edit(request: HttpRequest, template_id: str) -> HttpResponse:
         action="template.updated",
         target_type="CaseTemplate",
         target_id=str(template.id),
+        details={"reapplied_cases": reapplied} if apply_to_existing else {},
         ip=request.META.get("REMOTE_ADDR"),
     )
 
-    messages.success(request, f"Template '{template.name}' updated.")
+    if apply_to_existing:
+        messages.success(
+            request,
+            f"Template '{template.name}' updated and re-applied to {reapplied} case(s).",
+        )
+    else:
+        messages.success(request, f"Template '{template.name}' updated.")
     return redirect("ui-case-template-detail", template_id=template.id)
 
 
@@ -3103,7 +3150,15 @@ def case_template_delete(request: HttpRequest, template_id: str) -> HttpResponse
     except ValueError:
         template = get_object_or_404(CaseTemplate, name=template_id)
     name = template.name
-    template.delete()
+    try:
+        template.delete()
+    except ProtectedError:
+        count = template.cases_from_template.count()
+        messages.error(
+            request,
+            f"Template '{name}' cannot be deleted: {count} case(s) still reference it.",
+        )
+        return redirect("ui-case-template-detail", template_id=template.id)
     messages.success(request, f"Template '{name}' deleted.")
     return redirect("ui-case-template-list")
 
