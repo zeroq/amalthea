@@ -41,7 +41,7 @@
           <td>{{ t.flag|default:"—" }}</td>
           <td>
             {% if can_mutate %}
-            <a class="icon-link" href="{% url 'ui-case-template-detail' t.id %}" aria-label="Edit template {{ t.name }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></a>
+            <a class="icon-link" href="{% url 'ui-case-template-edit' template_id=t.id %}" aria-label="Edit template {{ t.name }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></a>
             {% url 'ui-case-template-delete' t.id as delete_url %}
             {% with modal_id="delete-template-"|add:t.id|stringformat:"s" %}
             {% include "ui/_modal.html" with modal_id=modal_id title="Delete template?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
@@ -88,7 +88,7 @@
           <td>{{ t.flag|default:"—" }}</td>
           <td>
             {% if can_mutate %}
-            <a class="icon-link" href="{% url 'ui-case-template-detail' t.id %}" aria-label="Edit template {{ t.name }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></a>
+            <a class="icon-link" href="{% url 'ui-case-template-edit' template_id=t.id %}" aria-label="Edit template {{ t.name }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></a>
             {% url 'ui-case-template-delete' t.id as delete_url %}
             {% with modal_id="delete-template-"|add:t.id|stringformat:"s" %}
             {% include "ui/_modal.html" with modal_id=modal_id title="Delete template?" body="This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
