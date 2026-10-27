@@ -45,9 +45,8 @@
   the overdue cue would silently never fire (verified against Django's template engine).
 {% endcomment %}
 {% now "U" as now_u %}
-<div class="cols">
-  <div class="stack">
-    <div class="card">
+<div class="stack">
+  <div class="card">
       <h3>Details</h3>
       <dl class="meta">
         <dt>Assignee</dt>
@@ -90,7 +89,7 @@
         {% endif %}
       </div>
       {% if task.description %}
-      <div class="body md">{{ task.description|markdown }}</div>
+      <div class="body md" style="overflow-x: auto; max-width: 100%;">{{ task.description|markdown }}</div>
       {% else %}
       <p class="empty">No description.</p>
       {% endif %}
@@ -124,7 +123,6 @@
       {% endif %}
     </div>
   </div>
-</div>
 
 {% comment %} Full alert payload modal (opt-in, lazy-loaded) {% endcomment %}
 {% if show_source_payload %}
