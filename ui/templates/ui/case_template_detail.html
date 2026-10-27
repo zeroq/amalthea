@@ -48,10 +48,14 @@
       <div class="card-actions">
         {% url 'ui-case-template-delete' template.id as delete_url %}
         {% with modal_id="delete-template-"|add:template.id|stringformat:"s" %}
-        {% include "ui/_modal.html" with modal_id=modal_id title="Delete template?" body="This cannot be undone. The template will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
         <button type="button" class="btn btn-err" data-modal-open="{{ modal_id }}">Delete template</button>
         {% endwith %}
       </div>
+
+      {% url 'ui-case-template-delete' template.id as delete_url %}
+      {% with modal_id="delete-template-"|add:template.id|stringformat:"s" %}
+      {% include "ui/_modal.html" with modal_id=modal_id title="Delete template?" body="This cannot be undone. The template will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
+      {% endwith %}
 
       <div class="card">
         <h3>Tags</h3>
