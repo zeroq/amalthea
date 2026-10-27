@@ -45,39 +45,36 @@
         <dd>{{ template.flag|default:"—" }}</dd>
       </dl>
 
-      <div class="card-actions">
-        {% url 'ui-case-template-delete' template.id as delete_url %}
-        {% with modal_id="delete-template-"|add:template.id|stringformat:"s" %}
-        <button type="button" class="btn btn-err" data-modal-open="{{ modal_id }}">Delete template</button>
-        {% endwith %}
-      </div>
-
+      {% if can_mutate %}
       {% url 'ui-case-template-delete' template.id as delete_url %}
-      {% with modal_id="delete-template-"|add:template.id|stringformat:"s" %}
-      {% include "ui/_modal.html" with modal_id=modal_id title="Delete template?" body="This cannot be undone. The template will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
+      {% with mid="delete-template-"|concat:template.id %}
+      <div class="card-actions">
+        <button type="button" class="btn btn-err" data-modal-open="{{ mid }}">Delete template</button>
+      </div>
+      {% include "ui/_modal.html" with modal_id=mid title="Delete template?" body="This cannot be undone. The template will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
       {% endwith %}
+      {% endif %}
+  </div>
 
-      <div class="card">
-        <h3>Tags</h3>
-        <div class="chips">
-          {% for tag in template.tags %}
-          <span class="chip">{{ tag }}</span>
-          {% empty %}
-          <span class="empty">No tags</span>
-          {% endfor %}
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>Task Definitions</h3>
-        <pre class="body">{{ template.tasks|prettyjson }}</pre>
-      </div>
-
-      <div class="card">
-        <h3>Custom Field Definitions</h3>
-        <pre class="body">{{ template.custom_fields|prettyjson }}</pre>
-      </div>
+  <div class="card">
+    <h3>Tags</h3>
+    <div class="chips">
+      {% for tag in template.tags %}
+      <span class="chip">{{ tag }}</span>
+      {% empty %}
+      <span class="empty">No tags</span>
+      {% endfor %}
     </div>
   </div>
 
+  <div class="card">
+    <h3>Task Definitions</h3>
+    <pre class="body">{{ template.tasks|prettyjson }}</pre>
+  </div>
+
+  <div class="card">
+    <h3>Custom Field Definitions</h3>
+    <pre class="body">{{ template.custom_fields|prettyjson }}</pre>
+  </div>
+</div>
 {% endblock %}

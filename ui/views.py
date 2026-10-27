@@ -42,7 +42,7 @@ from django.contrib.auth.views import (  # noqa: F401 (re-exported for ui/urls.p
 from django.core.exceptions import PermissionDenied
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Count, Max, ProtectedError, Q, QuerySet
+from django.db.models import Count, Max, Q, QuerySet
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy  # noqa: F401 (re-exported for ui/urls.py)
@@ -492,6 +492,7 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
     alert_status_options = (
         AlertStatus.objects.filter(stage__in=ALERT_STAGES)
         .exclude(stage="Imported")
+        .exclude(stage="Closed")
         .order_by("order", "value")
     )
     # Correlation-ranked merge candidates (P2) with plain open-case fallback
@@ -560,6 +561,10 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
             pap_choices=PAP_CHOICES,
             alert_observables=alert_observables_with_cases,
             alert_verdict=alert.verdict,
+            closing_verdict_choices=[
+                c for c in CASE_VERDICT_CHOICES if c[0] in CASE_CLOSING_VERDICTS
+            ],
+            alert_close_url=reverse("ui-alert-close", kwargs={"alert_id": alert.id}),
             tabs=tabs,
             active_tab=active_tab,
         ),
@@ -3160,16 +3165,33 @@ def case_template_delete(request: HttpRequest, template_id: str) -> HttpResponse
     except ValueError:
         template = get_object_or_404(CaseTemplate, name=template_id)
     name = template.name
-    try:
-        template.delete()
-    except ProtectedError:
-        count = template.cases_from_template.count()
-        messages.error(
+    template_id_value = str(template.pk)
+    # `Case.source_template` is SET_NULL, so deleting the template detaches the cases it seeded
+    # instead of blocking the delete. Count them first so the confirmation is honest.
+    unlinked = template.cases_from_template.count()
+    template.delete()
+
+    from identity.models import AuditLog
+
+    AuditLog.objects.create(
+        actor=request.user,
+        actor_org=getattr(request.user, "org", None),
+        target_org=None,  # templates are global
+        action="template.deleted",
+        target_type="CaseTemplate",
+        target_id=template_id_value,
+        details={"name": name, "unlinked_cases": unlinked},
+        ip=request.META.get("REMOTE_ADDR"),
+    )
+
+    if unlinked:
+        messages.success(
             request,
-            f"Template '{name}' cannot be deleted: {count} case(s) still reference it.",
+            f"Template '{name}' deleted. {unlinked} case(s) kept their applied defaults and now "
+            "have no source template.",
         )
-        return redirect("ui-case-template-detail", template_id=template.id)
-    messages.success(request, f"Template '{name}' deleted.")
+    else:
+        messages.success(request, f"Template '{name}' deleted.")
     return redirect("ui-case-template-list")
 
 
@@ -3383,12 +3405,20 @@ def alert_status(request: HttpRequest, alert_id: str) -> HttpResponse:
         messages.error(request, f"Invalid status: {value}")
         return redirect("ui-alert-detail", alert_id=alert.id)
 
+    if valid_status.stage == "Closed":
+        messages.error(request, "Closing an alert requires a verdict and closing comment.")
+        return redirect("ui-alert-detail", alert_id=alert.id)
+
     # The mutation, its audit row and the case timeline event share one transaction
     # (SEC-2026-10-11 NEW-2): a failed audit must roll the status change back rather than
     # leave the change persisted but unlogged.
     with transaction.atomic():
         alert.status = valid_status
-        alert.save(update_fields=["status", "updated_at"])
+        update_fields = ["status", "updated_at"]
+        if valid_status.value == "Triaged" or valid_status.stage == "InProgress":
+            alert.assignee = request.user
+            update_fields.append("assignee")
+        alert.save(update_fields=update_fields)
 
         AuditLog.objects.create(
             actor=request.user,
@@ -3411,6 +3441,70 @@ def alert_status(request: HttpRequest, alert_id: str) -> HttpResponse:
             )
 
     messages.success(request, f"Alert status changed to {value}.")
+    return redirect("ui-alert-detail", alert_id=alert.id)
+
+
+@not_viewer
+@login_required
+@require_POST
+def alert_close(request: HttpRequest, alert_id: str) -> HttpResponse:
+    """Close an alert via the close modal (verdict + closing comment required)."""
+    alert = resolve_alert(request.user, alert_id, write=True)
+    if alert is None:
+        return render(request, "ui/404.html", status=404)
+
+    verdict = (request.POST.get("verdict") or "").strip()
+    comment = (request.POST.get("comment") or "").strip()
+
+    if verdict not in CASE_CLOSING_VERDICTS:
+        messages.error(
+            request,
+            "A closing verdict (true positive or false positive) is required to close an alert.",
+        )
+        return redirect("ui-alert-detail", alert_id=alert.id)
+    if not comment:
+        messages.error(request, "A closing comment is required to close an alert.")
+        return redirect("ui-alert-detail", alert_id=alert.id)
+
+    closed_status = AlertStatus.objects.filter(stage="Closed").order_by("order", "value").first()
+    if closed_status is None:
+        messages.error(request, "No alert status is defined for the Closed stage.")
+        return redirect("ui-alert-detail", alert_id=alert.id)
+
+    with transaction.atomic():
+        alert.status = closed_status
+        alert.verdict = verdict
+        alert.assignee = request.user
+        alert.save(update_fields=["status", "verdict", "assignee", "updated_at"])
+
+        AuditLog.objects.create(
+            actor=request.user,
+            actor_org=getattr(request.user, "org", None),
+            target_org=alert.owner_org,
+            action="alert.status_changed",
+            target_type="Alert",
+            target_id=str(alert.id),
+            ip=request.META.get("REMOTE_ADDR"),
+        )
+
+        if alert.case_id:
+            append_timeline_event(
+                alert.case,
+                title=f"Alert closed as {verdict}",
+                kind="status-changed",
+                actor=request.user,
+                metadata={
+                    "alert": str(alert.id),
+                    "to": closed_status.value,
+                    "verdict": verdict,
+                    "comment": comment,
+                },
+            )
+        else:
+            # Even if not attached to a case, record the closing action via audit/timeline-like behavior
+            pass
+
+    messages.success(request, f"Alert closed as {verdict}.")
     return redirect("ui-alert-detail", alert_id=alert.id)
 
 

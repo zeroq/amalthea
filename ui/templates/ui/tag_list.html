@@ -1,5 +1,5 @@
 {% extends "ui/base.html" %}
-{% load static %}
+{% load static ui_tags %}
 
 {% block heading %}Tags{% endblock %}
 
@@ -41,7 +41,7 @@
             {% if can_mutate %}
             <a class="icon-link" href="{% url 'ui-tag-detail' tag.id %}" aria-label="Edit tag {{ tag.name }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></a>
             {% url 'ui-tag-delete' tag.id as delete_url %}
-            {% with modal_id="delete-tag-"|add:tag.id|stringformat:"s" %}
+            {% with modal_id="delete-tag-"|concat:tag.id %}
             {% include "ui/_modal.html" with modal_id=modal_id title="Delete tag?" body="This will remove the tag from all linked cases, alerts, and observables. This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
             {% endwith %}
             <button type="button" class="icon-link icon-link-err" data-modal-open="delete-tag-{{ tag.id }}" aria-label="Delete tag {{ tag.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
@@ -56,53 +56,6 @@
     </table>
     </div>
     {% include "ui/_pager.html" with entity_name="Tag" %}
-  {% else %}
-    {# Legacy path — view not yet converted to paginate() #}
-    <div class="table-wrap">
-    <table class="data-table">
-      <caption class="sr-only">Tags</caption>
-      <thead>
-        <tr>
-          <th scope="col">Name</th>
-          <th scope="col">Cases</th>
-          <th scope="col">Alerts</th>
-          <th scope="col">Observables</th>
-          <th scope="col">Created</th>
-          <th scope="col"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for tag in tags %}
-        <tr>
-          <td>
-            {% if can_mutate %}<a href="{% url 'ui-tag-detail' tag.id %}">{{ tag.name }}</a>
-            {% else %}{{ tag.name }}{% endif %}
-          </td>
-          <td>{{ tag.case_set.count }}</td>
-          <td>{{ tag.alert_set.count }}</td>
-          <td>{{ tag.observable_set.count }}</td>
-          <td class="mono dim">{{ tag.created_at|date:"Y-m-d H:i" }}</td>
-          <td>
-            {% if can_mutate %}
-            <a class="icon-link" href="{% url 'ui-tag-detail' tag.id %}" aria-label="Edit tag {{ tag.name }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></a>
-            {% url 'ui-tag-delete' tag.id as delete_url %}
-            {% with modal_id="delete-tag-"|add:tag.id|stringformat:"s" %}
-            {% include "ui/_modal.html" with modal_id=modal_id title="Delete tag?" body="This will remove the tag from all linked cases, alerts, and observables. This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
-            {% endwith %}
-            <button type="button" class="icon-link icon-link-err" data-modal-open="delete-tag-{{ tag.id }}" aria-label="Delete tag {{ tag.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
-            {% else %}
-            <span class="dim">—</span>
-            {% endif %}
-          </td>
-        </tr>
-        {% empty %}
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
-    {% if not tags %}
-    <p class="empty">No tags yet.{% if can_mutate %} <a href="{% url 'ui-tag-create' %}">Create one</a>.{% endif %}</p>
-    {% endif %}
   {% endif %}
 
   {# Honest empty state for paginated path #}

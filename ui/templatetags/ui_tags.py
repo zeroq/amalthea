@@ -65,6 +65,18 @@ def get_item(mapping: Any, key: Any) -> Any:
 
 
 @register.filter
+def concat(value: Any, arg: Any) -> str:
+    """Concatenate two values as text: `"prefix-"|concat:obj.id`.
+
+    Django's built-in `add` filter tries `int + int` first and only then `value + arg`,
+    so `"prefix-"|add:uuid` raises `TypeError` internally and returns `""` — silently
+    producing `id=""` for every modal whose id is built that way. This filter always
+    coerces both sides to `str`, so UUID/str/int all work.
+    """
+    return f"{value}{arg}"
+
+
+@register.filter
 def prettyjson(value: Any) -> str:
     """Render a JSON-able value as indented JSON for a `<pre>`/`<textarea>`.
 

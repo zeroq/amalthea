@@ -1,5 +1,5 @@
 {% extends "ui/base.html" %}
-{% load static %}
+{% load static ui_tags %}
 
 {% block heading %}{{ tag.name }}{% endblock %}
 
@@ -31,7 +31,7 @@
   </div>
 
   {% url 'ui-tag-delete' tag.id as delete_url %}
-  {% with modal_id="delete-tag-"|add:tag.id|stringformat:"s" %}
+  {% with modal_id="delete-tag-"|concat:tag.id %}
   {% include "ui/_modal.html" with modal_id=modal_id title="Delete tag?" body="This will remove the tag from all linked cases, alerts, and observables. This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
   {% endwith %}
 

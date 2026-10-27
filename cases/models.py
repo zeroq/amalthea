@@ -126,12 +126,13 @@ class Case(UUIDModel, TimeStampedModel):
     # tenant must not silently orphan its cases; remove or reassign the data first.
     owner_org = models.ForeignKey(Organisation, on_delete=models.PROTECT, related_name="cases")
     ingestion_warnings = models.JSONField(blank=True, default=dict)
-    # Provenance for the template that seeded this case. PROTECT: a template with cases derived
-    # from it must not vanish from under them (its name is the only record of where the defaults
-    # came from). `related_name` is what the "re-apply to existing cases" path filters on.
+    # Provenance for the template that seeded this case. SET_NULL: deleting a template must not be
+    # blocked by the cases it seeded — the cases keep their already-applied defaults, they just lose
+    # the pointer back to a template that no longer exists. `related_name` is what the "re-apply to
+    # existing cases" path filters on.
     source_template = models.ForeignKey(
         "CaseTemplate",
-        on_delete=models.PROTECT,
+        on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="cases_from_template",

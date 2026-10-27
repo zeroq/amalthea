@@ -41,38 +41,6 @@
 <div class="tabpanels">
   <section class="tabpanel" role="tabpanel" id="panel-general" aria-labelledby="tab-general" tabindex="0" {% if active_tab != "general" %}hidden{% endif %}>
     <div class="cols">
-      <section class="card" aria-labelledby="h-meta">
-        <h2 id="h-meta">Alert</h2>
-        <dl class="meta">
-          <dt>Severity</dt><dd>{{ alert.severity|sev_label }} ({{ alert.severity }})</dd>
-          <dt>Status</dt><dd>{{ alert.status.value }}</dd>
-          <dt>Verdict</dt><dd>{{ alert_verdict|default:"undefined" }}</dd>
-          <dt>Type</dt><dd class="mono">{{ alert.type }}</dd>
-          <dt>Source</dt><dd class="mono">{{ alert.source }}</dd>
-          <dt>Source ref</dt><dd class="mono">{{ alert.source_ref|default:"—" }}</dd>
-          <dt>Feed</dt><dd class="mono">{% if alert.ingestion_source %}{{ alert.ingestion_source.slug }}{% else %}—{% endif %}</dd>
-          <dt>Correlation key</dt><dd class="mono">{{ alert.correlation_key|default:"—" }}</dd>
-          <dt>Seen</dt><dd class="mono">{{ alert.date|date:"Y-m-d H:i:s" }}</dd>
-          <dt>Ingested</dt><dd class="mono">{{ alert.created_at|date:"Y-m-d H:i:s" }}</dd>
-          <dt>TLP / PAP</dt><dd>{{ alert.tlp|choice_name:tlp_choices }} / {{ alert.pap|choice_name:pap_choices }}</dd>
-          <dt>Owner org</dt><dd>{{ alert.owner_org.name }}</dd>
-        </dl>
-
-        {% if alert.summary or alert.description %}
-          <h3>Description</h3>
-          <pre class="body">{{ alert.summary|default:alert.description }}</pre>
-        {% endif %}
-
-        {% include "ui/_mapping_resolution.html" with mapping=alert.ingestion_warnings.mapping %}
-
-        {% if alert.ingestion_warnings.warnings %}
-          <h3>Ingestion warnings</h3>
-          <ul class="warns">
-            {% for warning in alert.ingestion_warnings.warnings %}<li>{{ warning }}</li>{% endfor %}
-          </ul>
-        {% endif %}
-      </section>
-
       <div class="stack">
         <section class="card" aria-labelledby="h-triage">
           <h2 id="h-triage">Triage</h2>
@@ -80,20 +48,60 @@
             Status vocabulary mirrors <code>core.enums.ALERT_STAGES</code> (New / Triaged / Dismissed).
           </p>
           {% if can_mutate %}
-          <form method="post" action="{% url 'ui-alert-status' alert.id %}" class="inline-form">{% csrf_token %}
-            <label for="f-status">Alert status</label>
-            <select id="f-status" name="status">
-              {% for opt in alert_status_options %}
-                <option value="{{ opt.value }}" {% if alert.status.pk == opt.pk %}selected{% endif %}>{{ opt.value }}</option>
-              {% endfor %}
-            </select>
-            <button type="submit" class="btn">Set status</button>
-          </form>
+          <div class="control-row">
+            <form method="post" action="{% url 'ui-alert-status' alert.id %}" class="inline-form control-row">{% csrf_token %}
+              <label for="f-status">Alert status</label>
+              <select id="f-status" name="status">
+                {% for opt in alert_status_options %}
+                  <option value="{{ opt.value }}" {% if alert.status.pk == opt.pk %}selected{% endif %}>{{ opt.value }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="btn">Set status</button>
+            </form>
+            {% if alert.status.stage != "Closed" %}
+            <button type="button" class="btn btn-err" data-modal-open="alert-close-modal">Close alert</button>
+            {% endif %}
+          </div>
           {% else %}
           <p class="empty">Read-only access — triage actions are unavailable.</p>
           {% endif %}
         </section>
 
+        <section class="card" aria-labelledby="h-meta">
+          <h2 id="h-meta">Alert</h2>
+          <dl class="meta">
+            <dt>Severity</dt><dd>{{ alert.severity|sev_label }} ({{ alert.severity }})</dd>
+            <dt>Status</dt><dd>{{ alert.status.value }}</dd>
+            <dt>Verdict</dt><dd>{{ alert_verdict|default:"undefined" }}</dd>
+            <dt>Type</dt><dd class="mono">{{ alert.type }}</dd>
+            <dt>Source</dt><dd class="mono">{{ alert.source }}</dd>
+            <dt>Source ref</dt><dd class="mono">{{ alert.source_ref|default:"—" }}</dd>
+            <dt>Feed</dt><dd class="mono">{% if alert.ingestion_source %}{{ alert.ingestion_source.slug }}{% else %}—{% endif %}</dd>
+            <dt>Correlation key</dt><dd class="mono">{{ alert.correlation_key|default:"—" }}</dd>
+            <dt>Seen</dt><dd class="mono">{{ alert.date|date:"Y-m-d H:i:s" }}</dd>
+            <dt>Ingested</dt><dd class="mono">{{ alert.created_at|date:"Y-m-d H:i:s" }}</dd>
+            <dt>TLP / PAP</dt><dd>{{ alert.tlp|choice_name:tlp_choices }} / {{ alert.pap|choice_name:pap_choices }}</dd>
+            <dt>Owner org</dt><dd>{{ alert.owner_org.name }}</dd>
+            <dt>Assignee</dt><dd>{{ alert.assignee.login|default:"Unassigned" }}</dd>
+          </dl>
+
+          {% if alert.summary or alert.description %}
+            <h3>Description</h3>
+            <pre class="body">{{ alert.summary|default:alert.description }}</pre>
+          {% endif %}
+
+          {% include "ui/_mapping_resolution.html" with mapping=alert.ingestion_warnings.mapping %}
+
+          {% if alert.ingestion_warnings.warnings %}
+            <h3>Ingestion warnings</h3>
+            <ul class="warns">
+              {% for warning in alert.ingestion_warnings.warnings %}<li>{{ warning }}</li>{% endfor %}
+            </ul>
+          {% endif %}
+        </section>
+      </div>
+
+      <div class="stack">
         {% if alert_observables %}
         <section class="card" aria-labelledby="h-observables">
           <h2 id="h-observables">Observables <span class="count">{{ alert_observables|length }}</span></h2>
@@ -188,6 +196,10 @@
     </section>
   </section>
 </div>
+
+{% if can_mutate and alert.status.stage != "Closed" %}
+  {% include "ui/_modal.html" with modal_id="alert-close-modal" form_id="alert-close-form" body_template="ui/_alert_close_form.html" title="Close alert" confirm_text="Close alert" confirm_class="btn-err" form_action=alert_close_url size="md" %}
+{% endif %}
 
 <script src="{% static 'ui/tabs.js' %}" defer></script>
 {% endblock %}

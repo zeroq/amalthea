@@ -1,0 +1,18 @@
+{% comment %}
+Body of the alert-close dialog. Mirrors the case-close dialog: verdict limited to closing
+verdicts, closing comment required. Controls target the footer form by id.
+{% endcomment %}
+<input type="hidden" name="tab" value="general" form="{{ form_id }}">
+<div class="field">
+  <label for="alert-close-verdict">Verdict</label>
+  <select id="alert-close-verdict" name="verdict" form="{{ form_id }}" required>
+    {% for val, label in closing_verdict_choices %}
+    <option value="{{ val }}" {% if alert.verdict == val %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</div>
+<div class="field">
+  <label for="alert-close-comment">Closing comment</label>
+  <textarea id="alert-close-comment" name="comment" rows="4" form="{{ form_id }}" required
+            placeholder="Why this alert is being closed (Markdown)"></textarea>
+</div>

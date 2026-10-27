@@ -109,10 +109,10 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     ("cases", "Case", "assignee"): models.SET_NULL,
     # PROTECT: a tenant that still owns cases cannot be deleted out from under them (ADR-004).
     ("cases", "Case", "owner_org"): models.PROTECT,
-    # Provenance, not ownership: the template seeded the case's defaults, so deleting it would
-    # erase the only record of where they came from. The case itself survives; PROTECT refuses the
-    # template delete until the link is cleared (UI explains the refusal rather than 500ing).
-    ("cases", "Case", "source_template"): models.PROTECT,
+    # Provenance, not ownership: the template seeded the case's defaults, but a global template
+    # must stay deletable. SET_NULL detaches the seeded cases (they keep the defaults already
+    # applied) instead of refusing the delete or cascading into the cases themselves.
+    ("cases", "Case", "source_template"): models.SET_NULL,
     # ---- Task: AGENTS.md §3 "Case 1 —— 0..* Task" ---------------------------------------
     # A task with a NULL case is not a lower-cardinality relationship, it is an orphan.
     ("cases", "Task", "case"): models.CASCADE,
@@ -275,7 +275,7 @@ def test_fk_audit_covers_the_whole_model_inventory() -> None:
     # observable). Kept as a literal on purpose: it is a tripwire for a model silently dropping
     # out of `OWN_APPS`, and `EXPECTED_ON_DELETE` already pins the exact set, so a bump here is
     # always a real change.
-    # 68 = 67 + Case.source_template (template provenance, PROTECT).
+    # 68 = 67 + Case.source_template (template provenance, SET_NULL).
     assert len(actual) == 68, f"expected the full FK set, found only {len(actual)}"
 
 

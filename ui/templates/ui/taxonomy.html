@@ -1,5 +1,5 @@
 {% extends "ui/base.html" %}
-{% load static %}
+{% load static ui_tags %}
 
 {% block heading %}Taxonomy{% endblock %}
 
@@ -31,7 +31,7 @@
             <td>{{ s.hidden|yesno:"Yes,No" }}</td>
             <td>
               {% if can_manage_taxonomy %}
-              {% with modal_id="case-status-edit-"|add:s.id|stringformat:"s" form_id="case-status-edit-form-"|add:s.id|stringformat:"s" %}
+              {% with modal_id="case-status-edit-"|concat:s.id form_id="case-status-edit-form-"|concat:s.id %}
               {% url 'ui-taxonomy-case-status-edit' s.id as edit_url %}
               <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit case status {{ s.value }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
               {% if form_state.modal_id == modal_id %}
@@ -43,7 +43,7 @@
               {% if s.case_count %}
               <button type="button" class="icon-link icon-link-err" disabled title="In use by {{ s.case_count }} case{{ s.case_count|pluralize }}" aria-label="Cannot delete case status {{ s.value }}: in use by {{ s.case_count }} case{{ s.case_count|pluralize }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
               {% else %}
-              {% with modal_id="case-status-delete-"|add:s.id|stringformat:"s" %}
+              {% with modal_id="case-status-delete-"|concat:s.id %}
               {% url 'ui-taxonomy-case-status-delete' s.id as delete_url %}
               {% include "ui/_modal.html" with modal_id=modal_id title="Delete case status?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="case status" identifier=s.value usage_count=0 %}
               <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete case status {{ s.value }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
@@ -99,7 +99,7 @@
             <td>{{ s.hidden|yesno:"Yes,No" }}</td>
             <td>
               {% if can_manage_taxonomy %}
-              {% with modal_id="alert-status-edit-"|add:s.id|stringformat:"s" form_id="alert-status-edit-form-"|add:s.id|stringformat:"s" %}
+              {% with modal_id="alert-status-edit-"|concat:s.id form_id="alert-status-edit-form-"|concat:s.id %}
               {% url 'ui-taxonomy-alert-status-edit' s.id as edit_url %}
               <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit alert status {{ s.value }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
               {% if form_state.modal_id == modal_id %}
@@ -111,7 +111,7 @@
               {% if s.alert_count %}
               <button type="button" class="icon-link icon-link-err" disabled title="In use by {{ s.alert_count }} alert{{ s.alert_count|pluralize }}" aria-label="Cannot delete alert status {{ s.value }}: in use by {{ s.alert_count }} alert{{ s.alert_count|pluralize }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
               {% else %}
-              {% with modal_id="alert-status-delete-"|add:s.id|stringformat:"s" %}
+              {% with modal_id="alert-status-delete-"|concat:s.id %}
               {% url 'ui-taxonomy-alert-status-delete' s.id as delete_url %}
               {% include "ui/_modal.html" with modal_id=modal_id title="Delete alert status?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="alert status" identifier=s.value usage_count=0 %}
               <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete alert status {{ s.value }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
@@ -166,7 +166,7 @@
             <td>{{ t.is_attachment|yesno:"Yes,No" }}</td>
             <td>
               {% if can_manage_taxonomy %}
-              {% with modal_id="observable-type-edit-"|add:t.id|stringformat:"s" form_id="observable-type-edit-form-"|add:t.id|stringformat:"s" %}
+              {% with modal_id="observable-type-edit-"|concat:t.id form_id="observable-type-edit-form-"|concat:t.id %}
               {% url 'ui-taxonomy-observable-type-edit' t.id as edit_url %}
               <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit observable type {{ t.name }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
               {% if form_state.modal_id == modal_id %}
@@ -178,7 +178,7 @@
               {% if t.observable_count %}
               <button type="button" class="icon-link icon-link-err" disabled title="In use by {{ t.observable_count }} observable{{ t.observable_count|pluralize }}" aria-label="Cannot delete observable type {{ t.name }}: in use by {{ t.observable_count }} observable{{ t.observable_count|pluralize }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
               {% else %}
-              {% with modal_id="observable-type-delete-"|add:t.id|stringformat:"s" %}
+              {% with modal_id="observable-type-delete-"|concat:t.id %}
               {% url 'ui-taxonomy-observable-type-delete' t.id as delete_url %}
               {% include "ui/_modal.html" with modal_id=modal_id title="Delete observable type?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="observable type" identifier=t.name usage_count=0 %}
               <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete observable type {{ t.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
@@ -234,7 +234,7 @@
                 <td>{{ t.hidden|yesno:"Yes,No" }}</td>
                 <td>
                   {% if can_manage_taxonomy %}
-                  {% with modal_id="taxonomy-term-edit-"|add:t.id|stringformat:"s" form_id="taxonomy-term-edit-form-"|add:t.id|stringformat:"s" %}
+                  {% with modal_id="taxonomy-term-edit-"|concat:t.id form_id="taxonomy-term-edit-form-"|concat:t.id %}
                   {% url 'ui-taxonomy-term-edit' t.id as edit_url %}
                   <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit case scope {{ t.code }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
                   {% if form_state.modal_id == modal_id %}
@@ -246,7 +246,7 @@
                   {% if t.protected or t.in_use_count %}
                   <button type="button" class="icon-link icon-link-err" disabled title="{% if t.protected %}Protected term{% elif t.in_use_count %}In use{% endif %}" aria-label="Cannot delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
                   {% else %}
-                  {% with modal_id="taxonomy-term-delete-"|add:t.id|stringformat:"s" %}
+                  {% with modal_id="taxonomy-term-delete-"|concat:t.id %}
                   {% url 'ui-taxonomy-term-delete' t.id as delete_url %}
                   {% include "ui/_modal.html" with modal_id=modal_id title="Delete taxonomy term?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="taxonomy term" identifier=t.code usage_count=0 %}
                   <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
@@ -303,7 +303,7 @@
                 <td>{{ t.hidden|yesno:"Yes,No" }}</td>
                 <td>
                   {% if can_manage_taxonomy %}
-                  {% with modal_id="taxonomy-term-edit-"|add:t.id|stringformat:"s" form_id="taxonomy-term-edit-form-"|add:t.id|stringformat:"s" %}
+                  {% with modal_id="taxonomy-term-edit-"|concat:t.id form_id="taxonomy-term-edit-form-"|concat:t.id %}
                   {% url 'ui-taxonomy-term-edit' t.id as edit_url %}
                   <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit case phase {{ t.code }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
                   {% if form_state.modal_id == modal_id %}
@@ -315,7 +315,7 @@
                   {% if t.protected or t.in_use_count %}
                   <button type="button" class="icon-link icon-link-err" disabled title="{% if t.protected %}Protected term{% elif t.in_use_count %}In use{% endif %}" aria-label="Cannot delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
                   {% else %}
-                  {% with modal_id="taxonomy-term-delete-"|add:t.id|stringformat:"s" %}
+                  {% with modal_id="taxonomy-term-delete-"|concat:t.id %}
                   {% url 'ui-taxonomy-term-delete' t.id as delete_url %}
                   {% include "ui/_modal.html" with modal_id=modal_id title="Delete taxonomy term?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="taxonomy term" identifier=t.code usage_count=0 %}
                   <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
@@ -370,7 +370,7 @@
                 <td>{{ t.hidden|yesno:"Yes,No" }}</td>
                 <td>
                   {% if can_manage_taxonomy %}
-                  {% with modal_id="taxonomy-term-edit-"|add:t.id|stringformat:"s" form_id="taxonomy-term-edit-form-"|add:t.id|stringformat:"s" %}
+                  {% with modal_id="taxonomy-term-edit-"|concat:t.id form_id="taxonomy-term-edit-form-"|concat:t.id %}
                   {% url 'ui-taxonomy-term-edit' t.id as edit_url %}
                   <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit case type {{ t.code }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
                   {% if form_state.modal_id == modal_id %}
@@ -382,7 +382,7 @@
                   {% if t.protected or t.in_use_count %}
                   <button type="button" class="icon-link icon-link-err" disabled title="{% if t.protected %}Protected term{% elif t.in_use_count %}In use{% endif %}" aria-label="Cannot delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
                   {% else %}
-                  {% with modal_id="taxonomy-term-delete-"|add:t.id|stringformat:"s" %}
+                  {% with modal_id="taxonomy-term-delete-"|concat:t.id %}
                   {% url 'ui-taxonomy-term-delete' t.id as delete_url %}
                   {% include "ui/_modal.html" with modal_id=modal_id title="Delete taxonomy term?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="taxonomy term" identifier=t.code usage_count=0 %}
                   <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
@@ -437,7 +437,7 @@
                 <td>{{ t.hidden|yesno:"Yes,No" }}</td>
                 <td>
                   {% if can_manage_taxonomy %}
-                  {% with modal_id="taxonomy-term-edit-"|add:t.id|stringformat:"s" form_id="taxonomy-term-edit-form-"|add:t.id|stringformat:"s" %}
+                  {% with modal_id="taxonomy-term-edit-"|concat:t.id form_id="taxonomy-term-edit-form-"|concat:t.id %}
                   {% url 'ui-taxonomy-term-edit' t.id as edit_url %}
                   <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit data classification {{ t.code }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
                   {% if form_state.modal_id == modal_id %}
@@ -449,7 +449,7 @@
                   {% if t.protected or t.in_use_count %}
                   <button type="button" class="icon-link icon-link-err" disabled title="{% if t.protected %}Protected term{% elif t.in_use_count %}In use{% endif %}" aria-label="Cannot delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
                   {% else %}
-                  {% with modal_id="taxonomy-term-delete-"|add:t.id|stringformat:"s" %}
+                  {% with modal_id="taxonomy-term-delete-"|concat:t.id %}
                   {% url 'ui-taxonomy-term-delete' t.id as delete_url %}
                   {% include "ui/_modal.html" with modal_id=modal_id title="Delete taxonomy term?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="taxonomy term" identifier=t.code usage_count=0 %}
                   <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
@@ -505,7 +505,7 @@
                 <td>{{ t.hidden|yesno:"Yes,No" }}</td>
                 <td>
                   {% if can_manage_taxonomy %}
-                  {% with modal_id="taxonomy-term-edit-"|add:t.id|stringformat:"s" form_id="taxonomy-term-edit-form-"|add:t.id|stringformat:"s" %}
+                  {% with modal_id="taxonomy-term-edit-"|concat:t.id form_id="taxonomy-term-edit-form-"|concat:t.id %}
                   {% url 'ui-taxonomy-term-edit' t.id as edit_url %}
                   <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit verdict {{ t.code }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
                   {% if form_state.modal_id == modal_id %}
@@ -517,7 +517,7 @@
                   {% if t.protected or t.in_use_count %}
                   <button type="button" class="icon-link icon-link-err" disabled title="{% if t.protected %}Protected term{% elif t.in_use_count %}In use{% endif %}" aria-label="Cannot delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
                   {% else %}
-                  {% with modal_id="taxonomy-term-delete-"|add:t.id|stringformat:"s" %}
+                  {% with modal_id="taxonomy-term-delete-"|concat:t.id %}
                   {% url 'ui-taxonomy-term-delete' t.id as delete_url %}
                   {% include "ui/_modal.html" with modal_id=modal_id title="Delete taxonomy term?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="taxonomy term" identifier=t.code usage_count=0 %}
                   <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>

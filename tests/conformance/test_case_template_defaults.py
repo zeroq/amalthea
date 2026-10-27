@@ -539,11 +539,38 @@ def test_edit_apply_to_existing_is_scoped_to_writable_cases(db: None) -> None:
     assert theirs.severity == 2
 
 
-def test_delete_template_seeded_cases_is_refused(db: None) -> None:
+def test_delete_template_modal_ids_match_openers(db: None) -> None:
+    """Regression: `"prefix-"|add:uuid` yields `""`, so the modal never opened.
+
+    Both the list trash button and the detail "Delete template" button must point at a
+    dialog whose id is the fully-interpolated UUID.
+    """
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    template = CaseTemplate.objects.create(name="modal-id")
+    client = Client()
+    _login(client, user)
+    expected = f"delete-template-{template.id}"
+
+    for url in (
+        reverse("ui-case-template-list"),
+        reverse("ui-case-template-detail", kwargs={"template_id": str(template.id)}),
+    ):
+        body = client.get(url).content.decode()
+        assert f'data-modal-open="{expected}"' in body, url
+        assert f'id="{expected}"' in body, url
+
+
+def test_delete_template_detaches_seeded_cases(db: None) -> None:
+    """Deleting a template must succeed and null the provenance on the cases it seeded.
+
+    `Case.source_template` is SET_NULL: the cases keep the defaults already applied to them, but
+    the pointer to a now-deleted template is cleared instead of blocking the delete (PROTECT).
+    """
     org = _mk_org("Org")
     user = _mk_user("analyst", org)
     case = _mk_case(org)
-    template = CaseTemplate.objects.create(name="undeletable")
+    template = CaseTemplate.objects.create(name="deletable")
     Case.objects.filter(pk=case.pk).update(source_template=template)
     client = Client()
     _login(client, user)
@@ -553,7 +580,9 @@ def test_delete_template_seeded_cases_is_refused(db: None) -> None:
     )
 
     assert response.status_code == 302
-    assert CaseTemplate.objects.filter(pk=template.pk).exists()
+    assert not CaseTemplate.objects.filter(pk=template.pk).exists()
+    case.refresh_from_db()
+    assert case.source_template_id is None
 
 
 # ---------------------------------------------------------------------------

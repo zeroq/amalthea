@@ -447,7 +447,7 @@
   {% for suggestion in suggestions_proposed %}
     {% if suggestion.enrichment_data %}
       {% with enrich_title=suggestion.data_type.name|add:": "|add:suggestion.raw_data %}
-      {% include "ui/_modal.html" with modal_id="suggestion-enrichment-"|add:suggestion.id|stringformat:"s" title=enrich_title body_template="ui/_suggestion_enrichment_modal_body.html" size="lg" suggestion=suggestion show_cancel=False close_url=request.path %}
+      {% include "ui/_modal.html" with modal_id="suggestion-enrichment-"|concat:suggestion.id title=enrich_title body_template="ui/_suggestion_enrichment_modal_body.html" size="lg" suggestion=suggestion show_cancel=False close_url=request.path %}
       {% endwith %}
     {% endif %}
   {% endfor %}
