@@ -100,14 +100,13 @@ from cases.views import (
     _resolve_ttp_value,
     _set_observable_fields,
 )
+from core import taxonomy_read
 from core.enums import (
     ALERT_STAGES,
-    CASE_CLOSING_VERDICTS,
     CASE_PHASE_CHOICES,
     CASE_SCOPE_CHOICES,
     CASE_STAGES,
     CASE_TYPE_CHOICES,
-    CASE_VERDICT_CHOICES,
     DATA_CLASSIFICATION_CHOICES,
     PAP_CHOICES,
     SEVERITY_CHOICES,
@@ -561,9 +560,7 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
             pap_choices=PAP_CHOICES,
             alert_observables=alert_observables_with_cases,
             alert_verdict=alert.verdict,
-            closing_verdict_choices=[
-                c for c in CASE_VERDICT_CHOICES if c[0] in CASE_CLOSING_VERDICTS
-            ],
+            closing_verdict_choices=taxonomy_read.closing_verdict_choices(),
             alert_close_url=reverse("ui-alert-close", kwargs={"alert_id": alert.id}),
             tabs=tabs,
             active_tab=active_tab,
@@ -1361,10 +1358,8 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             # the edit icon and its `case-field-<slug>` dialog; the close dialog's verdict select
             # offers only the closing verdicts; the Add-tag dialog lists tags not yet on the case.
             inline_edit_fields=_inline_edit_fields(case),
-            verdict_choices=CASE_VERDICT_CHOICES,
-            closing_verdict_choices=[
-                c for c in CASE_VERDICT_CHOICES if c[0] in CASE_CLOSING_VERDICTS
-            ],
+            verdict_choices=taxonomy_read.choices(taxonomy_read.CATEGORY_CASE_VERDICT),
+            closing_verdict_choices=taxonomy_read.closing_verdict_choices(),
             available_tags=available_tags,
             available_tags_truncated=available_tags_truncated,
             case_field_edit_url=reverse("ui-case-field-edit", kwargs={"case_id": case.number}),
@@ -1483,7 +1478,7 @@ def _inline_edit_fields(case: Case) -> list[dict[str, Any]]:
             "slug": "verdict",
             "label": "Verdict",
             "value": case.verdict,
-            "choices": list(CASE_VERDICT_CHOICES),
+            "choices": list(taxonomy_read.choices(taxonomy_read.CATEGORY_CASE_VERDICT)),
             "admin_only": False,
         },
     ]
@@ -3456,10 +3451,11 @@ def alert_close(request: HttpRequest, alert_id: str) -> HttpResponse:
     verdict = (request.POST.get("verdict") or "").strip()
     comment = (request.POST.get("comment") or "").strip()
 
-    if verdict not in CASE_CLOSING_VERDICTS:
+    if not taxonomy_read.is_closing_verdict(verdict):
+        allowed = ", ".join([c[0] for c in taxonomy_read.closing_verdict_choices()]) or "true_positive, false_positive"
         messages.error(
             request,
-            "A closing verdict (true positive or false positive) is required to close an alert.",
+            f"A closing verdict ({allowed}) is required to close an alert.",
         )
         return redirect("ui-alert-detail", alert_id=alert.id)
     if not comment:
@@ -4428,13 +4424,7 @@ def _taxonomy_context(request: HttpRequest, **extra: Any) -> dict[str, Any]:
     """
     from django.db.models import Count
 
-    from core.enums import (
-        CASE_PHASE_CHOICES,
-        CASE_SCOPE_CHOICES,
-        CASE_TYPE_CHOICES,
-        CASE_VERDICT_CHOICES,
-        DATA_CLASSIFICATION_CHOICES,
-    )
+
     from core.models import TaxonomyTerm
 
     # Usage counts for terms
@@ -4486,7 +4476,7 @@ def _taxonomy_context(request: HttpRequest, **extra: Any) -> dict[str, Any]:
         phase_choices=CASE_PHASE_CHOICES,
         case_type_choices=CASE_TYPE_CHOICES,
         data_classification_choices=DATA_CLASSIFICATION_CHOICES,
-        verdict_choices=CASE_VERDICT_CHOICES,
+        verdict_choices=taxonomy_read.choices(taxonomy_read.CATEGORY_CASE_VERDICT),
         case_stage_choices=CASE_STAGES,
         alert_stage_choices=ALERT_STAGES,
         can_manage_taxonomy=getattr(request.user, "role", "") == "superAdmin",

@@ -16,12 +16,8 @@ from alerts.escalation import resolve_case_status
 from cases.ledger import append_timeline_event
 from cases.models import Case, CaseTagLink, Tag
 from cases.tagging import tag_names_from_payload
+from core import taxonomy_read
 from core.enums import (
-    CASE_PHASE_CHOICES,
-    CASE_SCOPE_CHOICES,
-    CASE_TYPE_CHOICES,
-    CASE_VERDICT_VALUES,
-    DATA_CLASSIFICATION_CHOICES,
     PAP_MAX,
     PAP_MIN,
     SEVERITY_MAX,
@@ -57,15 +53,15 @@ _CASE_RANGE_FIELDS: dict[str, tuple[int, int]] = {
     "pap": (PAP_MIN, PAP_MAX),
 }
 
-#: String enum fields with their allowed values (derived from core/enums.py, never hardcoded).
+#: String enum fields with their allowed values (derived from taxonomy at runtime).
 #: An out-of-vocabulary value raises CaseUpdateError("BadRequest", ...); an empty/None value is
 #: dropped (keeps the model default) — mirroring the _CASE_RANGE_FIELDS tolerance.
-_CASE_ENUM_FIELDS: dict[str, tuple[str, ...]] = {
-    "scope": tuple(v for v, _ in CASE_SCOPE_CHOICES),
-    "case_type": tuple(v for v, _ in CASE_TYPE_CHOICES),
-    "data_classification": tuple(v for v, _ in DATA_CLASSIFICATION_CHOICES),
-    "phase": tuple(v for v, _ in CASE_PHASE_CHOICES),
-    "verdict": CASE_VERDICT_VALUES,
+_CASE_ENUM_CATEGORY = {
+    "scope": taxonomy_read.CATEGORY_CASE_SCOPE,
+    "case_type": taxonomy_read.CATEGORY_CASE_TYPE,
+    "data_classification": taxonomy_read.CATEGORY_DATA_CLASSIFICATION,
+    "phase": taxonomy_read.CATEGORY_CASE_PHASE,
+    "verdict": taxonomy_read.CATEGORY_CASE_VERDICT,
 }
 
 
@@ -137,8 +133,8 @@ def _set_case_fields(
             continue
 
         # String enum fields (scope, case_type, data_classification, phase)
-        allowed = _CASE_ENUM_FIELDS.get(key)
-        if allowed is not None:
+        category = _CASE_ENUM_CATEGORY.get(key)
+        if category is not None:
             # Admin gate for data_classification (Q-D5): admin/superAdmin only
             if key == "data_classification" and not is_admin(actor):
                 message = "data_classification may only be changed by an administrator"
@@ -147,8 +143,10 @@ def _set_case_fields(
             if value is None or value == "":
                 continue
             value_str = str(value).strip()
-            if value_str not in allowed:
-                message = f"{key} must be one of: {', '.join(allowed)}"
+            allowed_codes = set(taxonomy_read.codes(category, include_hidden=True))
+            if value_str not in allowed_codes:
+                allowed = ", ".join(taxonomy_read.codes(category, include_hidden=False))
+                message = f"{key} must be one of: {allowed}"
                 raise CaseUpdateError("BadRequest", message, {key: [message]})
             setattr(case, key, value_str)
             fields.append(key)
@@ -211,26 +209,12 @@ def enforce_close_rule(case: Case, payload: Mapping[str, Any], *, previous_stage
     if previous_stage == "Closed" or new_stage != "Closed":
         return
 
-    from core.models import TaxonomyTerm
-
     verdict = payload.get("verdict", case.verdict)
-    try:
-        term = TaxonomyTerm.objects.get(category="case_verdict", code=verdict)
-        if not term.is_closing:
-            raise TaxonomyTerm.DoesNotExist
-        allowed = list(
-            TaxonomyTerm.objects.filter(category="case_verdict", is_closing=True)
-            .order_by("order", "code")
-            .values_list("code", flat=True)
-        )
-    except TaxonomyTerm.DoesNotExist:
-        allowed = list(
-            TaxonomyTerm.objects.filter(category="case_verdict", is_closing=True)
-            .order_by("order", "code")
-            .values_list("code", flat=True)
-        )
-        message = f"Closing a case requires a verdict ({', '.join(allowed) or 'true_positive, false_positive'})."
-        raise CaseUpdateError("ValidationError", message, {"verdict": [message]}) from None
+    if not taxonomy_read.is_closing_verdict(verdict):
+        allowed = list(taxonomy_read.closing_verdict_choices())
+        allowed_codes = [c[0] for c in allowed]
+        message = f"Closing a case requires a verdict ({', '.join(allowed_codes) or 'true_positive, false_positive'})."
+        raise CaseUpdateError("ValidationError", message, {"verdict": [message]})
 
     comment = str(payload.get("comment") or "").strip()
     if not comment:

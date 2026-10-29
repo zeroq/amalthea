@@ -7,8 +7,6 @@ from django.utils import timezone
 from core.enums import (
     ALERT_STAGE_CHOICES,
     ALERT_STAGES,
-    CASE_VERDICT_CHOICES,
-    CASE_VERDICT_VALUES,
     PAP_CHOICES,
     PAP_MAX,
     PAP_MIN,
@@ -90,9 +88,7 @@ class Alert(UUIDModel, TimeStampedModel):
     summary = models.TextField(blank=True)
     # Plan-2026-10-17 (§12.8(5)): closing a case copies the case's verdict onto every linked
     # alert. Same vocabulary and tokens as Case.verdict (core/enums.py::CASE_VERDICT_CHOICES).
-    verdict = models.CharField(
-        max_length=32, choices=list(CASE_VERDICT_CHOICES), default="undefined"
-    )
+    verdict = models.CharField(max_length=32, default="undefined")
     assignee = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -158,7 +154,7 @@ class Alert(UUIDModel, TimeStampedModel):
             in_range("alert_severity_range", "severity", SEVERITY_MIN, SEVERITY_MAX),
             in_range("alert_tlp_range", "tlp", TLP_MIN, TLP_MAX),
             in_range("alert_pap_range", "pap", PAP_MIN, PAP_MAX),
-            in_values("alert_verdict_valid", "verdict", CASE_VERDICT_VALUES),
+            models.CheckConstraint(condition=models.Q(~models.Q(verdict="")), name="alert_verdict_not_blank"),
         ]
 
     def __str__(self) -> str:

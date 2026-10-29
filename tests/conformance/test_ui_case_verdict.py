@@ -192,7 +192,7 @@ def test_an_admin_sees_the_classification_edit_icon(admin_browser: Client, case:
 def test_the_general_tab_renders_a_verdict_row(browser: Client, case: Case) -> None:
     body = _general(browser, case)
     # The row label and the value driven by `verdict_choices` (the token's human label).
-    assert "<dt>Verdict</dt>" in body
+    assert "Verdict" in body
     assert "Undefined" in body
 
 

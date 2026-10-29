@@ -31,8 +31,8 @@ from django.utils import timezone
 from alerts.escalation import resolve_case_status
 from cases.ledger import append_timeline_event
 from cases.models import Case
+from core import taxonomy_read
 from cases.update import (
-    _CASE_ENUM_FIELDS,
     _CASE_RANGE_FIELDS,
     CASE_SCALAR_FIELDS,
     CaseUpdateError,
@@ -77,7 +77,14 @@ def _create_scalars(payload: Mapping[str, Any]) -> dict[str, Any]:
             # Absent/null/empty means "the model default" — the tolerance this endpoint has
             # always had — not a rejection.
             continue
-        if key in _CASE_ENUM_FIELDS and value in (None, ""):
+        enum_cat = {
+            "scope": taxonomy_read.CATEGORY_CASE_SCOPE,
+            "case_type": taxonomy_read.CATEGORY_CASE_TYPE,
+            "data_classification": taxonomy_read.CATEGORY_DATA_CLASSIFICATION,
+            "phase": taxonomy_read.CATEGORY_CASE_PHASE,
+            "verdict": taxonomy_read.CATEGORY_CASE_VERDICT,
+        }.get(key)
+        if enum_cat is not None and value in (None, ""):
             # Same tolerance for string enums: empty/null keeps the model default.
             continue
         if key in ("description", "summary"):
