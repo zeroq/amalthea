@@ -14,6 +14,12 @@
     </select>
     <button class="btn btn-primary" type="submit">Filter</button>
     <a class="btn" href="{% url 'ui-alert-list' %}">Clear</a>
+    {% if mine %}
+      <input type="hidden" name="mine" value="1">
+      <a class="btn btn-primary" href="{% querystring mine=None page=1 %}" aria-current="true" aria-label="Remove Mine filter — showing only alerts assigned to you">Mine</a>
+    {% else %}
+      <a class="btn" href="{% querystring mine=1 page=1 %}" aria-label="Show only alerts assigned to me">Mine</a>
+    {% endif %}
   </form>
 </div>
 
@@ -77,10 +83,8 @@
 
     {% if page_obj.paginator.count == 0 %}
       {# Honest empty state for paginated path #}
-      {% if scope == "linked" or scope == "all" %}
-        <p class="empty">No alerts match your filters. <a href="{% url 'ui-alert-list' %}">Clear filters</a></p>
-      {% elif scope == "unlinked" and filtered_from %}
-        <p class="empty">No alerts — no unlinked alerts (filtered from {{ filtered_from }}). <a href="{% url 'ui-alert-list' %}?scope=all">View all scopes</a></p>
+      {% if filtered_from %}
+        <p class="empty">No alerts match your filters (filtered from {{ filtered_from }}). <a href="{% url 'ui-alert-list' %}">Clear filters</a></p>
       {% else %}
         <p class="empty">No alerts in this scope.</p>
       {% endif %}
