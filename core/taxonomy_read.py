@@ -7,6 +7,11 @@ cases/ui to avoid import cycles.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.models import TaxonomyTerm
+
 CATEGORY_CASE_SCOPE = "case_scope"
 CATEGORY_CASE_PHASE = "case_phase"
 CATEGORY_CASE_TYPE = "case_type"
@@ -22,10 +27,10 @@ ALL_CATEGORIES = (
 )
 
 
-def _get_term_model():
-    from core.models import TaxonomyTerm
+def _get_term_model() -> type[TaxonomyTerm]:
+    from core.models import TaxonomyTerm as TermModel
 
-    return TaxonomyTerm
+    return TermModel
 
 
 def choices(category: str, *, include_hidden: bool = False) -> tuple[tuple[str, str], ...]:
@@ -68,7 +73,7 @@ def exists(category: str, code: str) -> bool:
     return term_model.objects.filter(category=category, code=str(code)).exists()
 
 
-def get_term(category: str, code: str):
+def get_term(category: str, code: str) -> TaxonomyTerm | None:
     if code is None or code == "":
         return None
     term_model = _get_term_model()
