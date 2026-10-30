@@ -31,7 +31,6 @@ from django.utils import timezone
 from alerts.escalation import resolve_case_status
 from cases.ledger import append_timeline_event
 from cases.models import Case
-from core import taxonomy_read
 from cases.update import (
     _CASE_RANGE_FIELDS,
     CASE_SCALAR_FIELDS,
@@ -40,6 +39,7 @@ from cases.update import (
     _set_case_fields,
     enforce_close_rule,
 )
+from core import taxonomy_read
 from identity.models import Organisation, User
 from observables.suggestions import create_suggestions_for_case
 

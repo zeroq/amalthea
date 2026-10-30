@@ -403,8 +403,7 @@ No new endpoints and no wire-shape changes are required.
 **Work:**
 - Add a small per-request helper in `ui/views.py`:
   ```python
-  def _case_taxonomy_context(*, include_hidden_for_labels: bool = True) -> dict[str, Any]:
-      ...
+  def _case_taxonomy_context(*, include_hidden_for_labels: bool = True) -> dict[str, Any]: ...
   ```
   It calls `choices_by_category(...)` once, returns picker maps and label maps, plus closing verdict choices.
 - Replace the hardcoded contexts at the current sites:

@@ -17,7 +17,6 @@ from core.enums import (
     TLP_MAX,
     TLP_MIN,
     in_range,
-    in_values,
 )
 from core.models import TimeStampedModel, UUIDModel
 from identity.models import Organisation, User
@@ -154,7 +153,9 @@ class Alert(UUIDModel, TimeStampedModel):
             in_range("alert_severity_range", "severity", SEVERITY_MIN, SEVERITY_MAX),
             in_range("alert_tlp_range", "tlp", TLP_MIN, TLP_MAX),
             in_range("alert_pap_range", "pap", PAP_MIN, PAP_MAX),
-            models.CheckConstraint(condition=models.Q(~models.Q(verdict="")), name="alert_verdict_not_blank"),
+            models.CheckConstraint(
+                condition=models.Q(~models.Q(verdict="")), name="alert_verdict_not_blank"
+            ),
         ]
 
     def __str__(self) -> str:
