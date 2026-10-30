@@ -250,7 +250,7 @@ def test_escalating_from_the_page_runs_the_playbook_and_shows_the_result(
     assert queue.status_code == 200
     assert alert.title in queue.content.decode()
     assert (
-        browser.get(reverse("ui-alert-list", query={"scope": "linked"}))
+        browser.get(reverse("ui-alert-list", query={"scope": "linked_open"}))
         .context["page_obj"]
         .object_list.count()
         == 0
@@ -313,13 +313,13 @@ def test_escalating_from_the_page_runs_the_playbook_and_shows_the_result(
 
     # 6. The alert is no longer in the queue; it is inside the case.
     assert (
-        browser.get(reverse("ui-alert-list", query={"scope": "unlinked"}))
+        browser.get(reverse("ui-alert-list", query={"scope": "unlinked_open"}))
         .context["page_obj"]
         .object_list.count()
         == 0
     )
     assert (
-        browser.get(reverse("ui-alert-list", query={"scope": "linked"}))
+        browser.get(reverse("ui-alert-list", query={"scope": "linked_open"}))
         .context["page_obj"]
         .object_list.count()
         == 1

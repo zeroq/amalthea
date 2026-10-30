@@ -269,30 +269,30 @@ def _make_users(org: Organisation, count: int, *, prefix: str = "edgeu") -> list
 def test_pager_hrefs_preserve_scope_and_per_page(
     browser: Client, org: Organisation, alert_status: AlertStatus
 ) -> None:
-    """Pager links on /alerts keep scope=all and per_page=25 on first and last page."""
+    """Pager links on /alerts keep scope=unlinked_open and per_page=25 on first and last page."""
     _make_alerts(org, alert_status, 60)
 
     response = browser.get(
-        reverse("ui-alert-list"), {"scope": "all", "per_page": "25", "page": "1"}
+        reverse("ui-alert-list"), {"scope": "unlinked_open", "per_page": "25", "page": "1"}
     )
     assert response.status_code == 200
     queries = _nav_queries(_body(response))
     assert queries, "60 rows at per_page=25 spans 3 pages — the pager nav must render"
     for query in queries:
-        assert query.get("scope") == ["all"], f"scope lost in pager href: {query}"
+        assert query.get("scope") == ["unlinked_open"], f"scope lost in pager href: {query}"
         assert query.get("per_page") == ["25"], f"per_page lost in pager href: {query}"
         assert query.get("page"), f"page missing from pager href: {query}"
     assert queries[0].get("page") == ["2"], "page 1 must offer next = page 2"
 
     response = browser.get(
-        reverse("ui-alert-list"), {"scope": "all", "per_page": "25", "page": "3"}
+        reverse("ui-alert-list"), {"scope": "unlinked_open", "per_page": "25", "page": "3"}
     )
     assert response.status_code == 200
     queries = _nav_queries(_body(response))
     assert len(queries) == 1, "last page offers only prev (no next)"
     assert queries[0].get("page") == ["2"], "page 3 must offer prev = page 2"
     for query in queries:
-        assert query.get("scope") == ["all"], f"scope lost in pager href: {query}"
+        assert query.get("scope") == ["unlinked_open"], f"scope lost in pager href: {query}"
         assert query.get("per_page") == ["25"], f"per_page lost in pager href: {query}"
 
 
@@ -452,12 +452,12 @@ def test_filtered_from_rendered_for_scope_linked(
     case_status: CaseStatus,
     alert_status: AlertStatus,
 ) -> None:
-    """scope=linked with 1 linked of 11 total renders '(filtered from 11)'."""
+    """scope=linked_open with 1 linked of 11 total renders '(filtered from 11)'."""
     case = _make_cases(org, case_status, analyst, 1)[0]
     _make_alerts(org, alert_status, 10, prefix="unlinked")
     _make_alerts(org, alert_status, 1, prefix="linked", case=case)
 
-    response = browser.get(reverse("ui-alert-list"), {"scope": "linked"})
+    response = browser.get(reverse("ui-alert-list"), {"scope": "linked_open"})
     assert response.status_code == 200
     assert response.context["page_obj"].paginator.count == 1
     assert "(filtered from 11)" in _text(_body(response))
@@ -471,7 +471,7 @@ def test_filtered_from_rendered_for_default_scope(
     case_status: CaseStatus,
     alert_status: AlertStatus,
 ) -> None:
-    """The default scope=unlinked is a filter too: 10 of 11 renders '(filtered from 11)'."""
+    """The default scope=unlinked_open is a filter too: 10 of 11 renders '(filtered from 11)'."""
     case = _make_cases(org, case_status, analyst, 1)[0]
     _make_alerts(org, alert_status, 10, prefix="unlinked")
     _make_alerts(org, alert_status, 1, prefix="linked", case=case)
@@ -484,12 +484,12 @@ def test_filtered_from_rendered_for_default_scope(
 
 
 @pytest.mark.django_db
-def test_filtered_from_absent_for_scope_all(
+def test_filtered_from_absent_when_scope_does_not_narrow(
     browser: Client, org: Organisation, alert_status: AlertStatus
 ) -> None:
-    """scope=all is not a filter: no '(filtered from …)' disclosure."""
+    """A filter that removes nothing must not claim rows were hidden."""
     _make_alerts(org, alert_status, 10)
-    response = browser.get(reverse("ui-alert-list"), {"scope": "all"})
+    response = browser.get(reverse("ui-alert-list"), {"scope": "unlinked_open"})
     assert response.status_code == 200
     assert response.context["filtered_from"] is None
     assert "(filtered from" not in _text(_body(response))
@@ -978,18 +978,19 @@ def test_observable_filtered_empty_copy_defect(
 def test_alert_linked_empty_copy_defect(
     browser: Client, org: Organisation, alert_status: AlertStatus
 ) -> None:
-    """DEFECT DEF-2 — trigger: GET /alerts/?scope=linked with 0 linked (3 unlinked exist)."""
+    """DEFECT DEF-2 — trigger: GET /alerts/?scope=linked_open with 0 linked (3 unlinked exist)."""
     _make_alerts(org, alert_status, 3, prefix="unlinked")
 
-    response = browser.get(reverse("ui-alert-list"), {"scope": "linked"})
+    response = browser.get(reverse("ui-alert-list"), {"scope": "linked_open"})
     assert response.status_code == 200
     assert response.context["page_obj"].paginator.count == 0
     assert response.context["filtered_from"] == 3
     text = _text(_body(response))
-    assert "No alerts match your filters." in text, (
-        "DEF-2 (alert_list.html:87): the honest-empty block is unreachable "
-        "(zero-row Page is falsy) - observed copy: 'No alerts in this scope.' "
-        "Trigger: GET /alerts/?scope=linked with zero linked alerts."
+    # Honest-empty block is now reachable: shows "No alerts match your filters (filtered from 3)"
+    assert "No alerts match your filters" in text, (
+        "DEF-2 (alert_list.html:76): honest-empty block is now reachable — "
+        "shows 'No alerts match your filters (filtered from {{ filtered_from }})' "
+        f"instead of the old dead-code copy. Observed: {text}"
     )
     assert "Clear filters" in text, "DEF-2: a filtered-empty list must offer Clear filters"
 
@@ -1006,22 +1007,22 @@ def test_alert_default_scope_empty_no_escape_hatch_defect(
     case_status: CaseStatus,
     alert_status: AlertStatus,
 ) -> None:
-    """DEFECT DEF-3 — trigger: GET /alerts/ with 0 unlinked and 3 linked alerts."""
+    """DEFECT DEF-3 — trigger: GET /alerts/ with 0 unlinked_open and 3 linked_open alerts."""
     case = _make_cases(org, case_status, analyst, 1)[0]
     _make_alerts(org, alert_status, 3, prefix="linked", case=case)
 
     response = browser.get(reverse("ui-alert-list"))
     assert response.status_code == 200
-    # The view already treats scope=unlinked as a filter and says so in context …
+    # The view already treats scope=unlinked_open as a filter and says so in context …
     assert response.context["filtered_from"] == 3, "view must pass the unfiltered total"
     text = _text(_body(response))
     # … but the page must tell the analyst rows were filtered away and offer a way out.
     assert "Clear filters" in text or "(filtered from 3)" in text, (
-        "DEF-3 (alert_list.html:88): scope=unlinked is excluded from the filtered-empty "
+        "DEF-3 (alert_list.html:88): scope=unlinked_open is excluded from the filtered-empty "
         "branch while ui/views.py:423-429 sets filtered_from — the default triage queue "
         "filtered to zero rows is indistinguishable from an empty queue (observed: "
         f"{text[text.find('No alerts') :][:80]!r}, no clear-filters, no filtered-from "
-        "disclosure). Trigger: GET /alerts/ with 3 linked and 0 unlinked alerts."
+        "disclosure). Trigger: GET /alerts/ with 3 linked_open and 0 unlinked_open alerts."
     )
 
 

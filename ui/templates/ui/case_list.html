@@ -14,6 +14,12 @@
     </select>
     <button class="btn btn-primary" type="submit">Filter</button>
     <a class="btn" href="{% url 'ui-case-list' %}">Clear</a>
+    {% if mine %}
+      <input type="hidden" name="mine" value="1">
+      <a class="btn btn-primary" href="{% querystring mine=None page=1 %}" aria-current="true" aria-label="Remove Mine filter — showing only cases assigned to you">Mine</a>
+    {% else %}
+      <a class="btn" href="{% querystring mine=1 page=1 %}" aria-label="Show only cases assigned to me">Mine</a>
+    {% endif %}
     {% if can_mutate %}
     <a class="btn btn-primary btn-end" href="{% url 'ui-case-create' %}" data-modal-open="new-case-modal">New case</a>
     {% endif %}
@@ -22,7 +28,7 @@
 
 <div class="card">
   <div class="card-header">
-    <h2>{% if scope == "closed" %}Closed cases{% elif scope == "all" %}All cases{% else %}Open cases{% endif %}</h2>
+    <h2>{{ heading }}</h2>
   </div>
   {% if page_obj.paginator %}
     {% include "ui/_list_summary.html" with entity_name="case" entity_name_plural="cases" %}
@@ -67,7 +73,7 @@
 
     {% if page_obj.paginator.count == 0 %}
       {# Honest empty state for paginated path #}
-      {% if scope != "open" %}
+      {% if scope != "open" or mine %}
         <p class="empty">No cases match your filters. <a href="{% url 'ui-case-list' %}">Clear filters</a></p>
       {% else %}
         <p class="empty">No cases open.{% if can_mutate %} <a href="{% url 'ui-case-create' %}">Open one</a>.{% endif %}</p>

@@ -8,8 +8,8 @@
   <form method="get" class="inline-form filter-bar" aria-label="Alert filters">
     <label class="sr-only" for="f-alert-scope">Scope</label>
     <select id="f-alert-scope" name="scope" class="filter-type">
-      {% for value in scopes %}
-      <option value="{{ value }}" {% if scope == value %}selected{% endif %}>{{ value|capfirst }}</option>
+      {% for value, label in scopes %}
+      <option value="{{ value }}" {% if scope == value %}selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
     <button class="btn btn-primary" type="submit">Filter</button>
@@ -23,6 +23,17 @@
     <div class="table-wrap">
     <table class="data-table">
       <caption class="sr-only">Alerts, newest first</caption>
+      <colgroup>
+        <col class="alert-col-severity">
+        <col class="alert-col-title">
+        <col class="alert-col-type">
+        <col class="alert-col-source">
+        <col class="alert-col-seen">
+        <col class="alert-col-state">
+        {% if request.user.role == "superAdmin" %}
+        <col class="alert-col-actions">
+        {% endif %}
+      </colgroup>
       <thead>
         <tr>
           <th scope="col">Severity</th><th scope="col">Title</th><th scope="col">Type</th>
@@ -82,6 +93,17 @@
       <div class="table-wrap">
     <table class="data-table alert-table">
         <caption class="sr-only">Alerts, newest first</caption>
+        <colgroup>
+          <col class="alert-col-severity">
+          <col class="alert-col-title">
+          <col class="alert-col-type">
+          <col class="alert-col-source">
+          <col class="alert-col-seen">
+          <col class="alert-col-state">
+          {% if request.user.role == "superAdmin" %}
+          <col class="alert-col-actions">
+          {% endif %}
+        </colgroup>
         <thead>
           <tr>
             <th scope="col">Severity</th><th scope="col">Title</th><th scope="col">Type</th>

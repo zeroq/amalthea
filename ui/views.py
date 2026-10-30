@@ -320,7 +320,7 @@ def _base_context(request: HttpRequest, **extra: Any) -> dict[str, Any]:
     """
     return {
         "nav_alert_count": Alert.objects.filter(
-            org_q("owner_org", request.user), case__isnull=True
+            org_q("owner_org", request.user), case__isnull=True, status__stage="New"
         ).count(),
         "nav_case_count": Case.objects.filter(
             case_visible_q(request.user), closed_date__isnull=True
@@ -391,7 +391,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     counts = {
         "alerts_total": Alert.objects.filter(org_q("owner_org", request.user)).count(),
         "alerts_unlinked": Alert.objects.filter(
-            org_q("owner_org", request.user), case__isnull=True
+            org_q("owner_org", request.user), case__isnull=True, status__stage="New"
         ).count(),
         "cases_total": Case.objects.filter(case_visible_q(request.user)).count(),
         "cases_open": Case.objects.filter(
@@ -419,7 +419,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             by_severity=by_severity,
             recent_alerts=list(
                 Alert.objects.select_related("status", "owner_org")
-                .filter(org_q("owner_org", request.user), case__isnull=True)
+                .filter(org_q("owner_org", request.user), case__isnull=True, status__stage="New")
                 .order_by("-date")[:10]
             ),
             open_cases=list(
@@ -436,11 +436,32 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     )
 
 
+ALERT_SCOPE_OPTIONS = (
+    ("unlinked_open", "Unlinked (open)"),
+    ("unlinked_triaged", "Unlinked (triaged)"),
+    ("unlinked_closed", "Unlinked (closed)"),
+    ("linked_open", "Linked (open)"),
+    ("linked_closed", "Linked (closed)"),
+)
+DEFAULT_ALERT_SCOPE = "unlinked_open"
+ALERT_SCOPE_PREDICATES = {
+    "unlinked_open": Q(case__isnull=True, status__stage="New"),
+    "unlinked_triaged": Q(case__isnull=True, status__stage="InProgress"),
+    "unlinked_closed": Q(case__isnull=True, status__stage="Closed"),
+    "linked_open": Q(case__isnull=False, case__closed_date__isnull=True),
+    "linked_closed": Q(case__isnull=False, case__closed_date__isnull=False),
+}
+
+
 @login_required
 @require_GET
 def alert_list(request: HttpRequest) -> HttpResponse:
     """The triage queue: unlinked alerts by default, because those are the decisions waiting."""
-    scope = request.GET.get("scope", "unlinked")
+    scope = request.GET.get("scope", DEFAULT_ALERT_SCOPE)
+    if scope not in ALERT_SCOPE_PREDICATES:
+        scope = DEFAULT_ALERT_SCOPE
+    mine = request.GET.get("mine") == "1"
+
     base_queryset = Alert.objects.select_related(
         "status", "assignee", "ingestion_source", "case", "owner_org"
     ).filter(org_q("owner_org", request.user))
@@ -448,23 +469,13 @@ def alert_list(request: HttpRequest) -> HttpResponse:
     # Compute unfiltered org-scoped count for filtered_from (honest empty state support)
     unfiltered_count = base_queryset.count()
 
-    if scope == "linked":
-        queryset = base_queryset.filter(case__isnull=False)
-    elif scope == "unlinked":
-        queryset = base_queryset.filter(case__isnull=True)
-    else:  # scope == "all"
-        queryset = base_queryset
+    if mine:
+        base_queryset = base_queryset.filter(assignee=request.user)
 
-    # Determine if a filter is active: scope parameter explicitly provided (including default "unlinked")
-    # The default "unlinked" scope is a filter, so filtered_from should show the unfiltered total.
-    # Only when scope="all" (no filter) is filtered_from None.
-    has_filter = scope != "all"
+    queryset = base_queryset.filter(ALERT_SCOPE_PREDICATES[scope])
 
     page_obj = paginate(request, queryset.order_by("-date"))
-    # filtered_from is only meaningful when the filter actually filters something out
-    # (unfiltered count > filtered count). When unfiltered == filtered, it's not a real filter.
-    filtered_count = page_obj.paginator.count
-    filtered_from = unfiltered_count if has_filter and unfiltered_count > filtered_count else None
+    filtered_from = unfiltered_count if unfiltered_count > page_obj.paginator.count else None
 
     return render(
         request,
@@ -474,7 +485,8 @@ def alert_list(request: HttpRequest) -> HttpResponse:
             page_obj=page_obj,
             filtered_from=filtered_from,
             scope=scope,
-            scopes=("unlinked", "linked", "all"),
+            mine=mine,
+            scopes=ALERT_SCOPE_OPTIONS,
         ),
     )
 
@@ -801,8 +813,10 @@ def _render_case_list(
 ) -> HttpResponse:
     """Render the case list, optionally with the New-case modal open and pre-filled.
 
-    Only when the user can mutate (not a viewer) do we include the form context;
-    viewers must not trigger those user/status queries at all.
+    Supports independent `scope` (open/all/closed) and `mine` (cases assigned to the
+    signed-in user) filters. Only when the user can mutate (not a viewer) do we
+    include the form context; viewers must not trigger those user/status queries
+    at all.
     """
     from identity.scoping import case_visible_q, is_viewer
 
@@ -812,10 +826,15 @@ def _render_case_list(
     if scope not in ("open", "all", "closed"):
         scope = "open"
 
+    mine = request.GET.get("mine") == "1"
+
     base_queryset = Case.objects.select_related("status", "assignee", "owner_org").filter(
         case_visible_q(request.user)
     )
     unfiltered_count = base_queryset.count()
+
+    if mine:
+        base_queryset = base_queryset.filter(assignee=request.user)
 
     if scope == "open":
         queryset = base_queryset.filter(closed_date__isnull=True)
@@ -827,16 +846,27 @@ def _render_case_list(
     # Pagination for the cases list (primary list P). The assignees picker
     # remains capped at PICKER_PAGE_SIZE (class K, not paged).
     # "all" is not a filter; "open"/"closed" narrow the set.
-    has_filter = scope != "all"
+    has_filter = scope != "all" or mine
     page_obj = paginate(request, queryset.order_by("-severity", "-start_date"))
     filtered_from = (
         unfiltered_count if has_filter and unfiltered_count > page_obj.paginator.count else None
     )
 
+    heading = {
+        ("open", False): "Open cases",
+        ("all", False): "All cases",
+        ("closed", False): "Closed cases",
+        ("open", True): "My open cases",
+        ("all", True): "My cases",
+        ("closed", True): "My closed cases",
+    }[(scope, mine)]
+
     context = {
         "page_obj": page_obj,
         "filtered_from": filtered_from,
         "scope": scope,
+        "mine": mine,
+        "heading": heading,
         "open_new_case": open_new_case,
     }
 
@@ -3452,7 +3482,10 @@ def alert_close(request: HttpRequest, alert_id: str) -> HttpResponse:
     comment = (request.POST.get("comment") or "").strip()
 
     if not taxonomy_read.is_closing_verdict(verdict):
-        allowed = ", ".join([c[0] for c in taxonomy_read.closing_verdict_choices()]) or "true_positive, false_positive"
+        allowed = (
+            ", ".join([c[0] for c in taxonomy_read.closing_verdict_choices()])
+            or "true_positive, false_positive"
+        )
         messages.error(
             request,
             f"A closing verdict ({allowed}) is required to close an alert.",
@@ -4423,7 +4456,6 @@ def _taxonomy_context(request: HttpRequest, **extra: Any) -> dict[str, Any]:
     the usage counts feed the delete dialogs so an in-use row never offers a doomed button.
     """
     from django.db.models import Count
-
 
     from core.models import TaxonomyTerm
 

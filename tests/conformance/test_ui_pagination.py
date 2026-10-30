@@ -382,7 +382,7 @@ def test_alert_list_scope_filter_preserved_across_pages(
     analyst: User,
     case_status: CaseStatus,
 ) -> None:
-    """Paging preserves scope=linked filter."""
+    """Paging preserves scope=linked_open filter."""
     # Create linked and unlinked alerts
     case = Case.objects.create(
         title="Linked Case", status=case_status, owner_org=org, assignee=analyst, tlp=2, pap=2
@@ -405,8 +405,8 @@ def test_alert_list_scope_filter_preserved_across_pages(
         status=alert_status,
     )
 
-    # Filter to linked only
-    response = browser.get(reverse("ui-alert-list"), {"scope": "linked"})
+    # Filter to linked_open only
+    response = browser.get(reverse("ui-alert-list"), {"scope": "linked_open"})
     assert response.status_code == 200
     page_obj = response.context["page_obj"]
     assert page_obj.paginator.count == 1  # Only the linked alert
@@ -423,7 +423,7 @@ def test_alert_list_scope_filter_preserved_across_pages(
             case=case,
         )
 
-    response = browser.get(reverse("ui-alert-list"), {"scope": "linked", "page": "2"})
+    response = browser.get(reverse("ui-alert-list"), {"scope": "linked_open", "page": "2"})
     assert response.status_code == 200
     page_obj = response.context["page_obj"]
     assert page_obj.number == 2
@@ -530,7 +530,7 @@ def test_filter_submission_resets_to_page_1(
     assert page_obj.number == 2
 
     # Apply a filter - should go back to page 1
-    response = browser.get(reverse("ui-alert-list"), {"scope": "linked"})
+    response = browser.get(reverse("ui-alert-list"), {"scope": "linked_open"})
     assert response.status_code == 200
     page_obj = response.context["page_obj"]
     assert page_obj.number == 1  # Reset to page 1
@@ -566,12 +566,12 @@ def test_alert_list_filtered_empty(
         owner_org=org,
         status=alert_status,
     )
-    # Filter to linked (none linked)
-    response = browser.get(reverse("ui-alert-list"), {"scope": "linked"})
+    # Filter to linked_open (none linked)
+    response = browser.get(reverse("ui-alert-list"), {"scope": "linked_open"})
     assert response.status_code == 200
     page_obj = response.context["page_obj"]
     filtered_from = response.context["filtered_from"]
-    assert page_obj.paginator.count == 0  # No linked alerts
+    assert page_obj.paginator.count == 0  # No linked_open alerts
     assert filtered_from == 1  # Unfiltered count is 1
 
 
@@ -852,29 +852,32 @@ def test_filtered_from_count_present_when_filtered(
         case=case,
     )
 
-    # Default scope "unlinked" is a filter: shows 10, filtered_from = 11 (total)
+    # Default scope "unlinked_open" is a filter: shows 10, filtered_from = 11 (total)
     response = browser.get(reverse("ui-alert-list"))
     assert response.status_code == 200
     page_obj = response.context["page_obj"]
     filtered_from = response.context["filtered_from"]
     assert page_obj.paginator.count == 10  # Unlinked only (default filter)
     assert filtered_from == 11  # Unfiltered total
+    assert "(filtered from 11)" in _text(_body(response))
 
-    # Explicit scope="all": shows all 11, no filter active → filtered_from = None
-    response = browser.get(reverse("ui-alert-list"), {"scope": "all"})
-    assert response.status_code == 200
-    page_obj = response.context["page_obj"]
-    filtered_from = response.context["filtered_from"]
-    assert page_obj.paginator.count == 11
-    assert filtered_from is None  # No filter active
-
-    # Filtered to linked: shows 1, filtered_from = 11
-    response = browser.get(reverse("ui-alert-list"), {"scope": "linked"})
+    # Explicit scope="linked_open": shows 1, filtered_from = 11 (total)
+    response = browser.get(reverse("ui-alert-list"), {"scope": "linked_open"})
     assert response.status_code == 200
     page_obj = response.context["page_obj"]
     filtered_from = response.context["filtered_from"]
     assert page_obj.paginator.count == 1  # Filtered count is 1
     assert filtered_from == 11  # Unfiltered total
+    assert "(filtered from 11)" in _text(_body(response))
+
+    # scope="all" falls back to unlinked_open: shows 10 unlinked New alerts
+    response = browser.get(reverse("ui-alert-list"), {"scope": "all"})
+    assert response.status_code == 200
+    page_obj = response.context["page_obj"]
+    filtered_from = response.context["filtered_from"]
+    assert page_obj.paginator.count == 10  # Falls back to unlinked_open
+    assert filtered_from == 11  # Unfiltered total
+    assert "(filtered from 11)" in _text(_body(response))
 
 
 # --------------------------------------------------------------------------
@@ -1118,3 +1121,16 @@ def test_case_share_list_pagination(
     # Cross-org isolation: outsider cannot access org's case
     response = outsider_browser.get(reverse("ui-case-share-list", kwargs={"case_id": case.number}))
     assert response.status_code == 404
+
+
+def _body(response) -> str:
+    return response.content.decode()
+
+
+def _text(source: str) -> str:
+    """Rough visible text: unescape entities, drop tags, collapse whitespace."""
+    import html
+    import re
+
+    stripped = re.sub(r"<[^>]+>", " ", html.unescape(source))
+    return re.sub(r"\s+", " ", stripped).strip()
