@@ -148,7 +148,12 @@ def ids(db: None, analyst: User) -> dict[str, str]:
     procedure = Procedure.objects.create(
         case=case, pattern_id="T1059", pattern_name="Command Shell"
     )
-    playbook = Playbook.objects.filter(name="enrich-observable").first()
+    playbook = Playbook.objects.create(
+        owner_org=org,
+        name="authz-playbook",
+        trigger_event="observable.created",
+        config={"action": "python", "action_path": "enrichment_probe"},
+    )
     return {
         "case": str(case.id),
         "alert": str(_alert("Authz alert", ref="authz-ref", org=org).id),

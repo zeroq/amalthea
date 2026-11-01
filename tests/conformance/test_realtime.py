@@ -326,7 +326,9 @@ def test_status_changes_and_automation_results_are_published(
     bypassed the choke point the case would look idle while it was changing.
     """
     case = _case("Changing", org=analyst.org)
-    playbook = Playbook.objects.create(name="enrich", trigger_event="observable.created")
+    playbook = Playbook.objects.create(
+        name="enrich", owner_org=analyst.org, trigger_event="observable.created"
+    )
 
     def post_status() -> None:
         with django_capture_on_commit_callbacks(execute=True):  # type: ignore[operator]

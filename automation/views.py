@@ -15,8 +15,7 @@ Two rules the shapes follow:
   executor will actually accept (AC6.12-P2-c).
 
 Permissions: mutating endpoints (POST/PATCH/DELETE on playbooks, POST on run) require
-`IsAnalystOrAbove` (analyst/admin/superAdmin). Read endpoints allow any authenticated org member.
-`read-only` role is denied on all mutating operations.
+`IsAnalystOrAbove` (analyst/admin/superAdmin). Read endpoints deny `viewer` role.
 """
 
 from __future__ import annotations
@@ -30,14 +29,16 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-import identity.scoping
-from automation.dispatcher import TRIGGER_EVENTS, run_now
+from automation.dispatcher import TRIGGER_EVENTS, PlaybookOrgMismatch, run_now
 from automation.models import Playbook
 from automation.playbooks import ACTIONS, HTTP_METHODS, MAX_TIMEOUT_SECONDS, validate_config
 from automation.scripts_loader import discover_scripts
 from automation.services import PlaybookDeleteBlockedError, delete_playbook
 from core.serializers import automation_run_json, playbook_json
+from identity.audit import maybe_record_cross_org_read
+from identity.models import User
 from identity.permissions import IsAnalystOrAbove
+from identity.scoping import _is_superadmin, org_q, resolve_case, resolve_observable
 
 __all__ = ["playbook_collection", "playbook_detail", "playbook_meta", "playbook_run"]
 
@@ -56,6 +57,13 @@ def _not_found(what: str) -> Response:
     )
 
 
+def _denied(what: str) -> Response:
+    return Response(
+        {"type": "AuthorizationError", "message": f"{what} denied"},
+        status=status.HTTP_403_FORBIDDEN,
+    )
+
+
 def _as_uuid(value: Any) -> UUID | None:
     """Parse an identifier without letting a malformed one reach the ORM (a 400, not a 500)."""
     try:
@@ -64,23 +72,33 @@ def _as_uuid(value: Any) -> UUID | None:
         return None
 
 
-def _resolve(identifier: str) -> Playbook | None:
-    """A playbook by UUID first, then by name — the `idOrName` rule the rest of the surface uses."""
+def _resolve(identifier: str, user: User) -> Playbook | None:
+    """Resolve a playbook by UUID first, then by name, scoped to the user's organisation.
+
+    - UUID lookup is always attempted first, within the org scope.
+    - Name lookup is scoped to `org_q("owner_org", user)`. For non-superAdmins the per-org
+      constraint makes the name unique. For a superAdmin, two orgs can hold the same name; if
+      the name matches more than one row, return None (uniform 404) so the caller must use a UUID.
+    """
+    qs = Playbook.objects.select_related("owner_org").filter(org_q("owner_org", user))
     pk = _as_uuid(identifier)
     if pk is not None:
-        playbook = Playbook.objects.filter(pk=pk).first()
+        playbook = qs.filter(pk=pk).first()
         if playbook is not None:
             return playbook
-    return Playbook.objects.filter(name=str(identifier)).first()
+    # Name lookup scoped to org
+    matches = list(qs.filter(name=str(identifier)))
+    if len(matches) != 1:
+        # Zero matches → 404; more than one (superAdmin with same name across orgs) → uniform 404
+        return None
+    return matches[0]
 
 
-def _trigger_event_error(value: object) -> list[str] | None:
-    """Validate one `triggerEvent` against the dispatcher's vocabulary; `None` when acceptable."""
-    name = str(value or "").strip()
-    if not name:
-        return ["required"]
-    if name not in TRIGGER_EVENTS:
-        return [f"must be one of {', '.join(TRIGGER_EVENTS)}"]
+def _require_analyst(request: Request) -> Response | None:
+    """Reuse IsAnalystOrAbove and return the existing 403 envelope, or None if authorised."""
+    perm = IsAnalystOrAbove()
+    if not perm.has_permission(request, None):
+        return _denied(perm.message)
     return None
 
 
@@ -89,19 +107,27 @@ def _trigger_event_error(value: object) -> list[str] | None:
 def playbook_collection(request: Request) -> Response:
     """`GET /api/v1/playbook` lists; `POST` creates (201).
 
-    GET: any authenticated org member.
+    GET: `viewer` → 403. Otherwise org-scoped, `select_related("owner_org")`, order by owner org/name.
     POST: requires analyst role or above (IsAnalystOrAbove).
     """
     if request.method == "POST":
         # Apply write permission for create
-        perm = IsAnalystOrAbove()
-        if not perm.has_permission(request, None):
-            return Response(
-                {"type": "AuthorizationError", "message": perm.message},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        perm_result = _require_analyst(request)
+        if perm_result is not None:
+            return perm_result
         return _create_playbook(request)
-    return Response([playbook_json(p) for p in Playbook.objects.order_by("name")])
+
+    perm_result = _require_analyst(request)
+    if perm_result is not None:
+        return perm_result
+
+    user = request.user
+    qs = (
+        Playbook.objects.select_related("owner_org")
+        .filter(org_q("owner_org", user))
+        .order_by("owner_org__name", "name")
+    )
+    return Response([playbook_json(p) for p in qs])
 
 
 def _create_playbook(request: Request) -> Response:
@@ -110,7 +136,13 @@ def _create_playbook(request: Request) -> Response:
     name = str(payload.get("name") or "").strip()
     if not name:
         return _bad("name is required", {"name": ["required"]})
-    if Playbook.objects.filter(name=name[:200]).exists():
+
+    # Duplicate name check within the caller's org only
+    user_org = getattr(request.user, "org_id", None)
+    if (
+        user_org is not None
+        and Playbook.objects.filter(owner_org_id=user_org, name=name[:200]).exists()
+    ):
         return _bad("name already exists", {"name": ["already exists"]})
 
     trigger_error = _trigger_event_error(payload.get("triggerEvent"))
@@ -133,19 +165,26 @@ def _create_playbook(request: Request) -> Response:
         trigger_event=str(payload.get("triggerEvent") or "").strip(),
         is_active=is_active,
         config=dict(payload["config"]),
+        owner_org=request.user.org,
     )
     return Response(playbook_json(playbook), status=status.HTTP_201_CREATED)
+
+
+def _trigger_event_error(value: object) -> list[str] | None:
+    """Validate one `triggerEvent` against the dispatcher's vocabulary; `None` when acceptable."""
+    name = str(value or "").strip()
+    if not name:
+        return ["required"]
+    if name not in TRIGGER_EVENTS:
+        return [f"must be one of {', '.join(TRIGGER_EVENTS)}"]
+    return None
 
 
 @api_view(["GET"])
 @renderer_classes([JSONRenderer])
 def playbook_meta(request: Request) -> Response:
-    """`GET /api/v1/playbook/_meta` — the authoring vocabulary, read from the code (AC6.12-P2-c).
+    """`GET /api/v1/playbook/_meta` — the authoring vocabulary, read from the code (AC6.12-P2-c)."""
 
-    A hand-maintained list here would be a second source of truth for what a playbook may say, and
-    the two would drift the first time a script was added. Both halves are rendered from the
-    same objects dispatch and the executor read.
-    """
     scripts = discover_scripts()
     runnable_scripts = [
         {
@@ -182,23 +221,27 @@ def playbook_meta(request: Request) -> Response:
 def playbook_detail(request: Request, playbook_id: str) -> Response:
     """`GET|PATCH|DELETE /api/v1/playbook/{idOrName}`; DELETE removes the run history too.
 
-    GET: any authenticated org member.
+    GET: viewer → 403; cross-org → 404 (audited for superAdmin).
     PATCH/DELETE: requires analyst role or above (IsAnalystOrAbove).
-
-    DELETE is refused while a run is `Pending`/`Running`; terminal runs are deleted with the
-    playbook in the same transaction.
     """
-    playbook = _resolve(playbook_id)
+    perm_result = _require_analyst(request)
+    if perm_result is not None:
+        return perm_result
+
+    user = request.user
+    playbook = _resolve(playbook_id, user)
     if playbook is None:
         return _not_found("Playbook")
 
-    if request.method in ("PATCH", "DELETE"):
-        perm = IsAnalystOrAbove()
-        if not perm.has_permission(request, None):
-            return Response(
-                {"type": "AuthorizationError", "message": perm.message},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+    # Audit only reads: a cross-org PATCH/DELETE is already a write attempt, not a read.
+    if request.method == "GET" and _is_superadmin(user) and playbook.owner_org_id != user.org_id:
+        maybe_record_cross_org_read(
+            request,
+            actor=user,
+            target_obj=playbook,
+            target_type="Playbook",
+            target_id=str(playbook.id),
+        )
 
     if request.method == "DELETE":
         # `AutomationRun.playbook` is `PROTECT` (REVIEW M14), so the service deletes the terminal
@@ -225,11 +268,17 @@ def _update_playbook(playbook: Playbook, request: Request) -> Response:
     payload = request.data if isinstance(request.data, dict) else {}
     fields: list[str] = []
 
+    # Note: owner_org is immutable and never accepted in PATCH
     if "name" in payload:
         name = str(payload["name"] or "").strip()
         if not name:
             return _bad("name is required", {"name": ["required"]})
-        if Playbook.objects.exclude(pk=playbook.pk).filter(name=name[:200]).exists():
+        # Duplicate name check within the playbook's org only (exclude self).
+        if (
+            Playbook.objects.filter(owner_org_id=playbook.owner_org_id, name=name[:200])
+            .exclude(pk=playbook.pk)
+            .exists()
+        ):
             return _bad("name already exists", {"name": ["already exists"]})
         playbook.name = name[:200]
         fields.append("name")
@@ -260,6 +309,8 @@ def _update_playbook(playbook: Playbook, request: Request) -> Response:
 
     if not fields:
         return _bad("No updatable field supplied", {})
+
+    # owner_org is immutable — never accepted or reassigned
     playbook.save(update_fields=[*fields, "updated_at"])
     return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -269,8 +320,9 @@ def _update_playbook(playbook: Playbook, request: Request) -> Response:
 def playbook_run(request: Request, playbook_id: str) -> Response:
     """`POST /api/v1/playbook/{idOrName}/run` — enqueue exactly one manual run (202, plan §6.1).
 
-    The body names the subject, not the config: `{"case"?: idOrNumber, "observable"?: id}` with at
-    least one required. The run is queued on commit and its result lands in `output_log` **and** the
+    The body names the subject, not the config: `{"case": idOrNumber}` or
+    `{"observable": id}` with at least one required. The run is queued on commit and its result
+    lands in `output_log` **and** the
     case timeline exactly as a triggered run's does — `run_now` shares the worker and the feedback
     loop, only the key and `triggered_by` differ.
 
@@ -280,14 +332,11 @@ def playbook_run(request: Request, playbook_id: str) -> Response:
 
     Requires analyst role or above (IsAnalystOrAbove).
     """
-    perm = IsAnalystOrAbove()
-    if not perm.has_permission(request, None):
-        return Response(
-            {"type": "AuthorizationError", "message": perm.message},
-            status=status.HTTP_403_FORBIDDEN,
-        )
+    perm_result = _require_analyst(request)
+    if perm_result is not None:
+        return perm_result
 
-    playbook = _resolve(playbook_id)
+    playbook = _resolve(playbook_id, request.user)
     if playbook is None:
         return _not_found("Playbook")
 
@@ -299,7 +348,7 @@ def playbook_run(request: Request, playbook_id: str) -> Response:
 
     case = None
     if raw_case not in (None, ""):
-        case = identity.scoping.resolve_case(request.user, str(raw_case), write=True)
+        case = resolve_case(request.user, str(raw_case), write=True)
         if case is None:
             return _not_found("Case")
 
@@ -307,12 +356,16 @@ def playbook_run(request: Request, playbook_id: str) -> Response:
     if raw_observable not in (None, ""):
         pk = _as_uuid(raw_observable)
         if pk is not None:
-            observable = identity.scoping.resolve_observable(request.user, str(pk))
+            observable = resolve_observable(request.user, str(pk))
         if observable is None:
             return _not_found("Observable")
 
     try:
         run = run_now(playbook, case=case, observable=observable)
+    except PlaybookOrgMismatch:
+        # Org mismatch → uniform 404, no run created
+        return _not_found("Playbook")
     except ValueError as exc:
         return _bad(str(exc), {"case": [str(exc)]})
+
     return Response(automation_run_json(run), status=status.HTTP_202_ACCEPTED)

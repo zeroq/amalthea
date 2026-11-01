@@ -13,13 +13,14 @@ from django.urls import reverse
 
 from automation.models import AutomationRun, Playbook
 from core.enums import VIEWER_ROLE
-from identity.models import User
+from identity.models import Organisation, User
 
 pytestmark = pytest.mark.django_db
 
 
-def _playbook(name: str) -> Playbook:
+def _playbook(name: str, org: Organisation) -> Playbook:
     return Playbook.objects.create(
+        owner_org=org,
         name=name,
         trigger_event="observable.created",
         config={"action": "python", "action_path": "enrichment_probe"},
@@ -43,7 +44,7 @@ def _browser(user: User) -> Client:
 
 
 def test_list_shows_delete_for_a_playbook_with_terminal_runs(analyst: User) -> None:
-    playbook = _playbook("ui-terminal-runs")
+    playbook = _playbook("ui-terminal-runs", analyst.org)
     _run(playbook, status="Success", key="ui-terminal-1")
     _run(playbook, status="Failed", key="ui-terminal-2")
 
@@ -57,7 +58,7 @@ def test_list_shows_delete_for_a_playbook_with_terminal_runs(analyst: User) -> N
 
 
 def test_detail_warns_and_disables_delete_while_a_run_is_active(analyst: User) -> None:
-    playbook = _playbook("ui-active-runs")
+    playbook = _playbook("ui-active-runs", analyst.org)
     _run(playbook, status="Running", key="ui-active-1")
 
     html = (
@@ -74,7 +75,7 @@ def test_detail_warns_and_disables_delete_while_a_run_is_active(analyst: User) -
 
 
 def test_delete_with_terminal_runs_removes_the_playbook_and_history(analyst: User) -> None:
-    playbook = _playbook("ui-delete-terminal")
+    playbook = _playbook("ui-delete-terminal", analyst.org)
     first = _run(playbook, status="Success", key="ui-delete-terminal-1")
     second = _run(playbook, status="Failed", key="ui-delete-terminal-2")
     client = _browser(analyst)
@@ -90,7 +91,7 @@ def test_delete_with_terminal_runs_removes_the_playbook_and_history(analyst: Use
 
 
 def test_delete_with_an_active_run_is_refused_and_keeps_the_rows(analyst: User) -> None:
-    playbook = _playbook("ui-delete-blocked")
+    playbook = _playbook("ui-delete-blocked", analyst.org)
     run = _run(playbook, status="Pending", key="ui-delete-blocked-1")
     client = _browser(analyst)
 
@@ -109,7 +110,7 @@ def test_delete_with_an_active_run_is_refused_and_keeps_the_rows(analyst: User) 
 
 
 def test_viewer_is_not_offered_a_playbook_delete_control(analyst: User) -> None:
-    playbook = _playbook("ui-viewer-no-delete")
+    playbook = _playbook("ui-viewer-no-delete", analyst.org)
     _run(playbook, status="Success", key="ui-viewer-no-delete-1")
     viewer = User.objects.create(username="playbook-del-viewer", org=analyst.org, role=VIEWER_ROLE)
     client = _browser(viewer)

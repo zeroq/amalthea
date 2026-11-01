@@ -89,7 +89,7 @@
         {% endif %}
       </div>
       {% if task.description %}
-      <div class="body md" style="overflow-x: auto; max-width: 100%;">{{ task.description|markdown }}</div>
+      <div class="body md">{{ task.description|markdown }}</div>
       {% else %}
       <p class="empty">No description.</p>
       {% endif %}

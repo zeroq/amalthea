@@ -190,7 +190,9 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     ("observables", "ObservableSuggestion", "reviewed_by"): models.SET_NULL,
     ("observables", "ObservableSuggestion", "case"): models.CASCADE,
     ("observables", "ObservableSuggestion", "observable"): models.SET_NULL,
-    # ---- AutomationRun: the Module D ledger -------------------------------------------
+    # ---- Playbook / AutomationRun: the Module D ledger --------------------------------
+    # PROTECT: a tenant that still owns playbooks cannot be deleted out from under them.
+    ("automation", "Playbook", "owner_org"): models.PROTECT,
     ("automation", "AutomationRun", "playbook"): models.PROTECT,
     # A finished (or failed) run is audit evidence; it outlives the case that triggered it.
     ("automation", "AutomationRun", "case"): models.SET_NULL,
@@ -276,7 +278,7 @@ def test_fk_audit_covers_the_whole_model_inventory() -> None:
     # out of `OWN_APPS`, and `EXPECTED_ON_DELETE` already pins the exact set, so a bump here is
     # always a real change.
     # 68 = 67 + Case.source_template (template provenance, SET_NULL).
-    assert len(actual) == 68, f"expected the full FK set, found only {len(actual)}"
+    assert len(actual) == 69, f"expected the full FK set, found only {len(actual)}"
 
 
 @pytest.mark.django_db
@@ -428,7 +430,9 @@ def test_delete_semantics_deleting_a_case_unlinks_alerts_and_automation_runs(
         case=case,
         owner_org=default_org,
     )
-    playbook = Playbook.objects.create(name="enrich", trigger_event="alert.created")
+    playbook = Playbook.objects.create(
+        name="enrich", owner_org=default_org, trigger_event="alert.created"
+    )
     run = AutomationRun.objects.create(
         case=case, playbook=playbook, playbook_name="enrich", idempotency_key="k1"
     )
@@ -519,7 +523,9 @@ def test_delete_semantics_vocabulary_rows_are_protected(
     from observables.models import Observable
 
     if delete_target == "playbook":
-        playbook = Playbook.objects.create(name="enrich", trigger_event="alert.created")
+        playbook = Playbook.objects.create(
+            name="enrich", owner_org=default_org, trigger_event="alert.created"
+        )
         case = Case.objects.create(title="c", status=vocab["case_status"], owner_org=default_org)
         AutomationRun.objects.create(
             case=case, playbook=playbook, playbook_name="enrich", idempotency_key="k2"
@@ -588,7 +594,9 @@ def test_delete_semantics_deleting_an_observable_removes_links_but_keeps_runs(
         owner_org=default_org,
     )
     link = CaseObservable.objects.create(case=case, observable=observable)
-    playbook = Playbook.objects.create(name="vt", trigger_event="observable.created")
+    playbook = Playbook.objects.create(
+        name="vt", owner_org=default_org, trigger_event="observable.created"
+    )
     run = AutomationRun.objects.create(
         case=case,
         playbook=playbook,

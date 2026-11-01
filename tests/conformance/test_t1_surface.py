@@ -863,7 +863,13 @@ def test_non_string_credentials_are_the_same_400_never_a_500(
         # `REST_FRAMEWORK` dict, and pinning the rate here makes "101st request throttled" a
         # property of this test instead of of whatever `settings/base.py` currently says.
         "DEFAULT_THROTTLE_RATES": {"anon": "100/min", "user": "1000/min"},
-    }
+    },
+    # Unknown usernames still run `set_password()` once so the response time cannot enumerate
+    # accounts. With the production Argon2 hasher that costs ~1s per attempt, so 101 attempts
+    # span more than the throttle's 60s window and older requests age out before the limit is
+    # reached. A fast hasher keeps all 101 attempts inside the window; this test is about the
+    # throttle, not password hashing.
+    PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"],
 )
 def test_the_101st_anonymous_login_from_one_client_is_throttled() -> None:
     """The `anon` 100/min `AnonRateThrottle` plan §8 asks for on login, pinned to request 101.

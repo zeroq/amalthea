@@ -62,7 +62,7 @@ REQUIRED_INDEXES: dict[str, dict[str, tuple[str, ...]]] = {
         "ar_celery_task_idx": ("celery_task_id",),
         "ar_pending_idx": ("created_at",),
     },
-    "playbook": {"playbook_trigger_idx": ("trigger_event", "is_active")},
+    "playbook": {"playbook_org_trigger_idx": ("owner_org_id", "trigger_event", "is_active")},
     "observable": {"obs_created_at_idx": ("created_at",)},
     "task": {"task_created_at_idx": ("created_at",)},
 }

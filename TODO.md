@@ -544,7 +544,7 @@ semantics, so they need a policy call before a fix.
   `test_viewer_readonly_api.py`) fail when a new mutating route is added without a gate. Every surface
   named below is now denied; the exemption list is exactly `{login, logout, ui-password-change}`.
   Verification: `docs/verification/VERIFY-2026-10-12-viewer-role-enforcement.md`.
-- [ ] **11.2 — M3: playbook action secrets are global and rendered in cleartext.** `Playbook` has **no
+- [x] **11.2 — M3: playbook action secrets are global and rendered in cleartext — DONE 2026-11-01.** `Playbook` had **no
   `owner_org`** (`automation/models.py:13`) and HTTP playbooks keep credentials in `config["headers"]`
   (`Authorization: Bearer …`); `playbook_edit`/`playbook_detail` render the full map to **any authenticated
   user of any org**. *Partial mitigation from 11.1:* a `viewer` can no longer reach `playbook_detail`'s
@@ -555,6 +555,12 @@ semantics, so they need a policy call before a fix.
   placeholder; (3) minimum: gate the GET views to `analyst`+ **and** mask header values. Note (3)
   conflicts with the D1 AC "round-trips headers", so the D1 test must change with it. Add a test asserting
   a viewer (and cross-tenant) GET never returns raw header values.
+  **PLANNED 2026-10-30:** [`PLAN-2026-10-30-playbook-tenant-scoping.md`](docs/planning/PLAN-2026-10-30-playbook-tenant-scoping.md).
+  Approved: Option A (org scope + viewer API denial); default-org backfill; per-org names; event-org
+  dispatch. Residual accepted: same-org analyst/admin cleartext until secret references/masking ship.
+  **DONE 2026-11-01:** 65/65 ACs met; full suite `3206 passed, 3 skipped`; `make check` green;
+  security audit **CONDITIONAL PASS** with unchanged accepted residuals
+  ([report](docs/security/SECURITY-2026-11-01-playbook-tenant-scoping.md)).
 - [x] **11.3 — L1: protocol-relative `href` survives the sanitizer — FIXED 2026-10-17.** `ui/markdown.py`
   registers a `markdown-it` core rule (`_strip_protocol_relative_links`, after the `inline` pass) that
   drops the `href` of any link whose target has an empty `urlsplit()` scheme **and** a `//` prefix: the

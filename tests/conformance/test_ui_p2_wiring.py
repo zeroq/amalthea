@@ -153,10 +153,13 @@ def test_alert_detail_renders_triage_control(browser: Client, alert) -> None:
     assert 'name="status"' in body
     # Vocabulary values, never the pk.
     assert 'value="Triaged"' in body
-    assert 'value="Dismissed"' in body
     assert f'value="{alert.status.pk}"' not in body
-    # "Imported" is system-assigned and is not offered.
+    # "Imported" is system-assigned and is not offered. `Dismissed` is a Closed-stage status,
+    # so it belongs to the dedicated close modal (which requires a verdict and comment), not
+    # the free-form status select.
     assert 'value="Imported"' not in body
+    assert 'value="Dismissed"' not in body
+    assert 'data-modal-open="alert-close-modal"' in body
 
 
 def test_alert_status_post_changes_status_and_audits(browser: Client, alert) -> None:
@@ -193,7 +196,7 @@ def test_alert_status_post_writes_case_timeline(browser: Client, alert, case) ->
     alert.case = case
     alert.save(update_fields=["case"])
     url = reverse("ui-alert-status", kwargs={"alert_id": alert.id})
-    browser.post(url, {"status": "Dismissed"})
+    browser.post(url, {"status": "Triaged"})
 
     assert case.timeline_events.filter(kind="status-changed").exists()
 

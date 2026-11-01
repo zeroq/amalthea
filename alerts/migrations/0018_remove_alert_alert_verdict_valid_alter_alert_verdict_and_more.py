@@ -8,7 +8,10 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('alerts', '0017_alert_payload_ssdeep'),
-        ('cases', '0021_case_source_template_setnull'),
+        # No cases edge: these operations touch only alerts.alert (Remove/Alter/Add on
+        # `verdict`). A cases edge at 0021 would chain a cases/0003_seed rollback into alerts
+        # (guard: tests/conformance/test_seed_migrations.py
+        #  ::test_h3_2_rolling_back_a_seed_unapplies_nothing_in_another_app).
         ('identity', '0012_ingestiontoken_deactivated_at'),
         ('ingest', '0003_ingestion_source_organisation'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),

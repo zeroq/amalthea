@@ -241,6 +241,7 @@ def _make_runs(case: Case, count: int) -> int:
     from automation.models import AutomationRun, Playbook
 
     playbook, _ = Playbook.objects.get_or_create(
+        owner_org=case.owner_org,
         name="Edge Playbook",
         defaults={"trigger_event": "observable.created", "config": {"action": "http"}},
     )

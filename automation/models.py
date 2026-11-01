@@ -15,7 +15,15 @@ ACTIVE_RUN_STATUSES: tuple[str, ...] = ("Pending", "Running")
 
 
 class Playbook(UUIDModel, TimeStampedModel):
-    name = models.CharField(max_length=200, unique=True)
+    owner_org = models.ForeignKey(
+        "identity.Organisation",
+        on_delete=models.PROTECT,
+        related_name="playbooks",
+        # The composite index below starts with owner_org, so the implicit FK index would be
+        # a redundant prefix copy (test_indexes flags it).
+        db_index=False,
+    )
+    name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     trigger_event = models.CharField(max_length=100)
     is_active = models.BooleanField(default=True)
@@ -23,9 +31,19 @@ class Playbook(UUIDModel, TimeStampedModel):
 
     class Meta:
         db_table = "playbook"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["owner_org", "name"],
+                name="playbook_org_name_uniq",
+            ),
+        ]
         indexes = [
             # Resolved on every domain event, so this lookup is on the hot path (C2).
-            models.Index(fields=["trigger_event", "is_active"], name="playbook_trigger_idx"),
+            # owner_org is the left prefix so dispatch can filter by org first.
+            models.Index(
+                fields=["owner_org", "trigger_event", "is_active"],
+                name="playbook_org_trigger_idx",
+            ),
         ]
 
     def __str__(self) -> str:

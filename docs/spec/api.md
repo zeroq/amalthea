@@ -306,15 +306,26 @@ code paths that deliberately circumvent the service layer.
 
 - **An Amalthea extension** — TheHive 5 / `thehive4py` 2.1.0 expose no playbook route (deviation
   **P12-2**).
+- **Tenant scope:** playbooks are org-owned (ADR-004). Collection/detail/run are scoped with
+  `org_q("owner_org", user)`; a cross-org UUID/name is the uniform **404**. `superAdmin` sees all
+  orgs; a cross-org detail GET is written to `AuditLog` (collection reads are not audited). Because
+  names are unique per org, a superAdmin name lookup that matches more than one org is **404** —
+  use the UUID.
+- **Viewer denial:** `GET` collection and detail return **403** for the `viewer` role because
+  `config` is inlined; `GET playbook/_meta` remains readable.
 - Create: required `name`, `triggerEvent` ∈ `TRIGGER_EVENTS`, `config` (validated by
   `automation.playbooks.validate_config` — mirrors `executor.execute` exactly). 201 `playbook_json`.
+  `ownerOrg` is stamped from `request.user.org`; an `ownerOrg`/`owner_org` field in the body is
+  ignored. Duplicate names are rejected **within that org only**.
+- `playbook_json` includes `ownerOrg` (UUID) and `ownerOrgName` alongside the existing fields;
+  `config` remains inlined for same-org analyst/admin/superAdmin callers.
 - `config` validation at write time (AC6.12-P2-b):
   - `http`: `url` required; `method` ∈ standard HTTP verbs; `headers` string→string map; `timeoutSeconds` positive number ≤ 30.
   - `python`: `action_path` must name a discovered script (resolver `automation.scripts_loader.script_names()`).
   - Unknown `action` ⇒ 400.
 - `_meta` (AC6.12-P2-c): `{"triggerEvents":[…], "actions":[{"action":"http",…},{"action":"python","scripts":[{"name":…,"description":…,"triggerHint":…}]}], "actionNames":["http","python"]}` — rendered from the live script folder so the UI pickers cannot drift.
-- `playbook/<idOrName>`: lookup by UUID or `name`; PATCH ⇒ **204 no body** (deviation); DELETE ⇒ **204** after deleting the playbook and its run history in one transaction; **400** while any `AutomationRun` is `Pending`/`Running` (a live worker may still write to it). Terminal run history is removed with the playbook; the FK stays `PROTECT` as a backstop.
-- `playbook/<idOrName>/run`: body `{"case"?: idOrNumber, "observable"?: id}` with at least one required; returns **202** + run JSON (`triggeredBy: "manual"`); enqueues a non-deduping run (key `manual:<uuid4>`); result lands in `output_log` **and** case timeline (AC6.12-P2-a).
+- `playbook/<idOrName>`: lookup by UUID or `name` within the caller's org scope; PATCH ⇒ **204 no body** (deviation); DELETE ⇒ **204** after deleting the playbook and its run history in one transaction; **400** while any `AutomationRun` is `Pending`/`Running` (a live worker may still write to it). Terminal run history is removed with the playbook; the FK stays `PROTECT` as a backstop. `ownerOrg` is immutable; a PATCH cannot move it.
+- `playbook/<idOrName>/run`: body `{"case"?: idOrNumber, "observable"?: id}` with at least one required; returns **202** + run JSON (`triggeredBy: "manual"`); enqueues a non-deduping run (key `manual:<uuid4>`); result lands in `output_log` **and** case timeline (AC6.12-P2-a). The playbook, case, and observable must belong to the same organisation; an org mismatch is a **404** and creates no `AutomationRun`.
 
 ## Identity — `user`, `organisation` (T2/Phase P1)
 

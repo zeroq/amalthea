@@ -17,9 +17,10 @@ Three properties are the whole design, and each one is a bug the plan named befo
 from __future__ import annotations
 
 import hashlib
+import logging
 from functools import partial
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from django.db import transaction
 from django.utils import timezone
@@ -29,6 +30,8 @@ from cases.ledger import append_timeline_event
 from cases.models import Case, TimelineEvent
 from core.events import AlertIngested, CaseStatusChanged, ObservableCreated, TaskCompleted
 from observables.models import Observable
+
+logger = logging.getLogger(__name__)
 
 #: Event name → the `Playbook.trigger_event` a playbook binds to.
 TRIGGER_EVENTS: tuple[str, ...] = (
@@ -49,17 +52,6 @@ def _event_name(event: object) -> str:
     if isinstance(event, TaskCompleted):
         return "task.completed"
     raise TypeError(f"no trigger event name for {type(event).__name__}")
-
-
-def idempotency_key(playbook: str, event_name: str, subject: str) -> str:
-    """A stable key for "this playbook, triggered by this subject".
-
-    Stable means *deterministic from its inputs*: no timestamp, no UUID, no counter. Two triggers
-    for the same subject must produce the same string, because that string is what the unique
-    constraint collapses them on.
-    """
-    digest = hashlib.sha256(f"{playbook}\x1f{event_name}\x1f{subject}".encode()).hexdigest()
-    return f"{event_name}:{playbook}:{digest[:32]}"
 
 
 def _subject_id(event: object) -> str:
@@ -96,6 +88,95 @@ def _case_id(event: object) -> str | None:
     return str(value) if value else None
 
 
+class PlaybookOrgMismatch(ValueError):  # noqa: N818 — plan/API name is part of the contract
+    """The playbook and the subject case do not belong to the same organisation."""
+
+
+def _event_org_id(event: object) -> UUID | None:
+    """Resolve the event subject's organisation ID, or None if unresolvable.
+
+    Sources per event type (plan D3):
+      * AlertIngested        → Alert.owner_org
+      * CaseStatusChanged    → Case.owner_org
+      * ObservableCreated    → Case.owner_org (via linked case)
+      * TaskCompleted        → Task.case.owner_org
+    """
+    event_name = _event_name(event)
+
+    if event_name == "alert.ingested":
+        alert_id = getattr(event, "alert_id", None)
+        if not alert_id:
+            logger.warning(
+                "automation.dispatch: AlertIngested without alert_id, cannot resolve org"
+            )
+            return None
+        from alerts.models import Alert
+
+        org = Alert.objects.filter(pk=alert_id).values_list("owner_org_id", flat=True).first()
+        if org is None:
+            logger.warning(
+                "automation.dispatch: AlertIngested alert_id=%s has no owner_org", alert_id
+            )
+        return org if org is not None else None
+
+    elif event_name == "case.status_changed":
+        case_id = getattr(event, "case_id", None)
+        if not case_id:
+            logger.warning(
+                "automation.dispatch: CaseStatusChanged without case_id, cannot resolve org"
+            )
+            return None
+        from cases.models import Case
+
+        org = Case.objects.filter(pk=case_id).values_list("owner_org_id", flat=True).first()
+        if org is None:
+            logger.warning(
+                "automation.dispatch: CaseStatusChanged case_id=%s has no owner_org", case_id
+            )
+        return org if org is not None else None
+
+    elif event_name == "observable.created":
+        case_id = getattr(event, "case_id", None)
+        if not case_id:
+            logger.warning(
+                "automation.dispatch: ObservableCreated without case_id, cannot resolve org"
+            )
+            return None
+        from cases.models import Case
+
+        org = Case.objects.filter(pk=case_id).values_list("owner_org_id", flat=True).first()
+        if org is None:
+            logger.warning(
+                "automation.dispatch: ObservableCreated case_id=%s has no owner_org", case_id
+            )
+        return org if org is not None else None
+
+    elif event_name == "task.completed":
+        task_id = getattr(event, "task_id", None)
+        if not task_id:
+            logger.warning("automation.dispatch: TaskCompleted without task_id, cannot resolve org")
+            return None
+        from cases.models import Task
+
+        org = Task.objects.filter(pk=task_id).values_list("case__owner_org_id", flat=True).first()
+        if org is None:
+            logger.warning("automation.dispatch: TaskCompleted task_id=%s has no case org", task_id)
+        return org if org is not None else None
+
+    return None
+
+
+def idempotency_key(playbook: str, event_name: str, subject: str) -> str:
+    """A stable key for "this playbook, triggered by this subject".
+
+    Stable means *deterministic from its inputs*: no timestamp, no UUID, no counter. Two triggers
+    for the same subject must produce the same string, because that string is what the unique
+    constraint collapses them on.
+    """
+    digest = hashlib.sha256(f"{playbook}\x1f{event_name}\x1f{subject}".encode()).hexdigest()
+    return f"{event_name}:{playbook}:{digest[:32]}"
+
+
 @transaction.atomic
 def dispatch(event: object) -> list[AutomationRun]:
     """Create a pending `AutomationRun` per bound playbook, then queue the workers on commit.
@@ -105,11 +186,22 @@ def dispatch(event: object) -> list[AutomationRun]:
     the insert is skipped rather than raced.
     """
     event_name = _event_name(event)
-    subject = _idempotent_subject(event)
-    playbooks = list(Playbook.objects.filter(trigger_event=event_name, is_active=True))
+    org_id = _event_org_id(event)
+    if org_id is None:
+        logger.warning("automation.dispatch: cannot resolve owner org for %s", event_name)
+        return []
+
+    playbooks = list(
+        Playbook.objects.filter(
+            owner_org_id=org_id,
+            trigger_event=event_name,
+            is_active=True,
+        ).order_by("name")
+    )
     if not playbooks:
         return []
 
+    subject = _idempotent_subject(event)
     created: list[AutomationRun] = []
     for playbook in playbooks:
         key = idempotency_key(playbook.name, event_name, subject)
@@ -143,6 +235,7 @@ def dispatch(event: object) -> list[AutomationRun]:
     return created
 
 
+@transaction.atomic
 def run_now(
     playbook: Playbook,
     *,
@@ -176,6 +269,12 @@ def run_now(
             raise ValueError("the observable is not linked to a case, so there is nowhere to write")
         case = link.case
 
+    # The branch above guarantees a case: either the caller passed one, or the observable's link
+    # supplied it (and a linkless observable raised). Keep the invariant explicit for the type check.
+    assert case is not None
+    if playbook.owner_org_id != case.owner_org_id:
+        raise PlaybookOrgMismatch("playbook and case belong to different organisations")
+
     run = AutomationRun.objects.create(
         case=case,
         playbook=playbook,
@@ -199,6 +298,7 @@ def record_result(run: AutomationRun, result: Any, *, subject_label: str = "") -
     This is the feedback loop AGENTS.md Module D promises: the result is in `output_log` **and** on
     the ledger, so an analyst reading the case does not have to know that automation exists.
     """
+
     ok = bool(getattr(result, "ok", False))
     run.status = "Success" if ok else "Failed"
     run.output_log = str(getattr(result, "output_log", ""))

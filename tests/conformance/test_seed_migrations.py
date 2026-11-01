@@ -42,6 +42,10 @@ def migrate(targets: list[tuple[str, str]]) -> None:
     MigrationExecutor(connection).migrate(targets)
 
 
+def _leaves() -> list[tuple[str, str]]:
+    return MigrationLoader(None, ignore_no_migrations=True).graph.leaf_nodes()
+
+
 # An *executed* seed rollback is a SQLite-only proof, and the reason is the engine, not a
 # preference. Round-3's H3-2 fix made the seed migrations' dependency graph plan-safe on
 # every engine, but *executing* a rollback replays historical model state: rolling back
@@ -125,11 +129,16 @@ def test_m10_rolling_back_a_seed_migration_deletes_no_rows(app_label: str, name:
     before = set(model.objects.values_list("id", flat=True))
     assert before, "the seed must have inserted something for this test to mean anything"
 
-    migrate([(app_label, parent)])
+    try:
+        migrate([(app_label, parent)])
 
-    assert set(model.objects.values_list("id", flat=True)) == before, (
-        f"M10: rolling back {app_label}/{name} deleted rows"
-    )
+        assert set(model.objects.values_list("id", flat=True)) == before, (
+            f"M10: rolling back {app_label}/{name} deleted rows"
+        )
+    finally:
+        # A schema rollback is not undone by pytest's data-only teardown. Restore the graph's
+        # leaves so the *next* transactional test can deserialize rows against HEAD's schema.
+        migrate(_leaves())
 
 
 @pytest.mark.django_db

@@ -40,13 +40,16 @@ _PREVIOUS_STAGE_ATTR = "_previous_stage"
 _PREVIOUS_TASK_STATUS_ATTR = "_previous_task_status"
 
 
-def playbooks_for(event_name: str, *, only_active: bool = True) -> list[Playbook]:
-    """The playbooks bound to `event_name`, in a deterministic order.
+def playbooks_for(
+    event_name: str, *, owner_org_id: UUID, only_active: bool = True
+) -> list[Playbook]:
+    """The playbooks bound to `event_name` for one organisation, in a deterministic order.
 
-    Ordered by `name` rather than left to the database: two playbooks bound to the same trigger must
-    fire in the same sequence on every replay, or the ledger's ordering is not reproducible.
+    `owner_org_id` is required: playbook lookup is never global after ADR-009. Ordered by `name`
+    rather than left to the database: two playbooks bound to the same trigger must fire in the
+    same sequence on every replay, or the ledger's ordering is not reproducible.
     """
-    queryset = Playbook.objects.filter(trigger_event=event_name)
+    queryset = Playbook.objects.filter(trigger_event=event_name, owner_org_id=owner_org_id)
     if only_active:
         queryset = queryset.filter(is_active=True)
     return list(queryset.order_by("name"))

@@ -138,6 +138,7 @@ class TestPlaybookRoundTripHTTP:
         """GET /edit shows stored HTTP config pre-selected."""
         # Create an HTTP playbook via UI POST
         playbook = Playbook.objects.create(
+            owner_org=org,
             name="http-roundtrip",
             description="Test HTTP",
             trigger_event="observable.created",
@@ -220,6 +221,7 @@ class TestPlaybookRoundTripHTTP:
         """
         payload = '</textarea><img src=x onerror="alert(1)">'
         playbook = Playbook.objects.create(
+            owner_org=org,
             name="http-xss",
             description="Test textarea breakout",
             trigger_event="observable.created",
@@ -245,6 +247,7 @@ class TestPlaybookRoundTripHTTP:
     def test_header_count_is_bounded(self, client_admin: Client, org: Organisation) -> None:
         """A form-controlled ``header_count`` must not drive an unbounded server-side loop."""
         playbook = Playbook.objects.create(
+            owner_org=org,
             name="http-headers-dos",
             description="Header count cap",
             trigger_event="observable.created",
@@ -278,6 +281,7 @@ class TestPlaybookRoundTripHTTP:
     ) -> None:
         """Only GET/POST are routed to the edit view (no DELETE/PUT)."""
         playbook = Playbook.objects.create(
+            owner_org=org,
             name="http-methods",
             description="Method guard",
             trigger_event="observable.created",
@@ -292,6 +296,7 @@ class TestPlaybookRoundTripHTTP:
     ) -> None:
         """POST unchanged form data → config unchanged (no-op round-trip)."""
         playbook = Playbook.objects.create(
+            owner_org=org,
             name="http-noop",
             description="Test HTTP noop",
             trigger_event="observable.created",
@@ -354,6 +359,7 @@ class TestPlaybookRoundTripHTTP:
     ) -> None:
         """Header order is preserved through GET→POST cycle."""
         playbook = Playbook.objects.create(
+            owner_org=org,
             name="http-headers-order",
             trigger_event="observable.created",
             is_active=True,
@@ -398,6 +404,7 @@ class TestPlaybookRoundTripPython:
     ) -> None:
         """GET /edit shows stored Python config pre-selected."""
         playbook = Playbook.objects.create(
+            owner_org=org,
             name="python-roundtrip",
             description="Test Python",
             trigger_event="alert.ingested",
@@ -439,6 +446,7 @@ class TestPlaybookRoundTripPython:
     ) -> None:
         """POST unchanged Python form data → config unchanged."""
         playbook = Playbook.objects.create(
+            owner_org=org,
             name="python-noop",
             trigger_event="task.completed",
             is_active=True,
@@ -486,6 +494,7 @@ class TestPlaybookEditAuthz:
         a viewer gets the uniform 404 on GET as well as on POST.
         """
         playbook = Playbook.objects.create(
+            owner_org=org,
             name="authz-test",
             trigger_event="observable.created",
             config={"action": "http", "url": "https://example.com", "method": "GET"},
@@ -500,6 +509,7 @@ class TestPlaybookEditAuthz:
     ) -> None:
         """Read-only (viewer) user POST to edit is rejected (uniform 404)."""
         playbook = Playbook.objects.create(
+            owner_org=org,
             name="authz-test-post",
             trigger_event="observable.created",
             config={"action": "http", "url": "https://example.com", "method": "GET"},
@@ -527,6 +537,7 @@ class TestPlaybookEditAuthz:
     def test_analyst_user_post_edit_denied(self, client_analyst: Client, org: Organisation) -> None:
         """Analyst can read the edit form but cannot save it (P5 authz tightening)."""
         playbook = Playbook.objects.create(
+            owner_org=org,
             name="analyst-edit",
             trigger_event="observable.created",
             config={"action": "http", "url": "https://example.com", "method": "GET"},
@@ -600,8 +611,9 @@ class TestPlaybookCreateStillWorks:
         resp = _post_form(client_admin, url, form_values)
         assert resp.status_code == 200
 
-        # Verify created
+        # Verify created and stamped with the caller's organisation
         pb = Playbook.objects.get(name="new-http-pb")
+        assert pb.owner_org_id == org.id
         assert pb.config["action"] == "http"
         assert pb.config["url"] == "https://api.test.com/{observable}"
         assert pb.config["method"] == "POST"

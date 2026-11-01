@@ -191,11 +191,12 @@ def test_observable_detail_offers_a_viewer_no_edit_or_delete(
 
 
 def test_playbook_list_offers_a_viewer_no_authoring_links(
-    viewer_browser: Client, analyst_browser: Client
+    viewer_browser: Client, analyst_browser: Client, org: Organisation
 ) -> None:
     from automation.models import Playbook
 
     playbook = Playbook.objects.create(
+        owner_org=org,
         name="aff-ordering-playbook",
         trigger_event="observable.created",
         config={"action": "python"},

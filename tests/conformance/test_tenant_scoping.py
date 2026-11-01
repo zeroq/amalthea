@@ -733,13 +733,9 @@ _GLOBAL_READ_ROUTES: set[str] = {
     "case-template-collection-slash",
     "case-template-detail",
     "case-template-detail-slash",
-    # Automation definitions (global)
-    "playbook-collection",
-    "playbook-collection-slash",
+    # Playbook authoring vocabulary is code-derived, not tenant data.
     "playbook-meta",
     "playbook-meta-slash",
-    "playbook-detail",
-    "playbook-detail-slash",
     # Identity (user/org are global resources, but access-controlled)
     "user-current",
     "user-current-slash",
@@ -789,12 +785,9 @@ _UI_GLOBAL_READ_ROUTES: set[str] = {
     "ui-tag-create",
     "ui-tag-detail",
     "ui-tag-delete",
-    # Playbooks are global automation definitions
-    "ui-playbook-list",
+    # Playbook create is admin-only, so a generic analyst GET is 404 by role rather than by org.
+    # List/detail/edit are org-scoped and exercised by the tenant read conformance below.
     "ui-playbook-create",
-    "ui-playbook-detail",
-    "ui-playbook-edit",
-    "ui-playbook-delete",
     # Settings (superAdmin only - global management views)
     "ui-settings-organisations",
     "ui-settings-organisations-edit",
@@ -1147,6 +1140,15 @@ class TestRouteEnumerationConformance:
         # Create a dummy file in storage
         default_storage.save(self.attachment1.path, ContentFile(b"test"))
 
+        from automation.models import Playbook
+
+        self.playbook1 = Playbook.objects.create(
+            name="Tenant API Playbook",
+            owner_org=self.org1,
+            trigger_event="observable.created",
+            config={"action": "python", "action_path": "enrichment_probe"},
+        )
+
         # Seed data in org2 (for cross-org tests)
         self.case2 = _mk_case("Case Org2", self.org2)
         self.alert2 = _mk_alert("Alert Org2", self.org2, "ref-org2-1")
@@ -1237,6 +1239,8 @@ class TestRouteEnumerationConformance:
             "case-collection-slash",
             "alert-list",
             "alert-list-slash",
+            "playbook-collection",
+            "playbook-collection-slash",
             "query-api",
             "query-api-slash",
         }
@@ -1386,6 +1390,8 @@ class TestRouteEnumerationConformance:
             "observable-detail": {"observable_id": str(self.obs1.id)},
             "procedure-detail": {"procedure_id": str(self.proc1.id)},
             "case-export": {"case_id": str(self.case1.id)},
+            "playbook-collection": {},
+            "playbook-detail": {"playbook_id": str(self.playbook1.id)},
             "query-api": {},
         }
         # Add -slash variants with same params
@@ -1552,6 +1558,15 @@ class TestUIRouteEnumerationConformance:
             case=self.case1, title="Event 1", description="Note", date=timezone.now()
         )
 
+        from automation.models import Playbook
+
+        self.playbook1 = Playbook.objects.create(
+            name="Tenant Enumeration Playbook",
+            owner_org=self.org1,
+            trigger_event="manual",
+            config={"action": "python", "action_path": "enrichment_probe"},
+        )
+
         # Create an attachment for case-attachment-download/detail test
         from django.core.files.base import ContentFile
         from django.core.files.storage import default_storage
@@ -1633,6 +1648,7 @@ class TestUIRouteEnumerationConformance:
             "ui-case-create",
             "ui-observable-list",
             "ui-automation-list",
+            "ui-playbook-list",
             "ui-sources-list",
             "ui-password-change",
         }
@@ -1740,6 +1756,9 @@ class TestUIRouteEnumerationConformance:
             "ui-observable-detail": {"observable_id": str(self.obs1.id)},
             "ui-observable-edit": {"observable_id": str(self.obs1.id)},
             "ui-automation-list": {},
+            "ui-playbook-list": {},
+            "ui-playbook-detail": {"playbook_id": str(self.playbook1.id)},
+            "ui-playbook-edit": {"playbook_id": str(self.playbook1.id)},
             "ui-sources-list": {},
             "ui-settings-source-detail": {"source_id": str(self.source1.id)},
         }
@@ -1833,6 +1852,7 @@ class TestWriteRouteEnumerationConformance:
 
         self.playbook1 = Playbook.objects.create(
             name="Test Playbook",
+            owner_org=default_org,
             description="Test playbook for conformance testing",
             trigger_event="observable_created",
             is_active=True,
@@ -2150,6 +2170,7 @@ class TestWriteRouteEnumerationConformance:
             "procedure-bulk-delete": {},
             "task-bulk-update": {},
             "playbook-run": {"playbook_id": str(self.playbook1.id)},
+            "playbook-detail": {"playbook_id": str(self.playbook1.id)},
             "alert-import": {"alert_id": str(self.alert1.id)},
             "alert-import-into": {"alert_id": str(self.alert1.id), "case_id": str(self.case1.id)},
             "alert-merge": {"alert_id": str(self.alert1.id), "case_id": str(self.case1.id)},
@@ -2591,6 +2612,7 @@ class TestP4WriteEnforcement:
 
         playbook = Playbook.objects.create(
             name="test-playbook",
+            owner_org=org1,
             trigger_event="manual",
             config={
                 "action": "python",
@@ -2656,6 +2678,7 @@ class TestP4WriteEnforcement:
         case2 = _mk_case("Case2", org2)
         playbook = Playbook.objects.create(
             name="test-playbook",
+            owner_org=org1,
             trigger_event="manual",
             config={
                 "action": "python",
@@ -2685,6 +2708,7 @@ class TestP4WriteEnforcement:
         obs2 = _mk_observable("10.0.0.2", org2)
         playbook = Playbook.objects.create(
             name="test-playbook",
+            owner_org=org1,
             trigger_event="manual",
             config={
                 "action": "python",
@@ -2711,6 +2735,7 @@ class TestP4WriteEnforcement:
         case1 = _mk_case("Case1", org1)
         playbook = Playbook.objects.create(
             name="test-playbook",
+            owner_org=org1,
             trigger_event="manual",
             config={
                 "action": "python",
@@ -2921,6 +2946,15 @@ class TestUITenantScoping:
             case=self.shared_case, organisation=self.org2, permissions={"read": True}
         )
 
+        from automation.models import Playbook
+
+        self.playbook1 = Playbook.objects.create(
+            name="Tenant UI Playbook",
+            owner_org=self.org1,
+            trigger_event="observable.created",
+            config={"action": "python", "action_path": "enrichment_probe"},
+        )
+
         # Seed data in org2
         self.case2 = _mk_case("Case Org2", self.org2)
         self.alert2 = _mk_alert("Alert Org2", self.org2, "ref-ui-2")
@@ -2938,6 +2972,7 @@ class TestUITenantScoping:
 
         playbook = Playbook.objects.create(
             name="test-playbook",
+            owner_org=self.org1,
             trigger_event="manual",
             is_active=True,
             config={
@@ -2962,6 +2997,7 @@ class TestUITenantScoping:
 
         playbook = Playbook.objects.create(
             name="test-playbook-2",
+            owner_org=self.org1,
             trigger_event="observable_created",
             is_active=True,
             config={
@@ -2986,6 +3022,7 @@ class TestUITenantScoping:
 
         playbook = Playbook.objects.create(
             name="test-playbook-3",
+            owner_org=self.org1,
             trigger_event="manual",
             is_active=True,
             config={
@@ -3006,6 +3043,62 @@ class TestUITenantScoping:
         )
         run = AutomationRun.objects.first()
         assert run.case_id == self.case1.id
+
+    def test_ui_playbook_run_cross_org_playbook_returns_404(self) -> None:
+        """A playbook owned by another org is a uniform 404 before any case work."""
+        from automation.models import AutomationRun, Playbook
+
+        playbook = Playbook.objects.create(
+            name="org2-only-run",
+            owner_org=self.org2,
+            trigger_event="manual",
+            is_active=True,
+            config={"action": "python", "action_path": "enrichment_probe"},
+        )
+
+        resp = self.client1.post(
+            reverse("ui-playbook-run", kwargs={"playbook_id": playbook.id}),
+            {"case": str(self.case1.id)},
+        )
+        assert resp.status_code == 404
+        assert AutomationRun.objects.filter(playbook=playbook).count() == 0
+
+    def test_ui_playbook_delete_cross_org_returns_404(self) -> None:
+        """Deleting another org's playbook is a uniform 404 and leaves it intact."""
+        from automation.models import Playbook
+
+        playbook = Playbook.objects.create(
+            name="org2-only-delete",
+            owner_org=self.org2,
+            trigger_event="manual",
+            is_active=True,
+            config={"action": "python", "action_path": "enrichment_probe"},
+        )
+
+        resp = self.client1.post(reverse("ui-playbook-delete", kwargs={"playbook_id": playbook.id}))
+        assert resp.status_code == 404
+        assert Playbook.objects.filter(pk=playbook.pk).exists()
+
+    def test_ui_playbook_list_owner_org_column_is_superadmin_only(self) -> None:
+        """superAdmin sees the Organisation column; an org user does not."""
+        from automation.models import Playbook
+
+        Playbook.objects.create(
+            name="org2-inventory",
+            owner_org=self.org2,
+            trigger_event="manual",
+            config={"action": "python", "action_path": "enrichment_probe"},
+        )
+
+        resp_user = self.client1.get(reverse("ui-playbook-list"))
+        assert resp_user.status_code == 200
+        assert resp_user.context["show_owner_org"] is False
+        assert all(p.owner_org_id == self.org1.id for p in resp_user.context["playbooks"])
+
+        resp_super = self.super_client.get(reverse("ui-playbook-list"))
+        assert resp_super.status_code == 200
+        assert resp_super.context["show_owner_org"] is True
+        assert any(p.owner_org_id == self.org2.id for p in resp_super.context["playbooks"])
 
     # --- NEW-02: case_apply_template ---
     def test_ui_case_apply_template_cross_tenant_returns_404(self) -> None:
@@ -3143,11 +3236,12 @@ class TestUITenantScoping:
             pass  # Just verify no crash
 
     def test_ui_playbook_detail_runs_scoped(self) -> None:
-        """Playbook detail runs only show visible cases' runs (NEW-06)."""
+        """Playbook detail is org-scoped; its run rail still only shows visible cases (NEW-06)."""
         from automation.models import AutomationRun, Playbook
 
         playbook = Playbook.objects.create(
             name="Scoped Playbook",
+            owner_org=self.org1,
             trigger_event="manual",
             is_active=True,
             config={
@@ -3164,7 +3258,7 @@ class TestUITenantScoping:
             status="Success",
             idempotency_key="test-run-1",
         )
-        run2 = AutomationRun.objects.create(
+        AutomationRun.objects.create(
             case=self.case2,
             playbook=playbook,
             playbook_name=playbook.name,
@@ -3176,17 +3270,13 @@ class TestUITenantScoping:
         resp2 = self.client2.get(reverse("ui-playbook-detail", kwargs={"playbook_id": playbook.id}))
 
         assert resp1.status_code == 200
-        assert resp2.status_code == 200
+        # Cross-org playbook detail is a uniform 404, not a run-count oracle.
+        assert resp2.status_code == 404
 
-        # Org1 should only see run1
+        # Org1 sees the playbook (and its run history) but only runs on visible cases.
         runs1 = list(resp1.context["runs"])
         assert len(runs1) == 1
         assert runs1[0].id == run1.id
-
-        # Org2 should only see run2
-        runs2 = list(resp2.context["runs"])
-        assert len(runs2) == 1
-        assert runs2[0].id == run2.id
 
     # --- Core UI routes cross-tenant 404 ---
     def test_ui_case_detail_cross_tenant_returns_404(self) -> None:

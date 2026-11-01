@@ -249,6 +249,9 @@ def playbook_json(playbook: Playbook) -> dict[str, Any]:
     plain `triggerEvent`/`isActive` spellings the plan specifies rather than a recorded schema's.
     `config` is inlined: unlike `raw_payload` it is analyst-authored configuration, not adversary
     telemetry, and the edit form cannot round-trip what it cannot see.
+
+    Adds `ownerOrg` (org ID) and `ownerOrgName` so the API surface conveys scoping information
+    without exposing secret reference data.
     """
     return {
         "_id": str(playbook.id),
@@ -259,6 +262,8 @@ def playbook_json(playbook: Playbook) -> dict[str, Any]:
         "triggerEvent": playbook.trigger_event,
         "isActive": playbook.is_active,
         "config": playbook.config or {},
+        "ownerOrg": str(playbook.owner_org_id),
+        "ownerOrgName": playbook.owner_org.name if playbook.owner_org else None,
         "createdAt": _iso(playbook.created_at),
         "updatedAt": _iso(playbook.updated_at),
     }

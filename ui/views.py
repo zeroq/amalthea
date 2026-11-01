@@ -56,7 +56,7 @@ from alerts.escalation import (
     merge_alert_into_case,
 )
 from alerts.models import Alert, AlertStatus
-from automation.dispatcher import TRIGGER_EVENTS
+from automation.dispatcher import TRIGGER_EVENTS, PlaybookOrgMismatch
 from automation.models import ACTIVE_RUN_STATUSES, AutomationRun, Playbook
 from automation.playbooks import ACTIONS, HTTP_METHODS
 from automation.scripts_loader import discover_scripts, script_names
@@ -118,6 +118,7 @@ from identity.audit import maybe_record_cross_org_read
 from identity.models import AuditLog, IngestionToken, Organisation, User
 from identity.ratelimit import check_login_rate_limit, record_failed_login, record_successful_login
 from identity.scoping import (
+    _is_superadmin,
     case_visible_q,
     is_admin,
     is_case_owner,
@@ -2355,22 +2356,45 @@ def sources_list(request: HttpRequest) -> HttpResponse:
     )
 
 
+def _resolve_playbook_ui(identifier: str, user: User) -> Playbook | None:
+    """Resolve a playbook by UUID then name, always inside the caller's organisation scope.
+
+    Returns `None` for a cross-org row, a missing row, or (for a superAdmin) an ambiguous name
+    shared by two organisations. Callers turn `None` into the uniform 404.
+    """
+    qs = Playbook.objects.select_related("owner_org").filter(org_q("owner_org", user))
+    try:
+        pk: uuid.UUID | None = uuid.UUID(identifier)
+    except (TypeError, ValueError):
+        pk = None
+    if pk is not None:
+        playbook = qs.filter(pk=pk).first()
+        if playbook is not None:
+            return playbook
+    matches = list(qs.filter(name=identifier)[:2])
+    return matches[0] if len(matches) == 1 else None
+
+
 @login_required
 @require_GET
 def playbook_list(request: HttpRequest) -> HttpResponse:
-    """List all playbooks with their trigger, action, and last run status.
+    """List the caller's playbooks with trigger, action, and last run status.
 
     `run_count`/`active_run_count` are annotated once per row: the delete modal needs both to
     tell "past runs" from "still running", and deriving them in the template would be an N+1.
+    Viewers keep read access to this inventory; the template omits authoring links and the full
+    config map. superAdmin sees every organisation and gets an Organisation column.
     """
     active_runs = Q(runs__status__in=ACTIVE_RUN_STATUSES)
     queryset = (
-        Playbook.objects.annotate(
+        Playbook.objects.select_related("owner_org")
+        .filter(org_q("owner_org", request.user))
+        .annotate(
             run_count=Count("runs"),
             active_run_count=Count("runs", filter=active_runs),
         )
         .prefetch_related("runs")
-        .order_by("name")
+        .order_by("owner_org__name", "name")
     )
     page_obj = paginate(request, queryset)
     filtered_from = None  # No filters on this list
@@ -2382,6 +2406,7 @@ def playbook_list(request: HttpRequest) -> HttpResponse:
             page_obj=page_obj,
             playbooks=queryset,
             filtered_from=filtered_from,
+            show_owner_org=_is_superadmin(request.user),
         ),
     )
 
@@ -2431,8 +2456,8 @@ def playbook_create(request: HttpRequest) -> HttpResponse:
         messages.error(request, "Name is required.")
         return redirect("ui-playbook-create")
 
-    if Playbook.objects.filter(name=name[:200]).exists():
-        messages.error(request, "A playbook with that name already exists.")
+    if Playbook.objects.filter(owner_org=request.user.org, name=name[:200]).exists():
+        messages.error(request, "A playbook with that name already exists in your organisation.")
         return redirect("ui-playbook-create")
 
     trigger_event = (request.POST.get("trigger_event") or "").strip()
@@ -2452,6 +2477,7 @@ def playbook_create(request: HttpRequest) -> HttpResponse:
     is_active = request.POST.get("is_active") == "on"
 
     Playbook.objects.create(
+        owner_org=request.user.org,
         name=name[:200],
         description=description,
         trigger_event=trigger_event,
@@ -2467,22 +2493,28 @@ def playbook_create(request: HttpRequest) -> HttpResponse:
 def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
     """View or edit a playbook.
 
-    GET: any authenticated org member.
+    GET: any authenticated non-viewer org member; superAdmin may cross orgs (audited on GET).
     POST (update): requires admin or superAdmin role (P5 authz tightening).
     """
     from automation.playbooks import HTTP_METHODS
     from automation.scripts_loader import discover_scripts
-    from identity.scoping import case_visible_q
 
-    # Resolve by UUID or name
-    playbook = None
-    try:
-        import uuid
+    playbook = _resolve_playbook_ui(playbook_id, request.user)
+    if playbook is None:
+        raise Http404()
 
-        uuid.UUID(playbook_id)
-        playbook = get_object_or_404(Playbook, pk=playbook_id)
-    except ValueError:
-        playbook = get_object_or_404(Playbook, name=playbook_id)
+    if (
+        request.method == "GET"
+        and _is_superadmin(request.user)
+        and playbook.owner_org_id != request.user.org_id
+    ):
+        maybe_record_cross_org_read(
+            request,
+            actor=request.user,
+            target_obj=playbook,
+            target_type="Playbook",
+            target_id=str(playbook.id),
+        )
 
     if request.method == "GET":
         visible_cases = Case.objects.filter(case_visible_q(request.user))
@@ -2632,24 +2664,17 @@ def playbook_detail(request: HttpRequest, playbook_id: str) -> HttpResponse:
 def playbook_edit(request: HttpRequest, playbook_id: str) -> HttpResponse:
     """Edit a playbook.
 
-    GET: any authenticated org member.
+    GET: any authenticated non-viewer org member; superAdmin may cross orgs.
     POST: requires admin or superAdmin role (P5 authz tightening).
     """
     from automation.playbooks import HTTP_METHODS
     from automation.scripts_loader import discover_scripts
 
-    # Resolve by UUID or name
-    playbook = None
-    try:
-        import uuid
-
-        uuid.UUID(playbook_id)
-        playbook = get_object_or_404(Playbook, pk=playbook_id)
-    except ValueError:
-        playbook = get_object_or_404(Playbook, name=playbook_id)
+    playbook = _resolve_playbook_ui(playbook_id, request.user)
+    if playbook is None:
+        raise Http404()
 
     if request.method == "GET":
-        # GET: any authenticated org member
         config = playbook.config or {}
         scripts = discover_scripts()
         script_list = [
@@ -2725,17 +2750,14 @@ def playbook_delete(request: HttpRequest, playbook_id: str) -> HttpResponse:
     """Delete a playbook and its run history. Requires analyst role or above.
 
     Refused while any run is `Pending`/`Running`; terminal runs are deleted with the playbook.
+    Cross-org playbooks are a uniform 404 for non-superAdmins.
     """
     if request.user.role not in ("analyst", "admin", "superAdmin"):
         return render(request, "ui/404.html", status=404)
 
-    try:
-        import uuid
-
-        uuid.UUID(playbook_id)
-        playbook = get_object_or_404(Playbook, pk=playbook_id)
-    except ValueError:
-        playbook = get_object_or_404(Playbook, name=playbook_id)
+    playbook = _resolve_playbook_ui(playbook_id, request.user)
+    if playbook is None:
+        raise Http404()
 
     name = playbook.name
     try:
@@ -2769,19 +2791,19 @@ def playbook_delete(request: HttpRequest, playbook_id: str) -> HttpResponse:
 @login_required
 @require_POST
 def playbook_run(request: HttpRequest, playbook_id: str) -> HttpResponse:
-    """Manually trigger a playbook run. Requires analyst role or above."""
+    """Manually trigger a playbook run. Requires analyst role or above.
+
+    The playbook and the subject case must belong to the same organisation. Cross-org playbooks
+    are a uniform 404; a cross-org case is rejected before a run is created.
+    """
     if request.user.role not in ("analyst", "admin", "superAdmin"):
         return render(request, "ui/404.html", status=404)
 
     from automation.dispatcher import run_now
 
-    try:
-        import uuid
-
-        uuid.UUID(playbook_id)
-        playbook = get_object_or_404(Playbook, pk=playbook_id)
-    except ValueError:
-        playbook = get_object_or_404(Playbook, name=playbook_id)
+    playbook = _resolve_playbook_ui(playbook_id, request.user)
+    if playbook is None:
+        raise Http404()
 
     case_id = (request.POST.get("case") or "").strip()
     observable_id = (request.POST.get("observable") or "").strip()
@@ -2816,6 +2838,9 @@ def playbook_run(request: HttpRequest, playbook_id: str) -> HttpResponse:
 
     try:
         run = run_now(playbook, case=case, observable=observable)
+    except PlaybookOrgMismatch:
+        # Do not reveal which side belongs to which organisation.
+        return render(request, "ui/404.html", status=404)
     except ValueError as exc:
         messages.error(request, str(exc))
         return redirect("ui-playbook-detail", playbook_id=playbook_id)

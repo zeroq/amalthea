@@ -170,7 +170,9 @@ def test_task_status_domain_is_enforced(case: Case) -> None:
 
 @pytest.mark.django_db
 def test_automation_run_status_domain_is_enforced(case: Case) -> None:
-    playbook = Playbook.objects.create(name="enrich", trigger_event="alert.created")
+    playbook = Playbook.objects.create(
+        name="enrich", owner_org=case.owner_org, trigger_event="alert.created"
+    )
     run = AutomationRun.objects.create(
         case=case, playbook=playbook, playbook_name="enrich", trigger_event="alert.created"
     )
@@ -303,7 +305,9 @@ _SAMPLE_ROW_BUILDERS: dict[str, Callable[[User, Any], Any]] = {
         case=_SAMPLE_ROW_BUILDERS["case_record"](analyst, default_org), title="t"
     ),
     "automation_run": lambda analyst, default_org: AutomationRun.objects.create(
-        playbook=Playbook.objects.create(name="enum-probe", trigger_event="alert.created"),
+        playbook=Playbook.objects.create(
+            name="enum-probe", owner_org=default_org, trigger_event="alert.created"
+        ),
         playbook_name="enum-probe",
         idempotency_key="enum-probe",
         case=_SAMPLE_ROW_BUILDERS["case_record"](analyst, default_org),

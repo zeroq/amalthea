@@ -21,6 +21,7 @@
           <th scope="col">Name</th>
           <th scope="col">Trigger</th>
           <th scope="col">Action</th>
+          {% if show_owner_org %}<th scope="col">Organisation</th>{% endif %}
           <th scope="col">Active</th>
           <th scope="col">Last run</th>
           <th scope="col">Runs</th>
@@ -41,6 +42,7 @@
             <span class="dim mono">{{ pb.config.action_path }}</span>
             {% endif %}
           </td>
+          {% if show_owner_org %}<td>{{ pb.owner_org.name }}</td>{% endif %}
           <td>
             {% if pb.is_active %}
               <span class="pill pill-on">Active</span>

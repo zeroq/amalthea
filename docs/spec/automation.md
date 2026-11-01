@@ -23,8 +23,9 @@ classes).
 
 ## Authoring surface (T2/Phase P2)
 
-`Playbook` is a first-class model (`automation/models.py`). The authoring API is an **Amalthea
-extension** (deviation **P12-2** — TheHive 5 / `thehive4py` 2.1.0 expose no playbook route).
+`Playbook` is a first-class, **org-owned** model (`automation/models.py`). The authoring API is an
+**Amalthea extension** (deviation **P12-2** — TheHive 5 / `thehive4py` 2.1.0 expose no playbook
+route).
 
 | Path | Methods | View |
 |---|---|---|
@@ -32,6 +33,13 @@ extension** (deviation **P12-2** — TheHive 5 / `thehive4py` 2.1.0 expose no pl
 | `playbook/_meta` | GET | `playbook_meta` |
 | `playbook/<idOrName>` | GET, PATCH, DELETE | `playbook_detail` |
 | `playbook/<idOrName>/run` | POST | `playbook_run` |
+
+Every playbook row carries a required `owner_org`; names are unique per org. Create stamps
+`request.user.org`, and `owner_org` is immutable. Collection/detail resolve through
+`org_q("owner_org", user)`, so cross-org is the uniform 404. `superAdmin` sees all orgs and
+cross-org detail GETs are audited; a name lookup matching multiple orgs is 404 (use the UUID). A
+viewer is denied collection/detail API reads (403) because `config` is inlined; the UI playbook
+list stays readable but renders no config map or authoring links.
 
 **Deletion** (`automation.services.delete_playbook`): DELETE removes the playbook **and its run
 history** in one transaction. It is refused while any run is `Pending`/`Running`; terminal
@@ -61,11 +69,13 @@ runs and survive.
 `POST /playbook/<idOrName>/run` body `{"case"?:idOrNumber,"observable"?:id}` with at least one required.
 Returns 202 + run JSON (`triggeredBy: "manual"`); the run uses a non-deduping key `manual:<uuid4>`,
 runs the same worker, and its result lands in `output_log` **and** the case timeline (AC6.12-P2-a).
-The authoring/run routes are **role-gated** (`identity.permissions.IsAnalystOrAbove`: the `viewer`
-role denied — REST 403, UI 404) and **org-scoped** (ADR-004): the case is resolved with
-`identity.scoping.resolve_case(user, …, write=True)` and an observable with
-`identity.scoping.resolve_observable`, so a cross-tenant case/observable is the uniform **404** and
-no run row is created.
+The run/authoring routes are **role-gated** (`identity.permissions.IsAnalystOrAbove`: the `viewer`
+role denied — REST 403, UI 404) and **org-scoped** (ADR-004): the playbook is resolved with
+`org_q("owner_org", user)`, the case with `identity.scoping.resolve_case(user, …, write=True)`, and
+an observable with `identity.scoping.resolve_observable`. A cross-tenant playbook/case/observable
+is the uniform **404** and no run row is created. `run_now()` additionally raises
+`PlaybookOrgMismatch` if `playbook.owner_org_id != case.owner_org_id`, so even a superAdmin's
+break-glass read cannot cross the runtime org boundary.
 
 ## Dispatch (`automation/dispatcher.py::dispatch`)
 
@@ -75,8 +85,13 @@ no run row is created.
 2. `subject = _idempotent_subject(event)` — `ObservableCreated` yields `"{observable_id}:{case_id}"`
    (required: an observable shared across cases must fire once per *case*); every other event yields
    its subject id (`_subject_id` checks `observable_id`, `alert_id`, `case_id`, `task_id` in order).
-3. `playbooks = Playbook.objects.filter(trigger_event=event_name, is_active=True)`.
-4. per playbook, `AutomationRun.objects.get_or_create(idempotency_key=key, defaults={…})`:
+3. Resolve the **subject's organisation** from the event: `AlertIngested` → `Alert.owner_org`;
+   `CaseStatusChanged` → `Case.owner_org`; `ObservableCreated` → the linked `Case.owner_org` (one
+   event per case); `TaskCompleted` → `Task.case.owner_org`. If the org cannot be resolved, log a
+   warning and return `[]` — no playbooks, no runs (fail closed).
+4. `playbooks = Playbook.objects.filter(owner_org_id=org_id, trigger_event=event_name,
+   is_active=True)` via `automation.registry.playbooks_for(...)`.
+5. per playbook, `AutomationRun.objects.get_or_create(idempotency_key=key, defaults={…})`:
    - `idempotency_key(playbook_name, event_name, subject)` =
      `f"{event_name}:{playbook_name}:{sha256(f'{playbook}\x1f{event_name}\x1f{subject}').hexdigest()[:32]}"`
      — the key is derived from the event and subject only, never a timestamp, so a replayed
@@ -84,7 +99,7 @@ no run row is created.
    - defaults stamp `case_id`, `playbook`, the immutable `playbook_name` snapshot (survives a
      rename — REVIEW M14), `trigger_event`, `status="Pending"`, `triggered_by_observable_id`.
    - `was_created` false ⇒ the run already exists; skipped, not raced.
-5. after the loop, `transaction.on_commit(partial(execute_run.delay, str(run.id)))` per created run
+6. after the loop, `transaction.on_commit(partial(execute_run.delay, str(run.id)))` per created run
    (AC6.6: nothing is queued if the producing transaction rolls back; `run.id` is bound, not
    captured, so N playbooks queue N distinct calls).
 

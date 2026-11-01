@@ -92,7 +92,7 @@
                 <button type="button" class="icon-link icon-link-err" data-modal-open="delete-token-{{ token.id }}" aria-label="Delete token {{ token.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
 
               {% else %}
-                {# Active: deactivate + revoke + delete #}
+                {# Active: deactivate + revoke; delete is offered only after deactivation. #}
                 {% url 'ui-settings-token-deactivate' token.id as deactivate_url %}
                 {% with sid=token.id|stringformat:"s" %}
                 {% with modal_id="deactivate-token-"|add:sid form_id="deactivate-token-"|add:sid|add:"-form" %}
@@ -108,14 +108,6 @@
                 {% endwith %}
                 {% endwith %}
                 <button type="button" class="icon-link icon-link-err" data-modal-open="revoke-token-{{ token.id }}" aria-label="Revoke token {{ token.name }}" title="Revoke token {{ token.name }}"><i class="fa-solid fa-ban" aria-hidden="true"></i></button>
-
-                {% url 'ui-settings-token-delete' token.id as delete_url %}
-                {% with sid=token.id|stringformat:"s" %}
-                {% with modal_id="delete-token-"|add:sid form_id="delete-token-"|add:sid|add:"-form" %}
-                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_token_delete_form.html" title="Delete token?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
-                {% endwith %}
-                {% endwith %}
-                <button type="button" class="icon-link icon-link-err" data-modal-open="delete-token-{{ token.id }}" aria-label="Delete token {{ token.name }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
               {% endif %}
             </div>
           </td>

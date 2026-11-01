@@ -69,6 +69,7 @@ class TestPlaybookScriptPicker(TestCase):
         from automation.models import Playbook
 
         playbook = Playbook.objects.create(
+            owner_org=self.org,
             name="Test Playbook",
             trigger_event="observable.created",
             config={"action": "python", "action_path": "enrichment_probe"},
@@ -88,6 +89,7 @@ class TestPlaybookScriptPicker(TestCase):
         from automation.models import Playbook
 
         playbook = Playbook.objects.create(
+            owner_org=self.org,
             name="Test Playbook 2",
             trigger_event="observable.created",
             config={"action": "python", "action_path": "enrichment_probe"},
@@ -138,6 +140,7 @@ class TestPlaybookDetailScriptCard(TestCase):
         from automation.models import Playbook
 
         playbook = Playbook.objects.create(
+            owner_org=self.org,
             name="Python Playbook",
             trigger_event="observable.created",
             config={"action": "python", "action_path": "enrichment_probe"},
@@ -167,6 +170,7 @@ class TestPlaybookDetailScriptCard(TestCase):
         from automation.models import Playbook
 
         playbook = Playbook.objects.create(
+            owner_org=self.org,
             name="Python Playbook Escaped",
             trigger_event="observable.created",
             config={"action": "python", "action_path": "enrichment_probe"},
@@ -196,6 +200,7 @@ class TestPlaybookDetailScriptCard(TestCase):
         from automation.models import Playbook
 
         playbook = Playbook.objects.create(
+            owner_org=self.org,
             name="Missing Script Playbook",
             trigger_event="observable.created",
             config={"action": "python", "action_path": "nonexistent_script"},
@@ -216,6 +221,7 @@ class TestPlaybookDetailScriptCard(TestCase):
         from automation.models import Playbook
 
         playbook = Playbook.objects.create(
+            owner_org=self.org,
             name="HTTP Playbook",
             trigger_event="observable.created",
             config={"action": "http", "url": "https://example.com", "method": "GET"},
@@ -267,6 +273,7 @@ class TestPlaybookAuthzTightening(TestCase):
         from automation.models import Playbook
 
         playbook = Playbook.objects.create(
+            owner_org=self.org,
             name="Target Playbook",
             trigger_event="observable.created",
             config={"action": "python", "action_path": "enrichment_probe"},
@@ -285,6 +292,7 @@ class TestPlaybookAuthzTightening(TestCase):
         from automation.models import Playbook
 
         playbook = Playbook.objects.create(
+            owner_org=self.org,
             name="Edit Target",
             trigger_event="observable.created",
             config={"action": "python", "action_path": "enrichment_probe"},
@@ -301,6 +309,7 @@ class TestPlaybookAuthzTightening(TestCase):
         from automation.models import Playbook
 
         playbook = Playbook.objects.create(
+            owner_org=self.org,
             name="Edit Target 2",
             trigger_event="observable.created",
             config={"action": "python", "action_path": "enrichment_probe"},
@@ -339,6 +348,7 @@ class TestPlaybookAuthzTightening(TestCase):
         from automation.models import Playbook
 
         playbook = Playbook.objects.create(
+            owner_org=self.org,
             name="Admin Update Target",
             trigger_event="observable.created",
             config={"action": "python", "action_path": "enrichment_probe"},
@@ -377,6 +387,7 @@ class TestPlaybookAuthzTightening(TestCase):
         from automation.models import Playbook
 
         playbook = Playbook.objects.create(
+            owner_org=self.org,
             name="SuperAdmin Update Target",
             trigger_event="observable.created",
             config={"action": "python", "action_path": "enrichment_probe"},
@@ -415,6 +426,7 @@ class TestPlaybookAuthzTightening(TestCase):
         from automation.models import Playbook
 
         playbook = Playbook.objects.create(
+            owner_org=self.org,
             name="Viewer Update Target",
             trigger_event="observable.created",
             config={"action": "python", "action_path": "enrichment_probe"},
@@ -433,6 +445,7 @@ class TestPlaybookAuthzTightening(TestCase):
         from automation.models import Playbook
 
         playbook = Playbook.objects.create(
+            owner_org=self.org,
             name="Viewer Edit Target",
             trigger_event="observable.created",
             config={"action": "python", "action_path": "enrichment_probe"},
@@ -476,6 +489,7 @@ class TestPlaybookEmptyState(TestCase):
         from automation.models import Playbook
 
         playbook = Playbook.objects.create(
+            owner_org=self.org,
             name="Empty Dir Playbook",
             trigger_event="observable.created",
             config={"action": "python", "action_path": "enrichment_probe"},

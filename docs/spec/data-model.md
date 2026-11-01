@@ -339,9 +339,14 @@ analyst's position in the incident-response loop. The two axes are deliberately 
 ## automation
 
 ### Playbook (`playbook`, extends `UUIDModel` + `TimeStampedModel`)
-- `name` unique · `description` · `trigger_event`(100) · `is_active` (default True) · `config` —
-  JSONB.
-- Index `playbook_trigger_idx ("trigger_event","is_active")`.
+- `owner_org` — FK → `Organisation`, required `PROTECT`, `related_name="playbooks"` (ADR-004).
+- `name` unique **per organisation** via `UniqueConstraint(("owner_org","name"),
+  name="playbook_org_name_uniq")`; the same name may exist in different organisations ·
+  `description` · `trigger_event`(100) · `is_active` (default True) · `config` — JSONB.
+- `owner_org` is set at create and immutable; there is no move-between-orgs operation. Existing rows
+  were backfilled to `AMALTHEA_DEFAULT_ORG_NAME` by migration `automation.0008`.
+- Index `playbook_org_trigger_idx ("owner_org","trigger_event","is_active")` — dispatch filters by
+  owner org first.
 
 ### AutomationRun (`automation_run`, extends `UUIDModel` + `TimeStampedModel`)
 - `case` — FK → `Case`, `SET_NULL`, `db_index=False`, `related_name="automation_runs"` ·

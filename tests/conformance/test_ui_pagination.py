@@ -154,6 +154,7 @@ def _make_automation_runs(case: Case, count: int):
     from automation.models import AutomationRun, Playbook
 
     playbook, _ = Playbook.objects.get_or_create(
+        owner_org=case.owner_org,
         name="Test Playbook",
         defaults={"trigger_event": "observable.created", "config": {"action": "http"}},
     )
@@ -772,6 +773,7 @@ def test_existing_automation_list_still_works(
     from automation.models import AutomationRun, Playbook
 
     playbook, _ = Playbook.objects.get_or_create(
+        owner_org=case.owner_org,
         name="Test Playbook",
         defaults={"trigger_event": "observable.created", "config": {"action": "http"}},
     )

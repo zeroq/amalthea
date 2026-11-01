@@ -156,7 +156,9 @@ def test_h3_automation_run_idempotency_key_is_unique(case: Case) -> None:
 
     from ._schema import unique_keys
 
-    playbook = Playbook.objects.create(name="h3-enrich", trigger_event="alert.created")
+    playbook = Playbook.objects.create(
+        name="h3-enrich", owner_org=case.owner_org, trigger_event="alert.created"
+    )
     # Rolled back unconditionally: when the database *fails* to refuse the duplicate the second
     # INSERT succeeds, and a guard that detaches the UNIQUE must still be able to rebuild the
     # table afterwards. A committed duplicate would turn the guard's own restore into an

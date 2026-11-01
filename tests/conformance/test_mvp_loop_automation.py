@@ -96,15 +96,14 @@ def source(db: None, analyst: User) -> IngestionSource:
 
 
 @pytest.fixture
-def mail_playbook(db: None) -> Playbook:
-    """Bind the enrichment probe to every new observable.
+def mail_playbook(analyst: User, db: None) -> Playbook:
+    """Bind the enrichment probe to every new observable in the analyst's organisation.
 
     `trigger_event="observable.created"` with no type filter is the coarse binding the MVP needs;
     type-scoped bindings are a configuration feature, not a code one.
-
-    Uses get_or_create to avoid conflicts with the seed migration that creates "enrich-mail".
     """
     return Playbook.objects.get_or_create(
+        owner_org=analyst.org,
         name="enrich-mail",
         defaults={
             "description": "Look up a newly extracted artifact",
@@ -112,7 +111,7 @@ def mail_playbook(db: None) -> Playbook:
             "is_active": True,
             "config": {
                 "action": "python",
-                "action_path": "amalthea.automation.executor.enrichment_probe",
+                "action_path": "enrichment_probe",
             },
         },
     )[0]
@@ -334,6 +333,7 @@ def test_a_failing_action_records_failure_without_raising(
 ) -> None:
     """AC6.4 — a playbook that cannot run yields `Failed` and an error, and the loop continues."""
     Playbook.objects.create(
+        owner_org=analyst.org,
         name="broken",
         trigger_event="observable.created",
         is_active=True,

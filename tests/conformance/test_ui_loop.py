@@ -588,6 +588,7 @@ def test_the_automation_page_shows_runs_and_their_errors(
 ) -> None:
     """A failed playbook must be legible here, not just a red dot on the dashboard."""
     Playbook.objects.create(
+        owner_org=analyst.org,
         name="broken",
         trigger_event="observable.created",
         is_active=True,
