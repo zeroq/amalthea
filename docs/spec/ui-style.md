@@ -241,3 +241,13 @@ This document is only a convention if the build enforces it. The guards live in
 tokens, `outline: none`, tab scrollbar, cheat-sheet modal rule, filter input rule) and
 `tests/conformance/test_ui_loop.py` (severity text pairing, list-surface markup). A change that breaks a
 rule here must update this document and the guard in the same wave; a new convention must add a guard.
+
+## 8. Global search
+
+- No header search form; Search is a rail entry below Cases.
+- `/search` page owns the form.
+- Shortcut: `/` focuses `#global-search-q` when present (keys.js); `s` navigates to Search.
+- Results page: `ui/templates/ui/search.html` with type tabs (`All`, `Cases`, `Alerts`, `Observables`).
+- Highlighting: `{{ value|highlight:query }}` filter in `ui_tags.py` emits safe `<mark>` only.
+- CSS: `.search-hit mark` uses dark-theme accent palette with `color-mix` for WCAG-AA contrast; no animation.
+- Form is plain `GET`, works without HTMX/JS (progressive enhancement).

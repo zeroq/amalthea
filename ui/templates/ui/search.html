@@ -1,0 +1,56 @@
+{% extends "ui/base.html" %}
+{% load ui_tags %}
+{% block title %}Search · Amalthea{% endblock %}
+{% block heading %}Search{% endblock %}
+
+{% block content %}
+<div class="card">
+  <form class="global-search inline-form search-form" method="get" action="{% url 'ui-search' %}" role="search">
+    <label class="sr-only" for="global-search-q">Search cases, alerts and observables</label>
+    <input id="global-search-q" name="q" type="search" value="{{ query }}" placeholder="Search cases, alerts, observables…" autocomplete="off"{% if not query %} autofocus{% endif %}>
+    <input type="hidden" name="type" value="{{ type }}">
+    <button class="btn btn-primary" type="submit">Search</button>
+  </form>
+
+  {% if query %}
+    <p class="search-query dim">Results for <strong>{{ query }}</strong></p>
+  {% endif %}
+
+  {% if not query %}
+    <div class="card-section">
+      <p class="empty">
+        Search cases, alerts and observables. Try a case number, title, hash, IP, domain, or username.
+      </p>
+    </div>
+  {% else %}
+    <nav class="search-tabs" aria-label="Search result types">
+      <a class="btn btn-sm{% if type == 'all' %} btn-primary{% endif %}"
+         href="{% url 'ui-search' %}?q={{ query|urlencode }}&type=all"
+         {% if type == 'all' %}aria-current="page"{% endif %}>
+        All <span class="count">{{ counts.case|add:counts.alert|add:counts.observable }}</span>
+      </a>
+      <a class="btn btn-sm{% if type == 'case' %} btn-primary{% endif %}"
+         href="{% url 'ui-search' %}?q={{ query|urlencode }}&type=case"
+         {% if type == 'case' %}aria-current="page"{% endif %}>
+        Cases <span class="count">{{ counts.case }}</span>
+      </a>
+      <a class="btn btn-sm{% if type == 'alert' %} btn-primary{% endif %}"
+         href="{% url 'ui-search' %}?q={{ query|urlencode }}&type=alert"
+         {% if type == 'alert' %}aria-current="page"{% endif %}>
+        Alerts <span class="count">{{ counts.alert }}</span>
+      </a>
+      <a class="btn btn-sm{% if type == 'observable' %} btn-primary{% endif %}"
+         href="{% url 'ui-search' %}?q={{ query|urlencode }}&type=observable"
+         {% if type == 'observable' %}aria-current="page"{% endif %}>
+        Observables <span class="count">{{ counts.observable }}</span>
+      </a>
+    </nav>
+
+    {% if type == "all" %}
+      {% include "ui/_search_all.html" with sections=sections query=query is_superadmin=is_superadmin %}
+    {% else %}
+      {% include "ui/_search_typed.html" with section=sections.0 page_obj=page_obj query=query is_superadmin=is_superadmin %}
+    {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

@@ -23,11 +23,12 @@
     { key: "g", label: "Go to Dashboard" },
     { key: "a", label: "Alerts list" },
     { key: "c", label: "Cases list" },
+    { key: "s", label: "Search" },
     { key: "n", label: "New case" },
     { key: "o", label: "Observables list" },
     { key: "r", label: "Automation runs" },
     { key: "p", label: "Playbooks list" },
-    { key: "s", label: "Sources" },
+    { key: "d", label: "Sources" },
     { key: "t", label: "Tags list" },
     { key: "m", label: "Case templates" },
     { key: "x", label: "Taxonomy" },
@@ -40,10 +41,11 @@
     g: "/",
     a: "/alerts",
     c: "/cases",
+    s: "/search",
     o: "/observables",
     r: "/automation",
     p: "/automation/playbooks",
-    s: "/sources",
+    d: "/sources",
     t: "/tags",
     m: "/case-templates",
     x: "/taxonomy",
@@ -103,9 +105,11 @@
       return;
     }
 
-    // `/` focuses the first text field on the page, the way most search-first tools behave.
+    // `/` focuses the global search input if present, otherwise falls back to the first text field.
     if (event.key === "/" && !event.shiftKey) {
-      var field = document.querySelector("main input:not([type=hidden]), main textarea");
+      var field =
+        document.getElementById("global-search-q") ||
+        document.querySelector("main input:not([type=hidden]), main textarea");
       if (field) {
         event.preventDefault();
         field.focus();

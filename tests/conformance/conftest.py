@@ -1,17 +1,11 @@
 """Fixtures shared across the conformance suite.
 
-Only two things live here, and both are things several modules would otherwise copy verbatim:
+The autouse ``_reset_throttle_cache`` fixture clears DRF's process-wide throttle counters before
+every test. The remaining fixtures are the plain authenticated/unauthenticated clients plus an
+optional superAdmin user.
 
-* ``_reset_throttle_cache`` (autouse) — DRF's ``AnonRateThrottle`` keys into the process-wide
-  LocMemCache, which survives between tests, so a long run trips 429s that have nothing to do
-  with the assertion at hand. ``test_query_api`` and ``test_webhook_hardening`` each grew the
-  same guard locally; making it suite-wide is the same fix applied once. It is safe for the
-  tests that already clear the cache themselves (they clear it again inside the test body, and
-  fixture setup runs first).
-* ``analyst`` / ``api`` / ``anonymous_api`` — the plain authenticated and unauthenticated
-  clients. A test module that defines its own of any of these shadows this one (pytest
-  precedence: module beats conftest), so the suites that seed a different organisation are
-  unaffected.
+A test module that defines its own fixture of the same name shadows this one (pytest precedence:
+module beats conftest), so suites that seed a different organisation are unaffected.
 """
 
 from __future__ import annotations
@@ -51,3 +45,22 @@ def api(analyst: User) -> APIClient:
 @pytest.fixture
 def anonymous_api() -> APIClient:
     return APIClient()
+
+
+@pytest.fixture
+def super_admin(db: None) -> User:
+    """SuperAdmin user for cross-org tests.
+
+    Uses its own organisation so a test can create data in a *different* org and verify the
+    break-glass read path. Set ``role="superAdmin"`` explicitly; ``is_superuser`` alone is Django
+    admin state and is not what ``identity.scoping`` consults.
+    """
+    org = Organisation.objects.create(name="Test SuperAdmin Org")
+    return User.objects.create(
+        login="superadmin",
+        username="superadmin",
+        email="superadmin@example.net",
+        org=org,
+        role="superAdmin",
+        is_active=True,
+    )

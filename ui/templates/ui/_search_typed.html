@@ -1,0 +1,58 @@
+{% load ui_tags %}
+{% if section.hits %}
+  {% include "ui/_list_summary.html" with page_obj=page_obj entity_name=section.kind entity_name_plural=section.kind|add:"s" %}
+  <div class="table-wrap">
+    <table class="data-table search-hit">
+      <caption class="sr-only">{{ section.kind|title }} results</caption>
+      <thead>
+        <tr>
+          {% if section.kind == "case" %}
+          <th scope="col">Case</th>
+          {% elif section.kind == "alert" %}
+          <th scope="col">Title</th>
+          {% else %}
+          <th scope="col">Value</th>
+          {% endif %}
+          {% if is_superadmin %}
+          <th scope="col">Organisation</th>
+          {% endif %}
+          <th scope="col">Subtitle</th>
+          <th scope="col">Severity</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for hit in section.hits %}
+        <tr>
+          <td>
+            {% if section.kind == "case" %}
+              <a class="mono" href="{% url 'ui-case-detail' hit.number %}">
+                <span class="case-number">{{ hit.number|highlight_case_number:query }}</span> · {{ hit.title|highlight:query }}
+              </a>
+            {% elif section.kind == "alert" %}
+              <a class="mono" href="{% url 'ui-alert-detail' hit.id %}">{{ hit.title|highlight:query }}</a>
+            {% else %}
+              <a class="mono" href="{% url 'ui-observable-detail' hit.id %}">{{ hit.title|highlight:query }}</a>
+            {% endif %}
+          </td>
+          {% if is_superadmin %}
+          <td>
+            {% if hit.org_name %}
+              <span class="dim" title="{{ hit.org_name }}">{{ hit.org_name }}</span>
+            {% endif %}
+          </td>
+          {% endif %}
+          <td>{{ hit.subtitle|highlight:query }}</td>
+          <td>
+            {% if hit.severity is not None %}
+              <span class="sev sev-{{ hit.severity|sev_class }}">{{ hit.severity|sev_label }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "ui/_pager.html" with entity_name=section.kind|title %}
+{% else %}
+  <p class="empty">No matches for '{{ query }}'.</p>
+{% endif %}

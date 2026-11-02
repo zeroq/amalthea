@@ -81,6 +81,28 @@ ADR-008: the path names no source. The credential is the only routing fact — i
   sourceRef,date,created_at,ingestion_source,created,warnings` — **201 on first store, 200 on
   replay**.
 
+## Search — `GET /api/v1/search` (+ no-slash twin)
+
+Simple, org-scoped substring search across cases, alerts and observables. It shares the UI's
+`query.search` service and does **not** change the TheHive-compatible `POST /api/v1/query` DSL.
+
+- Params: `q` (trimmed, clipped to 200 chars, max 8 whitespace-separated terms), `type` ∈
+  `all|case|alert|observable` (default `all`), `page` (typed only, default `1`), `per_page` (typed
+  only, default `50`, bound `1–200`). Invalid values are a named 400; a page past the end clamps to
+  the last page. `type=all` ignores `page`/`per_page`.
+- Semantics: case-insensitive substring, AND across terms and OR across fields; a digit-only term
+  (with optional `#`) matches `Case.number` exactly. Cases use `case_visible_q` (own org or share);
+  alerts/observables use `org_q`. Blank `q` returns 200 with zero counts and `sections=[]`.
+- Envelope: `{query, type, total, counts: {case, alert, observable}, sections: [...]}` and an
+  `X-Total` header equal to the sum of counts. Every section has
+  `{type, total, page, per_page, has_next, results}`; every result has
+  `{type, id, number, title, subtitle, severity, status, timestamp, organisation}`. `type=all`
+  returns the top 10 per kind with `page=1`, `per_page=10`, `has_next=false`; typed requests return
+  one section. `timestamp` is ISO-8601 or `null`; `number` is `null` for alerts/observables.
+- Raw text only: the API never returns `<mark>` or HTML fragments.
+- SuperAdmin cross-org API hits write one `cross_org_read_search` audit row per `(kind, target org)`
+  with a representative target id. UI search does not write per-search audit rows.
+
 ## Alerts
 
 | Path | Methods | View |
@@ -480,6 +502,7 @@ Routes are named `ui-*` in `ui/urls.py`.
 
 | Path | Methods | View | Name |
 |---|---|---|---|
+| `search` | GET | `global_search` | `ui-search` |
 | `cases/new` | GET, POST | `case_create` | `ui-case-create` |
 | `cases/<case_id>` | GET | `case_detail` | `ui-case-detail` |
 | `sources` | GET | `sources_list` | `ui-sources-list` |

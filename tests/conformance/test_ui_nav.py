@@ -140,3 +140,101 @@ def test_non_nav_keys_render_as_well() -> None:
     """`/` and `?` are documented too — the table must list them even though they have no route."""
     rendered = _rendered_cheatsheet()
     assert _NON_NAV_KEYS <= set(rendered)
+
+
+def test_account_menu_lives_in_the_rail_foot() -> None:
+    """Source-level check that account menu elements live inside the rail-foot div of base.html."""
+    text = BASE_HTML.read_text(encoding="utf-8")
+    foot_start = text.index('<div class="rail-foot">')
+    foot_end = text.index("</div>", foot_start)
+    foot = text[foot_start:foot_end]
+    assert 'class="rail-user"' in foot
+    assert 'class="rail-user-trigger"' in foot
+    assert 'class="rail-user-name"' in foot
+    assert 'class="rail-user-menu"' in foot
+
+
+def test_top_nav_is_gone() -> None:
+    """The top navigation bar has been removed from base.html (including user reference)."""
+    text = BASE_HTML.read_text(encoding="utf-8")
+    assert '<header class="top-nav"' not in text
+    assert "top-nav-user" not in text
+
+
+def test_search_rail_link_sits_after_cases() -> None:
+    """Source-level order check: ui-case-list → ui-search → next rail-sep.
+
+    Assert <span class="k">s</span> Search and the ui-search aria-current condition.
+    """
+    text = BASE_HTML.read_text(encoding="utf-8")
+
+    # Parse the rail-links <ul> element to check link ordering
+    ul_start = text.index('<ul class="rail-links">') + len('<ul class="rail-links">')
+    ul_end = text.index("</ul>", ul_start)
+    rail_section = text[ul_start:ul_end]
+
+    # Find all <li> elements with links inside the rail
+    li_pattern = re.compile(r"<li[^>]*>(.*?)</li>", re.S)
+    lis = li_pattern.findall(rail_section)
+
+    # Extract keys from span.k inside each li
+    key_pattern = re.compile(r'<span class="k">([^<])</span>')
+    li_keys = []
+    for li in lis:
+        m = key_pattern.search(li)
+        if m:
+            li_keys.append(m.group(1))
+
+    # Expected order: g, a, c, s, then rail-sep
+    c_index = li_keys.index("c") if "c" in li_keys else -1
+    s_index = li_keys.index("s") if "s" in li_keys else -1
+    assert c_index >= 0 and s_index >= 0, "Both Cases and Search rail links must be present"
+    assert c_index < s_index, (
+        f"Search rail link (index {s_index}) must appear after Cases (index {c_index}), "
+        f"but order is {li_keys}"
+    )
+
+    search_start = text.index("{% url 'ui-search' %}")
+    search_end = text.index("</a>", search_start)
+    search_link = text[search_start:search_end]
+    assert '<span class="k">s</span> Search' in search_link, (
+        "Search rail link must advertise the s keycap"
+    )
+    assert 'aria-current="page"' in search_link, (
+        "Search rail link must have aria-current='page' logic"
+    )
+
+
+def test_sources_uses_d_shortcut() -> None:
+    """Assert Sources uses the d shortcut in rail, keys.js ROUTES, and keys.js CHEATSHEET."""
+    text = BASE_HTML.read_text(encoding="utf-8")
+
+    # Rail link in base.html must use d for Sources
+    assert '<span class="k">d</span> Sources' in text, (
+        "base.html must advertise the d keycap for Sources"
+    )
+
+    # keys.js ROUTES must map d to /sources
+    routes = _routes()
+    assert routes.get("d") == "/sources", (
+        f"keys.js ROUTES must map d to /sources, got {routes.get('d')!r}"
+    )
+
+    # keys.js CHEATSHEET must have { key: 'd', label: 'Sources' }
+    cheat = _js_cheatsheet()
+    assert cheat.get("d") == "Sources", (
+        f"keys.js CHEATSHEET must have d → Sources, got {cheat.get('d')!r}"
+    )
+
+
+def test_search_uses_s_shortcut() -> None:
+    """Assert Search uses the s shortcut in ROUTES and CHEATSHEET."""
+    routes = _routes()
+    assert routes.get("s") == "/search", (
+        f"keys.js ROUTES must map s to /search, got {routes.get('s')!r}"
+    )
+
+    cheat = _js_cheatsheet()
+    assert cheat.get("s") == "Search", (
+        f"keys.js CHEATSHEET must have s → Search, got {cheat.get('s')!r}"
+    )

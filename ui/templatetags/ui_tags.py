@@ -11,14 +11,20 @@ the product and must never be conveyed by hue alone (WCAG 1.4.1).
 `reason_label`/`is_unresolved` do the same job for `ingest.mapping`'s field warnings: the alert page and
 the re-map dialog both render them, and the wording plus the "produced no value" set live next to the
 engine that emits them rather than in two templates.
+
+`highlight` renders safe `<mark>` around query term matches in UI text. It escapes all source text
+and matching text, `re.escape`s each term, emits only `<mark>` around matches, and never returns
+raw query HTML. Handles blank query, empty text, nested/overlapping terms, and HTML payloads safely.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from django import template
+from django.utils.html import escape
 from django.utils.safestring import mark_safe
 
 from core.enums import SEVERITY_CHOICES, SEVERITY_MAX, SEVERITY_MIN
@@ -165,3 +171,55 @@ def is_unresolved(reason: Any) -> bool:
     *not* one of them, because that row did get a value.
     """
     return str(reason) in UNRESOLVED_REASONS
+
+
+@register.filter
+def highlight(value: Any, query: Any) -> str:
+    """Safe `<mark>` highlighting for query terms in UI text.
+
+    - Escapes all source text and matching text.
+    - `re.escape`s each term so literal substring match.
+    - Emits only `<mark>` around matches; never returns raw query HTML.
+    - Handles blank query (returns escaped text only), empty text, nested/overlapping terms
+      (no double-highlight), and HTML payloads (source text is escaped, not rendered).
+    - The raw text is fully preserved for assistive tech; only the matched segments are
+      wrapped in `<mark>`.
+    """
+    try:
+        text = str(value or "")
+    except (TypeError, ValueError):
+        return mark_safe("")
+
+    try:
+        query_text = str(query or "")
+    except (TypeError, ValueError):
+        query_text = ""
+
+    if not text:
+        return mark_safe("")
+    if not query_text.strip():
+        return mark_safe(escape(text))  # noqa: S308 — source is escaped
+
+    # Same cap as the service/view. Terms are literal case-insensitive substrings, never regex.
+    terms = [term for term in query_text.split()[:8] if term]
+    if not terms:
+        return mark_safe(escape(text))  # noqa: S308 — source is escaped
+
+    pattern = re.compile("|".join(re.escape(term) for term in terms), re.IGNORECASE)
+    parts: list[str] = []
+    cursor = 0
+    for match in pattern.finditer(text):
+        parts.append(escape(text[cursor : match.start()]))
+        parts.append("<mark>")
+        parts.append(escape(match.group(0)))
+        parts.append("</mark>")
+        cursor = match.end()
+    parts.append(escape(text[cursor:]))
+    # Every dynamic segment above is escaped; only the literal <mark> tags are trusted.
+    return mark_safe("".join(parts))  # noqa: S308
+
+
+@register.filter
+def highlight_case_number(value: Any, query: Any) -> str:
+    """Highlight the leading ``#`` plus a case number, for ``#123`` and ``123`` queries."""
+    return highlight(f"#{value}", query)

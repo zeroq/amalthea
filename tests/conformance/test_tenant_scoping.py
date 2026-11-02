@@ -1243,6 +1243,8 @@ class TestRouteEnumerationConformance:
             "playbook-collection-slash",
             "query-api",
             "query-api-slash",
+            "search-api",
+            "search-api-slash",
         }
 
         failures = []
@@ -1318,6 +1320,8 @@ class TestRouteEnumerationConformance:
             # Own-org request must succeed (200)
             if name in ("query-api", "query-api-slash"):
                 own_query_body = {"query": [{"_name": "listCase"}]}
+            elif name in ("search-api", "search-api-slash"):
+                own_query_body = {}
             else:
                 own_query_body = {}
             resp_own = (
@@ -1393,6 +1397,8 @@ class TestRouteEnumerationConformance:
             "playbook-collection": {},
             "playbook-detail": {"playbook_id": str(self.playbook1.id)},
             "query-api": {},
+            "search-api": {},
+            "search-api-slash": {},
         }
         # Add -slash variants with same params
         slash_variants = {}
@@ -1650,6 +1656,7 @@ class TestUIRouteEnumerationConformance:
             "ui-automation-list",
             "ui-playbook-list",
             "ui-sources-list",
+            "ui-search",
             "ui-password-change",
         }
 
@@ -1761,6 +1768,7 @@ class TestUIRouteEnumerationConformance:
             "ui-playbook-edit": {"playbook_id": str(self.playbook1.id)},
             "ui-sources-list": {},
             "ui-settings-source-detail": {"source_id": str(self.source1.id)},
+            "ui-search": {},
         }
         return base
 

@@ -8,6 +8,7 @@ made by someone who has read the other side of the codebase.
 from django.urls import path, reverse_lazy
 
 from . import taxonomy_views, views
+from .search import global_search
 
 urlpatterns = [
     path("", views.dashboard, name="ui-dashboard"),
@@ -264,6 +265,7 @@ urlpatterns = [
     # Sources
     path("sources", views.sources_list, name="ui-sources-list"),
     # Auth
+    path("search", global_search, name="ui-search"),
     path("login", views.SignInView.as_view(), name="login"),
     path("logout", views.sign_out, name="logout"),
     path(

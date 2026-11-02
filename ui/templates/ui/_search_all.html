@@ -1,0 +1,68 @@
+{% load ui_tags %}
+{% if sections %}
+  {% for section in sections %}
+    <section class="card search-section">
+      <div class="card-header">
+        <h3>{{ section.kind|title }}{% if section.total > 0 %} ({{ section.total }}){% endif %}</h3>
+      </div>
+      <div class="card-section">
+        {% if section.hits %}
+          <table class="data-table search-hit">
+            <caption class="sr-only">{{ section.kind|title }} results</caption>
+            <thead>
+              <tr>
+                <th scope="col">Title</th>
+                {% if is_superadmin %}
+                <th scope="col">Organisation</th>
+                {% endif %}
+                <th scope="col">Subtitle</th>
+                <th scope="col">Severity</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for hit in section.hits %}
+              <tr>
+                <td>
+                  {% if section.kind == "case" %}
+                    <a class="mono" href="{% url 'ui-case-detail' hit.number %}">
+                      <span class="case-number">{{ hit.number|highlight_case_number:query }}</span> · {{ hit.title|highlight:query }}
+                    </a>
+                  {% elif section.kind == "alert" %}
+                    <a class="mono" href="{% url 'ui-alert-detail' hit.id %}">{{ hit.title|highlight:query }}</a>
+                  {% else %}
+                    <a class="mono" href="{% url 'ui-observable-detail' hit.id %}">{{ hit.title|highlight:query }}</a>
+                  {% endif %}
+                </td>
+                {% if is_superadmin %}
+                <td>
+                  {% if hit.org_name %}
+                    <span class="dim" title="{{ hit.org_name }}">{{ hit.org_name }}</span>
+                  {% endif %}
+                </td>
+                {% endif %}
+                <td>{{ hit.subtitle|highlight:query }}</td>
+                <td>
+                  {% if hit.severity is not None %}
+                    <span class="sev sev-{{ hit.severity|sev_class }}">{{ hit.severity|sev_label }}</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% if section.total > 0 %}
+            <p class="list-summary">
+              <a href="{% url 'ui-search' %}?q={{ query|urlencode }}&type={{ section.kind }}">
+                View all {{ section.total }} {{ section.kind }} results
+              </a>
+            </p>
+          {% endif %}
+        {% else %}
+          <p class="empty">No matches for {{ section.kind|lower }}.</p>
+        {% endif %}
+      </div>
+    </section>
+  {% endfor %}
+{% else %}
+  <p class="empty">No results. Search cases, alerts and observables. Try a case number, title, hash, IP, domain, or username.</p>
+{% endif %}
