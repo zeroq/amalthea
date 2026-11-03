@@ -1,7 +1,7 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-11-03 (**case custom-fields tab shipped — detail-only `customFields`, conditional editable tab, case-scoped edit endpoint; 65 targeted tests and `make check` green; independent verification and the full-suite run are still pending**). Earlier: **correctness wave landed — and CI has been red all week**. The wave closed `§12.10`
+Last updated: 2026-11-03 (**case custom-fields tab shipped — detail-only `customFields`, conditional editable tab, case-scoped edit endpoint; 65 targeted tests and `make check` green; full suite green on the worktree at `4bab358` (plus six unrelated dirty template edits) — 3305 passed, 3 skipped; independent verification still pending**). Earlier: **correctness wave landed — and CI has been red all week**. The wave closed `§12.10`
 (severity pills rendered unstyled: the filter emitted `sev-high` while `app.css` defines only `.sev-1`…`.sev-4`),
 `§12.5-fu1` (a dialog heading and its Title input shared one DOM `id`, so the input lost its accessible name) and
 `§12.5-fu2` (no committed cross-tenant enumeration for the three case-page write routes) — each with a
@@ -430,13 +430,13 @@ backlog once the analyst-visible classification fields (10.3–10.6) are designe
   `CaseCustomFieldValue`, placed after General with a count, editable via a plain-POST modal, and
   `GET /api/v1/case/{id}` now returns ordered `customFields`. Plan:
   [`PLAN-2026-11-02-case-custom-fields-tab.md`](./docs/planning/PLAN-2026-11-02-case-custom-fields-tab.md);
-  65 targeted tests and `make check` green. Open: independent verification (the TODO evidence rule) and
-  the API write half below.
+  65 targeted tests and `make check` green. Full suite green on the worktree at `4bab358`: 3305 passed,
+  3 skipped. Open: independent verification (the TODO evidence rule) and the API write half below.
 - [ ] **10.7-fu1 — Custom-field API write parity and independent verification.** `PATCH/PUT
   /api/v1/case/{id}` still ignores `customFields`; the UI writes through
   `POST /cases/<id>/custom-field`. Route both through one shared service, add API contract tests (invalid
-  types, foreign value id, no-op), then run the feature's independent verification + full suite. Source:
-  custom-fields plan §Non-goals/§Risks.
+  types, foreign value id, no-op), then run the feature's independent verification. Full suite is already
+  green (3305 passed, 3 skipped). Source: custom-fields plan §Non-goals/§Risks.
 - [x] **10.8 — Ingestion-token surface + stale webhook copy (mostly absorbed by §6.16 P4).** *(DONE
   2026-10-17.)* (a) **Done, both parts.** The `sources_list.html` URL copy already showed the
   source-less `POST /api/v1/alerts/webhook/` (ADR-008); the remaining debt — the `open` / `required`
