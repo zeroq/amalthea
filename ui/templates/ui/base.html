@@ -198,8 +198,8 @@ Accessibility notes that are not optional:
   <main id="main" class="main">
     <header class="page-head">
       <h1>{% block heading %}{% endblock %}</h1>
-      <div class="page-actions">{% block actions %}{% endblock %}</div>
     </header>
+    <div class="page-actions">{% block actions %}{% endblock %}</div><br/>
 
     <div class="messages" role="status" aria-live="polite">
       {% for message in messages %}

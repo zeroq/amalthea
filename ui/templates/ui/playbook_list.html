@@ -3,14 +3,14 @@
 
 {% block heading %}Playbooks{% endblock %}
 
-{% block actions %}
-{% if can_mutate %}
-<a class="btn btn-primary" href="{% url 'ui-playbook-create' %}">New playbook</a>
-{% endif %}
-{% endblock %}
-
 {% block content %}
 <div class="card">
+    <div class="card-header">
+        <h2>Playbooks</h2>
+        {% if can_mutate %}
+            <a class="btn btn-primary btn-end" href="{% url 'ui-playbook-create' %}">New playbook</a>
+        {% endif %}
+    </div>
   {% if page_obj %}
     {% include "ui/_list_summary.html" with entity_name="playbook" entity_name_plural="playbooks" %}
     <div class="table-wrap">

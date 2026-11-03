@@ -29,7 +29,6 @@
 
 {% block content %}
 {% if edit_mode %}
-<div class="cols">
   <div class="stack">
     <div class="card">
       <h3>Edit observable</h3>
@@ -120,9 +119,7 @@
       </form>
     </div>
   </div>
-</div>
 {% else %}
-<div class="cols">
   <div class="stack">
     <div class="card">
       <h3>Details</h3>
@@ -212,7 +209,6 @@
       {% endif %}
     </div>
   </div>
-</div>
 {% endif %}
 
 {% if not edit_mode %}

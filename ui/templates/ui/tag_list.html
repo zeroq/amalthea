@@ -3,14 +3,14 @@
 
 {% block heading %}Tags{% endblock %}
 
-{% block actions %}
-{% if can_mutate %}
-<a class="btn btn-primary" href="{% url 'ui-tag-create' %}">New tag</a>
-{% endif %}
-{% endblock %}
-
 {% block content %}
 <div class="card">
+    <div class="card-header">
+        <h2>Tags</h2>
+        {% if can_mutate %}
+            <a class="btn btn-primary" href="{% url 'ui-tag-create' %}">New tag</a>
+        {% endif %}
+    </div>
   {% if page_obj %}
     {% include "ui/_list_summary.html" with entity_name="tag" entity_name_plural="tags" %}
     <div class="table-wrap">
