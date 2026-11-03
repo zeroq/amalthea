@@ -176,6 +176,10 @@ Simple, org-scoped substring search across cases, alerts and observables. It sha
   `organisationName` + `permissions`/`canWrite` (deviation **P2-3**).
 - `case_flow`: `{"_type":"flow","case":…,"alerts":[…],"observables":[…],"tasks":[…]}` — an extension
   with no TheHive REST route; never inlines `raw_payload` (deviation **P2-4**).
+- `GET case/<id>` (detail only) includes `customFields`: ordered `{_id, name, type, value, order}`
+  rows, sorted by `CaseCustomFieldValue.order` then `CustomField.name`. `_id` is the
+  `CaseCustomFieldValue` UUID, not the field definition; an empty case returns `[]`. List responses
+  stay unchanged and omit `customFields` (no per-case N+1).
 
 ### Attachments (T2/Phase P3)
 

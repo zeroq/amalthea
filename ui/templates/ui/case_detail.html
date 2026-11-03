@@ -49,6 +49,7 @@
       {% if tab.slug == "similar" %}<i class="fa-solid fa-diagram-project" aria-hidden="true"></i> {% endif %}
       {% if tab.slug == "comments" %}<i class="fa-solid fa-comments" aria-hidden="true"></i> {% endif %}
       {% if tab.slug == "audit" %}<i class="fa-solid fa-clipboard-list" aria-hidden="true"></i> {% endif %}
+      {% if tab.slug == "custom" %}<i class="fa-solid fa-file-lines" aria-hidden="true"></i> {% endif %}
       {{ tab.label }}
       {% if tab.count is not None %}<span class="count">{{ tab.count }}</span>{% endif %}
     </a>
@@ -93,6 +94,12 @@
   <section class="tabpanel" role="tabpanel" id="panel-audit" aria-labelledby="tab-audit" tabindex="0" {% if active_tab != "audit" %}hidden{% endif %}>
     {% include "ui/_tab_audit.html" %}
   </section>
+
+  {% if custom_field_rows %}
+  <section class="tabpanel" role="tabpanel" id="panel-custom" aria-labelledby="tab-custom" tabindex="0" {% if active_tab != "custom" %}hidden{% endif %}>
+    {% include "ui/_tab_custom.html" %}
+  </section>
+  {% endif %}
 </div>
 
 {# Merge case modal (A2) — omitted for a viewer: its opener is gated too. #}

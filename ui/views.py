@@ -139,6 +139,7 @@ from observables.extractor import add_observable_with_status
 from observables.models import Observable, ObservableSuggestion, ObservableType
 from observables.suggestions import create_suggestions_for_case
 from realtime.publisher import publish_case_event
+from ui.case_custom_fields import case_custom_field_rows, update_case_custom_field_value
 from ui.pagination import PICKER_PAGE_SIZE, paginate
 
 logger = logging.getLogger(__name__)
@@ -1012,6 +1013,7 @@ def case_create(request: HttpRequest) -> HttpResponse:
 # Tab allowlist for case_detail — binding is server-side; never interpolated into a template path.
 CASE_TABS: tuple[tuple[str, str], ...] = (
     ("general", "General"),
+    ("custom", "Custom"),
     ("alerts", "Alerts"),
     ("tasks", "Tasks"),
     ("observables", "Observables"),
@@ -1028,8 +1030,8 @@ def _case_detail_redirect(request: HttpRequest, case_id: str) -> HttpResponseRed
     """Redirect back to the case page, staying on the tab the form was submitted from.
 
     Each panel form carries a hidden `tab` input. It is validated against `CASE_TAB_SLUGS` and
-    dropped when absent or unknown, so the redirect target is always one of the eight known
-    panels — a hostile value can never reach the URL or a template path.
+    dropped when absent or unknown, so the redirect target is always a known panel — a hostile
+    value can never reach the URL or a template path.
     """
     url = reverse("ui-case-detail", kwargs={"case_id": case_id})
     tab = request.POST.get("tab")
@@ -1104,9 +1106,17 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     user_org_id = getattr(request.user, "org_id", None)
     is_cross_org = case.owner_org_id != user_org_id
 
-    # Resolve active tab from query string against the allowlist (unknown/missing -> "general").
+    # Fetch custom field rows before tab resolution (UI custom tab). The tab only exists when
+    # the case carries at least one value; empty cases keep the old panel list.
+    custom_field_rows = case_custom_field_rows(case)
+    tabs = [{"slug": slug, "label": label, "count": None} for slug, label in CASE_TABS]
+    if not custom_field_rows:
+        tabs = [tab for tab in tabs if tab["slug"] != "custom"]
+
+    # Resolve active tab against the *visible* allowlist: unknown, missing, or a now-hidden
+    # `custom` tab falls back to General.
     active_tab = request.GET.get("tab")
-    if active_tab not in CASE_TAB_SLUGS:
+    if active_tab not in {tab["slug"] for tab in tabs}:
         active_tab = "general"
 
     # Build tab list with counts where applicable
@@ -1127,7 +1137,6 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     )
     procedures_count = case.procedures.count()
 
-    tabs = [{"slug": slug, "label": label, "count": None} for slug, label in CASE_TABS]
     # Inject counts for tabs that have them
     counts = {
         "alerts": alerts_qs.count(),
@@ -1137,6 +1146,7 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
         "ttp": procedures_count,
         # Counts exactly what the Comments panel lists: analyst notes.
         "comments": comments_qs.count(),
+        "custom": len(custom_field_rows),
     }
     for tab in tabs:
         if tab["slug"] in counts:
@@ -1396,6 +1406,11 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             case_field_edit_url=reverse("ui-case-field-edit", kwargs={"case_id": case.number}),
             case_close_url=reverse("ui-case-close", kwargs={"case_id": case.number}),
             case_tag_add_url=reverse("ui-case-tag-add", kwargs={"case_id": case.number}),
+            # Custom field rows + edit URL for the Custom tab
+            custom_field_rows=custom_field_rows,
+            case_custom_field_edit_url=reverse(
+                "ui-case-custom-field-edit", kwargs={"case_id": case.number}
+            ),
             # Observables tab create/edit modals. The per-row Edit gate uses `is_owner` above
             # (`is_case_owner`, so a superAdmin qualifies), matching this view's owner-org check.
             data_type_options=ObservableType.objects.order_by("name"),
@@ -1703,6 +1718,44 @@ def case_comment(request: HttpRequest, case_id: str) -> HttpResponse:
         # that is already on screen.
         return render(request, "ui/_timeline_entry.html", {"event": event})
     messages.success(request, "Note added to the case timeline.")
+    return _case_detail_redirect(request, case.number)
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_custom_field_edit(request: HttpRequest, case_id: str) -> HttpResponse:
+    """Edit a case custom field value.
+
+    POST fields:
+      - value_id  : CaseCustomFieldValue UUID
+      - value     : raw form value
+      - tab       : "custom" (validated against CASE_TAB_SLUGS)
+    """
+    case = resolve_case(request.user, case_id, write=True)
+    if case is None:
+        raise Http404()
+
+    value_uuid = _as_uuid(request.POST.get("value_id"))
+    if value_uuid is None:
+        raise Http404()
+
+    # Scope the lookup to this case. A value id from another case is indistinguishable from an
+    # unknown one, so the response cannot confirm that it exists.
+    value = case.custom_field_values.select_related("custom_field").filter(pk=value_uuid).first()
+    if value is None:
+        raise Http404()
+
+    raw = request.POST.get("value", "")
+
+    try:
+        with transaction.atomic():
+            update_case_custom_field_value(case, value, raw, actor=request.user)
+    except CaseUpdateError as exc:
+        messages.error(request, exc.message)
+        return _case_detail_redirect(request, case.number)
+
+    messages.success(request, "Custom field updated.")
     return _case_detail_redirect(request, case.number)
 
 

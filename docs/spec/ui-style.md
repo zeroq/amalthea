@@ -234,6 +234,19 @@ cheat-sheet is itself a modal and reuses the pattern.
   (AGENTS.md §6; guarded by `test_severity_is_shown_as_text_not_colour_alone`).
 - Icon-only controls require an accessible name (§3.1). Primary actions keep visible labels.
 
+### 6.1 Conditional case-detail tabs
+
+- A case-detail tab may be hidden when it has nothing to show (for example, **Custom** is hidden until
+  the case has at least one `CaseCustomFieldValue`). The tab is still part of the static allowlist for
+  redirects; the view, not the template, decides which tabs are visible.
+- Resolve `?tab=` against the **visible** tab slugs. A hidden, unknown, or missing tab falls back to
+  `general`, so a stale link can never leave every panel hidden.
+- A count badge uses the existing `.count` class and is only rendered when the tab has a meaningful
+  count.
+- Keep the tab's `id="tab-<slug>"`, `aria-controls="panel-<slug>"`, the panel's
+  `id="panel-<slug>"`, `role="tabpanel"`, `aria-labelledby="tab-<slug>"`, and `tabindex="0"`. Keyboard
+  numbering follows DOM order automatically; inserting a tab must not create a separate shortcut map.
+
 ## 7. Conformance
 
 This document is only a convention if the build enforces it. The guards live in

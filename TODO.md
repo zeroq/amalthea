@@ -1,7 +1,7 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-10-19 (**correctness wave landed — and CI has been red all week**). The wave closed `§12.10`
+Last updated: 2026-11-03 (**case custom-fields tab shipped — detail-only `customFields`, conditional editable tab, case-scoped edit endpoint; 65 targeted tests and `make check` green; independent verification and the full-suite run are still pending**). Earlier: **correctness wave landed — and CI has been red all week**. The wave closed `§12.10`
 (severity pills rendered unstyled: the filter emitted `sev-high` while `app.css` defines only `.sev-1`…`.sev-4`),
 `§12.5-fu1` (a dialog heading and its Title input shared one DOM `id`, so the input lost its accessible name) and
 `§12.5-fu2` (no committed cross-tenant enumeration for the three case-page write routes) — each with a
@@ -419,13 +419,24 @@ backlog once the analyst-visible classification fields (10.3–10.6) are designe
   lifecycle, and `resolve_case_status` is ADR-002 §D11-tolerant. Decide: new `phase` field, new
   `CaseStatus` rows, or replace/rename. Whatever ships must stay parity-consistent across the API,
   `case_json`, the UI, and the automation triggers that key on `stage`.
-- [ ] **10.7 — Case detail tabs.** Split the case page into tabs: **General, Alerts, Tasks, Observables,
-  Attachments, Similar, Comments, Audit.** Server-rendered (§6/ADR-003: no inline JS; CSP `'self'`),
-  keyboard-navigable, degradable to separate pages/sections without JS. Feeds: General = 10.3–10.6 +
-  summary; Alerts = `case`↔`Alert` links; Tasks/Observables/Attachments/Comments = existing relations;
-  **Similar** = the §2-Module-C cross-case observable linking — **now tracked as §12.3** (with the missing
-  auto-bundle consumer; decide Q-D4 there, not here); **Audit** = the read-only `AuditLog` viewer
-  (pull forward §6.13/P4).
+- [~] **10.7 — Case detail tabs.** Split the case page into tabs: **General, Custom, Alerts, Tasks,
+  Observables, Attachments, Similar, Comments, Audit.** Server-rendered (§6/ADR-003: no inline JS;
+  CSP `'self'`), keyboard-navigable, degradable to separate pages/sections without JS. Feeds:
+  General = 10.3–10.6 + summary; Alerts = `case`↔`Alert` links; Tasks/Observables/Attachments/Comments =
+  existing relations; **Similar** = the §2-Module-C cross-case observable linking — **now tracked as
+  §12.3** (with the missing auto-bundle consumer; decide Q-D4 there, not here); **Audit** = the read-only
+  `AuditLog` viewer (pull forward §6.13/P4).
+  **Update 2026-11-03:** the missing **Custom** tab shipped — conditional on at least one
+  `CaseCustomFieldValue`, placed after General with a count, editable via a plain-POST modal, and
+  `GET /api/v1/case/{id}` now returns ordered `customFields`. Plan:
+  [`PLAN-2026-11-02-case-custom-fields-tab.md`](./docs/planning/PLAN-2026-11-02-case-custom-fields-tab.md);
+  65 targeted tests and `make check` green. Open: independent verification (the TODO evidence rule) and
+  the API write half below.
+- [ ] **10.7-fu1 — Custom-field API write parity and independent verification.** `PATCH/PUT
+  /api/v1/case/{id}` still ignores `customFields`; the UI writes through
+  `POST /cases/<id>/custom-field`. Route both through one shared service, add API contract tests (invalid
+  types, foreign value id, no-op), then run the feature's independent verification + full suite. Source:
+  custom-fields plan §Non-goals/§Risks.
 - [x] **10.8 — Ingestion-token surface + stale webhook copy (mostly absorbed by §6.16 P4).** *(DONE
   2026-10-17.)* (a) **Done, both parts.** The `sources_list.html` URL copy already showed the
   source-less `POST /api/v1/alerts/webhook/` (ADR-008); the remaining debt — the `open` / `required`

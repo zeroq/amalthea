@@ -1,0 +1,32 @@
+<section class="card" aria-labelledby="h-custom">
+  <h2 id="h-custom">Custom fields <span class="count">{{ custom_field_rows|length }}</span></h2>
+  <div class="meta-grid">
+    <div class="meta meta-col">
+      {% for row in custom_field_rows %}
+      <div class="meta-row">
+        <span class="meta-label">
+          {{ row.name }}
+          {% if row.group %}<span class="dim">{{ row.group }}</span>{% endif %}
+        </span>
+        <span class="meta-value">
+          {% if row.json_text %}
+            <pre class="body mono">{{ row.json_text }}</pre>
+          {% else %}
+            <span class="mono">{{ row.display }}</span>
+          {% endif %}
+          <span class="dim">{{ row.type }}</span>
+          {% if can_mutate %}
+          <button type="button" class="meta-edit" data-modal-open="case-cf-{{ row.id }}" aria-label="Edit custom field {{ row.name }}"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
+          {% endif %}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if can_mutate %}
+    {% for row in custom_field_rows %}
+      {% include "ui/_modal.html" with modal_id="case-cf-"|add:row.id form_id="case-cf-"|add:row.id|add:"-form" body_template="ui/_case_custom_field_form.html" title="Edit custom field" confirm_text="Save" form_action=case_custom_field_edit_url edit_value_id=row.id edit_label=row.name edit_type=row.type edit_value=row.edit_value edit_is_json=row.edit_is_json size="sm" %}
+    {% endfor %}
+  {% endif %}
+</section>

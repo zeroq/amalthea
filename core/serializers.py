@@ -26,6 +26,7 @@ from cases.models import (
     TTP,
     Attachment,
     Case,
+    CaseCustomFieldValue,
     CaseObservable,
     CaseStatus,
     CaseTemplate,
@@ -197,6 +198,20 @@ def custom_field_json(field: CustomField) -> dict[str, Any]:
     }
 
 
+def custom_field_value_json(value: CaseCustomFieldValue) -> dict[str, Any]:
+    """`OutputCustomFieldValue` — the wire shape for a case custom field value.
+
+    `_id` is the `CaseCustomFieldValue` UUID, matching TheHive's value-id semantics.
+    """
+    return {
+        "_id": str(value.id),
+        "name": value.custom_field.name,
+        "type": value.custom_field.type,
+        "value": value.value,
+        "order": value.order,
+    }
+
+
 def user_json(user: User) -> dict[str, Any]:
     """`OutputUser` — what `POST /api/v1/login` returns.
 
@@ -339,6 +354,12 @@ def case_json(
             for link in CaseObservable.objects.select_related("observable__data_type")
             .filter(case=case)
             .order_by("-created_at")
+        ]
+        payload["customFields"] = [
+            custom_field_value_json(v)
+            for v in case.custom_field_values.select_related("custom_field").order_by(
+                "order", "custom_field__name"
+            )
         ]
         payload["automationRuns"] = [
             automation_run_json(r)

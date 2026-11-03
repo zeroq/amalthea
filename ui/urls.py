@@ -29,6 +29,11 @@ urlpatterns = [
     path("cases/<str:case_id>/status", views.case_set_status, name="ui-case-status"),
     path("cases/<str:case_id>/close", views.case_close, name="ui-case-close"),
     path("cases/<str:case_id>/field", views.case_field_edit, name="ui-case-field-edit"),
+    path(
+        "cases/<str:case_id>/custom-field",
+        views.case_custom_field_edit,
+        name="ui-case-custom-field-edit",
+    ),
     path("cases/<str:case_id>/comment", views.case_comment, name="ui-case-comment"),
     path("cases/<str:case_id>/extract", views.case_extract_observables, name="ui-case-extract"),
     path("cases/<str:case_id>/task", views.case_task_create, name="ui-case-task-create"),

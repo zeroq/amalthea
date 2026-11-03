@@ -1,0 +1,41 @@
+{% comment %}
+Body of the custom field edit dialog (PLAN-2026-11-02).
+The controls sit in the modal body but target the footer form through the HTML `form` attribute
+(see ui/_modal.html), so the no-JS fallback is still a single plain POST.
+Context comes from the including _modal.html, whose caller passes:
+  modal_id, form_id, body_template, form_action, edit_value_id, edit_label, edit_type,
+  edit_value, edit_is_json
+{% endcomment %}
+<input type="hidden" name="value_id" value="{{ edit_value_id }}" form="{{ form_id }}">
+<input type="hidden" name="tab" value="custom" form="{{ form_id }}">
+
+<label for="{{ modal_id }}-value">{{ edit_label }}</label>
+
+{% if edit_is_json %}
+<div class="field">
+  <textarea id="{{ modal_id }}-value" name="value" rows="6" cols="40" form="{{ form_id }}">{{ edit_value }}</textarea>
+</div>
+{% elif edit_type == "boolean" %}
+<div class="field">
+  <select id="{{ modal_id }}-value" name="value" form="{{ form_id }}">
+    <option value="true" {% if edit_value == "true" %}selected{% endif %}>Yes</option>
+    <option value="false" {% if edit_value == "false" %}selected{% endif %}>No</option>
+  </select>
+</div>
+{% elif edit_type == "integer" %}
+<div class="field">
+  <input type="number" id="{{ modal_id }}-value" name="value" step="1" form="{{ form_id }}" value="{{ edit_value }}">
+</div>
+{% elif edit_type == "float" %}
+<div class="field">
+  <input type="number" id="{{ modal_id }}-value" name="value" step="any" form="{{ form_id }}" value="{{ edit_value }}">
+</div>
+{% elif edit_type == "date" %}
+<div class="field">
+  <input type="date" id="{{ modal_id }}-value" name="value" form="{{ form_id }}" value="{{ edit_value }}">
+</div>
+{% else %}
+<div class="field">
+  <input type="text" id="{{ modal_id }}-value" name="value" form="{{ form_id }}" value="{{ edit_value }}">
+</div>
+{% endif %}
