@@ -42,7 +42,7 @@ from django.contrib.auth.views import (  # noqa: F401 (re-exported for ui/urls.p
 from django.core.exceptions import PermissionDenied
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Count, Max, Q, QuerySet
+from django.db.models import Count, Max, Q, QuerySet, Subquery
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy  # noqa: F401 (re-exported for ui/urls.py)
@@ -3349,7 +3349,11 @@ def tag_detail(request: HttpRequest, tag_id: str) -> HttpResponse:
     except ValueError:
         tag = get_object_or_404(Tag, name=tag_id)
     if request.method == "GET":
-        return render(request, "ui/tag_detail.html", _base_context(request, tag=tag))
+        # Fetch case_links ordered by case start_date descending
+        related_tags = tag.case_links.select_related("case").order_by(
+            "-case__start_date"
+        )[:20]
+        return render(request, "ui/tag_detail.html", _base_context(request, tag=tag, related_tags=related_tags))
     # Update
     tag.name = (request.POST.get("name") or tag.name)[:200]
     tag.save()

@@ -17,18 +17,19 @@
     <dd>{{ tag.created_at|date:"Y-m-d H:i" }}</dd>
 
     <dt>Cases</dt>
-    <dd>{{ tag.case_set.count }}</dd>
+    <dd>{{ tag.case_links.count }}</dd>
 
     <dt>Alerts</dt>
-    <dd>{{ tag.alert_set.count }}</dd>
+    <dd>{% if tag.alerts %}{{ tag.alerts.count }}{% else %}0{% endif %}</dd>
 
     <dt>Observables</dt>
-    <dd>{{ tag.observable_set.count }}</dd>
+    <dd>{% if tag.observables %}{{ tag.observables.count }}{% else %}0{% endif %}</dd>
   </dl>
 
   <div class="card-actions">
     <button type="button" class="btn btn-err" data-modal-open="delete-tag-{{ tag.id|stringformat:"s" }}">Delete tag</button>
   </div>
+  <br/>
 
   {% url 'ui-tag-delete' tag.id as delete_url %}
   {% with modal_id="delete-tag-"|concat:tag.id %}
@@ -36,23 +37,43 @@
   {% endwith %}
 
   <div class="card">
-    <h3>Linked Cases</h3>
-  {% if tag.case_set.all %}
-  <ul class="chips">
-    {% for case in tag.case_set.all %}
-    <li><a href="{% url 'ui-case-detail' case.number %}">{{ case.number }}</a></li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <p class="empty">No cases</p>
-  {% endif %}
-</div>
+    <h3>Linked Cases (most recent 20 cases)</h3>
+    {% if related_tags %}
+    <div class="table-wrap">
+      <table class="data-table">
+        <caption class="sr-only">Linked cases for {{ tag.name }}</caption>
+        <colgroup>
+          <col class="alert-col-seen">
+          <col class="alert-col-title">
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col">Started</th>
+            <th scope="col">Case</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for caselnk in related_tags %}
+            <tr>
+              <td class="mono dim">{{ caselnk.case.start_date|date:"Y-m-d H:i" }}
+              </td>
+              <td><a class="mono text-wrap" href="{% url 'ui-case-detail' caselnk.case.id %}">{{ caselnk.case.title }}</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">No cases</p>
+    {% endif %}
+  </div>
 
 <div class="card">
-  <h3>Linked Alerts</h3>
-  {% if tag.alert_set.all %}
+    <h3>Linked Alerts</h3>
+  {% if tag.alerts.all %}
   <ul class="chips">
-    {% for alert in tag.alert_set.all %}
+    {% for alert in tag.alerts.all %}
     <li><a href="{% url 'ui-alert-detail' alert.id %}">{{ alert.title|truncatechars:40 }}</a></li>
     {% endfor %}
   </ul>
@@ -62,10 +83,10 @@
 </div>
 
 <div class="card">
-  <h3>Linked Observables</h3>
-  {% if tag.observable_set.all %}
+    <h3>Linked Observables</h3>
+  {% if tag.observables.all %}
   <ul class="chips">
-    {% for obs in tag.observable_set.all %}
+    {% for obs in tag.observables.all %}
     <li><a href="{% url 'ui-observable-detail' obs.id %}">{{ obs.data_type.name }}: {{ obs.data|truncatechars:40 }}</a></li>
     {% endfor %}
   </ul>
