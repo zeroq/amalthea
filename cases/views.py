@@ -77,6 +77,7 @@ from core.enums import (
     CASE_PHASE_CHOICES,
     CASE_SCOPE_CHOICES,
     CASE_TYPE_CHOICES,
+    CUSTOM_FIELD_TYPES,
     TASK_STATUS_CHOICES,
 )
 from core.serializers import (
@@ -2211,9 +2212,16 @@ def _apply_template(
         name = str(spec.get("name") or "").strip()
         if not name:
             continue
-        field = CustomField.objects.filter(name=name[:100]).first()
-        if field is None:
-            continue
+        name = name[:100]
+        # A template is a blueprint: materialize a missing global definition instead of silently
+        # dropping the default. An existing definition wins, including its type.
+        field_type = str(spec.get("type") or "").strip().lower()
+        if field_type not in dict(CUSTOM_FIELD_TYPES):
+            field_type = "string"
+        field, _created = CustomField.objects.get_or_create(
+            name=name,
+            defaults={"type": field_type},
+        )
         value = spec.get("value")
         CaseCustomFieldValue.objects.get_or_create(
             case=case,
