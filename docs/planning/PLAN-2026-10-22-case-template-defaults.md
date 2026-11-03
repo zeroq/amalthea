@@ -41,6 +41,9 @@ authoring aid, not a wire contract.
    is tenant-checked against `resolve_alert` and is never cached.
 5. **Custom fields are best-effort.** `DEFAULT_TEMPLATE_CUSTOM_FIELDS` contains `Example Field` /
    `example`; application skips it unless a global field with that name exists.
+   **Update 2026-11-03:** reversed — apply-time materialization now creates a missing global
+   `CustomField` from the template spec instead of dropping it. Existing definitions keep their
+   type. See [`PLAN-2026-11-03-template-custom-field-materialization.md`](./PLAN-2026-11-03-template-custom-field-materialization.md).
 
 ## Architecture
 
@@ -148,8 +151,9 @@ apply route and remains unchanged.
 - The 8 MiB modal cap can refuse an extreme API-created payload; the alert page still exposes it.
 - UI create cannot express "zero tasks" when both fields are empty (defaults are restored); edit can
   clear them. This asymmetry is deliberate for the authoring aid and documented here.
-- The example custom field is only useful when a global field named `Example Field` exists; this is
-  best-effort by design.
+- ~~The example custom field is only useful when a global field named `Example Field` exists; this
+  is best-effort by design.~~ **Superseded 2026-11-03:** templates now materialize missing
+  `CustomField` definitions at apply time (see the update note above).
 - The sentinel is stored in user-editable Markdown; own-line detection limits but cannot eliminate
   intentional spoofing.
 

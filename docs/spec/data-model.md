@@ -163,6 +163,13 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
 - `name` unique · `group` · `type` — `CUSTOM_FIELD_TYPES
   ("string","integer","float","boolean","date","url")` · `options` — JSONB.
 - Constraint: `custom_field_type_valid`.
+- Templates now materialize missing `CustomField` definitions at apply time: if a
+  `CaseTemplate.custom_fields` spec references a name not yet in the global vocabulary,
+  `_apply_template` creates the `CustomField` row using the spec's `type` (validated
+  against `CUSTOM_FIELD_TYPES`, defaulting to `"string"` for missing/invalid types). The
+  existing global definition's type is never overridden — the template's declared type
+  only applies when the field is brand new. A `CaseCustomFieldValue` is then created
+  via `get_or_create` for every case the template is applied to.
 
 ### Case (`case_record` — not `case`, reserved SQL word, deviation M6; extends `UUIDModel` + `TimeStampedModel`)
 - `number` — `AllocatedNumberField` (unique, `editable=False`; allocated by

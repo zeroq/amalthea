@@ -16,11 +16,13 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from alerts.models import Alert, AlertStatus
 from cases import template_defaults as td
 from cases.models import (
     Case,
+    CaseCustomFieldValue,
     CaseStatus,
     CaseTemplate,
     CustomField,
@@ -808,3 +810,137 @@ def test_payload_script_is_escaped_in_markdown(db: None) -> None:
 
     assert "<script>alert(1)</script>" not in content
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in content
+
+
+# ---------------------------------------------------------------------------
+# Regression: template custom-field materialization
+# ---------------------------------------------------------------------------
+
+
+def test_template_missing_field_creates_custom_field_and_value(db: None) -> None:
+    """When a template references a CustomField that does not yet exist, apply-time
+    materialization creates the global CustomField and the CaseCustomFieldValue,
+    making the case-detail Custom tab appear."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    case = _mk_case(org, "Missing field case")
+    template = CaseTemplate.objects.create(
+        name="tmpl-with-missing-field",
+        custom_fields=[
+            {"name": "Example Field", "type": "string", "value": "example"},
+        ],
+    )
+    client = Client()
+    _login(client, user)
+    response = client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    assert response.status_code == 302, response.content
+
+    case.refresh_from_db()
+    # The global CustomField should have been created.
+    field = CustomField.objects.get(name="Example Field")
+    assert field.type == "string"
+    # The case value should have been materialized.
+    value = case.custom_field_values.get(custom_field=field)
+    assert value.value == "example"
+    # The Custom tab should now be visible.
+    detail = client.get(reverse("ui-case-detail", kwargs={"case_id": case.number}))
+    html = detail.content.decode()
+    assert 'id="tab-custom"' in html
+    assert 'id="panel-custom"' in html
+
+
+def test_template_existing_field_reused_type_not_changed(db: None) -> None:
+    """When a template references an existing CustomField, the global definition wins;
+    the template's declared type does NOT overwrite it."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    case = _mk_case(org, "Existing field case")
+    # Pre-existing field with type 'integer'.
+    CustomField.objects.create(name="Existing Field", type="integer")
+    template = CaseTemplate.objects.create(
+        name="tmpl-existing-field",
+        custom_fields=[
+            {"name": "Existing Field", "type": "string", "value": 7},
+        ],
+    )
+    client = Client()
+    _login(client, user)
+    response = client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    assert response.status_code == 302, response.content
+
+    case.refresh_from_db()
+    # The existing field must be reused (not duplicated).
+    assert CustomField.objects.filter(name="Existing Field").count() == 1
+    # Its type must remain "integer" — the template's "string" must NOT change it.
+    field = CustomField.objects.get(name="Existing Field")
+    assert field.type == "integer"
+    assert case.custom_field_values.get(custom_field=field).value == 7
+
+
+def test_template_missing_invalid_type_defaults_to_string(db: None) -> None:
+    """When a template's custom field has a missing or invalid type, it defaults to "string"."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    case = _mk_case(org, "Invalid type case")
+    template = CaseTemplate.objects.create(
+        name="tmpl-invalid-type",
+        custom_fields=[
+            {"name": "Bad Type Field", "value": "fallback"},  # no type declared
+            {"name": "Also Bad", "type": "colour", "value": "red"},  # 'colour' is not valid
+        ],
+    )
+    client = Client()
+    _login(client, user)
+    response = client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    assert response.status_code == 302, response.content
+
+    case.refresh_from_db()
+    # Both fields should have been created with type 'string'.
+    for name, expected_value in [("Bad Type Field", "fallback"), ("Also Bad", "red")]:
+        field = CustomField.objects.get(name=name)
+        assert field.type == "string", f"Expected string, got {field.type} for {name}"
+        assert case.custom_field_values.get(custom_field=field).value == expected_value
+
+
+def test_template_resync_does_not_overwrite_existing_value(db: None) -> None:
+    """Resync-ing a template must not overwrite an existing CaseCustomFieldValue."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    case = _mk_case(org, "Resync case")
+    field = CustomField.objects.create(name="Persistent Field", type="string")
+    CaseCustomFieldValue.objects.create(case=case, custom_field=field, value="original")
+    template = CaseTemplate.objects.create(
+        name="resync-template",
+        custom_fields=[
+            {"name": "Persistent Field", "value": "should-not-change"},
+        ],
+    )
+    client = Client()
+    _login(client, user)
+    # First apply.
+    response = client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    assert response.status_code == 302, response.content
+    # Re-apply through the API path too: get_or_create must keep the original value.
+    api_client = APIClient()
+    api_client.force_login(user)
+    resp = api_client.post(
+        "/api/v1/case/_bulk/caseTemplate",
+        {"ids": [str(case.id)], "caseTemplate": template.name, "updateTitlePrefix": False},
+        format="json",
+    )
+    assert resp.status_code == 200, resp.content
+    case.refresh_from_db()
+    value = case.custom_field_values.get(custom_field=field)
+    assert value.value == "original", f"Expected 'original', got '{value.value}'"
