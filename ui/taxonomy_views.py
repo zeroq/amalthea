@@ -54,12 +54,8 @@ from .taxonomy_forms import (
     taxonomy_term_create_form,
     taxonomy_term_edit_form,
 )
-from .views import (
-    _htmx_redirect,
-    _require_superadmin_ui,
-    _taxonomy_context,
-    not_viewer,
-)
+from .views.common import _htmx_redirect, _require_superadmin_ui, not_viewer
+from .views.taxonomy import _taxonomy_context
 
 _STATUS_PARTIALS = {
     "CaseStatus": "ui/_taxonomy_case_status_form.html",

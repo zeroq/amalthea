@@ -321,10 +321,10 @@ class TestFragmentEndpoint:
         _mk_alert(org=org, title="Attached seed", source_ref="h-seed", case=case)
         client = _login(analyst)
 
-        from ui.views import _similar_for_case as real_helper
+        from ui.views.case_detail import _similar_for_case as real_helper
 
         for tab in ("general", "similar"):
-            with mock.patch("ui.views._similar_for_case", wraps=real_helper) as patched:
+            with mock.patch("ui.views.case_detail._similar_for_case", wraps=real_helper) as patched:
                 resp = client.get(_case_url(case, tab))
                 assert resp.status_code == 200
                 assert patched.call_count == 1, (

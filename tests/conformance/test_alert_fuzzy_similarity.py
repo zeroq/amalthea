@@ -851,7 +851,9 @@ class TestTabGating:
         )
         client = _login(analyst)
 
-        with mock.patch("ui.views.alerts_fuzzy_similar_to_case", return_value=([], 0)) as patched:
+        with mock.patch(
+            "ui.views.case_detail.alerts_fuzzy_similar_to_case", return_value=([], 0)
+        ) as patched:
             resp_general = client.get(_case_url(case, "general"))
             assert resp_general.status_code == 200
             # The helper now runs on every case-detail load (the badge needs it).
