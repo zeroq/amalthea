@@ -113,7 +113,7 @@ hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the
 | **15** | **§12.7 — Cases list: make the case title clickable — SHIPPED 2026-10-17** | `ui/templates/ui/case_list.html` now links the **case title** to `ui-case-detail` (same URL as the **case number**); it is a real `<a>`, so keyboard access needs no JS. | **Done** — small UX improvement. |
 | **16** | **§12.8 — Case Details (General) + verdict taxonomy + close flow — SHIPPED 2026-10-17** | Code shipped (`PLAN-2026-10-17-case-verdict-close-flow.md`, `2476edb`); **independently verified 2026-10-17 at 18/18 ACs** (`docs/verification/VERIFY-2026-10-17-case-verdict-close-flow.md`, re-issued in `554bb0d`; one new low deviation **D-N1** → §12.8-fu3); **security pass 2026-10-18 = CONDITIONAL PASS** (`SECURITY-2026-10-18-case-verdict-close-flow.md`). Inline metadata edits, Tags row, Verdict on Case + Alert + Taxonomy, enforced close (Verdict + closing comment) and close-propagation to linked alerts. | **Done** 2026-10-19 — the §12.8-fu4 hardening conditions (M1/L2/M2) landed. |
 | **17** | **§12.9 — UI layout/style standardization** | Establish and apply a small set of UI/layout rules across the UI: (1) Input field height must match the button height next to it. (2) For action columns in tables, prefer compact icon-only actions with accessible names (not full text buttons) where space-limited and common. (3) Standardize table markup/styles: the table lives inside a `.card`, and filters go in a separate card above the table (use **Observables List View** as the reference). Codify in a short "UI Layout Guidelines" note (e.g. in `ui/README.md` or `docs/spec/ui-style.md`) and apply to affected views (e.g. Cases, Alerts, Tasks, Users, Tokens) to avoid drift. | **Low** — global consistency; reduces CSS/markup churn. |
-| **18** | **§13 — Oversized-module maintainability backlog** | 20 refactor candidates identified after the `ui/views.py` split; `cases/views.py` (2,821 lines) is the next P0. | **None** — engineering hygiene; no analyst-visible change. |
+| **18** | **§13 — Oversized-module maintainability backlog** | 20 module-refactor candidates identified after the `ui/views.py` split, plus one small template-hygiene cleanup (§13.21); `cases/views.py` (2,821 lines) is the next P0. | **None** — engineering hygiene; no analyst-visible change. |
 
 
 ---
@@ -1037,7 +1037,8 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
 
 Follow-up audit after the `ui/views.py` → `ui/views/` split (`64eef0c`). These are refactor candidates, not
 product features. Priority: **P0** next structural change; **P1** next wave; **P2** when the module is next
-touched or before adding features; **P3** monitor only — do not split purely for line count.
+touched or before adding features; **P3** monitor only — do not split purely for line count. §13.21 is a small
+template-hygiene cleanup found during the same audit, not a module split.
 
 **Definition of done for every §13 task:** move-only where possible; preserve public imports, URL names/order,
 auth and tenant checks, status codes, request/response bodies, form field names and templates; add compatibility
@@ -1109,6 +1110,16 @@ the full `pytest` suite green; record any deviation in the plan.
   Current: **3,649 lines**, the largest test file in the repo. Target: cases, alerts, observables, identity and
   automation tenant-scoping suites (shared fixtures in a conftest/helper). Test-maintainability only; no
   production behaviour change. Source: §13 audit 2026-11-04.
+- [ ] **13.21 — Remove redundant pagination guards from list templates (small cleanup).**
+  After the `alert_list.html` legacy fallback removal, several paginated lists still wrap their content in
+  `{% if page_obj.paginator %}` or `{% if page_obj %}` even though the view always passes a `Page`:
+  `case_list.html:33`, `observable_list.html:22`, `automation_list.html:23`, `case_share_list.html:19`,
+  `settings_users.html:85` (admin branch only), `tag_list.html:14`, `sources_list.html:13`,
+  `playbook_list.html:14`, `settings_sources.html:20`, `settings_organisations.html:13`.
+  Remove each guard only where the view unconditionally calls `paginate()`; leave the intentional
+  superAdmin per-organisation card path in `settings_users.html` untouched. No behaviour change. Verify the
+  empty-state copy and pager still render, then run the list/pagination conformance tests and `make check`.
+  Source: 2026-11-04 alert-list cleanup audit.
 
 ### P3 — monitor; do not split for size alone
 
