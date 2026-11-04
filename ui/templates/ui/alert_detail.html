@@ -182,6 +182,19 @@
             {% else %}
               <p class="empty">No open cases to merge into.</p>
             {% endif %}
+
+          {% if can_mutate %}
+          <section class="card" aria-labelledby="h-add-tags">
+            <h2 id="h-add-tags">Add tags</h2>
+            <p class="hint">
+              Select existing tags from your org or create new ones to assign to this alert.
+            </p>
+            <button type="button" class="btn" data-modal-open="alert-tag-add-modal">
+              <i class="fa-solid fa-tag" aria-hidden="true"></i>
+              Add tags
+            </button>
+          </section>
+          {% endif %}
           </section>
         {% endif %}
       </div>
@@ -199,6 +212,10 @@
 
 {% if can_mutate and alert.status.stage != "Closed" %}
   {% include "ui/_modal.html" with modal_id="alert-close-modal" form_id="alert-close-form" body_template="ui/_alert_close_form.html" title="Close alert" confirm_text="Close alert" confirm_class="btn-err" form_action=alert_close_url size="md" %}
+{% endif %}
+
+{% if can_mutate %}
+  {% include "ui/_modal.html" with modal_id="alert-tag-add-modal" form_id="alert-tag-add-form" body_template="ui/_alert_tag_add_modal_body.html" title="Add tags to this alert" confirm_text="Add tags" confirm_class="btn-primary" form_action=alert_tag_add_url size="sm" %}
 {% endif %}
 
 <script src="{% static 'ui/tabs.js' %}" defer></script>

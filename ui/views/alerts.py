@@ -18,7 +18,7 @@ from alerts.escalation import (
     import_alert_to_case,
     merge_alert_into_case,
 )
-from alerts.models import Alert, AlertStatus
+from alerts.models import Alert, AlertStatus, AlertTagLink
 from cases.correlation import (
     candidate_cases_for_alert,
     record_alert_bundled,
@@ -27,6 +27,7 @@ from cases.ledger import append_timeline_event
 from cases.models import (
     Case,
     CaseObservable,
+    Tag,
 )
 from core import taxonomy_read
 from core.enums import (
@@ -167,6 +168,24 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
             }
         )
 
+    # Resolve existing tags on this alert (via AlertTagLink)
+    existing_tag_ids = list(
+        AlertTagLink.objects.filter(alert=alert).values_list("tag_id", flat=True)
+    )
+
+    # Available tags: tags from this user's organisation, excluding those already on the alert
+    # Use PICKER_PAGE_SIZE for consistent picker behavior with case tags
+    from ui.pagination import PICKER_PAGE_SIZE
+
+    available_tags_qs = (
+        Tag.objects.filter(owner_org=user_org_id)
+        .exclude(id__in=existing_tag_ids)
+        .order_by("name")[: PICKER_PAGE_SIZE + 1]
+    )
+    available_tags = list(available_tags_qs)[:PICKER_PAGE_SIZE]
+    available_tags_total = available_tags_qs.count()
+    available_tags_truncated = available_tags_total > PICKER_PAGE_SIZE
+
     tabs = [
         {"slug": "general", "label": "General"},
         {"slug": "raw-data", "label": "Raw data"},
@@ -192,6 +211,10 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
             alert_close_url=reverse("ui-alert-close", kwargs={"alert_id": alert.id}),
             tabs=tabs,
             active_tab=active_tab,
+            alert_tag_ids=existing_tag_ids,
+            alert_tags_total=available_tags_total,
+            available_tags=available_tags,
+            available_tags_truncated=available_tags_truncated,
         ),
     )
 
@@ -419,3 +442,81 @@ def alert_close(request: HttpRequest, alert_id: str) -> HttpResponse:
 
     messages.success(request, f"Alert closed as {verdict}.")
     return redirect("ui-alert-detail", alert_id=alert.id)
+
+
+@not_viewer
+@login_required
+@require_POST
+@not_viewer
+@login_required
+@require_POST
+def alert_tag_add(request: HttpRequest, alert_id: str) -> HttpResponse:
+    """Add tags to an alert via the modal form."""
+    import requests
+    from django.urls import reverse
+
+    from cases.models import Tag
+
+    alert = resolve_alert(request.user, alert_id, write=True)
+    if alert is None:
+        messages.error(request, "Alert not found.")
+        return redirect("ui-alert-list")
+
+    # Collect tag IDs from checkboxes and new tag names from text input
+    existing_tag_ids = [
+        int(tag_id) for tag_id in request.POST.getlist("existing_tag_ids", []) if tag_id
+    ]
+    new_tag_names = [
+        name.strip() for name in request.POST.getlist("new_tag_names", []) if name.strip()
+    ]
+
+    # Validate: at least one tag provided
+    if not existing_tag_ids and not new_tag_names:
+        messages.error(request, "Please select or type at least one tag.")
+        return render("ui/alert_detail.html", _base_context(request, request.user, alert=alert))
+
+    # Validate existing tag IDs
+    for tag_id in existing_tag_ids:
+        try:
+            Tag.objects.get(id=tag_id, owner_org=alert.owner_org)
+        except Tag.DoesNotExist:
+            messages.error(request, f"Tag with id {tag_id} not found in this organization.")
+            return render("ui/alert_detail.html", _base_context(request, request.user, alert=alert))
+
+    # Call backend API
+    api_url = reverse("api:alert-tag-add", kwargs={"alert_id": str(alert.id)})
+
+    headers = {
+        "X-CSRFToken": request.csrf_token(),
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+    # Format: [{"_id": str(tag.id), "name": tag.name}, ...]
+    tags_payload = []
+    for tag_id in existing_tag_ids:
+        tag = Tag.objects.get(id=tag_id)
+        tags_payload.append({"_id": str(tag.id), "name": f"existing-{tag_id}"})
+
+    for tag_name in new_tag_names:
+        # Check if tag exists in this org
+        existing_tag = Tag.objects.filter(name=tag_name, owner_org=alert.owner_org).first()
+        if existing_tag:
+            tags_payload.append({"_id": str(existing_tag.id), "name": tag_name})
+        else:
+            tags_payload.append({"_id": "", "name": tag_name})
+
+    api_response = requests.post(api_url, headers=headers, json={"tags": tags_payload}, timeout=10)
+
+    if api_response.status_code == 201:
+        messages.success(request, f"Added {len(tags_payload)} tag(s) to alert '{alert.title}'.")
+        return redirect("ui-alert-detail", alert_id=alert_id)
+    elif api_response.status_code == 400:
+        error_data = api_response.json()
+        messages.error(request, error_data.get("message", "Failed to add tags."))
+        return render("ui/alert_detail.html", _base_context(request, request.user, alert=alert))
+    elif api_response.status_code == 404:
+        messages.error(request, "Alert not found.")
+        return redirect("ui-alert-list")
+    else:
+        messages.error(request, f"Failed to add tags: {api_response.status_code}")
+        return render("ui/alert_detail.html", _base_context(request, request.user, alert=alert))

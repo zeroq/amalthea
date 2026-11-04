@@ -20,6 +20,7 @@ urlpatterns = [
     # P2/C1 — Alert status change
     path("alerts/<uuid:alert_id>/status", views.alert_status, name="ui-alert-status"),
     path("alerts/<uuid:alert_id>/close", views.alert_close, name="ui-alert-close"),
+    path("alerts/<uuid:alert_id>/tag/add", views.alert_tag_add, name="ui-alert-tag-add"),
     path("cases", views.case_list, name="ui-case-list"),
     # §10.2 — must precede `cases/<str:case_id>` (a literal is otherwise swallowed as a case id).
     path("cases/new", views.case_create, name="ui-case-create"),

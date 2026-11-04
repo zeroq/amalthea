@@ -18,6 +18,7 @@ from .alerts import (
     alert_list,
     alert_merge,
     alert_status,
+    alert_tag_add,
 )
 from .auth import (
     SignInView,
@@ -252,6 +253,7 @@ __all__ = [
     "alert_list",
     "alert_merge",
     "alert_status",
+    "alert_tag_add",
     "automation_list",
     "case_alert_link",
     "case_apply_template",

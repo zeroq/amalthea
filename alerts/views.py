@@ -720,6 +720,57 @@ def alert_tag_link(request: Request, alert_id: str) -> Response:
     return Response([tag_json(tag) for tag in alert.tags.order_by("name")])
 
 
+@api_view(["POST"])
+@renderer_classes([JSONRenderer])
+@transaction.atomic
+def alert_tag_add(request: Request, alert_id: str) -> Response:
+    """POST /api/v1/alert/{alertId}/tag/add — attach existing tags to an alert (201).
+
+    TheHive 5.8 has no dedicated endpoint; tags arrive through the create/update body.
+    This dedicated add endpoint keeps the operation explicit and idempotent —
+    re-linking an existing tag is a no-op — and returns the alert's updated tag set.
+    """
+    alert = _resolve_alert_scoped(request, alert_id)
+    if alert is None:
+        return Response(
+            {"type": "NotFoundError", "message": "Alert not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    names = tag_names_from_payload(request.data)
+    if names is None:
+        return Response(
+            {"type": "BadRequest", "message": "No tags supplied"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Ensure no duplicate tags (same name as an existing alert tag)
+    existing_tag_names = [tag.name for tag in alert.tags.all()]
+    for name in names:
+        if name in existing_tag_names:
+            return Response(
+                {"type": "BadRequest", "message": f"Tag '{name}' already assigned to this alert."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    # Validate and create each tag
+    for name in names:
+        if not name:
+            return Response(
+                {"type": "BadRequest", "message": "Empty tag name"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        tag, _ = Tag.objects.get_or_create(name=name, defaults={"colour": "", "description": ""})
+
+    # Attach the tags to the alert
+    for name in names:
+        tag = Tag.objects.get(name=name)
+        AlertTagLink.objects.create(alert=alert, tag=tag)
+
+    # Return updated tag set (existing + new)
+    return Response([tag_json(tag) for tag in alert.tags.order_by("name")], status=201)
+
+
 @api_view(["GET", "POST"])
 @renderer_classes([JSONRenderer])
 @transaction.atomic
@@ -778,5 +829,6 @@ __all__ = [
     "alert_raw",
     "alert_status_collection",
     "alert_status_detail",
+    "alert_tag_add",
     "alert_tag_link",
 ]

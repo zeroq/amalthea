@@ -25,6 +25,7 @@ urlpatterns = [
     # T2 tag link, above the bare detail route so `<str:alert_id>` cannot swallow `tag`.
     path("alert/<str:alert_id>/tag", views.alert_tag_link, name="alert-tag-link"),
     path("alert/<str:alert_id>/tag/", views.alert_tag_link, name="alert-tag-link-slash"),
+    path("alert/<str:alert_id>/tag/add", views.alert_tag_add, name="alert-tag-add"),
     # T2 P2 — alert comments (`GET|POST`), above the bare detail route.
     path("alert/<str:alert_id>/comment", views.alert_comment_list, name="alert-comment-list"),
     path(

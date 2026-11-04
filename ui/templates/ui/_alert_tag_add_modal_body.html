@@ -1,0 +1,30 @@
+{% comment %}
+Body of the `alert-tag-add` modal: checkbox list of existing tags not yet on the alert
+(`available_tags`) plus a text input for brand-new tags. Both merge into one server-side write.
+{% endcomment %}
+<input type="hidden" name="tab" value="general" form="alert-tag-add-form">
+
+{% if available_tags %}
+<div class="field">
+  <label for="alert-tag-add-existing">Existing tags</label>
+  <div class="chips chips-scroll" style="max-height: 120px;">
+    {% for tag in available_tags %}
+      <label class="chip">
+        <input type="checkbox" name="existing_tag_ids" value="{{ tag.id }}" form="alert-tag-add-form"> {{ tag.name }}
+      </label>
+    {% endfor %}
+  </div>
+  {% if available_tags_truncated %}
+    <p class="field-hint">Showing the first {{ available_tags_truncated }} tags in this org.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="field">
+  <label for="alert-tag-add-new">New tags (comma-separated)</label>
+  <input id="alert-tag-add-new" type="text" name="new_tag_names" form="alert-tag-add-form"
+         placeholder="phishing, credential, malware"
+         pattern="[a-zA-Z0-9_\- ]+(,\s*[a-zA-Z0-9_\- ]+)*"
+         title="Letters, numbers, spaces, hyphens, underscores. Comma-separated or single tag."
+         maxlength="300">
+</div>
