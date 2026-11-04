@@ -2151,12 +2151,14 @@ def _apply_template(
     prose must not clobber what the analyst already wrote. Task and custom-field defaults are
     copied once, tags are attached. One provenance ledger entry records the template's name.
 
-    `resync=True` is the "edited template, re-apply to the cases it seeded" path. It refreshes the
-    scalars but only **adds** runbook rows that are missing: tags and custom-field values already
-    use `get_or_create`, and tasks are matched on `(title, group)` so a second pass cannot duplicate
-    the runbook. The ledger entry is distinguished so an analyst can tell an initial application
-    from a later resync.
+    Tasks are matched on `(title, group)` across every apply so that re-applying the same template
+    never creates a duplicate. Tags and custom-field values already use `get_or_create`; the task
+    dedup step extends that idempotency to runbook rows. The ledger entry is distinguished so an
+    analyst can tell an initial application from a later re-apply.
     """
+    # Detect re-apply before we overwrite source_template.
+    is_reapply = case.source_template_id == template.id
+
     case.severity = template.severity
     case.tlp = template.tlp
     case.pap = template.pap
@@ -2185,16 +2187,16 @@ def _apply_template(
             tag, _created = Tag.objects.get_or_create(name=name.strip()[:100])
             CaseTagLink.objects.get_or_create(case=case, tag=tag)
 
-    existing_tasks: set[tuple[str, str]] = set()
-    if resync:
-        existing_tasks = set(case.tasks.values_list("title", "group"))
+    # Build existing-task identity set on EVERY apply, not only on resync.
+    # Identity is (title_truncated_to_500, group_truncated_to_100), case-sensitive exact match.
+    existing_tasks: set[tuple[str, str]] = set(case.tasks.values_list("title", "group"))
     for spec in template.tasks or []:
         if not isinstance(spec, Mapping) or not str(spec.get("title") or "").strip():
             continue
         title = str(spec["title"])[:500]
         group = str(spec.get("group") or "")[:100]
         key = (title, group)
-        if resync and key in existing_tasks:
+        if key in existing_tasks:
             continue
         Task.objects.create(
             case=case,
@@ -2229,14 +2231,17 @@ def _apply_template(
             defaults={"value": {} if value is None else value},
         )
 
+    # Ledger: distinguish initial apply from re-apply.
+    kind = "template-reapplied" if (resync or is_reapply) else "template-applied"
+    title = (
+        f"Template re-applied: {template.name}"
+        if (resync or is_reapply)
+        else f"Template applied: {template.name}"
+    )
     append_timeline_event(
         case,
-        title=(
-            f"Template re-applied: {template.name}"
-            if resync
-            else f"Template applied: {template.name}"
-        ),
-        kind="template-reapplied" if resync else "template-applied",
+        title=title,
+        kind=kind,
         actor=actor,
         metadata={"template": template.name},
     )

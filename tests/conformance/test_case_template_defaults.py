@@ -944,3 +944,224 @@ def test_template_resync_does_not_overwrite_existing_value(db: None) -> None:
     case.refresh_from_db()
     value = case.custom_field_values.get(custom_field=field)
     assert value.value == "original", f"Expected 'original', got '{value.value}'"
+
+
+# ---------------------------------------------------------------------------
+# Regression: idempotent task materialization on template re-apply
+# ---------------------------------------------------------------------------
+
+
+def test_template_idempotent_ui_double_apply(db: None) -> None:
+    """UI double-apply: task count stays 1; one template-applied then one template-reapplied."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    case = _mk_case(org)
+    template = CaseTemplate.objects.create(
+        name="idempotent-template",
+        tasks=[{"title": "Triage task", "group": ""}],
+    )
+    client = Client()
+    _login(client, user)
+
+    # First apply
+    response = client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    assert response.status_code == 302
+    case.refresh_from_db()
+    assert case.tasks.count() == 1
+    assert TimelineEvent.objects.filter(case=case, kind="template-applied").count() == 1
+
+    # Second apply (re-apply)
+    response = client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    assert response.status_code == 302
+    case.refresh_from_db()
+    assert case.tasks.count() == 1, "Second UI apply should not create a duplicate task"
+    assert TimelineEvent.objects.filter(case=case, kind="template-reapplied").count() == 1, (
+        "Second UI apply should write one template-reapplied event"
+    )
+    assert TimelineEvent.objects.filter(case=case, kind="template-applied").count() == 1, (
+        "Should still have exactly one template-applied event from first apply"
+    )
+
+
+def test_template_idempotent_api_double_apply(db: None) -> None:
+    """API double-apply via POST /api/v1/case/_bulk/caseTemplate: task count stays 1."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    case = _mk_case(org)
+    template = CaseTemplate.objects.create(
+        name="api-idempotent",
+        tasks=[{"title": "API task", "group": ""}],
+    )
+    client = Client()
+    _login(client, user)
+    api_client = APIClient()
+    api_client.force_login(user)
+
+    # First apply via API
+    resp = api_client.post(
+        "/api/v1/case/_bulk/caseTemplate",
+        {"ids": [str(case.id)], "caseTemplate": template.name, "updateTitlePrefix": False},
+        format="json",
+    )
+    assert resp.status_code == 200
+    case.refresh_from_db()
+    assert case.tasks.count() == 1
+    assert TimelineEvent.objects.filter(case=case, kind="template-applied").count() == 1
+
+    # Second apply via API (re-apply)
+    resp = api_client.post(
+        "/api/v1/case/_bulk/caseTemplate",
+        {"ids": [str(case.id)], "caseTemplate": template.name, "updateTitlePrefix": False},
+        format="json",
+    )
+    assert resp.status_code == 200
+    case.refresh_from_db()
+    assert case.tasks.count() == 1, "Second API apply should not create a duplicate task"
+    assert TimelineEvent.objects.filter(case=case, kind="template-reapplied").count() == 1, (
+        "Second API apply should write one template-reapplied event"
+    )
+    assert TimelineEvent.objects.filter(case=case, kind="template-applied").count() == 1, (
+        "Should still have exactly one template-applied event from first apply"
+    )
+
+
+def test_template_same_title_different_groups_not_deduplicated(db: None) -> None:
+    """Same title in different groups: both are created first time, neither duplicated second time."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    case = _mk_case(org)
+    template = CaseTemplate.objects.create(
+        name="multi-group",
+        tasks=[
+            {"title": "Task A", "group": "G1"},
+            {"title": "Task A", "group": "G2"},
+        ],
+    )
+    client = Client()
+    _login(client, user)
+
+    # First apply
+    response = client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    assert response.status_code == 302
+    case.refresh_from_db()
+    assert case.tasks.count() == 2
+
+    # Second apply (re-apply)
+    response = client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    assert response.status_code == 302
+    case.refresh_from_db()
+    assert case.tasks.count() == 2, (
+        "Second apply should not duplicate tasks with same title in different groups"
+    )
+
+
+def test_template_manual_task_skipped_same_title_different_group(db: None) -> None:
+    """Existing manual task with same (title, group) is skipped; same title in another group is added."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    case = _mk_case(org)
+    # Pre-create a manual task with same title and empty group
+    Task.objects.create(case=case, title="Existing Task", group="")
+    template = CaseTemplate.objects.create(
+        name="manual-skip",
+        tasks=[{"title": "Existing Task", "group": ""}, {"title": "Existing Task", "group": "G1"}],
+    )
+    client = Client()
+    _login(client, user)
+
+    response = client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    assert response.status_code == 302
+    case.refresh_from_db()
+    # The manual task is NOT duplicated, but still exists; a same-title task in another group IS added
+    assert case.tasks.count() == 2, "Manual task kept, same title in another group added"
+    task_titles = list(case.tasks.values_list("title", "group"))
+    assert task_titles.count(("Existing Task", "")) == 1, "Manual task should not be duplicated"
+    assert ("Existing Task", "G1") in task_titles, "Same title in another group should be added"
+
+
+def test_template_no_field_overwrite_on_re_apply(db: None) -> None:
+    """Existing task fields (status/assignee/description) are not overwritten on re-apply."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    case = _mk_case(org)
+    template = CaseTemplate.objects.create(
+        name="no-overwrite",
+        tasks=[{"title": "Persistent Task", "group": "", "mandatory": True}],
+    )
+    # Create a task with different status initially
+    task = Task.objects.create(
+        case=case,
+        title="Persistent Task",
+        group="",
+        status="InProgress",
+        description="Original description",
+        assignee=user,
+    )
+    client = Client()
+    _login(client, user)
+
+    response = client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    assert response.status_code == 302
+    case.refresh_from_db()
+    task.refresh_from_db()
+    # Task fields must NOT be overwritten
+    assert task.status == "InProgress", f"Status should remain InProgress, got {task.status}"
+    assert task.description == "Original description", (
+        f"Description should remain unchanged, got {task.description}"
+    )
+
+
+def test_template_re_apply_adds_genuinely_new_task(db: None) -> None:
+    """Edited template that adds a genuinely new task still adds it on re-apply."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    case = _mk_case(org)
+    template = CaseTemplate.objects.create(
+        name="add-new-task",
+        tasks=[{"title": "Original Task", "group": ""}],
+    )
+    client = Client()
+    _login(client, user)
+
+    # First apply
+    response = client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    assert response.status_code == 302
+    case.refresh_from_db()
+    assert case.tasks.count() == 1
+
+    # Update template to add a new task
+    template.tasks = [
+        {"title": "Original Task", "group": ""},
+        {"title": "New Task", "group": "G1"},
+    ]
+    template.save()
+
+    # Re-apply the edited template
+    response = client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    assert response.status_code == 302
+    case.refresh_from_db()
+    assert case.tasks.count() == 2, "Re-apply should add the genuinely new task"
