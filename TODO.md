@@ -1,7 +1,7 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-11-03 (**case custom-fields tab shipped — detail-only `customFields`, conditional editable tab, case-scoped edit endpoint; 65 targeted tests and `make check` green; full suite green on the worktree at `4bab358` (plus six unrelated dirty template edits) — 3305 passed, 3 skipped; independent verification still pending**). Earlier: **correctness wave landed — and CI has been red all week**. The wave closed `§12.10`
+Last updated: 2026-11-04 (**oversized-module refactor backlog added (§13); case custom-fields tab shipped — detail-only `customFields`, conditional editable tab, case-scoped edit endpoint; 65 targeted tests and `make check` green; full suite green on the worktree at `4bab358` (plus six unrelated dirty template edits) — 3305 passed, 3 skipped; independent verification still pending**). Earlier: **correctness wave landed — and CI has been red all week**. The wave closed `§12.10`
 (severity pills rendered unstyled: the filter emitted `sev-high` while `app.css` defines only `.sev-1`…`.sev-4`),
 `§12.5-fu1` (a dialog heading and its Title input shared one DOM `id`, so the input lost its accessible name) and
 `§12.5-fu2` (no committed cross-tenant enumeration for the three case-page write routes) — each with a
@@ -113,6 +113,7 @@ hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the
 | **15** | **§12.7 — Cases list: make the case title clickable — SHIPPED 2026-10-17** | `ui/templates/ui/case_list.html` now links the **case title** to `ui-case-detail` (same URL as the **case number**); it is a real `<a>`, so keyboard access needs no JS. | **Done** — small UX improvement. |
 | **16** | **§12.8 — Case Details (General) + verdict taxonomy + close flow — SHIPPED 2026-10-17** | Code shipped (`PLAN-2026-10-17-case-verdict-close-flow.md`, `2476edb`); **independently verified 2026-10-17 at 18/18 ACs** (`docs/verification/VERIFY-2026-10-17-case-verdict-close-flow.md`, re-issued in `554bb0d`; one new low deviation **D-N1** → §12.8-fu3); **security pass 2026-10-18 = CONDITIONAL PASS** (`SECURITY-2026-10-18-case-verdict-close-flow.md`). Inline metadata edits, Tags row, Verdict on Case + Alert + Taxonomy, enforced close (Verdict + closing comment) and close-propagation to linked alerts. | **Done** 2026-10-19 — the §12.8-fu4 hardening conditions (M1/L2/M2) landed. |
 | **17** | **§12.9 — UI layout/style standardization** | Establish and apply a small set of UI/layout rules across the UI: (1) Input field height must match the button height next to it. (2) For action columns in tables, prefer compact icon-only actions with accessible names (not full text buttons) where space-limited and common. (3) Standardize table markup/styles: the table lives inside a `.card`, and filters go in a separate card above the table (use **Observables List View** as the reference). Codify in a short "UI Layout Guidelines" note (e.g. in `ui/README.md` or `docs/spec/ui-style.md`) and apply to affected views (e.g. Cases, Alerts, Tasks, Users, Tokens) to avoid drift. | **Low** — global consistency; reduces CSS/markup churn. |
+| **18** | **§13 — Oversized-module maintainability backlog** | 20 module-refactor candidates identified after the `ui/views.py` split, plus one small template-hygiene cleanup (§13.21); `cases/views.py` (2,821 lines) is the next P0. | **None** — engineering hygiene; no analyst-visible change. |
 
 
 ---
@@ -1029,6 +1030,118 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
   Postgres run failed only because Postgres is not installed locally but runs in the compose container
   (`docker-compose.yml`), so the container is the way to reproduce; CI *does* provide a `postgres:16-alpine`
   service, so the CI-side Postgres failure is still unmeasured (its log needs a signed-in session).
+
+---
+
+## 13. Maintainability — oversized modules (added 2026-11-04)
+
+Follow-up audit after the `ui/views.py` → `ui/views/` split (`64eef0c`). These are refactor candidates, not
+product features. Priority: **P0** next structural change; **P1** next wave; **P2** when the module is next
+touched or before adding features; **P3** monitor only — do not split purely for line count. §13.21 is a small
+template-hygiene cleanup found during the same audit, not a module split.
+
+**Definition of done for every §13 task:** move-only where possible; preserve public imports, URL names/order,
+auth and tenant checks, status codes, request/response bodies, form field names and templates; add compatibility
+re-exports where callers/tests patch the old path; no schema changes unless separately planned; `make check` and
+the full `pytest` suite green; record any deviation in the plan.
+
+### P0 — next structural refactor
+
+- [ ] **13.1 — Split `cases/views.py` into a `cases/views/` package.**
+  Current: **2,821 lines**, 100+ handlers covering case CRUD, tasks, observables, tags, statuses, comments, pages,
+  shares, attachments, bulk operations, templates, procedures, TTPs and export — the most mixed module in the
+  repo. Target: `cases/views/` with `_common.py`, `cases.py`, `tasks.py`, `observables.py`, `tags.py`,
+  `statuses.py`, `comments.py`, `pages.py`, `shares.py`, `attachments.py`, `bulk.py`, `templates.py`,
+  `procedures.py`, `export.py`; keep `__init__.py` compatibility re-exports or update `cases/urls.py` in one
+  pass. Watch: `cases/urls.py` ordering is load-bearing (specific sub-resources must precede the bare case
+  detail route), and every handler keeps its existing auth/tenant checks. Source: §13 audit 2026-11-04.
+
+### P1 — next wave
+
+- [ ] **13.2 — Split `ui/taxonomy_views.py` into taxonomy-view modules.**
+  Current: **787 lines** covering case statuses, alert statuses, observable types and taxonomy terms, with
+  repeated error helpers. Target: `ui/taxonomy_views/` (or a `ui/views/taxonomy/` package) with `_common.py`,
+  `case_statuses.py`, `alert_statuses.py`, `observable_types.py`, `terms.py`; keep URL imports and
+  `ui/views/taxonomy.py` context helpers intact. Source: §13 audit 2026-11-04.
+- [ ] **13.3 — Split `ui/views/cases.py` further.**
+  Current: **1,002 lines** — the largest module left by the recent split — mixing case list/create/edit, status,
+  close, tags, comments, custom fields, export, shares and merge. Target: `case_list.py`, `case_edit.py`,
+  `case_actions.py`, `case_shares.py` (package or siblings; keep `ui/views/cases.py` as a compatibility shim).
+  Watch: template/HTMX partial names and any tests that import or monkeypatch `ui.views.cases.*`.
+  Source: §13 audit 2026-11-04.
+- [ ] **13.4 — Split `alerts/views.py` into an `alerts/views/` package.**
+  Current: **782 lines** mixing alert CRUD, observables, merge/import, bulk update, procedures, statuses, tags
+  and comments. Target: `alerts/views/` with `alerts.py`, `observables.py`, `merge.py`, `bulk.py`,
+  `procedures.py`, `statuses.py`, `comments.py`; mirror the `cases/views/` layout. Watch: `alerts/urls.py`
+  ordering and the same tenant/auth contracts. Source: §13 audit 2026-11-04.
+
+### P2 — when touched or before feature work
+
+- [ ] **13.5 — Split `ingest/mapping.py` into a mapping package.**
+  Current: **842 lines** combining JSONPath extraction, value coercion, config normalization, validation,
+  transform application and correlation-key logic. Target: `ingest/mapping/` with `jsonpath.py`, `values.py`,
+  `config.py`, `apply.py`, `correlation.py`. High regression risk: add/keep characterization tests for every
+  public function before moving code. Source: §13 audit 2026-11-04.
+- [ ] **13.6 — Split `core/serializers.py` by domain.**
+  Current: **720 lines** of mostly independent serializers. Target: `core/serializers/` with `cases.py`,
+  `alerts.py`, `observables.py`, `identity.py`, `taxonomy.py`, `automation.py`, plus compatibility re-exports.
+  Low risk and a good cleanup when serializers are next changed. Source: §13 audit 2026-11-04.
+- [ ] **13.7 — Split `ui/views/automation.py`.**
+  Current: **659 lines** combining playbook-config parsing with list/detail/create/edit/delete/run views.
+  Target: `playbook_config.py` for parser helpers and `playbooks.py` for views (or an `automation/` package);
+  preserve `_parse_playbook_config` / `_get_script_source` compatibility for tests. Source: §13 audit 2026-11-04.
+- [ ] **13.8 — Split `identity/views.py` into organisation and user views.**
+  Current: **617 lines** covering both admin domains. Target: `identity/views/organisations.py` and
+  `identity/views/users.py` (or sibling modules) with compatibility exports. Watch: superadmin guards, audit
+  rows and URL names. Source: §13 audit 2026-11-04.
+- [ ] **13.9 — Split `ui/views/observables.py`.**
+  Current: **609 lines** mixing observable list/detail/edit/delete with case link/update/remove actions.
+  Target: `observables.py` for CRUD and `case_observables.py` for case-link actions. Watch: cross-case guard
+  and `dataType` form contract. Source: §13 audit 2026-11-04.
+- [ ] **13.10 — Split `ui/views/settings.py`.**
+  Current: **594 lines** mixing organisation settings, user settings and the settings home. Target:
+  `settings_orgs.py`, `settings_users.py`, `settings_home.py` with compatibility exports. Watch: org-blocker
+  helper and superadmin-only paths. Source: §13 audit 2026-11-04.
+- [ ] **13.11 — Split `query/engine.py` only if the query DSL is growing.**
+  Current: **759 lines** but cohesive (field specs, Q building, sorting, execution). Target if needed:
+  `fields.py`, `filters.py`, `execution.py`. Do not split purely for line count; preserve the public
+  `QueryEngine` surface. Source: §13 audit 2026-11-04.
+- [ ] **13.12 — Split `tests/conformance/test_tenant_scoping.py` by resource.**
+  Current: **3,649 lines**, the largest test file in the repo. Target: cases, alerts, observables, identity and
+  automation tenant-scoping suites (shared fixtures in a conftest/helper). Test-maintainability only; no
+  production behaviour change. Source: §13 audit 2026-11-04.
+- [ ] **13.21 — Remove redundant pagination guards from list templates (small cleanup).**
+  After the `alert_list.html` legacy fallback removal, several paginated lists still wrap their content in
+  `{% if page_obj.paginator %}` or `{% if page_obj %}` even though the view always passes a `Page`:
+  `case_list.html:33`, `observable_list.html:22`, `automation_list.html:23`, `case_share_list.html:19`,
+  `settings_users.html:85` (admin branch only), `tag_list.html:14`, `sources_list.html:13`,
+  `playbook_list.html:14`, `settings_sources.html:20`, `settings_organisations.html:13`.
+  Remove each guard only where the view unconditionally calls `paginate()`; leave the intentional
+  superAdmin per-organisation card path in `settings_users.html` untouched. No behaviour change. Verify the
+  empty-state copy and pager still render, then run the list/pagination conformance tests and `make check`.
+  Source: 2026-11-04 alert-list cleanup audit.
+
+### P3 — monitor; do not split for size alone
+
+- [ ] **13.13 — `cases/models.py` (677 lines).** 17 Django models. Do **not** split for line count now: model
+  module moves risk migration/app-registry churn. Revisit only if the case domain grows substantially.
+  Source: §13 audit 2026-11-04.
+- [ ] **13.14 — `observables/extractor.py` (570 lines).** Cohesive extraction/normalization/linking pipeline.
+  Split only when adding a new extraction stage. Source: §13 audit 2026-11-04.
+- [ ] **13.15 — `cases/correlation.py` (518 lines).** Cohesive correlation algorithms; leave unless correlation
+  features expand. Source: §13 audit 2026-11-04.
+- [ ] **13.16 — `ui/views/ingestion_sources.py` (525 lines).** Mapping-editor UI; split preview/apply from source
+  detail only if it grows. Source: §13 audit 2026-11-04.
+- [ ] **13.17 — `observables/views.py` (488 lines).** Observable-type CRUD plus the suggestion workflow; split
+  `types.py` and `suggestions.py` when touched. Source: §13 audit 2026-11-04.
+- [ ] **13.18 — `identity/services.py` (471 lines).** Organisation/user services with shared locking logic;
+  split when next modified. Source: §13 audit 2026-11-04.
+- [ ] **13.19 — `ui/static/ui/app.src.css` (1,396 lines).** Cohesive Tailwind source; split with `@import` only
+  if component CSS churn increases. Preserve `make css-check` and the `@source` scanning contract.
+  Source: §13 audit 2026-11-04.
+- [ ] **13.20 — Large templates: `ui/templates/ui/taxonomy.html` (647) and `_tab_observables.html` (479).**
+  Prefer template partials over Python-style module splits, only when the templates are next edited.
+  Source: §13 audit 2026-11-04.
 
 ---
 

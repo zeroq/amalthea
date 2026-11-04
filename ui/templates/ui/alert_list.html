@@ -24,8 +24,7 @@
 </div>
 
 <div class="card">
-  {% if page_obj.paginator %}
-    {% include "ui/_list_summary.html" with entity_name="alert" entity_name_plural="alerts" %}
+  {% include "ui/_list_summary.html" with entity_name="alert" entity_name_plural="alerts" %}
     <div class="table-wrap">
     <table class="data-table">
       <caption class="sr-only">Alerts, newest first</caption>
@@ -82,7 +81,7 @@
     </div>
 
     {% if page_obj.paginator.count == 0 %}
-      {# Honest empty state for paginated path #}
+      {# Honest empty state #}
       {% if filtered_from %}
         <p class="empty">No alerts match your filters (filtered from {{ filtered_from }}). <a href="{% url 'ui-alert-list' %}">Clear filters</a></p>
       {% else %}
@@ -91,75 +90,5 @@
     {% else %}
       {% include "ui/_pager.html" with entity_name="Alert" %}
     {% endif %}
-  {% else %}
-    {# Legacy / transitional path — view may pass alerts + scope + filtered_from #}
-    {% if alerts %}
-      <div class="table-wrap">
-    <table class="data-table alert-table">
-        <caption class="sr-only">Alerts, newest first</caption>
-        <colgroup>
-          <col class="alert-col-severity">
-          <col class="alert-col-title">
-          <col class="alert-col-type">
-          <col class="alert-col-source">
-          <col class="alert-col-seen">
-          <col class="alert-col-state">
-          {% if request.user.role == "superAdmin" %}
-          <col class="alert-col-actions">
-          {% endif %}
-        </colgroup>
-        <thead>
-          <tr>
-            <th scope="col">Severity</th><th scope="col">Title</th><th scope="col">Type</th>
-            <th scope="col">Source</th><th scope="col">Seen</th>
-            <th scope="col">State</th>
-            {% if request.user.role == "superAdmin" %}
-            <th scope="col">Actions</th>
-            {% endif %}
-          </tr>
-        </thead>
-        <tbody>
-          {% for alert in alerts %}
-            <tr>
-              <td><span class="sev sev-{{ alert.severity|sev_class }}">{{ alert.severity|sev_label }}</span></td>
-              <td><a href="{% url 'ui-alert-detail' alert.id %}">{{ alert.title }}</a></td>
-              <td class="mono">{{ alert.type }}</td>
-              <td class="mono">{{ alert.source }}{% if alert.ingestion_source %} <span class="dim">({{ alert.ingestion_source.slug }})</span>{% endif %}</td>
-              <td class="mono dim">{{ alert.date|date:"Y-m-d H:i" }}</td>
-              <td>
-                {% if alert.case %}
-                  <a href="{% url 'ui-case-detail' alert.case.number %}">#{{ alert.case.number }}</a>
-                {% else %}{{ alert.status.value }}{% endif %}
-              </td>
-              {% if request.user.role == "superAdmin" %}
-              <td>
-                <button class="btn btn-ghost btn-sm" data-modal-open="delete-alert-{{ alert.id }}"
-                        aria-label="Delete alert {{ alert.title }}">
-                  <i class="fa-solid fa-trash" aria-hidden="true"></i>
-                </button>
-                {% url 'ui-alert-delete' alert.id as alert_delete_url %}
-                {% with alert_oid=alert.id|stringformat:"s" %}
-                {% include "ui/_modal.html" with modal_id="delete-alert-"|add:alert_oid title="Delete alert?" body="This will permanently delete the alert. This action cannot be undone." confirm_text="Delete" confirm_class="btn-err" form_action=alert_delete_url size="sm" %}
-                {% endwith %}
-              </td>
-              {% endif %}
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      </div
-    {% else %}
-      {# Empty list — check for filtered_from to give honest empty state #}
-      {% if filtered_from %}
-        {% if scope == "unlinked" %}
-          <p class="empty">No alerts — no unlinked alerts (filtered from {{ filtered_from }}). <a href="{% url 'ui-alert-list' %}?scope=all">View all scopes</a></p>
-        {% else %}
-          <p class="empty">No alerts match your filters (filtered from {{ filtered_from }}). <a href="{% url 'ui-alert-list' %}">Clear filters</a></p>
-        {% endif %}
-      {% else %}
-        <p class="empty">No alerts in this scope.</p>
-      {% endif %}
-    {% endif %}
-  {% endif %}
 </div>
 {% endblock %}
