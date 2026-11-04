@@ -8,7 +8,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -173,12 +173,22 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
         AlertTagLink.objects.filter(alert=alert).values_list("tag_id", flat=True)
     )
 
-    # Available tags: tags from this user's organisation, excluding those already on the alert
-    # Use PICKER_PAGE_SIZE for consistent picker behavior with case tags
+    # Available tags: all tags in the system, excluding those already on the alert.
+    # Note: Tags are organization-scoped at the link level (AlertTagLink), so we filter by
+    # the alert's organization to ensure cross-org tags aren't shown here.
     from ui.pagination import PICKER_PAGE_SIZE
 
     available_tags_qs = (
-        Tag.objects.filter(owner_org=user_org_id)
+        Tag.objects.annotate(
+            count=Count("alert_links__alert__owner_org"),
+            case_count=Count("case_links__case__owner_org"),
+            observable_count=Count("observable_links__observable__owner_org"),
+        )
+        .filter(
+            Q(alert_links__alert__owner_org=user_org_id)
+            | Q(case_links__case__owner_org=user_org_id)
+            | Q(observable_links__observable__owner_org=user_org_id)
+        )
         .exclude(id__in=existing_tag_ids)
         .order_by("name")[: PICKER_PAGE_SIZE + 1]
     )
