@@ -4,15 +4,15 @@
 {% block heading %}Automation{% endblock %}
 
 {% block content %}
-<p class="hint">
-  Every run the orchestrator has made, newest first. A playbook fires on
-  <code>observable.created</code>, runs in a Celery worker after the transaction that produced the
-  artifact commits, and writes its result back onto the case timeline.
-</p>
 
 {% if playbooks %}
   <section class="card" aria-labelledby="h-summary">
     <h2 id="h-summary">Runs per playbook</h2>
+    <p class="hint">
+      Every run the orchestrator has made, newest first. A playbook fires on
+      <code>observable.created</code>, runs in a Celery worker after the transaction that produced the
+      artifact commits, and writes its result back onto the case timeline.
+    </p>
     <ul class="chips">
       {% for row in playbooks %}<li class="chip">{{ row.playbook_name }} <span class="count">{{ row.n }}</span></li>{% endfor %}
     </ul>
