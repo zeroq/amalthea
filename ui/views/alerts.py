@@ -219,6 +219,7 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
             alert_verdict=alert.verdict,
             closing_verdict_choices=taxonomy_read.closing_verdict_choices(),
             alert_close_url=reverse("ui-alert-close", kwargs={"alert_id": alert.id}),
+            alert_tag_add_url=reverse("ui-alert-tag-add", kwargs={"alert_id": str(alert.id)}),
             tabs=tabs,
             active_tab=active_tab,
             alert_tag_ids=existing_tag_ids,
@@ -473,9 +474,7 @@ def alert_tag_add(request: HttpRequest, alert_id: str) -> HttpResponse:
         return redirect("ui-alert-list")
 
     # Collect tag IDs from checkboxes and new tag names from text input
-    existing_tag_ids = [
-        int(tag_id) for tag_id in request.POST.getlist("existing_tag_ids", []) if tag_id
-    ]
+    existing_tag_ids = [tag_id for tag_id in request.POST.getlist("existing_tag_ids", []) if tag_id]
     new_tag_names = [
         name.strip() for name in request.POST.getlist("new_tag_names", []) if name.strip()
     ]

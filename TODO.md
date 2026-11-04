@@ -1159,6 +1159,16 @@ Everything else holds. Ranked as of 2026-10-19:
 1. **§11.2 (M3)** — playbook action secrets are global and rendered in cleartext to any cross-org analyst. The
    highest-severity *open* finding in the repo, and it needs a policy call (scope `Playbook` by org vs. stop
    storing plaintext secrets).
+
+### Tests — new items (to be added by user review)
+
+- [ ] **12.14 — Alert tag management tests (Phase F, pending review).**
+  Tests for the alert-tag-add feature implemented in §12.8 follow-up (user-proposed plan 2026-11-04).
+  Planned files:
+  - `tests/conformance/test_ui_alert_detail.py` — alert_detail view tag filtering (available_tags, alert_tag_ids)
+  - `tests/conformance/test_api_alert_tag_add.py` — backend API endpoint (201 success, 400 duplicate block)
+  - `tests/conformance/test_ui_alert_tag_add.py` — UI modal and form submission (201 success, 400/404 failures)
+  Reference: `docs/planning/PLAN-2026-11-04-alert-tag-management.md`
 2. **§6.16 P6** — global search over cases/alerts/observables. The biggest remaining *feature* gap; §12.1 made the
    lists truthful, so it no longer has to search a truncated corpus.
 3. **§12.4 / §6.16 P7** — bulk triage, realtime breadth.

@@ -7,7 +7,7 @@ Body of the `alert-tag-add` modal: checkbox list of existing tags not yet on the
 {% if available_tags %}
 <div class="field">
   <label for="alert-tag-add-existing">Existing tags</label>
-  <div class="chips chips-scroll" style="max-height: 120px;">
+  <div class="chips chips-scroll max-h-[120px] overflow-y-auto">
     {% for tag in available_tags %}
       <label class="chip">
         <input type="checkbox" name="existing_tag_ids" value="{{ tag.id }}" form="alert-tag-add-form"> {{ tag.name }}
