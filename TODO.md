@@ -1145,6 +1145,75 @@ the full `pytest` suite green; record any deviation in the plan.
 
 ---
 
+## 14. Alert tag management follow-ups (2026-11-05 review)
+
+The P1 defects found in the 2026-11-05 review are fixed: empty submissions now redirect instead of
+500-ing, comma-separated names are split/clamped/deduped inside one transaction, the Add-tags card is
+visible on linked alerts, and the API dedupes repeated names before inserting. Regression coverage:
+`tests/conformance/test_alert_tag_add_regressions.py` (5 tests); targeted suite 108 passed and
+`make check` green. The items below are the remaining P2/P3 findings, ordered by risk.
+
+### P2 — correctness, parity and tenant safety
+
+- [ ] **14.1 — Validate `existing_tag_ids` in the UI tag form.** `ui/views/alerts.py:473` accepts any
+  POST value, then passes it to `Tag.objects.filter(id__in=...)` at `ui/views/alerts.py:506`; a non-UUID
+  raises `ValidationError` → 500 instead of a form error. A valid UUID not shown in the picker can also
+  be attached, including one from another tenant. Parse UUIDs, drop invalid values with a message, and
+  re-resolve the surviving IDs through the same allowed-tag queryset the picker uses. Add a regression
+  test for malformed and out-of-picker IDs.
+- [ ] **14.2 — Reject a non-object JSON body on `POST /alert/{id}/tag/add` with 400, not 500.**
+  `alerts/views.py:740` calls `tag_names_from_payload(request.data)`; a JSON array makes `request.data` a
+  list, and the helper calls `.get()` on it (`cases/tagging.py:23`) → `AttributeError`. Either reject
+  non-mapping bodies in the view or make the helper accept `Mapping | list`. Test with `[]` and
+  `["tag"]`.
+- [ ] **14.3 — Reconcile the documented idempotency with the actual 400.**
+  `alerts/views.py:730-731` says re-linking an existing tag is a no-op, but `alerts/views.py:751-758`
+  returns 400 for an existing name. Choose one contract: return 201/the alert's tag set unchanged
+  (true idempotency, matching `alert_tag_link`), or document the 400 as intentional. Add a test pinning
+  the decision.
+- [ ] **14.4 — Scope the picker to the alert's organisation, not the caller's.**
+  `ui/views/alerts.py:188-192` builds `available_tags_qs` with `user_org_id`, so a superAdmin viewing a
+  cross-org alert sees their own org's tags (or none). Decide the superAdmin policy, then use
+  `alert.owner_org_id` for normal callers and validate submitted tag IDs against the exact picker
+  queryset. This also closes the arbitrary-ID gap in 14.1.
+- [ ] **14.5 — Show and remove the alert's current tags.** `alert_tag_ids` and `alert_tags_total` are
+  passed from `ui/views/alerts.py:226-227` but no template renders them; the UI can only add. Add a
+  current-tags row and a removal action (or reuse the existing alert tag-link API) so an accidental tag
+  is reversible without the API. Audit and broadcast the removal like the add path.
+- [ ] **14.6 — Give alert-tag writes case-tag parity.** `ui/views/alerts.py:487-510` writes
+  `AlertTagLink` directly: no `AuditLog`, no ledger entry when the alert is linked to a case, and no
+  WebSocket frame. Route through a shared service (or add the audit/ledger/broadcast explicitly) so the
+  alert and case tag flows behave the same and the Audit tab is truthful.
+- [ ] **14.7 — Restore the plan/reference and broaden the tests.** §12.14 points at
+  `docs/planning/PLAN-2026-11-04-alert-tag-management.md`, which does not exist; `/alert/{id}/tag/add`
+  is also absent from `docs/spec/api.md`. Write or restore the plan (or correct the reference), document
+  the endpoint and its idempotency contract, and extend coverage beyond the P1 regressions: alert-detail
+  available/current tag filtering, the modal's 400/404 paths, tenant scoping, and idempotency.
+- [ ] **14.8 — Decide the fate of the redundant `/alert/{id}/tag/add` endpoint.** The route
+  (`alerts/urls.py:28`) is undocumented, unused by the UI (which posts to the UI view), and duplicates
+  the existing POST-on-`/tag` semantics. Prefer removing it unless a consumer needs the explicit
+  endpoint; if kept, document it and add it to the API/test contract. If removed, update
+  `tests/conformance/test_tenant_scoping.py` route enumeration.
+
+### P3 — polish and housekeeping
+
+- [ ] **14.9 — Fix the truncation message.** `_alert_tag_add_modal_body.html:18` renders the
+  `available_tags_truncated` boolean as "Showing the first True tags". Render the shown count
+  (`available_tags|length`) like `_case_tag_add_form.html:19`, or pass a dedicated total.
+- [ ] **14.10 — Fix the picker's accessibility markup.** `_alert_tag_add_modal_body.html:9` has a
+  `<label for="alert-tag-add-existing">` that targets no element. Use a `<fieldset><legend>` around the
+  checkbox chips, matching the case form.
+- [ ] **14.11 — Simplify the picker query.** `ui/views/alerts.py:182-198` adds three `Count`
+  annotations the template never displays, slices the queryset, then calls `.count()` on the sliced
+  queryset (a capped second query) and misnames the result `alert_tags_total` (it is the available
+  count). Follow `case_detail.py:316-325`: fetch one row past `PICKER_PAGE_SIZE` to detect truncation,
+  drop unused annotations, and select/prefetch existing links for the current-tags row in 14.5.
+- [ ] **14.12 — Commit the `.gitignore` fix and purge editor swap files.** `*.swp` is currently only
+  an uncommitted `.gitignore` change; a committed `.swp` blob remains in history. Commit the ignore
+  rule and confirm no swap files are tracked.
+
+---
+
 ## 🎯 Next Recommended Items
 
 The canonical **NEXT HIGHEST-IMPACT ITEMS** table at the top of this file is the single source of truth.
@@ -1162,13 +1231,11 @@ Everything else holds. Ranked as of 2026-10-19:
 
 ### Tests — new items (to be added by user review)
 
-- [ ] **12.14 — Alert tag management tests (Phase F, pending review).**
-  Tests for the alert-tag-add feature implemented in §12.8 follow-up (user-proposed plan 2026-11-04).
-  Planned files:
-  - `tests/conformance/test_ui_alert_detail.py` — alert_detail view tag filtering (available_tags, alert_tag_ids)
-  - `tests/conformance/test_api_alert_tag_add.py` — backend API endpoint (201 success, 400 duplicate block)
-  - `tests/conformance/test_ui_alert_tag_add.py` — UI modal and form submission (201 success, 400/404 failures)
-  Reference: `docs/planning/PLAN-2026-11-04-alert-tag-management.md`
+- [ ] **12.14 — Alert tag management tests (Phase F, still open).**
+  P1 regression coverage added 2026-11-05: `tests/conformance/test_alert_tag_add_regressions.py` (5 tests).
+  Broader Phase F coverage still open — alert-detail available/current tag filtering, the modal's 400/404
+  paths, tenant scoping and idempotency. See §14.7 for the missing plan/doc reference and the wider
+  test list; §14 records the remaining P2/P3 review findings.
 2. **§6.16 P6** — global search over cases/alerts/observables. The biggest remaining *feature* gap; §12.1 made the
    lists truthful, so it no longer has to search a truncated corpus.
 3. **§12.4 / §6.16 P7** — bulk triage, realtime breadth.
