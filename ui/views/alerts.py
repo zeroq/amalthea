@@ -463,10 +463,7 @@ def alert_close(request: HttpRequest, alert_id: str) -> HttpResponse:
 @require_POST
 def alert_tag_add(request: HttpRequest, alert_id: str) -> HttpResponse:
     """Add tags to an alert via the modal form."""
-    import requests
-    from django.urls import reverse
-
-    from cases.models import Tag
+    from cases.models import AlertTagLink, Tag
 
     alert = resolve_alert(request.user, alert_id, write=True)
     if alert is None:
@@ -484,48 +481,28 @@ def alert_tag_add(request: HttpRequest, alert_id: str) -> HttpResponse:
         messages.error(request, "Please select or type at least one tag.")
         return render("ui/alert_detail.html", _base_context(request, request.user, alert=alert))
 
-    # Validate existing tag IDs
+    # Collect all tag IDs that will be on the alert (existing + new)
+    all_tag_ids = list(AlertTagLink.objects.filter(alert=alert).values_list("tag_id", flat=True))
+
+    # Add existing tag IDs (if not already on alert)
     for tag_id in existing_tag_ids:
-        try:
-            Tag.objects.get(id=tag_id, owner_org=alert.owner_org)
-        except Tag.DoesNotExist:
-            messages.error(request, f"Tag with id {tag_id} not found in this organization.")
-            return render("ui/alert_detail.html", _base_context(request, request.user, alert=alert))
+        if tag_id not in all_tag_ids:
+            all_tag_ids.append(tag_id)
 
-    # Call backend API
-    api_url = reverse("api:alert-tag-add", kwargs={"alert_id": str(alert.id)})
-
-    headers = {
-        "X-CSRFToken": request.csrf_token(),
-        "X-Requested-With": "XMLHttpRequest",
-    }
-
-    # Format: [{"_id": str(tag.id), "name": tag.name}, ...]
-    tags_payload = []
-    for tag_id in existing_tag_ids:
-        tag = Tag.objects.get(id=tag_id)
-        tags_payload.append({"_id": str(tag.id), "name": f"existing-{tag_id}"})
-
+    # Create and add new tags
     for tag_name in new_tag_names:
-        # Check if tag exists in this org
-        existing_tag = Tag.objects.filter(name=tag_name, owner_org=alert.owner_org).first()
-        if existing_tag:
-            tags_payload.append({"_id": str(existing_tag.id), "name": tag_name})
-        else:
-            tags_payload.append({"_id": "", "name": tag_name})
+        tag, created = Tag.objects.get_or_create(
+            name=tag_name, defaults={"colour": "", "description": ""}
+        )
+        if created or tag.id not in all_tag_ids:
+            all_tag_ids.append(tag.id)
 
-    api_response = requests.post(api_url, headers=headers, json={"tags": tags_payload}, timeout=10)
+    # Link all tags to the alert in one operation
+    existing_links = [lt.tag for lt in AlertTagLink.objects.filter(alert=alert)]
+    tags_to_link = Tag.objects.filter(id__in=all_tag_ids).exclude(
+        pk__in=[lt.pk for lt in existing_links]
+    )
+    AlertTagLink.objects.bulk_create([AlertTagLink(alert=alert, tag=tag) for tag in tags_to_link])
 
-    if api_response.status_code == 201:
-        messages.success(request, f"Added {len(tags_payload)} tag(s) to alert '{alert.title}'.")
-        return redirect("ui-alert-detail", alert_id=alert_id)
-    elif api_response.status_code == 400:
-        error_data = api_response.json()
-        messages.error(request, error_data.get("message", "Failed to add tags."))
-        return render("ui/alert_detail.html", _base_context(request, request.user, alert=alert))
-    elif api_response.status_code == 404:
-        messages.error(request, "Alert not found.")
-        return redirect("ui-alert-list")
-    else:
-        messages.error(request, f"Failed to add tags: {api_response.status_code}")
-        return render("ui/alert_detail.html", _base_context(request, request.user, alert=alert))
+    messages.success(request, f"Added {len(tags_to_link)} new tag(s) to alert.")
+    return redirect("ui-alert-detail", alert_id=alert_id)
