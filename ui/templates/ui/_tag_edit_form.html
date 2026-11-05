@@ -1,0 +1,21 @@
+{% comment %}
+Body of the admin-only tag edit modal, hosted by `ui/_modal.html` (`body_template`).
+Fields target the footer form via form="{{ form_id }}" so the form still works without JS.
+`return_to` is set only when the modal is opened from the tag detail page.
+{% endcomment %}
+{% if return_to %}<input type="hidden" name="return_to" value="{{ return_to }}" form="{{ form_id }}">{% endif %}
+
+<div class="field-row">
+  <label for="{{ modal_id }}-name">Name <span class="required" aria-hidden="true">*</span></label>
+  <input type="text" id="{{ modal_id }}-name" name="name" maxlength="100" value="{{ tag.name }}" required autofocus form="{{ form_id }}">
+</div>
+
+<div class="field-row">
+  <label for="{{ modal_id }}-colour">Colour</label>
+  <input type="text" id="{{ modal_id }}-colour" name="colour" maxlength="20" value="{{ tag.colour }}" placeholder="#e8560a" form="{{ form_id }}">
+</div>
+
+<div class="field-row">
+  <label for="{{ modal_id }}-description">Description</label>
+  <textarea id="{{ modal_id }}-description" name="description" rows="4" form="{{ form_id }}">{{ tag.description }}</textarea>
+</div>

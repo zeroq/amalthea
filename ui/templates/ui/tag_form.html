@@ -1,7 +1,7 @@
 {% extends "ui/base.html" %}
 {% load static %}
 
-{% block heading %}{% if tag %}Edit{% else %}New{% endif %} Tag{% endblock %}
+{% block heading %}New Tag{% endblock %}
 
 {% block actions %}
 <a class="btn" href="{% url 'ui-tag-list' %}">Back</a>
@@ -14,10 +14,20 @@
 
     <div class="meta-inline">
       <label for="id_name">Name</label>
-      <input type="text" id="id_name" name="name" value="{{ tag.name|default:'' }}" maxlength="200" required {% if tag %}readonly{% endif %}>
+      <input type="text" id="id_name" name="name" maxlength="100" required autofocus>
     </div>
 
-    <button class="btn btn-primary" type="submit">{% if tag %}Update{% else %}Create{% endif %}</button>
+    <div class="meta-inline">
+      <label for="id_colour">Colour</label>
+      <input type="text" id="id_colour" name="colour" maxlength="20" placeholder="#e8560a">
+    </div>
+
+    <div class="meta-inline">
+      <label for="id_description">Description</label>
+      <textarea id="id_description" name="description" rows="4"></textarea>
+    </div>
+
+    <button class="btn btn-primary" type="submit">Create</button>
     <a class="btn" href="{% url 'ui-tag-list' %}">Cancel</a>
   </form>
 </div>

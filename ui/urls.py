@@ -194,6 +194,7 @@ urlpatterns = [
     path("tags", views.tag_list, name="ui-tag-list"),
     path("tags/new", views.tag_create, name="ui-tag-create"),
     path("tags/<str:tag_id>", views.tag_detail, name="ui-tag-detail"),
+    path("tags/<str:tag_id>/edit", views.tag_edit, name="ui-tag-edit"),
     path("tags/<str:tag_id>/delete", views.tag_delete, name="ui-tag-delete"),
     # Observables
     path("observables", views.observable_list, name="ui-observable-list"),

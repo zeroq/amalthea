@@ -175,6 +175,7 @@ from .tags import (
     tag_create,
     tag_delete,
     tag_detail,
+    tag_edit,
     tag_list,
 )
 from .tasks import (
@@ -339,6 +340,7 @@ __all__ = [
     "tag_create",
     "tag_delete",
     "tag_detail",
+    "tag_edit",
     "tag_list",
     "task_detail",
     "task_note",

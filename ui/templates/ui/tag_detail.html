@@ -5,6 +5,9 @@
 
 {% block actions %}
 <a class="btn" href="{% url 'ui-tag-list' %}">Back</a>
+{% if can_edit_tags %}
+<button type="button" class="btn" data-modal-open="edit-tag-{{ tag.id }}">Edit tag</button>
+{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -12,6 +15,12 @@
   <dl class="meta">
     <dt>Name</dt>
     <dd>{{ tag.name }}</dd>
+
+    <dt>Colour</dt>
+    <dd>{% if tag.colour %}<span class="mono">{{ tag.colour }}</span>{% else %}<span class="dim">—</span>{% endif %}</dd>
+
+    <dt>Description</dt>
+    <dd>{% if tag.description %}{{ tag.description|linebreaksbr }}{% else %}<span class="dim">—</span>{% endif %}</dd>
 
     <dt>Created</dt>
     <dd>{{ tag.created_at|date:"Y-m-d H:i" }}</dd>
@@ -36,6 +45,13 @@
   {% include "ui/_modal.html" with modal_id=modal_id title="Delete tag?" body="This will remove the tag from all linked cases, alerts, and observables. This cannot be undone." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
   {% endwith %}
 
+  {% if can_edit_tags %}
+  {% url 'ui-tag-edit' tag.id as edit_url %}
+  {% with modal_id="edit-tag-"|concat:tag.id %}
+  {% include "ui/_modal.html" with modal_id=modal_id title="Edit tag" body_template="ui/_tag_edit_form.html" confirm_text="Save" form_action=edit_url size="md" return_to="detail" %}
+  {% endwith %}
+  {% endif %}
+
   <div class="card">
     <h3>Linked Cases (most recent 20 cases)</h3>
     {% if related_tags %}
@@ -43,22 +59,26 @@
       <table class="data-table">
         <caption class="sr-only">Linked cases for {{ tag.name }}</caption>
         <colgroup>
-          <col class="alert-col-seen">
+          <col class="alert-col-severity">
           <col class="alert-col-title">
+          <col class="alert-col-seen">
+          <col class="alert-col-state">
         </colgroup>
         <thead>
           <tr>
-            <th scope="col">Started</th>
+            <th scope="col">Severity</th>
             <th scope="col">Case</th>
+            <th scope="col">Started</th>
+            <th scope="col">State</th>
           </tr>
         </thead>
         <tbody>
           {% for caselnk in related_tags %}
             <tr>
-              <td class="mono dim">{{ caselnk.case.start_date|date:"Y-m-d H:i" }}
-              </td>
-              <td><a class="mono text-wrap" href="{% url 'ui-case-detail' caselnk.case.id %}">{{ caselnk.case.title }}</a>
-              </td>
+              <td><span class="sev sev-{{ caselnk.case.severity|sev_class }}">{{ caselnk.case.severity|sev_label }}</span></td>
+              <td><a href="{% url 'ui-case-detail' caselnk.case.id %}">{{ caselnk.case.title }}</a></td>
+              <td class="mono dim">{{ caselnk.case.start_date|date:"Y-m-d H:i" }}</td>
+              <td>{{ caselnk.case.status.value }}</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -70,26 +90,78 @@
   </div>
 
 <div class="card">
-    <h3>Linked Alerts</h3>
-  {% if tag.alerts.all %}
-  <ul class="chips">
-    {% for alert in tag.alerts.all %}
-    <li><a href="{% url 'ui-alert-detail' alert.id %}">{{ alert.title|truncatechars:40 }}</a></li>
-    {% endfor %}
-  </ul>
+  <h3>Linked Alerts</h3>
+  {% if related_alerts %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Linked alerts for {{ tag.name }}</caption>
+      <colgroup>
+        <col class="alert-col-severity">
+        <col class="alert-col-title">
+        <col class="alert-col-seen">
+        <col class="alert-col-state">
+      </colgroup>
+      <thead>
+        <tr>
+          <th scope="col">Severity</th>
+          <th scope="col">Alert</th>
+          <th scope="col">Seen</th>
+          <th scope="col">State</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for alert in related_alerts %}
+        <tr>
+          <td><span class="sev sev-{{ alert.severity|sev_class }}">{{ alert.severity|sev_label }}</span></td>
+          <td><a href="{% url 'ui-alert-detail' alert.id %}">{{ alert.title }}</a></td>
+          <td class="mono dim">{{ alert.date|date:"Y-m-d H:i" }}</td>
+          <td>
+            {% if alert.case %}
+              <a href="{% url 'ui-case-detail' alert.case.number %}">#{{ alert.case.number }}</a>
+            {% else %}{{ alert.status.value }}{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% else %}
   <p class="empty">No alerts</p>
   {% endif %}
 </div>
 
 <div class="card">
-    <h3>Linked Observables</h3>
-  {% if tag.observables.all %}
-  <ul class="chips">
-    {% for obs in tag.observables.all %}
-    <li><a href="{% url 'ui-observable-detail' obs.id %}">{{ obs.data_type.name }}: {{ obs.data|truncatechars:40 }}</a></li>
-    {% endfor %}
-  </ul>
+  <h3>Linked Observables</h3>
+  {% if related_observables %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Linked observables for {{ tag.name }}</caption>
+      <colgroup>
+        <col class="alert-col-type">
+        <col class="alert-col-title">
+        <col class="alert-col-seen">
+        <col class="alert-col-seen">
+      </colgroup>
+      <thead>
+        <tr>
+          <th scope="col">Type</th>
+          <th scope="col">Value</th>
+          <th scope="col">First seen</th>
+          <th scope="col">Last seen</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for obs in related_observables %}
+        <tr>
+          <td>{{ obs.data_type.name }}</td>
+          <td><a class="mono break" href="{% url 'ui-observable-detail' obs.id %}">{{ obs.data }}</a></td>
+          <td class="mono dim">{{ obs.created_at|date:"Y-m-d H:i" }}</td>
+          <td class="mono dim">{{ obs.updated_at|default:obs.created_at|date:"Y-m-d H:i" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% else %}
   <p class="empty">No observables</p>
   {% endif %}
