@@ -458,12 +458,8 @@ def alert_close(request: HttpRequest, alert_id: str) -> HttpResponse:
 @not_viewer
 @login_required
 @require_POST
-@not_viewer
-@login_required
-@require_POST
 def alert_tag_add(request: HttpRequest, alert_id: str) -> HttpResponse:
     """Add tags to an alert via the modal form."""
-    from cases.models import AlertTagLink, Tag
 
     alert = resolve_alert(request.user, alert_id, write=True)
     if alert is None:
