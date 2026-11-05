@@ -183,8 +183,9 @@
               <p class="empty">No open cases to merge into.</p>
             {% endif %}
           </section>
+        {% endif %}
 
-          {% if can_mutate %}
+        {% if can_mutate %}
           <section class="card" aria-labelledby="h-add-tags">
             <h2 id="h-add-tags">Add tags</h2>
             <p class="hint">
@@ -195,7 +196,6 @@
               Add tags
             </button>
           </section>
-          {% endif %}
         {% endif %}
       </div>
     </div>

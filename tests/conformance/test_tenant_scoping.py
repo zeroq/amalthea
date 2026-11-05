@@ -1957,6 +1957,7 @@ class TestWriteRouteEnumerationConformance:
             "alert-observable-add",  # POST (no slash variant)
             "alert-procedure-create",  # POST (no slash variant)
             "alert-procedures-create",  # POST (no slash variant)
+            "alert-tag-add",  # POST (no slash variant)
             "alert-tag-link",  # POST/DELETE
             "alert-tag-link-slash",
             # Alert bulk/detail (write)
@@ -2183,6 +2184,7 @@ class TestWriteRouteEnumerationConformance:
             "alert-import-into": {"alert_id": str(self.alert1.id), "case_id": str(self.case1.id)},
             "alert-merge": {"alert_id": str(self.alert1.id), "case_id": str(self.case1.id)},
             "alert-observable-add": {"alert_id": str(self.alert1.id)},
+            "alert-tag-add": {"alert_id": str(self.alert1.id)},
             "alert-tag-link": {"alert_id": str(self.alert1.id)},
             "alert-procedure-create": {"alert_id": str(self.alert1.id)},
             "alert-procedures-create": {"alert_id": str(self.alert1.id)},

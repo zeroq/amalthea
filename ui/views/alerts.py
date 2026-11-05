@@ -29,6 +29,7 @@ from cases.models import (
     CaseObservable,
     Tag,
 )
+from cases.tagging import MAX_TAG_NAME
 from core import taxonomy_read
 from core.enums import (
     ALERT_STAGES,
@@ -466,39 +467,47 @@ def alert_tag_add(request: HttpRequest, alert_id: str) -> HttpResponse:
         messages.error(request, "Alert not found.")
         return redirect("ui-alert-list")
 
-    # Collect tag IDs from checkboxes and new tag names from text input
+    # Collect tag IDs from checkboxes and new tag names from text input. The modal advertises a
+    # comma-separated list, so split it the same way the case-tag form does; clamp each name to the
+    # `Tag.name` column limit before anything is written (Postgres rejects a longer value).
     existing_tag_ids = [tag_id for tag_id in request.POST.getlist("existing_tag_ids", []) if tag_id]
-    new_tag_names = [
-        name.strip() for name in request.POST.getlist("new_tag_names", []) if name.strip()
-    ]
+    new_tag_names = list(
+        dict.fromkeys(
+            name.strip()[:MAX_TAG_NAME]
+            for name in (request.POST.get("new_tag_names") or "").split(",")
+            if name.strip()
+        )
+    )
 
     # Validate: at least one tag provided
     if not existing_tag_ids and not new_tag_names:
         messages.error(request, "Please select or type at least one tag.")
-        return render("ui/alert_detail.html", _base_context(request, request.user, alert=alert))
+        return redirect("ui-alert-detail", alert_id=alert.id)
 
-    # Collect all tag IDs that will be on the alert (existing + new)
-    all_tag_ids = list(AlertTagLink.objects.filter(alert=alert).values_list("tag_id", flat=True))
-
-    # Add existing tag IDs (if not already on alert)
-    for tag_id in existing_tag_ids:
-        if tag_id not in all_tag_ids:
-            all_tag_ids.append(tag_id)
-
-    # Create and add new tags
-    for tag_name in new_tag_names:
-        tag, created = Tag.objects.get_or_create(
-            name=tag_name, defaults={"colour": "", "description": ""}
+    with transaction.atomic():
+        # Collect all tag IDs that will be on the alert (existing + new)
+        existing_tag_ids_on_alert = set(
+            AlertTagLink.objects.filter(alert=alert).values_list("tag_id", flat=True)
         )
-        if created or tag.id not in all_tag_ids:
-            all_tag_ids.append(tag.id)
+        all_tag_ids = set(existing_tag_ids_on_alert)
 
-    # Link all tags to the alert in one operation
-    existing_links = [lt.tag for lt in AlertTagLink.objects.filter(alert=alert)]
-    tags_to_link = Tag.objects.filter(id__in=all_tag_ids).exclude(
-        pk__in=[lt.pk for lt in existing_links]
-    )
-    AlertTagLink.objects.bulk_create([AlertTagLink(alert=alert, tag=tag) for tag in tags_to_link])
+        # Add existing tag IDs (if not already on alert)
+        all_tag_ids.update(existing_tag_ids)
+
+        # Create and add new tags
+        for tag_name in new_tag_names:
+            tag, _created = Tag.objects.get_or_create(
+                name=tag_name, defaults={"colour": "", "description": ""}
+            )
+            all_tag_ids.add(tag.id)
+
+        # Link all tags to the alert in one operation
+        tags_to_link = list(
+            Tag.objects.filter(id__in=all_tag_ids).exclude(id__in=existing_tag_ids_on_alert)
+        )
+        AlertTagLink.objects.bulk_create(
+            [AlertTagLink(alert=alert, tag=tag) for tag in tags_to_link]
+        )
 
     messages.success(request, f"Added {len(tags_to_link)} new tag(s) to alert.")
     return redirect("ui-alert-detail", alert_id=alert_id)

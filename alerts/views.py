@@ -743,6 +743,10 @@ def alert_tag_add(request: Request, alert_id: str) -> Response:
             {"type": "BadRequest", "message": "No tags supplied"},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    # The input is a list, so the same name can appear more than once. Dedupe before attaching:
+    # `AlertTagLink` is unique per (alert, tag), and a repeated name would otherwise 500 on the
+    # second insert.
+    names = list(dict.fromkeys(names))
 
     # Ensure no duplicate tags (same name as an existing alert tag)
     existing_tag_names = [tag.name for tag in alert.tags.all()]
