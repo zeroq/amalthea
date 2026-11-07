@@ -4,8 +4,19 @@
 {% block heading %}{{ source.name }}{% endblock %}
 
 {% block content %}
-{# The Sources tab stays highlighted: this page is a detail view *of* Sources, not a sibling section. #}
-{% include "ui/_settings_nav.html" with active_tab="ui-settings-sources" %}
+
+<nav class="tabs" aria-label="Source sections">
+  <a class="tab{% if active_tab == 'mapping' %} tab-on{% endif %}"
+     href="?tab=mapping" aria-controls="panel-mapping"
+     {% if active_tab == 'mapping' %}aria-current="page"{% endif %}>
+    Mapping
+  </a>
+  <a class="tab{% if active_tab == 'raw-data' %} tab-on{% endif %}"
+     href="?tab=raw-data" aria-controls="panel-raw-data"
+     {% if active_tab == 'raw-data' %}aria-current="page"{% endif %}>
+    Raw data
+  </a>
+</nav>
 
 {% if is_superadmin and source.organisation.id != request.user.org_id %}
   <p class="hint">
@@ -14,6 +25,7 @@
   </p>
 {% endif %}
 
+{% if active_tab == "mapping" %}
 <div class="card">
   <h2>Identity</h2>
   <dl class="meta">
@@ -118,6 +130,61 @@
       {% endfor %}
     </dl>
   </details>
+</div>
+
+<div class="card">
+  <h2>Observable extraction</h2>
+  <p class="hint">
+    Every matching value becomes an artifact on the alert. Values are normalized and deduplicated by
+    type, and this card owns only the <code>observables</code> section — field rules,
+    <code>value_maps</code> and other settings are left untouched.
+  </p>
+  {% if failed_form == 'observables' %}
+    {% for message in observable_config_errors %}<p class="msg msg-error">{{ message }}</p>{% endfor %}
+  {% endif %}
+  <form method="post" action="{% url 'ui-settings-source-detail' source.id %}">
+    {% csrf_token %}
+    <input type="hidden" name="form" value="observables" />
+    <div class="table-wrap">
+      <table class="data-table">
+        <caption class="sr-only">Observable extraction rules for {{ source.name }}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Type</th>
+            <th scope="col">JSONPath candidates</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in observable_rows %}
+            <tr>
+              <td>
+                <span class="mono">{{ row.type }}</span>
+                {% for message in row.errors %}<p class="field-error">{{ message }}</p>{% endfor %}
+              </td>
+              <td>
+                <label class="sr-only" for="observable_paths__{{ row.type }}">{{ row.type }} paths</label>
+                <textarea id="observable_paths__{{ row.type }}"
+                          name="observable_paths__{{ row.type }}" rows="3"
+                          class="mono" spellcheck="false"
+                          placeholder="$.actor.email">{{ row.paths }}</textarea>
+                <p class="hint">
+                  One JSONPath per line. Every matching value is added to the alert; leave empty for
+                  no rule of this type.
+                </p>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="control-row">
+      <button class="btn btn-primary" type="submit">Save observable rules</button>
+      <span class="hint">
+        Rules for types not in the vocabulary are preserved by a save here and remain editable through
+        the advanced JSON below.
+      </span>
+    </div>
+  </form>
 </div>
 
 <div class="card">
@@ -277,5 +344,23 @@ dialog). Writing it as a `<dialog>` rather than a native `confirm()` is the repo
 {% if apply_pending %}
   {% url 'ui-settings-source-detail' source.id as apply_confirm_url %}
   {% include "ui/_modal.html" with modal_id="mapping-apply-modal" body_template="ui/_source_remap_confirm_body.html" title="Apply this mapping to existing alerts?" confirm_text="Save & re-map" confirm_class="btn-primary" cancel_text="Cancel" form_action=apply_confirm_url extra_fields=apply_confirm_fields confirm_disabled=apply_confirm_disabled autoopen=True size="md" %}
+{% endif %}
+{% elif active_tab == "raw-data" %}
+<div class="card">
+  <h2>Raw data</h2>
+  {% if latest_alert %}
+    <dl class="meta">
+      <dt>Alert</dt><dd class="mono">{{ latest_alert.id }}</dd>
+      <dt>Type</dt><dd class="mono">{{ latest_alert.type }}</dd>
+      <dt>Source ref</dt><dd class="mono">{{ latest_alert.source_ref }}</dd>
+      <dt>Date</dt><dd class="mono">{{ latest_alert.date|date:"Y-m-d H:i" }}</dd>
+      <dt>Organisation</dt><dd>{{ latest_alert.owner_org.name }}</dd>
+    </dl>
+    <pre class="json">{{ latest_raw_payload }}</pre>
+  {% else %}
+    <p class="empty">No raw data yet.</p>
+    <p class="hint">Raw data appears here once an alert has been ingested from this feed.</p>
+  {% endif %}
+</div>
 {% endif %}
 {% endblock %}
