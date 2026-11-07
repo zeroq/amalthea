@@ -873,6 +873,20 @@ a.rail-org-name:hover {
   margin: 0;
 }
 
+/* Tag colour swatch — 8px round dot, decorative only; the tag name text is the
+   neutral fallback. When a tag has a stored safe hex colour, the pill gets a
+   `.tag-dot` beside it. The dot has no focus ring (it's purely decorative) and
+   uses `flex-shrink: 0` to stay the same size next to variable-length names. */
+.tag-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--color-text-dim);
+  background: transparent;
+  margin-left: 2px;
+}
+
 /* Single-column field (label above its control) in the General-tab dialogs. Modelled
    on the `.form-grid` label treatment but sized for a narrow modal body. */
 .field {

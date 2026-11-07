@@ -29,6 +29,10 @@ from django.utils import timezone
 from alerts.models import Alert, AlertStatus
 from cases.ledger import append_timeline_event
 from cases.models import Case, CaseStatus, TimelineEvent
+from observables.alert_sync import (
+    copy_alert_observables_to_case,
+    reconcile_suggestions_with_copied_observables,
+)
 from observables.suggestions import create_suggestions_for_case
 
 
@@ -99,6 +103,8 @@ def import_alert_to_case(
     alert.status = resolve_alert_status("Imported", warnings=warnings)
     alert.save(update_fields=["case", "status", "updated_at"])
 
+    copied = copy_alert_observables_to_case(alert, case, actor=actor)
+
     create_suggestions_for_case(
         case,
         case.title,
@@ -107,6 +113,7 @@ def import_alert_to_case(
         source_alert=alert,
         raw_payload=alert.raw_payload,
     )
+    reconciled = reconcile_suggestions_with_copied_observables(alert, case, actor=actor)
 
     append_timeline_event(
         case,
@@ -114,7 +121,12 @@ def import_alert_to_case(
         kind="alert-imported",
         description=f"Source {alert.source}, type {alert.type}, ref {alert.source_ref}",
         actor=actor,
-        metadata={"alert_id": str(alert.id)},
+        metadata={
+            "alert_id": str(alert.id),
+            "observables_copied": copied.copied,
+            "observables_already_present": copied.already_present,
+            "suggestions_reconciled": reconciled,
+        },
     )
 
     if warnings:
@@ -145,6 +157,8 @@ def merge_alert_into_case(
         alert.status = resolve_alert_status("Imported", warnings=warnings)
         alert.save(update_fields=["case", "status", "updated_at"])
 
+    copied = copy_alert_observables_to_case(alert, case, actor=actor)
+
     create_suggestions_for_case(
         case,
         alert.title,
@@ -153,6 +167,7 @@ def merge_alert_into_case(
         source_alert=alert,
         raw_payload=alert.raw_payload,
     )
+    reconciled = reconcile_suggestions_with_copied_observables(alert, case, actor=actor)
 
     return append_timeline_event(
         case,
@@ -160,7 +175,14 @@ def merge_alert_into_case(
         kind="alert-merged",
         description=f"Source {alert.source}, type {alert.type}, ref {alert.source_ref}",
         actor=actor,
-        metadata={"alert_id": str(alert.id), "already_linked": already, "warnings": warnings},
+        metadata={
+            "alert_id": str(alert.id),
+            "already_linked": already,
+            "warnings": warnings,
+            "observables_copied": copied.copied,
+            "observables_already_present": copied.already_present,
+            "suggestions_reconciled": reconciled,
+        },
     )
 
 

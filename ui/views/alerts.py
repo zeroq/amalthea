@@ -173,6 +173,7 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
     existing_tag_ids = list(
         AlertTagLink.objects.filter(alert=alert).values_list("tag_id", flat=True)
     )
+    alert_tags = Tag.objects.filter(id__in=existing_tag_ids).order_by("name")
 
     # Available tags: all tags in the system, excluding those already on the alert.
     # Note: Tags are organization-scoped at the link level (AlertTagLink), so we filter by
@@ -199,6 +200,7 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
 
     tabs = [
         {"slug": "general", "label": "General"},
+        {"slug": "observables", "label": "Observables"},
         {"slug": "raw-data", "label": "Raw data"},
     ]
     active_tab = request.GET.get("tab", "general")
@@ -224,6 +226,7 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
             tabs=tabs,
             active_tab=active_tab,
             alert_tag_ids=existing_tag_ids,
+            alert_tags=alert_tags,
             alert_tags_total=available_tags_total,
             available_tags=available_tags,
             available_tags_truncated=available_tags_truncated,
@@ -511,3 +514,33 @@ def alert_tag_add(request: HttpRequest, alert_id: str) -> HttpResponse:
 
     messages.success(request, f"Added {len(tags_to_link)} new tag(s) to alert.")
     return redirect("ui-alert-detail", alert_id=alert_id)
+
+
+@not_viewer
+@login_required
+@require_POST
+def alert_tag_remove(request: HttpRequest, alert_id: str) -> HttpResponse:
+    """Remove a tag from an alert.
+
+    Only accessible to analysts and superAdmins (viewer is denied by @not_viewer).
+    Expects a POST body with a `tag` field containing the tag name to remove.
+    """
+    alert = resolve_alert(request.user, alert_id, write=True)
+    if alert is None:
+        messages.error(request, "Alert not found.")
+        return redirect("ui-alert-list")
+
+    tag_name = (request.POST.get("tag") or "").strip()
+    if not tag_name:
+        messages.error(request, "No tag specified.")
+        return redirect("ui-alert-detail", alert_id=alert.id)
+
+    # Remove the AlertTagLink for this tag on this alert
+    deleted, _ = AlertTagLink.objects.filter(alert=alert, tag__name=tag_name).delete()
+
+    if deleted:
+        messages.success(request, f"Removed tag {tag_name} from alert.")
+    else:
+        messages.error(request, f"Tag {tag_name} not found on this alert.")
+
+    return redirect("ui-alert-detail", alert_id=alert.id)

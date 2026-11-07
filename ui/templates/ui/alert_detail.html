@@ -32,6 +32,7 @@
        tabindex="{% if tab.slug == active_tab %}0{% else %}-1{% endif %}"
        aria-keyshortcuts="{{ forloop.counter }}">
       {% if tab.slug == "general" %}<i class="fa-solid fa-circle-info" aria-hidden="true"></i> {% endif %}
+      {% if tab.slug == "observables" %}<i class="fa-solid fa-cube" aria-hidden="true"></i> {% endif %}
       {% if tab.slug == "raw-data" %}<i class="fa-solid fa-code" aria-hidden="true"></i> {% endif %}
       {{ tab.label }}
     </a>
@@ -83,6 +84,33 @@
             <dt>TLP / PAP</dt><dd>{{ alert.tlp|choice_name:tlp_choices }} / {{ alert.pap|choice_name:pap_choices }}</dd>
             <dt>Owner org</dt><dd>{{ alert.owner_org.name }}</dd>
             <dt>Assignee</dt><dd>{{ alert.assignee.login|default:"Unassigned" }}</dd>
+
+            <dt>Tags</dt>
+            <dd id="alert-tags">
+              <ul class="tag-list">
+                {% if alert_tags %}
+                  {% for tag in alert_tags %}
+                    <li class="pill">
+                      <span>{{ tag.name }}</span>
+                      {% if tag.colour|tag_colour %}
+                        <span class="tag-dot" style="background-color: {{ tag.colour|tag_colour }}"></span>
+                      {% endif %}
+                      {% if can_mutate %}
+                      <form method="post" action="{% url 'ui-alert-tag-remove' alert.id %}" class="inline-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="tag" value="{{ tag.name }}">
+                        <button type="submit" class="icon-link icon-link-err" aria-label="Remove tag {{ tag.name }}">
+                          <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+                        </button>
+                      </form>
+                      {% endif %}
+                    </li>
+                  {% endfor %}
+                {% else %}
+                  <li class="empty">No tags yet.</li>
+                {% endif %}
+              </ul>
+            </dd>
           </dl>
 
           {% if alert.summary or alert.description %}
@@ -102,43 +130,6 @@
       </div>
 
       <div class="stack">
-        {% if alert_observables %}
-        <section class="card" aria-labelledby="h-observables">
-          <h2 id="h-observables">Observables <span class="count">{{ alert_observables|length }}</span></h2>
-          <div class="table-wrap">
-            <table class="data-table data-table-tight">
-              <caption class="sr-only">Observables extracted from this alert</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Type</th>
-                  <th scope="col">Value</th>
-                  <th scope="col">Appears in cases</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in alert_observables %}
-                <tr>
-                  <td>{{ item.observable.data_type.name }}</td>
-                  <td class="mono break">
-                    <a href="{% url 'ui-observable-detail' item.observable.id %}">{{ item.observable.data }}</a>
-                  </td>
-                  <td class="mono dim">
-                    {% if item.cases %}
-                      {% for c in item.cases %}
-                        <a href="{% url 'ui-case-detail' c.number %}" class="case-link">#{{ c.number }}</a>{% if not forloop.last %}, {% endif %}
-                      {% endfor %}
-                    {% else %}
-                      <span class="dim">—</span>
-                    {% endif %}
-                  </td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </section>
-        {% endif %}
-
         {% if can_mutate and not alert.case %}
           <section class="card" aria-labelledby="h-escalate">
             <h2 id="h-escalate">Escalate</h2>
@@ -199,6 +190,53 @@
         {% endif %}
       </div>
     </div>
+  </section>
+
+  <section class="tabpanel" role="tabpanel" id="panel-observables" aria-labelledby="tab-observables" tabindex="0" {% if active_tab != "observables" %}hidden{% endif %}>
+    <section class="card" aria-labelledby="h-observables">
+      <h2 id="h-observables">Observables <span class="count">{{ alert_observables|length }}</span></h2>
+      {% if alert_observables %}
+        <div class="table-wrap">
+          <table class="data-table data-table-tight">
+            <caption class="sr-only">Observables mapped from this alert</caption>
+            <thead>
+              <tr>
+                <th scope="col">Type</th>
+                <th scope="col">Value</th>
+                <th scope="col">Appears in cases</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in alert_observables %}
+              <tr>
+                <td>{{ item.observable.data_type.name }}</td>
+                <td class="mono break">
+                  <a href="{% url 'ui-observable-detail' item.observable.id %}">{{ item.observable.data }}</a>
+                </td>
+                <td class="mono dim">
+                  {% if item.cases %}
+                    {% for c in item.cases %}
+                      <a href="{% url 'ui-case-detail' c.number %}" class="case-link">#{{ c.number }}</a>{% if not forloop.last %}, {% endif %}
+                    {% endfor %}
+                  {% else %}
+                    <span class="dim">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="empty">No observables have been mapped for this alert.</p>
+        {% if alert.ingestion_source %}
+          <p class="hint">
+            Feed <span class="mono">{{ alert.ingestion_source.slug }}</span> has no observable rule for
+            this payload. Configure observable paths in the feed's mapping to add them automatically.
+          </p>
+        {% endif %}
+      {% endif %}
+    </section>
   </section>
 
   <section class="tabpanel" role="tabpanel" id="panel-raw-data" aria-labelledby="tab-raw-data" tabindex="0" {% if active_tab != "raw-data" %}hidden{% endif %}>

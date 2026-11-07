@@ -110,6 +110,42 @@ def extract_by_jsonpath(path: str, payload: Any) -> Any | None:
 _extract_by_jsonpath = extract_by_jsonpath
 
 
+def _flatten_match_values(value: Any, out: list[Any]) -> None:
+    """Collect scalar JSON leaves, recursively flattening arrays and skipping objects.
+
+    Observables are scalar artifacts: a matched object or `null` says nothing typed about the
+    payload, while an array can legitimately hold many candidates (`$.recipients[*].address`).
+    """
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _flatten_match_values(item, out)
+        return
+    if isinstance(value, dict) or value is None or isinstance(value, bool):
+        return
+    out.append(value)
+
+
+def extract_all_by_jsonpath(path: str, payload: Any) -> list[Any]:
+    """Every scalar match at JSONPath `path` in `payload`, in document order.
+
+    The scalar-field engine deliberately takes the first match (one title, one severity). Observable
+    rules are the opposite case: every address in `$.recipients[*].address` is an artifact, not a
+    fallback candidate. This helper keeps the compiled-path cache and tolerance in one place while
+    returning all of them; a bad path still returns `[]` rather than raising.
+    """
+    expression = _compile(path)
+    if expression is None:
+        return []
+    try:
+        matches = expression.find(payload)
+    except Exception:
+        return []
+    values: list[Any] = []
+    for match in matches:
+        _flatten_match_values(match.value, values)
+    return values
+
+
 # --- Alert fields this engine fills -----------------------------------------
 
 #: Every target a rule may name. `tlp`/`pap`/`tags` are deliberately absent (they came out of the
@@ -733,6 +769,12 @@ def validate_config(mapping_config: Any) -> list[str]:
         return errors
     if not isinstance(mapping_config, dict):
         return ["mapping_config must be a JSON object"]
+
+    # Observables are an optional top-level section in either shape; validate them before the legacy
+    # early return so a legacy config with an observable section is held to the same schema.
+    from .observable_rules import validate_observables
+
+    errors.extend(validate_observables(mapping_config))
 
     fields = mapping_config.get("fields")
     # The branch is `_normalize`'s branch. Branching on `fields is None` alone would validate

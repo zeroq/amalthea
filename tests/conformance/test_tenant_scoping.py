@@ -852,6 +852,7 @@ _UI_WRITE_ONLY_ROUTES: set[str] = {
     "ui-alert-escalate",
     "ui-alert-merge",
     "ui-alert-status",
+    "ui-alert-tag-remove",
     "ui-case-status",
     "ui-case-close",
     "ui-case-field-edit",

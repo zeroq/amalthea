@@ -511,20 +511,35 @@ def resolve_observable(
     obs_type = ObservableType.objects.filter(name=type_name).first()
     if obs_type is None:
         return None
+    return resolve_observable_for_type(obs_type, value, owner_org=owner_org, defaults=defaults)
+
+
+def resolve_observable_for_type(
+    obs_type: ObservableType,
+    value: str,
+    *,
+    owner_org: Organisation | None = None,
+    defaults: dict[str, Any] | None = None,
+) -> tuple[Observable, bool]:
+    """Resolve one value when the caller already loaded its vocabulary row.
+
+    Ingest syncs a whole alert in one pass, so it loads `ObservableType` once and must not re-query the
+    same row for every candidate. The normalization/dedupe rules stay here, beside `resolve_observable`,
+    rather than being copied into the sync service.
+    """
     canonical = canonical_value_under(
-        normalize(type_name, value, is_case_sensitive=obs_type.is_case_sensitive),
+        normalize(obs_type.name, value, is_case_sensitive=obs_type.is_case_sensitive),
         case_sensitive=obs_type.is_case_sensitive,
     )
     create_defaults: dict[str, Any] = {"data": value.strip()}
     if defaults:
         create_defaults.update(defaults)
-    observable, created = Observable.objects.get_or_create(
+    return Observable.objects.get_or_create(
         owner_org=owner_org,
         data_type=obs_type,
         normalized_data=canonical,
         defaults=create_defaults,
     )
-    return observable, created
 
 
 @transaction.atomic

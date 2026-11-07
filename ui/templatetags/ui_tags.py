@@ -220,6 +220,26 @@ def highlight(value: Any, query: Any) -> str:
 
 
 @register.filter
+def tag_colour(value: Any) -> str:
+    """Return a safe hex colour string for a tag's stored colour value.
+
+    Accepts well-formed hex codes: #RGB (3 digits), #RGBA (4 digits),
+    #RRGGBB (6 digits), #RRGGBBAA (8 digits). Anything else (including
+    plain colour names, CSS keywords, or malformed strings) returns an
+    empty string so the template never emits arbitrary styling values.
+    """
+    if not value:
+        return ""
+    v = str(value).strip()
+    # Match # followed by exactly 3, 4, 6, or 8 hex digits:
+    # #RGB, #RGBA, #RRGGBB, #RRGGBBAA
+    m = re.fullmatch(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$", v)
+    if m:
+        return v
+    return ""
+
+
+@register.filter
 def highlight_case_number(value: Any, query: Any) -> str:
     """Highlight the leading ``#`` plus a case number, for ``#123`` and ``123`` queries."""
     return highlight(f"#{value}", query)

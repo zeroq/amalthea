@@ -150,10 +150,32 @@ def settings_source_detail(request: HttpRequest, source_id) -> HttpResponse:
         target_org_field="organisation",
     )
 
+    active_tab = request.GET.get("tab", "mapping")
+    if active_tab not in ("mapping", "raw-data"):
+        active_tab = "mapping"
+
+    latest_alert: Alert | None = None
+    latest_raw_payload: str | None = None
+    if active_tab == "raw-data":
+        latest_alert = (
+            Alert.objects.filter(ingestion_source=source).order_by("-date", "-created_at").first()
+        )
+        if latest_alert is not None:
+            latest_raw_payload = json.dumps(latest_alert.raw_payload, indent=2, sort_keys=True)
+
     return render(
         request,
         "ui/source_detail.html",
-        _base_context(request, **_source_detail_context(request, source)),
+        _base_context(
+            request,
+            **_source_detail_context(
+                request,
+                source,
+                active_tab=active_tab,
+                latest_alert=latest_alert,
+                latest_raw_payload=latest_raw_payload,
+            ),
+        ),
     )
 
 
@@ -163,10 +185,15 @@ def _source_detail_context(
     *,
     submitted: dict[str, dict[str, str]] | None = None,
     errors: dict[str, tuple[str, ...]] | None = None,
+    observable_submitted: dict[str, str] | None = None,
+    observable_errors: dict[str, tuple[str, ...]] | None = None,
     failed_form: str = "",
     json_text: str | None = None,
     apply_pending: object | None = None,
     pending_config_json: str | None = None,
+    active_tab: str = "mapping",
+    latest_alert: Alert | None = None,
+    latest_raw_payload: str | None = None,
 ) -> dict:
     """Everything the source page renders, for both the GET and a rejected POST.
 
@@ -180,9 +207,13 @@ def _source_detail_context(
     """
     from ingest.editor import TARGET_LABELS, editor_rows, transforms_for_editor
     from ingest.mapping import config_shape, read_rules
+    from ingest.observable_editor import observable_editor_rows
     from ingest.remap import MAX_REMAP_ALERTS, REMAP_FIELDS, mapping_health
+    from observables.models import ObservableType
 
     errors = errors or {}
+    observable_errors = observable_errors or {}
+    observable_types = list(ObservableType.objects.order_by("name"))
 
     # Tokens rail (R surface) — cap with honest total (Q3/Q4, D1)
     from ui.pagination import RAIL_CAP
@@ -204,6 +235,14 @@ def _source_detail_context(
         # The whole-config messages of whichever form was submitted: `validate_config` has no row to
         # attach `value_maps` (or a JSON parse failure) to, so they are shown above it.
         "config_errors": errors.get("", ()),
+        "observable_rows": observable_editor_rows(
+            source.mapping_config,
+            observable_types,
+            submitted=observable_submitted,
+            errors=observable_errors,
+        ),
+        "observable_errors": observable_errors,
+        "observable_config_errors": observable_errors.get("", ()),
         "failed_form": failed_form,
         "mapping_json_text": (
             json_text
@@ -244,6 +283,10 @@ def _source_detail_context(
             if target not in REMAP_FIELDS
         ],
         "remap_cap": MAX_REMAP_ALERTS,
+        # Source detail tabs (PLAN-2026-11-06-source-detail-raw-data).
+        "active_tab": active_tab,
+        "latest_alert": latest_alert,
+        "latest_raw_payload": latest_raw_payload,
     }
 
 
@@ -267,6 +310,8 @@ def _source_mapping_post(request: HttpRequest, source) -> HttpResponse:
     `intent` is the discriminator, and its default is the *old* behaviour: the Save buttons carry no
     `intent` at all, so every existing submission lands on the save path unchanged.
     """
+    if request.POST.get("form") == "observables":
+        return _save_observable_rules(request, source)
     intent = request.POST.get("intent") or "save"
     if intent == "apply":
         # Validates and *counts*, then opens the confirmation dialog. Writes nothing at all.
@@ -321,6 +366,78 @@ def _reject_mapping(
             ),
         ),
     )
+
+
+def _observable_rows_from_post(request: HttpRequest) -> dict[str, str]:
+    """The card's textareas, keyed by the current vocabulary name."""
+    from observables.models import ObservableType
+
+    return {
+        name: request.POST.get(f"observable_paths__{name}", "")
+        for name in ObservableType.objects.order_by("name").values_list("name", flat=True)
+    }
+
+
+def _reject_observables(
+    request: HttpRequest,
+    source,
+    *,
+    submitted: dict[str, str],
+    result: object,
+) -> HttpResponse:
+    """Echo the observable card's input and per-row errors without writing anything."""
+    return render(
+        request,
+        "ui/source_detail.html",
+        _base_context(
+            request,
+            **_source_detail_context(
+                request,
+                source,
+                observable_submitted=submitted,
+                observable_errors=result.errors,
+                failed_form="observables",
+            ),
+        ),
+    )
+
+
+def _save_observable_rules(request: HttpRequest, source) -> HttpResponse:
+    """Save one edit of the top-level `observables` list, preserving every sibling key.
+
+    This is a third writer over the same store, not a replacement for the table or JSON form. It owns
+    exactly one key, so a field-mapping change and an observable-rule change cannot overwrite each
+    other; the no-op path writes no row and no audit event, matching the other two writers (AC24).
+    """
+    from ingest.observable_editor import (
+        build_observable_config,
+        observable_save_is_noop,
+    )
+    from observables.models import ObservableType
+
+    types = list(ObservableType.objects.order_by("name"))
+    submitted = _observable_rows_from_post(request)
+    before = source.mapping_config or {}
+    result = build_observable_config(before, submitted, types)
+    if not result.ok:
+        return _reject_observables(request, source, submitted=submitted, result=result)
+
+    if observable_save_is_noop(before, result.config):
+        messages.info(request, "No changes to save.")
+        return redirect("ui-settings-source-detail", source_id=source.id)
+
+    with transaction.atomic():
+        _persist_mapping(request, source, before, result.config)
+
+    count = len(result.config.get("observables") or [])
+    if count:
+        messages.success(
+            request,
+            f"Observable rules saved — {count} type{'' if count == 1 else 's'}.",
+        )
+    else:
+        messages.success(request, "Observable rules cleared.")
+    return redirect("ui-settings-source-detail", source_id=source.id)
 
 
 def _persist_mapping(request: HttpRequest, source, before: dict, config: dict) -> None:
@@ -497,6 +614,12 @@ def _apply_mapping_to_alerts(request: HttpRequest, source) -> HttpResponse:
                 request,
                 f"Rule state refreshed on {counts.refreshed} alert"
                 f"{'' if counts.refreshed == 1 else 's'} with no field values changed.",
+            )
+        if counts.observables_added:
+            messages.info(
+                request,
+                f"Added {counts.observables_added} alert observable"
+                f"{'' if counts.observables_added == 1 else 's'}.",
             )
         for line in _unresolved_lines(counts.unresolved, counts.candidates):
             messages.warning(request, line)

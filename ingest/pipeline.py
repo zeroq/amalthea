@@ -144,6 +144,19 @@ def store_ingested_alert(
             },
         )
 
+        # Sync on create *and* replay: a replayed payload after a mapping fix should repair missing
+        # links. Warnings are only recorded on the create path; replay is silent by design.
+        if alert.ingestion_source_id is not None:
+            from observables.alert_sync import sync_alert_observables
+
+            sync = sync_alert_observables(alert)
+            if created and sync.warnings:
+                warnings.extend(sync.warnings)
+                stored_warnings = dict(alert.ingestion_warnings or {})
+                stored_warnings["warnings"] = list(warnings)
+                alert.ingestion_warnings = stored_warnings
+                alert.save(update_fields=["ingestion_warnings", "updated_at"])
+
     return StoredAlert(
         alert=alert,
         created=created,

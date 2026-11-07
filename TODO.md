@@ -1,7 +1,7 @@
 # TODO — Amalthea
 
 Open work only. Completed items live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-11-04 (**oversized-module refactor backlog added (§13); case custom-fields tab shipped — detail-only `customFields`, conditional editable tab, case-scoped edit endpoint; 65 targeted tests and `make check` green; full suite green on the worktree at `4bab358` (plus six unrelated dirty template edits) — 3305 passed, 3 skipped; independent verification still pending**). Earlier: **correctness wave landed — and CI has been red all week**. The wave closed `§12.10`
+Last updated: 2026-11-06 (**alert observables from source mappings shipped and verified (§15) — 28/28 ACs, 56 focused tests, relevant suites and `make check` green; security review PASS with one pre-existing Medium residual risk filed as §15.10; deferred Q6 API parity and Q7 per-link provenance remain open**). Earlier: **oversized-module refactor backlog added (§13); case custom-fields tab shipped — detail-only `customFields`, conditional editable tab, case-scoped edit endpoint; 65 targeted tests and `make check` green; full suite green on the worktree at `4bab358` (plus six unrelated dirty template edits) — 3305 passed, 3 skipped; independent verification still pending**). Earlier: **correctness wave landed — and CI has been red all week**. The wave closed `§12.10`
 (severity pills rendered unstyled: the filter emitted `sev-high` while `app.css` defines only `.sev-1`…`.sev-4`),
 `§12.5-fu1` (a dialog heading and its Title input shared one DOM `id`, so the input lost its accessible name) and
 `§12.5-fu2` (no committed cross-tenant enumeration for the three case-page write routes) — each with a
@@ -1176,10 +1176,14 @@ visible on linked alerts, and the API dedupes repeated names before inserting. R
   cross-org alert sees their own org's tags (or none). Decide the superAdmin policy, then use
   `alert.owner_org_id` for normal callers and validate submitted tag IDs against the exact picker
   queryset. This also closes the arbitrary-ID gap in 14.1.
-- [ ] **14.5 — Show and remove the alert's current tags.** `alert_tag_ids` and `alert_tags_total` are
-  passed from `ui/views/alerts.py:226-227` but no template renders them; the UI can only add. Add a
-  current-tags row and a removal action (or reuse the existing alert tag-link API) so an accidental tag
-  is reversible without the API. Audit and broadcast the removal like the add path.
+- [x] **14.5 — Show and remove the alert's current tags.** The Tags row is now rendered in the Alert
+  detail card immediately after Assignee (`ui/templates/ui/alert_detail.html`, `ui/views/alerts.py`).
+  Tags appear as read-only neutral pills in alphabetical order; untagged alerts show `No tags yet.`
+  (`tests/conformance/test_ui_alert_detail_tags.py`). Removing assigned tags is now supported through
+  the UI for mutating users (`@not_viewer` gated `alert_tag_remove` view at
+  `alerts/<uuid:alert_id>/tag/remove`). A viewer POST to the remove endpoint receives a 404 and
+  the link remains unchanged. Audit trail and ledger/broadcast parity for tag removals is tracked
+  separately under §14.6.
 - [ ] **14.6 — Give alert-tag writes case-tag parity.** `ui/views/alerts.py:487-510` writes
   `AlertTagLink` directly: no `AuditLog`, no ledger entry when the alert is linked to a case, and no
   WebSocket frame. Route through a shared service (or add the audit/ledger/broadcast explicitly) so the
@@ -1211,6 +1215,65 @@ visible on linked alerts, and the API dedupes repeated names before inserting. R
 - [ ] **14.12 — Commit the `.gitignore` fix and purge editor swap files.** `*.swp` is currently only
   an uncommitted `.gitignore` change; a committed `.swp` blob remains in history. Commit the ignore
   rule and confirm no swap files are tracked.
+
+---
+
+## 15. Alert observables from source mappings (2026-11-06)
+
+Plan: [`PLAN-2026-11-06-alert-observables.md`](docs/planning/PLAN-2026-11-06-alert-observables.md)
+(APPROVED; decisions §14; 28 ACs). This is the P6 candidate from
+`PLAN-2026-10-16-source-field-mapping.md`. **Do not commit unless explicitly requested.**
+
+- [x] **15.1 — P1: pure schema + extraction.** `ingest/observable_rules.py` and
+  `ingest.mapping.extract_all_by_jsonpath`; observable validation in `validate_config`. AC1–AC4.
+- [x] **15.2 — P2: ingest persistence.** `observables/alert_sync.py::sync_alert_observables` called
+  from `store_ingested_alert` for create and replay. AC5–AC9.
+- [x] **15.3 — P3: remap.** Observables re-extracted in `remap_alerts`; `observables_added` in
+  `RemapResult` and the flash message. AC10–AC12.
+- [x] **15.4 — P4: alert detail tab.** Observables tab, card moved out of General, honest empty
+  state. Two provenance UI assertions moved to `?tab=observables`. AC13–AC16.
+- [x] **15.5 — P5: case copy.** Copy on merge/import, reconcile proposed suggestions, dispatch once
+  per new link, timeline counts. AC17–AC21.
+- [x] **15.6 — P6: source editor.** Observable-rules card and save path preserving unrelated config;
+  audit/no-op/error handling. AC22–AC25.
+- [ ] **15.7 — Deferred API parity (Q6).** A future `GET /api/v1/alert/{alertId}/observable` read
+  endpoint is intentionally omitted until a client needs it.
+- [ ] **15.8 — Deferred provenance decision (Q7).** Explain and decide the trade-off for a per-link
+  `AlertObservable.source_path` column before a migration-backed provenance wave.
+- [x] **15.9 — P7: verification.** 56 focused tests + relevant suites + `make check` green; independent
+  verifier passes AC1–AC28 (`docs/verification/VERIFY-2026-11-06-alert-observables.md`); security
+  review PASS with one pre-existing Medium residual risk
+  (`docs/reviews/SECURITY-2026-11-06-alert-observables.md`). AC26–AC28.
+- [ ] **15.10 — Security follow-up: redact raw values from mapping warnings.** The AC28 review found
+  that `FieldWarning.value_any` can store raw payload values (emails, IPs) in
+  `Alert.ingestion_warnings`. This is pre-existing (not introduced by §15) and not a blocker, but the
+  warning text should redact or hash sensitive values. Source: `SECURITY-2026-11-06-alert-observables.md`
+  §7 (Medium residual).
+
+---
+
+## 16. Source detail: Mapping + Raw data tabs (2026-11-06)
+
+Plan: [`PLAN-2026-11-06-source-detail-raw-data.md`](docs/planning/PLAN-2026-11-06-source-detail-raw-data.md)
+(IMPLEMENTED; decisions §4; ACs SRC-RAW-1..8). Impl brief:
+[`IMPL-2026-11-06-source-detail-raw-data.md`](docs/planning/IMPL-2026-11-06-source-detail-raw-data.md).
+**Do not commit unless explicitly requested.**
+
+- [x] **16.1 — View.** `settings_source_detail` reads `?tab=` (`mapping` default; invalid → `mapping`),
+  computes `latest_alert` (`-date, -created_at` for the source) and pretty-printed `latest_raw_payload`;
+  `_source_detail_context` forwards `active_tab`, `latest_alert`, `latest_raw_payload`.
+- [x] **16.2 — Template.** Reuses `.tabs`/`.tab`/`.tab-on` under the messages block; Mapping content
+  wrapped in `{% if active_tab == "mapping" %}`, Raw data card with identity `<dl>` and auto-escaped
+  `<pre class="json">`, plus "No raw data yet." empty state (no alert link, per §4).
+- [x] **16.3 — Tests.** `tests/conformance/test_source_detail_raw_data.py` (7): default tab, latest
+  payload/identity, latest-wins ordering, auto-escaped payload, empty state, invalid-tab fallback,
+  analyst 404. `test_settings_source_mapping.py` (53) still green — 60 total.
+- [x] **16.4 — Gates.** `make check` green.
+- [x] **16.5 — Independent verification.** PASS WITH NOTES, 8/8 ACs met
+  (`docs/verification/VERIFY-2026-11-06-source-detail-raw-data.md`).
+- [ ] **16.6 — Decide the empty-payload edge.** An alert whose `raw_payload` is the default `{}` renders
+  `{}` in `<pre>` rather than the "No raw data yet." empty state (the plan never specified this case).
+  Low priority; either show `{}` intentionally or treat a falsy payload as empty. Verifier observation (a).
 
 ---
 

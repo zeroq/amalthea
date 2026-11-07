@@ -128,7 +128,7 @@ def test_alert_detail_lists_observables_and_verdict(client, case, org, alert_sta
     observable = _email_observable(org, mail_type, "detail@example.com")
     AlertObservable.objects.create(alert=alert, observable=observable)
 
-    response = client.get(f"/alerts/{alert.id}")
+    response = client.get(f"/alerts/{alert.id}?tab=observables")
     body = response.content.decode()
 
     assert response.status_code == 200
@@ -145,7 +145,7 @@ def test_alert_detail_observable_case_link_is_visible_only_for_visible_cases(
     AlertObservable.objects.create(alert=alert, observable=observable)
     CaseObservable.objects.create(case=case, observable=observable)
 
-    response = client.get(f"/alerts/{alert.id}")
+    response = client.get(f"/alerts/{alert.id}?tab=observables")
     body = response.content.decode()
 
     assert f"#{case.number}" in body

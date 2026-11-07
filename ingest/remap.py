@@ -43,6 +43,7 @@ from django.db.models import Count, QuerySet
 from alerts.models import Alert
 from ingest.mapping import UNRESOLVED_REASONS, AlertDraft, apply_mapping
 from ingest.models import IngestionSource
+from observables.alert_sync import sync_alert_observables
 
 #: The fields a re-map may write, in the order every message and audit row lists them.
 #:
@@ -101,6 +102,9 @@ class RemapResult:
     #: nothing and falls back to the default, which is *identical* to the stored value and therefore
     #: invisible in `updated`/`unchanged` alone (`ingest.mapping.UNRESOLVED_REASONS`).
     unresolved: dict[str, dict[str, int]]
+    #: Alert observables newly linked by this pass. Defaulted so existing callers can construct the
+    #: result without the new field; re-extraction is additive and never removes a link.
+    observables_added: int = 0
 
     @property
     def touched(self) -> list[str]:
@@ -264,6 +268,7 @@ def remap_alerts(
     candidates = 0
     updated = 0
     refreshed = 0
+    observables_added = 0
     changed_fields: dict[str, int] = {}
     unresolved: dict[str, dict[str, int]] = {}
     for alert in candidate_alerts(source)[:limit].iterator(chunk_size=200):
@@ -279,6 +284,9 @@ def remap_alerts(
                 changed_fields[target] = changed_fields.get(target, 0) + 1
         elif _refresh_record(alert, source, draft):
             refreshed += 1
+        # Re-extraction is additive and idempotent. It runs even when no field changed, because a
+        # mapping fix or a newly configured observable rule must be able to repair existing alerts.
+        observables_added += sync_alert_observables(alert, config=config).created
     return RemapResult(
         candidates=candidates,
         updated=updated,
@@ -286,6 +294,7 @@ def remap_alerts(
         refreshed=refreshed,
         changed_fields=changed_fields,
         unresolved=unresolved,
+        observables_added=observables_added,
     )
 
 

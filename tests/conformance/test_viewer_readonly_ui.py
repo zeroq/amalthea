@@ -43,6 +43,7 @@ _MUTATION_ROUTE_SAMPLES = frozenset(
         "ui-case-field-edit",
         "ui-case-tag-add",
         "ui-case-tag-remove",
+        "ui-alert-tag-remove",
         "ui-case-task-create",
         "ui-case-procedure-create",
         "ui-case-procedures-create",
