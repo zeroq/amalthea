@@ -29,6 +29,7 @@ from django.utils.safestring import mark_safe
 
 from core.enums import SEVERITY_CHOICES, SEVERITY_MAX, SEVERITY_MIN
 from ingest.mapping import REASON_LABELS, UNRESOLVED_REASONS
+from ui.json_tree import build_json_tree
 from ui.markdown import render_markdown
 
 register = template.Library()
@@ -243,3 +244,14 @@ def tag_colour(value: Any) -> str:
 def highlight_case_number(value: Any, query: Any) -> str:
     """Highlight the leading ``#`` plus a case number, for ``#123`` and ``123`` queries."""
     return highlight(f"#{value}", query)
+
+
+@register.inclusion_tag("ui/_json_tree.html")
+def json_tree(value: Any) -> dict[str, Any]:
+    """Render a JSON payload as a tree of ``JsonNode`` objects.
+
+    Returns ``{"nodes": tree.nodes, "truncated": tree.truncated}`` for use in
+    ``ui/_json_tree.html``.
+    """
+    tree = build_json_tree(value)
+    return {"nodes": tree.nodes, "truncated": tree.truncated}

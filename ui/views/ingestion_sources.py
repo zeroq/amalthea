@@ -206,10 +206,11 @@ def _source_detail_context(
     reached by GET can never show a confirm control for a write nobody asked for.
     """
     from ingest.editor import TARGET_LABELS, editor_rows, transforms_for_editor
-    from ingest.mapping import config_shape, read_rules
+    from ingest.mapping import TARGETS, config_shape, read_rules
     from ingest.observable_editor import observable_editor_rows
     from ingest.remap import MAX_REMAP_ALERTS, REMAP_FIELDS, mapping_health
     from observables.models import ObservableType
+    from ui.json_tree import is_valid_jsonpath
 
     errors = errors or {}
     observable_errors = observable_errors or {}
@@ -226,21 +227,47 @@ def _source_detail_context(
     tokens_total = tokens_qs.count()
     tokens = list(tokens_qs[:RAIL_CAP])
 
+    erows = editor_rows(source.mapping_config, submitted=submitted, errors=errors)
+    obs_rows = observable_editor_rows(
+        source.mapping_config,
+        observable_types,
+        submitted=observable_submitted,
+        errors=observable_errors,
+    )
+
+    # --- Raw-data click-to-map prefill (TODO §17) --------------------------------
+    # A GET from the raw-data tab asks to add one JSONPath to a mapping row. It is a
+    # *prefill* only: the path lands in the unsaved textarea, and the existing Save POST
+    # remains the sole writer. Invalid input is ignored rather than raising.
+    prefilled: dict[str, str] | None = None
+    if active_tab == "mapping":
+        map_target = request.GET.get("map_target", "")
+        map_path = request.GET.get("map_path", "")
+        map_observable_type = request.GET.get("map_observable_type", "")
+        if is_valid_jsonpath(map_path):
+            if map_target in TARGET_LABELS:
+                prefilled = {"target": map_target, "observable_type": "", "path": map_path}
+                _prefill_row(erows, "target", map_target, map_path)
+            elif map_target == "observable" and map_observable_type in {
+                ot.name for ot in observable_types
+            }:
+                prefilled = {
+                    "target": "observable",
+                    "observable_type": map_observable_type,
+                    "path": map_path,
+                }
+                _prefill_row(obs_rows, "type", map_observable_type, map_path)
+
     return {
         "source": source,
         # `legacy` is the one shape the page must explain rather than silently upgrade (§7 rule 4).
         "config_shape": config_shape(source.mapping_config),
-        "editor_rows": editor_rows(source.mapping_config, submitted=submitted, errors=errors),
+        "editor_rows": erows,
         "editor_errors": errors,
         # The whole-config messages of whichever form was submitted: `validate_config` has no row to
         # attach `value_maps` (or a JSON parse failure) to, so they are shown above it.
         "config_errors": errors.get("", ()),
-        "observable_rows": observable_editor_rows(
-            source.mapping_config,
-            observable_types,
-            submitted=observable_submitted,
-            errors=observable_errors,
-        ),
+        "observable_rows": obs_rows,
         "observable_errors": observable_errors,
         "observable_config_errors": observable_errors.get("", ()),
         "failed_form": failed_form,
@@ -287,7 +314,24 @@ def _source_detail_context(
         "active_tab": active_tab,
         "latest_alert": latest_alert,
         "latest_raw_payload": latest_raw_payload,
+        # Raw-data click-to-map (TODO §17): the parsed payload feeds the JSON tree; the
+        # raw `<pre>` above stays as the no-JS fallback.
+        "latest_raw_data": latest_alert.raw_payload if latest_alert is not None else None,
+        "map_targets": [(t, TARGET_LABELS[t]) for t in TARGETS],
+        "observable_types": observable_types,
+        "prefilled": prefilled,
     }
+
+
+def _prefill_row(rows: list[dict], key: str, value: str, path: str) -> None:
+    """Append *path* to the editor row whose ``key`` equals ``value`` (dedup, newline-separated)."""
+    for row in rows:
+        if row.get(key) == value:
+            existing = [p.strip() for p in row.get("paths", "").splitlines() if p.strip()]
+            if path not in existing:
+                existing.append(path)
+            row["paths"] = "\n".join(existing)
+            return
 
 
 def _source_mapping_rows(request: HttpRequest) -> dict[str, dict[str, str]]:

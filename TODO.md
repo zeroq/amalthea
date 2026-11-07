@@ -1277,6 +1277,137 @@ Plan: [`PLAN-2026-11-06-source-detail-raw-data.md`](docs/planning/PLAN-2026-11-0
 
 ---
 
+## 17. Raw-data click-to-map (IMPLEMENTED, 2026-11-07)
+
+Status: **IMPLEMENTED & VERIFIED (2026-11-07).** Verifier: PASS WITH NOTES, 10/10 ACs
+(`docs/verification/VERIFY-2026-11-07-raw-click-map.md`); security: PASS WITH NOTES, no Critical/High
+(`docs/security/SECURITY-2026-11-07-raw-click-map.md` — M1 GET-without-CSRF and M2 key-names-in-URL are
+accepted). Decisions in §17.6 are locked; §17.9 has files, deviations, and test evidence. Not committed
+yet. A full `docs/planning/PLAN-<date>-raw-click-map.md` may be written when scheduled for release.
+
+### 17.1 Goal
+On the source detail **Raw data** tab, make JSON scalar values clickable. Clicking a value opens a modal
+("Map this field to…") offering the seven general targets (Title, Description, Summary, Severity, Date,
+Type, Source reference) and, last, **Observable extraction**. Choosing one adds that value's JSONPath to
+the matching mapping row, which the operator then reviews and saves.
+
+### 17.2 Why "append in place" does not work as-is
+- CSP is `script-src 'self'`, no inline/nonce (ADR-003): interaction must live in an external
+  `ui/static/ui/*.js` file; templates must not build HTML from payload data.
+- The source tabs are **server-rendered and mutually exclusive**: on `?tab=raw-data` the Mapping form is
+  not in the DOM (`{% if active_tab == "mapping" %}`), and SRC-RAW-2 asserts mapping content is absent
+  there — so a click cannot append to a textarea that does not exist.
+- A click that wrote the stored config directly would bypass the reviewed "Save mapping" flow.
+
+### 17.3 Recommended model (prefill, then Save)
+1. Render the raw payload server-side as a structured, pretty JSON tree; each scalar carries
+   `data-json-path="<jsonpath>"`. Keep a collapsible "Raw JSON" `<pre>` for copy/paste and fallback.
+2. External `json-map.js` enhances scalar nodes (`role=button`, `tabindex=0`, Enter/Space); on activation
+   it fills a hidden `map_path` in a server-rendered `<dialog>` and opens it.
+3. The dialog offers the seven targets as radios, plus "Observable extraction" (reveals a server-rendered
+   type `<select>`), and submits a **GET** to the same page:
+   `?tab=mapping&map_target=<t>&map_path=<p>[&map_observable_type=<type>]`.
+4. The view validates the target and path (starts with `$`, `jsonpath-ng` parses it, ≤ `MAX_PATH_LEN`=200)
+   and renders the Mapping tab with the path appended to that row's textarea (deduped, **not saved**) plus
+   a hint/highlight: "Added from raw data — review, then Save mapping."
+5. Nothing persists until the existing "Save mapping" / "Save observable rules" POST (CSRF unchanged).
+
+This keeps one writer per form, no silent writes, no new endpoint, and preserves SRC-RAW-2.
+
+### 17.4 Components
+- `ui/json_tree.py` (new, pure): `jsonpath_for(parts)` (dot for identifier keys, `[n]` for indices,
+  `["…"]` with `"`/`\` escaping for everything else; round-trip tested with `jsonpath-ng`); a bounded
+  tree builder (`MAX_NODES`≈1000, `MAX_DEPTH`≈12, truncation flag).
+- `ui/templatetags/ui_tags.py`: a `json_tree` inclusion tag rendering `_json_tree.html` recursively.
+- `ui/templates/ui/source_detail.html`: raw panel uses the tree + `<details>` raw `<pre>`; include
+  `_json_map_modal.html` on the raw tab; Mapping tab shows the prefill hint/highlight.
+- `ui/templates/ui/_json_tree.html`, `_json_map_modal.html` (new partials).
+- `ui/static/ui/json-map.js` (new, external, CSP-safe; DOM text/value only, no `innerHTML`).
+- `ui/templates/ui/base.html`: add a `{% block scripts %}` before `</body>` so page-specific JS loads once.
+- `ui/views/ingestion_sources.py`: parse/validate the GET prefill; append to `editor_rows` /
+  `observable_rows`; pass `map_targets`, `observable_types`, prefill state.
+- `ui/static/ui/app.src.css` (+ regenerate `app.css` via `make css`): `.json-tree`, `.json-key`,
+  `.json-val`, hover/focus treatment, truncation note.
+
+### 17.5 Security
+- All output auto-escaped; no `|safe` from payload data; no `innerHTML`.
+- `map_path`/`map_target`/`map_observable_type` validated against allow-lists and length caps; invalid
+  input silently ignored (normal Mapping render). GET prefill is non-persistent; the only writer remains
+  the CSRF-protected Save POST.
+- Node/depth caps prevent a huge payload from bloating the page.
+- Note: the prefill URL exposes payload **key names** (not values) in browser history/server logs. Keys
+  only; accepted unless the user prefers a POST/session alternative.
+
+### 17.6 Open questions (answered 2026-11-07)
+1. **Interaction model:** prefill + navigate to Mapping (recommended) vs. true in-place edit (needs both
+   panels in the DOM, breaks SRC-RAW-2) vs. direct save (new write endpoint). Which?
+2. **Path order on an existing target:** append (lower priority; first match wins) or prepend (higher
+   priority)? Recommend append.
+3. **Observable type:** choose from existing `ObservableType`s via a dropdown (recommended); also
+   auto-suggest a type from the value (IP/hash/mail)? Allow free-text types, or known types only?
+4. **Arrays:** clicking an element gives a concrete `[n]`; also offer an "all items" `[*]` option?
+5. **Clickable nodes:** scalars only (string/number/bool/null), not objects/arrays? Recommend scalars.
+6. **Raw fallback:** keep the collapsible "Raw JSON" `<pre>` for copy/paste/accessibility? Recommend yes.
+7. **Caps:** ~1,000 nodes / depth 12 with a truncation notice — acceptable?
+8. **Prefill transport:** GET query (simple; key names in history/logs) vs. sessionStorage/HTMX POST?
+9. **After add:** scroll/focus the target textarea and show an "unsaved" hint — confirm.
+10. **Scope:** admin/superAdmin only (inherits the source-page gate) — confirm.
+
+### 17.7 Phases and acceptance criteria
+- **P1 — pure helpers.** `jsonpath_for` + bounded tree builder + tests. `RCM-1` paths round-trip through
+  `jsonpath-ng` and select exactly that value (incl. dots, spaces, quotes, unicode, indices); `RCM-2`
+  node/depth truncation is flagged.
+- **P2 — tree UI.** Template tag + partials + CSS + raw fallback. `RCM-3` scalars expose valid
+  `data-json-path`; raw `<pre>` preserved.
+- **P3 — modal + JS.** Dialog, radios (7 targets + Observable extraction), type select, external JS.
+  `RCM-4` activation opens the dialog with the path; `RCM-5` keyboard operable (focus trap, Esc,
+  Enter/Space, labels, no color-only).
+- **P4 — prefill view.** Validation + append/dedup + hint. `RCM-6` target/path/type accepted → Mapping
+  textarea holds the path (unsaved); `RCM-7` invalid/missing → normal Mapping render, no error page;
+  `RCM-8` stored config unchanged until Save.
+- **P5 — verification.** Focused tests + `make check`; independent verifier + security review.
+  `RCM-9` autoescape/XSS-safe; `RCM-10` no-JS raw data still readable, CSRF/writes unchanged.
+
+### 17.8 Testing
+- Pure: `jsonpath_for` round-trip matrix; tree cap/truncation; escaping.
+- View: prefill general target, dedup, invalid target/path, observable type prefill, no persistence,
+  raw tab still hides mapping (SRC-RAW-2), analyst 404, reflected-value escaping.
+- Template: raw tree `data-json-path` present; modal lists all seven labels + Observable extraction.
+- JS: no harness in-repo — add a template-presence conformance test and document manual keyboard checks.
+
+**Answers (locked):** (1) prefill + navigate; (2) append; (3) dropdown of existing `ObservableType`
+names only, no auto-suggest, no free text; (4) concrete `[n]` **and** an "all items" `[*]` option;
+(5) scalars only; (6) keep the collapsible Raw JSON `<pre>`; (7) 1,000 nodes / depth 12 with a
+truncation notice; (8) GET query; (9) scroll/focus the textarea and show the unsaved hint; (10) admin/
+superAdmin only (inherits the source-page gate).
+
+### 17.9 Implementation result (2026-11-07)
+- **Backend:** `ui/json_tree.py` (pure `jsonpath_for`, `all_items_path`, `is_valid_jsonpath`,
+  `build_json_tree`, `JsonNode`/`JsonTree`; caps `MAX_TREE_NODES=1000`, `MAX_TREE_DEPTH=12`,
+  `MAX_VALUE_CHARS=200`); `json_tree` inclusion tag in `ui/templatetags/ui_tags.py` +
+  `ui/templates/ui/_json_tree.html`; `ui/views/ingestion_sources.py` validates the GET prefill and
+  appends (deduped) to the unsaved editor rows, exposing `latest_raw_data`, `map_targets`,
+  `observable_types`, `prefilled`.
+- **Frontend:** dedicated `ui/templates/ui/_json_map_modal.html` (GET, no CSRF); `ui/static/ui/json-map.js`
+  (external, no `innerHTML`/`eval`; role/tabindex + Enter/Space; path choice; observable select toggle);
+  `{% block scripts %}` in `base.html`; raw panel renders `{% json_tree latest_raw_data %}` with the
+  `<details>` raw fallback; Mapping tab renders the prefill hint and `data-prefilled` marker; `.json-tree`
+  styles in `app.src.css`, `app.css` regenerated (`make css`).
+- **Deviations:** (a) `_json_map_modal.html` is a dedicated `<dialog>`, not `_modal.html`, because the
+  shared footer form injects `{% csrf_token %}` and defaults to POST — a GET form must not put the token
+  in the URL; (b) `is_valid_jsonpath` lives in `ui/json_tree.py` (as planned) and is imported by the view,
+  not duplicated in `ingest/mapping.py`.
+- **Tests:** `tests/conformance/test_raw_click_map.py` (helpers + view prefill/dedup/invalid/observable/
+  escaping/404) and `test_raw_click_map_template.py` (tree paths incl. `[*]`, modal labels + observable
+  options, external script/no inline script, payload escaping, prefill hint + `data-prefilled`). Focused
+  run: **88 passed**; `make css-check` green; ruff clean. Two test bugs fixed during integration: a missing
+  `ObservableType` fixture and a dedup assertion that counted the new prefill hint as a duplicate.
+- **Verification:** independent verifier PASS WITH NOTES (10/10 ACs) and security PASS WITH NOTES
+  (no Critical/High; M1/M2 accepted). **Still needed:** a manual browser pass (keyboard, focus trap,
+  scroll-to-textarea) and a dark-theme contrast check, then a commit once approved.
+
+---
+
 ## 🎯 Next Recommended Items
 
 The canonical **NEXT HIGHEST-IMPACT ITEMS** table at the top of this file is the single source of truth.

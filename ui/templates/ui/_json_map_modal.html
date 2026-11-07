@@ -1,0 +1,57 @@
+{#  raw-data click-to-map: choose a mapping target for a clicked JSON value.
+    A GET form deliberately carries no CSRF token (it writes nothing); modal.js
+    supplies Esc/backdrop/focus-trap behaviour. No inline script (ADR-003). #}
+<dialog class="modal" id="json-map-modal" aria-labelledby="json-map-modal-title">
+  <div class="modal-content">
+    <header class="modal-header">
+      <h2 class="modal-title" id="json-map-modal-title">Map this value</h2>
+      <button type="button" class="modal-close" aria-label="Close" data-modal-close="json-map-modal">&times;</button>
+    </header>
+    <div class="modal-body">
+      <form id="json-map-form" method="get" action="{{ request.path }}">
+        <input type="hidden" name="tab" value="mapping">
+
+        <fieldset class="radio-group">
+          <legend>Mapping target</legend>
+          {% for target, label in map_targets %}
+            <label class="radio-option">
+              <input type="radio" name="map_target" value="{{ target }}"{% if forloop.first %} checked{% endif %}>
+              {{ label }}
+            </label>
+          {% endfor %}
+          <label class="radio-option">
+            <input type="radio" name="map_target" value="observable">
+            Observable (extract)
+          </label>
+        </fieldset>
+
+        <label class="sr-only" for="json-map-observable-type">Observable type</label>
+        <select id="json-map-observable-type" name="map_observable_type" disabled>
+          {% for ot in observable_types %}
+            <option value="{{ ot.name }}">{{ ot.name }}</option>
+          {% endfor %}
+        </select>
+
+        <fieldset class="path-options">
+          <legend>Path</legend>
+          <label class="radio-option">
+            <input type="radio" name="map_path" value="" checked>
+            This item only
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="map_path" value="">
+            All items in this array
+          </label>
+        </fieldset>
+
+        <p class="hint">
+          <code class="mono" id="path-preview"></code>
+        </p>
+      </form>
+    </div>
+    <footer class="modal-footer">
+      <button type="button" class="btn modal-cancel" data-modal-close="json-map-modal">Cancel</button>
+      <button type="submit" form="json-map-form" class="btn btn-primary">Use this path</button>
+    </footer>
+  </div>
+</dialog>

@@ -1,0 +1,28 @@
+<ul class="json-tree"{% if truncated %} data-truncated="1"{% endif %}>
+{% for node in nodes %}
+  {% if node.kind == "scalar" %}
+    {% if node.key != "" %}
+      <span class="json-key">{{ node.key }}: </span>
+    {% endif %}
+    <span class="json-val" data-json-path="{{ node.path }}"{% if node.all_path != node.path %} data-json-path-all="{{ node.all_path }}"{% endif %}>
+      {{ node.value_repr }}
+    </span>
+  {% elif node.kind == "object" %}
+    <div class="json-key">{{ node.key }}: </div>
+    <ul class="json-tree children"{% if node.truncated %} data-truncated="1"{% endif %}>
+      {% include "ui/_json_tree.html" with nodes=node.children truncated=node.truncated only %}
+    </ul>
+    {% if node.truncated %}
+      <p class="hint">… truncated</p>
+    {% endif %}
+  {% elif node.kind == "array" %}
+    <div class="json-key">{{ node.key }}: </div>
+    <ul class="json-tree children"{% if node.truncated %} data-truncated="1"{% endif %}>
+      {% include "ui/_json_tree.html" with nodes=node.children truncated=node.truncated only %}
+    </ul>
+    {% if node.truncated %}
+      <p class="hint">… truncated</p>
+    {% endif %}
+  {% endif %}
+{% endfor %}
+</ul>

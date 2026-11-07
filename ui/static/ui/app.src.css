@@ -1399,6 +1399,38 @@ a.rail-org-name:hover {
 
 /* Global search */
 .search-query { margin: 0 0 12px; }
+
+/* JSON tree — rendered by {% json_tree %} in the raw-data tab */
+.json-tree {
+  font-family: var(--font-mono);
+  color: var(--color-text);
+  line-height: 1.5;
+  margin: 8px 0;
+}
+.json-tree .json-key {
+  color: var(--color-text-dim);
+  font-weight: 500;
+  min-width: 6ch;
+}
+.json-tree .json-val {
+  color: var(--color-text);
+  user-select: all;
+}
+.json-val-map {
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+.json-val-map:hover {
+  background: var(--color-bg-raised);
+}
+.json-tree .json-val:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  background: var(--color-bg-raised);
+  border-radius: var(--radius);
+}
+
+/* End JSON tree */
 .search-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
 .search-tabs .btn { margin-top: 0; }
 .search-tabs .count { margin-left: 6px; }

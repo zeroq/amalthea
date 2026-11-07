@@ -1,4 +1,5 @@
 {% extends "ui/base.html" %}
+{% load static %}
 {% load ui_tags %}
 {% block title %}{{ source.name }} · Sources · Amalthea{% endblock %}
 {% block heading %}{{ source.name }}{% endblock %}
@@ -27,6 +28,9 @@
 
 {% if active_tab == "mapping" %}
 <div class="card">
+  {% if prefilled %}
+    <p class="hint" role="status">Added <code class="mono">{{ prefilled.path }}</code> from raw data. Save the form to apply.</p>
+  {% endif %}
   <h2>Identity</h2>
   <dl class="meta">
     <dt>Slug</dt><dd class="mono">{{ source.slug }}</dd>
@@ -90,7 +94,7 @@
                 <label class="sr-only" for="paths__{{ row.target }}">{{ row.label }} paths</label>
                 <textarea id="paths__{{ row.target }}" name="paths__{{ row.target }}" rows="3"
                           class="mono" spellcheck="false"
-                          placeholder="{{ row.literal_keys|join:', ' }}">{{ row.paths }}</textarea>
+                          placeholder="{{ row.literal_keys|join:', ' }}"{% if prefilled and prefilled.target == row.target %} data-prefilled="1"{% endif %}>{{ row.paths }}</textarea>
                 <p class="hint">One JSONPath per line; the first path that yields a value wins.</p>
               </td>
               <td>
@@ -166,7 +170,7 @@
                 <textarea id="observable_paths__{{ row.type }}"
                           name="observable_paths__{{ row.type }}" rows="3"
                           class="mono" spellcheck="false"
-                          placeholder="$.actor.email">{{ row.paths }}</textarea>
+                          placeholder="$.actor.email"{% if prefilled and prefilled.target == "observable" and prefilled.observable_type == row.type %} data-prefilled="1"{% endif %}>{{ row.paths }}</textarea>
                 <p class="hint">
                   One JSONPath per line. Every matching value is added to the alert; leave empty for
                   no rule of this type.
@@ -356,11 +360,20 @@ dialog). Writing it as a `<dialog>` rather than a native `confirm()` is the repo
       <dt>Date</dt><dd class="mono">{{ latest_alert.date|date:"Y-m-d H:i" }}</dd>
       <dt>Organisation</dt><dd>{{ latest_alert.owner_org.name }}</dd>
     </dl>
-    <pre class="json">{{ latest_raw_payload }}</pre>
+    <p class="hint">Click any value to map it.</p>
+    {% json_tree latest_raw_data %}
+    <details>
+      <summary>Raw JSON</summary>
+      <pre class="json">{{ latest_raw_payload }}</pre>
+    </details>
+    {% include "ui/_json_map_modal.html" with map_targets=map_targets observable_types=observable_types prefilled=prefilled %}
   {% else %}
     <p class="empty">No raw data yet.</p>
     <p class="hint">Raw data appears here once an alert has been ingested from this feed.</p>
   {% endif %}
 </div>
 {% endif %}
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'ui/json-map.js' %}" defer></script>
 {% endblock %}
