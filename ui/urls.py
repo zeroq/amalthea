@@ -13,6 +13,9 @@ from .search import global_search
 urlpatterns = [
     path("", views.dashboard, name="ui-dashboard"),
     path("alerts", views.alert_list, name="ui-alert-list"),
+    # §19 — Alert JSON export/import (place before `alerts/<uuid:alert_id>`)
+    path("alerts/import", views.alert_import_ui, name="ui-alert-import"),
+    path("alerts/<uuid:alert_id>/export", views.alert_export_ui, name="ui-alert-export"),
     path("alerts/<uuid:alert_id>", views.alert_detail, name="ui-alert-detail"),
     path("alerts/<uuid:alert_id>/escalate", views.alert_escalate, name="ui-alert-escalate"),
     path("alerts/<uuid:alert_id>/merge", views.alert_merge, name="ui-alert-merge"),
@@ -25,6 +28,9 @@ urlpatterns = [
     path("cases", views.case_list, name="ui-case-list"),
     # §10.2 — must precede `cases/<str:case_id>` (a literal is otherwise swallowed as a case id).
     path("cases/new", views.case_create, name="ui-case-create"),
+    # §18 — Case JSON import (must precede `cases/<str:case_id>` so the literal "import" is not
+    # swallowed as a case identifier by the <str:case_id> route).
+    path("cases/import", views.case_import_ui, name="ui-case-import"),
     path("cases/<str:case_id>", views.case_detail, name="ui-case-detail"),
     path("cases/<str:case_id>/delete", views.case_delete_ui, name="ui-case-delete"),
     path("cases/<str:case_id>/link-alert", views.case_alert_link, name="ui-case-alert-link"),

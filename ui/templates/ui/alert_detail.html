@@ -18,6 +18,7 @@
   {% if alert.case %}
     <a class="btn btn-primary" href="{% url 'ui-case-detail' alert.case.number %}">Open case #{{ alert.case.number }}</a>
   {% endif %}
+  <a class="btn" href="{% url 'ui-alert-export' alert.id %}">Export JSON</a>
 {% endblock %}
 
 {% block content %}

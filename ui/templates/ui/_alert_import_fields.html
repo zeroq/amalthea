@@ -1,0 +1,10 @@
+{% comment %}
+Server-rendered body for the "Import Alert JSON" modal. Fields target the modal footer form via
+`form="{{ form_id }}"` so the upload works with JS disabled through the same POST route.
+{% endcomment %}
+<div class="form-group">
+  <label for="alert-import-file">JSON export file</label>
+  <input type="file" id="alert-import-file" name="file" accept="application/json,.json" required
+         form="{{ form_id }}">
+  <p class="hint">Select an <code>AlertExport</code> v1 JSON file. Maximum size: 5 MiB.</p>
+</div>

@@ -20,8 +20,16 @@
     {% else %}
       <a class="btn" href="{% querystring mine=1 page=1 %}" aria-label="Show only alerts assigned to me">Mine</a>
     {% endif %}
+    {% if request.user.role == "admin" or request.user.role == "superAdmin" %}
+      <a class="btn btn-primary btn-end" href="{% url 'ui-alert-import' %}"
+         data-modal-open="import-alert-modal">Import JSON</a>
+    {% endif %}
   </form>
 </div>
+{% if request.user.role == "admin" or request.user.role == "superAdmin" %}
+  {% url 'ui-alert-import' as alert_import_url %}
+  {% include "ui/_modal.html" with modal_id="import-alert-modal" title="Import alert JSON" body_template="ui/_alert_import_fields.html" form_id="import-alert-form" form_action=alert_import_url form_enctype="multipart/form-data" confirm_text="Import" cancel_text="Cancel" size="lg" %}
+{% endif %}
 
 <div class="card">
   {% include "ui/_list_summary.html" with entity_name="alert" entity_name_plural="alerts" %}

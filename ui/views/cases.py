@@ -22,6 +22,14 @@ from cases.correlation import (
     record_alert_bundled,
 )
 from cases.create import DEFAULT_CASE_STATUS, create_case
+from cases.importing import (
+    MAX_BYTES as CASE_IMPORT_MAX_BYTES,
+)
+from cases.importing import (
+    CaseImportError,
+    import_case_document,
+    parse_case_export,
+)
 from cases.ledger import append_timeline_event
 from cases.models import (
     Case,
@@ -665,6 +673,66 @@ def case_export(request: HttpRequest, case_id: str) -> HttpResponse:
     )
     response["Content-Disposition"] = f'attachment; filename="case-{case.number}-export.json"'
     return response
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def case_import_ui(request: HttpRequest) -> HttpResponse:
+    """§18 — import a case from a ``CaseExport`` JSON file.
+
+    Admin/superAdmin only; everyone else gets the same 404 as any other forbidden page (ADR-006).
+    GET renders the standalone page; POST validates the upload and either redirects to the new case
+    or re-renders the page with the service's message and a 400/409. Any failure leaves no case.
+    """
+    if not is_admin(request.user):
+        raise Http404("Import is admin-only.")
+
+    if request.method == "GET":
+        return render(request, "ui/import_case.html", _base_context(request))
+
+    uploaded_file = request.FILES.get("file")
+    if uploaded_file is None:
+        return render(
+            request,
+            "ui/import_case.html",
+            {"error": "Choose a JSON export file to import.", **_base_context(request)},
+            status=400,
+        )
+    if uploaded_file.size > CASE_IMPORT_MAX_BYTES:
+        return render(
+            request,
+            "ui/import_case.html",
+            {"error": "File exceeds the 5 MiB limit.", **_base_context(request)},
+            status=400,
+        )
+
+    raw = uploaded_file.read(CASE_IMPORT_MAX_BYTES + 1)
+    if len(raw) > CASE_IMPORT_MAX_BYTES:
+        return render(
+            request,
+            "ui/import_case.html",
+            {"error": "File exceeds the 5 MiB limit.", **_base_context(request)},
+            status=400,
+        )
+
+    try:
+        document = parse_case_export(raw)
+        case = import_case_document(
+            document,
+            actor=request.user,
+            source_filename=uploaded_file.name,
+        )
+    except CaseImportError as exc:
+        status_code = 409 if exc.code in ("alert_duplicate", "alert_import_failed") else 400
+        return render(
+            request,
+            "ui/import_case.html",
+            {"error": exc.message, "error_code": exc.code, **_base_context(request)},
+            status=status_code,
+        )
+
+    messages.success(request, f"Case #{case.number} imported from JSON.")
+    return redirect("ui-case-detail", case_id=str(case.id))
 
 
 @not_viewer

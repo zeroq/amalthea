@@ -1,0 +1,26 @@
+{% extends "ui/base.html" %}
+{% load ui_tags %}
+{% block title %}Import Alert JSON · Amalthea{% endblock %}
+{% block heading %}Import Alert JSON{% endblock %}
+
+{% block content %}
+<div class="card">
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <div class="form-group">
+      <label for="file">Upload JSON export file</label>
+      <input type="file" name="file" accept="application/json,.json" required>
+      <p class="hint">Select an AlertExport v1 JSON file exported from Amalthea or TheHive.</p>
+    </div>
+
+    {% if error %}
+    <div class="form-group error">
+      <p>{{ error }}</p>
+    </div>
+    {% endif %}
+
+    <button type="submit" class="btn btn-primary">Import</button>
+    <a class="btn" href="{% url 'ui-alert-list' %}">Back to alerts</a>
+  </form>
+</div>
+{% endblock %}

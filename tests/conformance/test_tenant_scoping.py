@@ -785,6 +785,9 @@ _UI_GLOBAL_READ_ROUTES: set[str] = {
     "ui-tag-create",
     "ui-tag-detail",
     "ui-tag-delete",
+    # Admin-only standalone pages: a generic analyst GET is a 404 by role, not by org.
+    "ui-alert-import",
+    "ui-case-import",
     # Playbook create is admin-only, so a generic analyst GET is 404 by role rather than by org.
     # List/detail/edit are org-scoped and exercised by the tenant read conformance below.
     "ui-playbook-create",
@@ -1739,6 +1742,7 @@ class TestUIRouteEnumerationConformance:
             "ui-dashboard": {},
             "ui-alert-list": {},
             "ui-alert-detail": {"alert_id": str(self.alert1.id)},
+            "ui-alert-export": {"alert_id": str(self.alert1.id)},
             "ui-case-list": {},
             "ui-case-create": {},
             "ui-case-detail": {"case_id": str(self.case1.number)},

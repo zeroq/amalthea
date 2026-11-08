@@ -86,7 +86,7 @@ Parameters:
       <button type="button" class="btn modal-cancel" data-modal-close="{{ modal_id }}">{{ cancel_text|default:"Cancel" }}</button>
       {% endif %}
       {% if form_action %}
-      <form id="{{ form_id }}" method="{{ form_method|default:'post' }}" action="{{ form_action }}"
+      <form id="{{ form_id }}" method="{{ form_method|default:'post' }}" action="{{ form_action }}"{% if form_enctype %} enctype="{{ form_enctype }}"{% endif %}
             {% if form_hx_post %}hx-post="{{ form_hx_post }}" hx-target="{{ form_hx_target }}" hx-swap="innerHTML"{% endif %}>
         {% csrf_token %}
         {% if extra_fields %}

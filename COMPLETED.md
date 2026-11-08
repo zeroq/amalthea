@@ -2,7 +2,7 @@
 
 Finished work, with the evidence that it actually happened. Open items live in
 [`TODO.md`](./TODO.md).
-Last updated: 2026-10-13
+Last updated: 2026-11-08
 
 Items are only listed here once independently verified. Where code exists but an acceptance criterion
 is still unproven, the item says so explicitly and the verification gap is cross-linked in `TODO.md`.
@@ -1499,3 +1499,400 @@ manual refresh; tab label badge = similar cases + similar alerts; 21/21 ACs veri
 APPROVE WITH NOTES). Plus the earlier **"Similar alerts" card** (11/11 ACs), the **clickable "Seen in" →
 linked-cases modal**, **§10.1 org-scoped user management** (ADR-010) and the Settings/Cases/Alerts UI
 refinements.*
+---
+
+## 2026-11-08 — TODO cleanup: closed items moved out of TODO.md
+
+Historical closed work removed from `TODO.md` when it was cut down to open items only. Recent closed sections are copied verbatim; earlier one-line closures are preserved as a title index (full text remains in git history at `f2212a9`). Open items stayed in `TODO.md`.
+
+### §15 closed items (15.1–15.6, 15.9)
+
+## 15. Alert observables from source mappings (2026-11-06)
+
+Plan: [`PLAN-2026-11-06-alert-observables.md`](docs/planning/PLAN-2026-11-06-alert-observables.md)
+(APPROVED; decisions §14; 28 ACs). This is the P6 candidate from
+`PLAN-2026-10-16-source-field-mapping.md`. **Do not commit unless explicitly requested.**
+
+- [x] **15.1 — P1: pure schema + extraction.** `ingest/observable_rules.py` and
+  `ingest.mapping.extract_all_by_jsonpath`; observable validation in `validate_config`. AC1–AC4.
+- [x] **15.2 — P2: ingest persistence.** `observables/alert_sync.py::sync_alert_observables` called
+  from `store_ingested_alert` for create and replay. AC5–AC9.
+- [x] **15.3 — P3: remap.** Observables re-extracted in `remap_alerts`; `observables_added` in
+  `RemapResult` and the flash message. AC10–AC12.
+- [x] **15.4 — P4: alert detail tab.** Observables tab, card moved out of General, honest empty
+  state. Two provenance UI assertions moved to `?tab=observables`. AC13–AC16.
+- [x] **15.5 — P5: case copy.** Copy on merge/import, reconcile proposed suggestions, dispatch once
+  per new link, timeline counts. AC17–AC21.
+- [x] **15.6 — P6: source editor.** Observable-rules card and save path preserving unrelated config;
+  audit/no-op/error handling. AC22–AC25.
+- [x] **15.9 — P7: verification.** 56 focused tests + relevant suites + `make check` green; independent
+  verifier passes AC1–AC28 (`docs/verification/VERIFY-2026-11-06-alert-observables.md`); security
+  review PASS with one pre-existing Medium residual risk
+  (`docs/reviews/SECURITY-2026-11-06-alert-observables.md`). AC26–AC28.
+
+### §16 closed items (16.1–16.5)
+
+## 16. Source detail: Mapping + Raw data tabs (2026-11-06)
+
+Plan: [`PLAN-2026-11-06-source-detail-raw-data.md`](docs/planning/PLAN-2026-11-06-source-detail-raw-data.md)
+(IMPLEMENTED; decisions §4; ACs SRC-RAW-1..8). Impl brief:
+[`IMPL-2026-11-06-source-detail-raw-data.md`](docs/planning/IMPL-2026-11-06-source-detail-raw-data.md).
+**Do not commit unless explicitly requested.**
+
+- [x] **16.1 — View.** `settings_source_detail` reads `?tab=` (`mapping` default; invalid → `mapping`),
+  computes `latest_alert` (`-date, -created_at` for the source) and pretty-printed `latest_raw_payload`;
+  `_source_detail_context` forwards `active_tab`, `latest_alert`, `latest_raw_payload`.
+- [x] **16.2 — Template.** Reuses `.tabs`/`.tab`/`.tab-on` under the messages block; Mapping content
+  wrapped in `{% if active_tab == "mapping" %}`, Raw data card with identity `<dl>` and auto-escaped
+  `<pre class="json">`, plus "No raw data yet." empty state (no alert link, per §4).
+- [x] **16.3 — Tests.** `tests/conformance/test_source_detail_raw_data.py` (7): default tab, latest
+  payload/identity, latest-wins ordering, auto-escaped payload, empty state, invalid-tab fallback,
+  analyst 404. `test_settings_source_mapping.py` (53) still green — 60 total.
+- [x] **16.4 — Gates.** `make check` green.
+- [x] **16.5 — Independent verification.** PASS WITH NOTES, 8/8 ACs met
+  (`docs/verification/VERIFY-2026-11-06-source-detail-raw-data.md`).
+
+### §17 Raw-data click-to-map
+
+## 17. Raw-data click-to-map (IMPLEMENTED, 2026-11-07)
+
+Status: **IMPLEMENTED & VERIFIED (2026-11-07).** Verifier: PASS WITH NOTES, 10/10 ACs
+(`docs/verification/VERIFY-2026-11-07-raw-click-map.md`); security: PASS WITH NOTES, no Critical/High
+(`docs/security/SECURITY-2026-11-07-raw-click-map.md` — M1 GET-without-CSRF and M2 key-names-in-URL are
+accepted). Decisions in §17.6 are locked; §17.9 has files, deviations, and test evidence. Not committed
+yet. A full `docs/planning/PLAN-<date>-raw-click-map.md` may be written when scheduled for release.
+
+### 17.1 Goal
+On the source detail **Raw data** tab, make JSON scalar values clickable. Clicking a value opens a modal
+("Map this field to…") offering the seven general targets (Title, Description, Summary, Severity, Date,
+Type, Source reference) and, last, **Observable extraction**. Choosing one adds that value's JSONPath to
+the matching mapping row, which the operator then reviews and saves.
+
+### 17.2 Why "append in place" does not work as-is
+- CSP is `script-src 'self'`, no inline/nonce (ADR-003): interaction must live in an external
+  `ui/static/ui/*.js` file; templates must not build HTML from payload data.
+- The source tabs are **server-rendered and mutually exclusive**: on `?tab=raw-data` the Mapping form is
+  not in the DOM (`{% if active_tab == "mapping" %}`), and SRC-RAW-2 asserts mapping content is absent
+  there — so a click cannot append to a textarea that does not exist.
+- A click that wrote the stored config directly would bypass the reviewed "Save mapping" flow.
+
+### 17.3 Recommended model (prefill, then Save)
+1. Render the raw payload server-side as a structured, pretty JSON tree; each scalar carries
+   `data-json-path="<jsonpath>"`. Keep a collapsible "Raw JSON" `<pre>` for copy/paste and fallback.
+2. External `json-map.js` enhances scalar nodes (`role=button`, `tabindex=0`, Enter/Space); on activation
+   it fills a hidden `map_path` in a server-rendered `<dialog>` and opens it.
+3. The dialog offers the seven targets as radios, plus "Observable extraction" (reveals a server-rendered
+   type `<select>`), and submits a **GET** to the same page:
+   `?tab=mapping&map_target=<t>&map_path=<p>[&map_observable_type=<type>]`.
+4. The view validates the target and path (starts with `$`, `jsonpath-ng` parses it, ≤ `MAX_PATH_LEN`=200)
+   and renders the Mapping tab with the path appended to that row's textarea (deduped, **not saved**) plus
+   a hint/highlight: "Added from raw data — review, then Save mapping."
+5. Nothing persists until the existing "Save mapping" / "Save observable rules" POST (CSRF unchanged).
+
+This keeps one writer per form, no silent writes, no new endpoint, and preserves SRC-RAW-2.
+
+### 17.4 Components
+- `ui/json_tree.py` (new, pure): `jsonpath_for(parts)` (dot for identifier keys, `[n]` for indices,
+  `["…"]` with `"`/`\` escaping for everything else; round-trip tested with `jsonpath-ng`); a bounded
+  tree builder (`MAX_NODES`≈1000, `MAX_DEPTH`≈12, truncation flag).
+- `ui/templatetags/ui_tags.py`: a `json_tree` inclusion tag rendering `_json_tree.html` recursively.
+- `ui/templates/ui/source_detail.html`: raw panel uses the tree + `<details>` raw `<pre>`; include
+  `_json_map_modal.html` on the raw tab; Mapping tab shows the prefill hint/highlight.
+- `ui/templates/ui/_json_tree.html`, `_json_map_modal.html` (new partials).
+- `ui/static/ui/json-map.js` (new, external, CSP-safe; DOM text/value only, no `innerHTML`).
+- `ui/templates/ui/base.html`: add a `{% block scripts %}` before `</body>` so page-specific JS loads once.
+- `ui/views/ingestion_sources.py`: parse/validate the GET prefill; append to `editor_rows` /
+  `observable_rows`; pass `map_targets`, `observable_types`, prefill state.
+- `ui/static/ui/app.src.css` (+ regenerate `app.css` via `make css`): `.json-tree`, `.json-key`,
+  `.json-val`, hover/focus treatment, truncation note.
+
+### 17.5 Security
+- All output auto-escaped; no `|safe` from payload data; no `innerHTML`.
+- `map_path`/`map_target`/`map_observable_type` validated against allow-lists and length caps; invalid
+  input silently ignored (normal Mapping render). GET prefill is non-persistent; the only writer remains
+  the CSRF-protected Save POST.
+- Node/depth caps prevent a huge payload from bloating the page.
+- Note: the prefill URL exposes payload **key names** (not values) in browser history/server logs. Keys
+  only; accepted unless the user prefers a POST/session alternative.
+
+### 17.6 Open questions (answered 2026-11-07)
+1. **Interaction model:** prefill + navigate to Mapping (recommended) vs. true in-place edit (needs both
+   panels in the DOM, breaks SRC-RAW-2) vs. direct save (new write endpoint). Which?
+2. **Path order on an existing target:** append (lower priority; first match wins) or prepend (higher
+   priority)? Recommend append.
+3. **Observable type:** choose from existing `ObservableType`s via a dropdown (recommended); also
+   auto-suggest a type from the value (IP/hash/mail)? Allow free-text types, or known types only?
+4. **Arrays:** clicking an element gives a concrete `[n]`; also offer an "all items" `[*]` option?
+5. **Clickable nodes:** scalars only (string/number/bool/null), not objects/arrays? Recommend scalars.
+6. **Raw fallback:** keep the collapsible "Raw JSON" `<pre>` for copy/paste/accessibility? Recommend yes.
+7. **Caps:** ~1,000 nodes / depth 12 with a truncation notice — acceptable?
+8. **Prefill transport:** GET query (simple; key names in history/logs) vs. sessionStorage/HTMX POST?
+9. **After add:** scroll/focus the target textarea and show an "unsaved" hint — confirm.
+10. **Scope:** admin/superAdmin only (inherits the source-page gate) — confirm.
+
+### 17.7 Phases and acceptance criteria
+- **P1 — pure helpers.** `jsonpath_for` + bounded tree builder + tests. `RCM-1` paths round-trip through
+  `jsonpath-ng` and select exactly that value (incl. dots, spaces, quotes, unicode, indices); `RCM-2`
+  node/depth truncation is flagged.
+- **P2 — tree UI.** Template tag + partials + CSS + raw fallback. `RCM-3` scalars expose valid
+  `data-json-path`; raw `<pre>` preserved.
+- **P3 — modal + JS.** Dialog, radios (7 targets + Observable extraction), type select, external JS.
+  `RCM-4` activation opens the dialog with the path; `RCM-5` keyboard operable (focus trap, Esc,
+  Enter/Space, labels, no color-only).
+- **P4 — prefill view.** Validation + append/dedup + hint. `RCM-6` target/path/type accepted → Mapping
+  textarea holds the path (unsaved); `RCM-7` invalid/missing → normal Mapping render, no error page;
+  `RCM-8` stored config unchanged until Save.
+- **P5 — verification.** Focused tests + `make check`; independent verifier + security review.
+  `RCM-9` autoescape/XSS-safe; `RCM-10` no-JS raw data still readable, CSRF/writes unchanged.
+
+### 17.8 Testing
+- Pure: `jsonpath_for` round-trip matrix; tree cap/truncation; escaping.
+- View: prefill general target, dedup, invalid target/path, observable type prefill, no persistence,
+  raw tab still hides mapping (SRC-RAW-2), analyst 404, reflected-value escaping.
+- Template: raw tree `data-json-path` present; modal lists all seven labels + Observable extraction.
+- JS: no harness in-repo — add a template-presence conformance test and document manual keyboard checks.
+
+**Answers (locked):** (1) prefill + navigate; (2) append; (3) dropdown of existing `ObservableType`
+names only, no auto-suggest, no free text; (4) concrete `[n]` **and** an "all items" `[*]` option;
+(5) scalars only; (6) keep the collapsible Raw JSON `<pre>`; (7) 1,000 nodes / depth 12 with a
+truncation notice; (8) GET query; (9) scroll/focus the textarea and show the unsaved hint; (10) admin/
+superAdmin only (inherits the source-page gate).
+
+### 17.9 Implementation result (2026-11-07)
+- **Backend:** `ui/json_tree.py` (pure `jsonpath_for`, `all_items_path`, `is_valid_jsonpath`,
+  `build_json_tree`, `JsonNode`/`JsonTree`; caps `MAX_TREE_NODES=1000`, `MAX_TREE_DEPTH=12`,
+  `MAX_VALUE_CHARS=200`); `json_tree` inclusion tag in `ui/templatetags/ui_tags.py` +
+  `ui/templates/ui/_json_tree.html`; `ui/views/ingestion_sources.py` validates the GET prefill and
+  appends (deduped) to the unsaved editor rows, exposing `latest_raw_data`, `map_targets`,
+  `observable_types`, `prefilled`.
+- **Frontend:** dedicated `ui/templates/ui/_json_map_modal.html` (GET, no CSRF); `ui/static/ui/json-map.js`
+  (external, no `innerHTML`/`eval`; role/tabindex + Enter/Space; path choice; observable select toggle);
+  `{% block scripts %}` in `base.html`; raw panel renders `{% json_tree latest_raw_data %}` with the
+  `<details>` raw fallback; Mapping tab renders the prefill hint and `data-prefilled` marker; `.json-tree`
+  styles in `app.src.css`, `app.css` regenerated (`make css`).
+- **Deviations:** (a) `_json_map_modal.html` is a dedicated `<dialog>`, not `_modal.html`, because the
+  shared footer form injects `{% csrf_token %}` and defaults to POST — a GET form must not put the token
+  in the URL; (b) `is_valid_jsonpath` lives in `ui/json_tree.py` (as planned) and is imported by the view,
+  not duplicated in `ingest/mapping.py`.
+- **Tests:** `tests/conformance/test_raw_click_map.py` (helpers + view prefill/dedup/invalid/observable/
+  escaping/404) and `test_raw_click_map_template.py` (tree paths incl. `[*]`, modal labels + observable
+  options, external script/no inline script, payload escaping, prefill hint + `data-prefilled`). Focused
+  run: **88 passed**; `make css-check` green; ruff clean. Two test bugs fixed during integration: a missing
+  `ObservableType` fixture and a dedup assertion that counted the new prefill hint as a duplicate.
+- **Verification:** independent verifier PASS WITH NOTES (10/10 ACs) and security PASS WITH NOTES
+  (no Critical/High; M1/M2 accepted). **Still needed:** a manual browser pass (keyboard, focus trap,
+  scroll-to-textarea) and a dark-theme contrast check, then a commit once approved.
+
+---
+
+### §20 Raw-data JSON tree
+
+## 20. Raw-data JSON tree on the source mapping detail page (PLAN, 2026-11-07)
+
+Status: **IMPLEMENTED 2026-11-07 — verification pending.** Corrects a defect in the shipped §17
+click-to-map tree.
+
+### 20.1 Problem (confirmed)
+`source_detail.html` (`?tab=raw-data`) already calls `{% json_tree latest_raw_data %}`, but
+`ui/json_tree.py::_build()` appends **every** node to the top-level `nodes` list, always with
+`key=""` and `children=()`. The template's recursive `node.children` branch therefore never runs.
+Result: the tab renders a **flat list of clickable values**, with no keys and no object/array
+structure — exactly the reported symptom. Paths, `[*]` variants, caps, and the click-to-map modal
+are otherwise correct.
+
+### 20.2 Goal
+Render the real JSON structure (objects, arrays, keys, indices, expandable branches) and keep the
+existing scalar-click-to-map behaviour, accessibility, and the `[*]` alternative.
+
+### 20.3 Fix — builder (`ui/json_tree.py`)
+- `_build()` returns a `JsonNode`; children are attached to the parent (`children=(...)`) instead of
+  being appended to the root list. `JsonTree.nodes` remains the **top-level roots**.
+- Carry the dict key / list index on the node (`key`; add `is_index: bool = False`,
+  `count: int = 0` for containers). Root `key=""`.
+- Keep `MAX_TREE_NODES=1000`, `MAX_TREE_DEPTH=12`, `MAX_VALUE_CHARS=200`, per-branch `truncated`,
+  and `path`/`all_path` generation exactly as-is (`[*]` for array positions).
+- Containers are **not** clickable (expand/collapse only); scalars keep `.json-val` +
+  `data-json-path` / `data-json-path-all`.
+
+### 20.4 Fix — template + CSS (`django-frontend`)
+Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
+- `<ul class="json-tree" role="tree"><li class="json-node" role="treeitem">` per node.
+- scalar: `<span class="json-key">key</span><span class="json-punct">:</span>
+  <span class="json-val" data-json-path=… data-json-path-all=…>value</span>`.
+- object/array: `<details class="json-branch" open><summary><span class="json-key">key</span>
+  <span class="json-brace">{…}</span> <span class="json-count">N keys</span></summary>
+  <ul class="json-tree children">…</ul></details>`; root shows a `$` label.
+- array items render `[0]:`; truncation hint stays; `<details>` gives native keyboard collapse.
+- CSS in `ui/static/ui/app.src.css`, regenerate `ui/static/ui/app.css` with `make css` (verify
+  `make css-check`): indentation/guides, summary marker, dim keys/braces/counts, keep
+  `.json-val-map` hover/focus.
+- a11y: `role="tree"`/`treeitem`; JS keeps adding `role="button"`, `tabindex`, `aria-label` to values.
+
+### 20.5 Decisions (locked 2026-11-07)
+1. Branch state: **all expanded**; `<details>` per branch.
+2. Root row: **show `$` root**.
+3. Type hints: **counts** (`{…} 3 keys` / `[…] 2 items`).
+4. Container click: **expand only** (not clickable).
+5. Key display: **plain dim `key:`**; array `[0]:`.
+6. Caps: **keep** 1000 nodes / 12 depth / 200 chars + truncation hint.
+
+### 20.6 Implementation Brief (ready on approval)
+- **django-backend** — `ui/json_tree.py`: nest children, carry key/index/count, preserve caps and
+  paths; update `tests/conformance/test_raw_click_map.py` (nesting/keys/index/count + existing caps).
+- **django-frontend** — `ui/templates/ui/_json_tree.html` (valid nested `<ul>/<li>/<details>` keep
+  `.json-val[data-json-path]`), `ui/static/ui/app.src.css` + `make css`, update
+  `tests/conformance/test_raw_click_map_template.py` (keys, branch nesting, leaf paths + `[*]`,
+  containers not clickable, escaping, modal still opens).
+- **Constraints:** no inline JS (`script-src 'self'`); Django autoescape (never `|safe` on
+  keys/values); keep `ui/static/ui/json-map.js` contract unchanged; `.venv/bin/pytest` on the two
+  conformance files; `make check-fast`; `make css-check`.
+- **ACs:** `TREE-1` nested DOM with keys/indices and >1 level of children; `TREE-2` clicking a scalar
+  still opens the map modal with the right path; `TREE-3` `data-json-path-all` (`[*]`) still offered;
+  `TREE-4` node/depth/value caps still truncate with a hint; `TREE-5` keyboard/a11y works and no CSP
+  violation; `TREE-6` hostile keys/values are escaped.
+- **Note:** record the §17 flat-builder correction as a deviation in the plan/verification docs.
+
+### 20.7 Implementation result (2026-11-07)
+- `ui/json_tree.py`: `_build()` returns a `JsonNode`; children nest under the parent; `key` /
+  `is_index` / `count` (real container size) / per-branch `truncated` carried; caps and
+  `jsonpath_for`/`all_items_path` output unchanged. 6 new tests added.
+- `ui/templates/ui/_json_tree.html`: valid `<ul role="tree|group"><li role="treeitem">` markup with
+  `<details open>` branches, `$ {…} N keys` / `[0]:` display, container counts, truncation hints;
+  scalars keep `.json-val[data-json-path]` (+ `data-json-path-all`) so `json-map.js` is untouched.
+- `ui/static/ui/app.src.css` → `app.css`: list reset, indentation guide, summary/brace/count styling;
+  `.json-val-map` hover/focus preserved.
+- Tests: `tests/conformance/test_raw_click_map.py` **28 passed**; `test_raw_click_map_template.py`
+  **7 passed** (nesting, keys/index, containers not clickable, counts, escaping); `test_ui_urls_smoke`
+  **6 passed**; `make css-check` + `make check-fast` green.
+- Deviation note: a frontend sub-agent reported a non-existent `TemplateSyntaxError` for the
+  `<li>`/`data-json-path-all` markup and reverted the template. The valid markup compiles and the
+  rendered response passes the template tests — the revert was discarded.
+- Fixed a visible template comment: `_json_map_modal.html` used a **multi-line** `{# … #}`, which
+  Django does not treat as a comment (only single-line `{# #}` is), so it rendered as text on the
+  raw-data tab. Replaced with `{% comment %}…{% endcomment %}`; the modal test now asserts `{#` and
+  the comment text never appear in the response.
+
+---
+
+## 18. Case JSON export v2 + import (IMPLEMENTED 2026-11-08)
+
+- **Export v2** — shared by `GET /api/v1/case/{id}/export` and `GET /ui/cases/{id}/export`:
+  `version: 2`, all case scalars/classification/tags/custom fields, top-level observables,
+  tasks + notes, full timeline (capped), comments, pages, procedures, share/attachment metadata,
+  full §19 alert documents and automation runs. Caps are reported in `truncated`; no secrets or
+  `payload_ssdeep`.
+- **Import** — `cases/importing.py`: parse/bound-check (5 MiB, 10k nodes, depth 20), then one
+  atomic `import_case_document`. Actor org is forced; tags create-missing; sharers/attachments/
+  automation are skipped with warnings; exported `task-note` rows are skipped and imported notes
+  mirror once; duplicate embedded alerts roll the whole case back. Provenance and a
+  `Case imported from JSON` ledger entry are written; unknown classification tokens fall back with
+  warnings.
+- **UI** — admin/superAdmin-only `/cases/import` (`ui-case-import`, ordered before the detail
+  route), standalone upload page, 400/409 errors, success redirect, and a secondary
+  “Import from JSON…” link in the new-case surface.
+- **Verification** — `docs/verification/VERIFY-2026-11-08-case-json-import.md`: IMP-1..IMP-7 MET.
+  `tests/conformance/test_case_export_import.py` **17 passed**; adjacent case/UI suite **111
+  passed**; `test_tenant_scoping` route assertions fixed. Uncommitted at the time of writing.
+
+---
+
+### Other closed checkbox items (title index)
+
+- **1.1 — `Case.save()` number allocation**
+- **1.2 — `manage.py` default settings module**
+- **1.3 — Replace the four vacuous schema tests**
+- **1.4 — `Alert.source_ref` digest fallback**
+- **1.5 — Enum `choices` + `CheckConstraint`s**
+- **1.6 — Drop the redundant indexes**
+- **1.7 — Rename `Alert.source_id` → `ingestion_source`**
+- **1.8 — `Observable.data_hash`**
+- **1.12 — Mutation guards could not mutate UNIQUE/CHECK constraints**
+- **1.13 — Mutation 5 was a no-op; the guard lied about itself**
+- **1.14 — FK `on_delete` audit is blind to `CASCADE`**
+- **1.15 — `M1` over-pruned: two indexes are still needed**
+- **1.16 — Postgres-only corruption: sequence not advanced for explicit numbers**
+- **1.17 — `data_hash` backfill uses a different hash function than the runtime**
+- **1.18 — Pin a runnable static-analysis command; "mypy clean" was not one**
+- **1.19 — Smaller round-2 items**
+- **1.20 — Round-3 Highs**
+- **1.11 — Re-run the `db-postgres` gate**
+- **2.1 — Coverage → ≥ 80%**
+- **2.2 — mypy strict clean**
+- **2.3 — Enforce the one-way dependency rule with a lint check**
+- **2.4 — Reverse-direction link-table indexes**
+- **2.5 — Remaining Medium/Low cleanups**
+- **3.1 — Postgres verification**
+- **3.2 — Multi-tenancy timing**
+- **3.3 — Markdown dialect**
+- **3.4 — `Alert.type` vs `dataType` taxonomy**
+- **3.5 — Alert severity default when unmapped**
+- **3.6 — Multi-signal correlation default**
+- **4.1 — `README.md` missing but referenced by `pyproject.toml`**
+- **4.2 — Local git repository**
+- **4.5 — Move to a real GitHub-hosted remote**
+- **4.6 — Production secret hardening + repo-wide secret-hygiene guard**
+- **4.3 — Hash-pin the requirements**
+- **4.4 — `docs/spec/` populated with the implemented-system spec**
+- **5.1 — Phase 4: Ingestion**
+- **5.2 — Phase 5: Escalation, Observables, Tasks, Timeline**
+- **5.3 — Phase 6: Orchestration Gateway**
+- **5.4 — Phase 7: Realtime Ledger**
+- **5.5 — Phase 8: Query API**
+- **5.6 — Phase 9: Minimal UI**
+- **5.6 — Phase 9: Conformance, Security & Performance**
+- **5.7 — Phase 10: Conformance, Security & Performance**
+- **5.8 — AC1.3 / AC1.4 verification**
+- **5.9 — §3.1 Postgres gate executed (2026-10-06)**
+- **6.1 — T2 endpoints**
+- **6.2 — Postgres-only indexes**
+- **6.3 — Per-link tags on observable link tables**
+- **6.4 — Tenant isolation**
+- **6.5 — Observable PATCH/DELETE cross-case blast radius**
+- **6.6 — Production cookie/secret hardening**
+- **6.7 — Paged case-detail timeline**
+- **6.8 — Orchestration authoring surface**
+- **6.9 — Analyst UI catch-up to the T2 surface**
+- **6.10 — Frontend stack actually in place (HTMX + Tailwind + Font Awesome)**
+- **6.11 — Login rate-limiting / brute-force hardening**
+- **6.12 — Settings: organisations + users (superAdmin)**
+- **6.14 — Wave 6.3A: Settings UI hardening — scoped fix (CSP / progressive enhancement)**
+- **P1 — DONE 2026-10-11**
+- **P2 — DONE 2026-10-11**
+- **P3 — DONE 2026-10-12**
+- **P3–P7**
+- **6.15 — Wave 6.3B: repo-wide ADR-003 compliance (externalise all inline scripts/styles)**
+- **6.17 — Retro-mapping: re-apply a feed's field mapping to its existing alerts.**
+- **6.18 — Dead-code observation from the field-mapping plan (P5): `ingest/views.py::_verify_secret` — DONE 2026-10-17.**
+- **8.1 — Every mutation guard must prove its own mutation landed**
+- **8.2 — The standard is enforced mechanically, for all tests, not by convention**
+- **8.3 — `make check` is the single Definition of Done**
+- **8.4 — Pre-commit and pre-push hooks installed**
+- **8.6 — Guard the CI invocation itself**
+- **9.1 — Stale `__pycache__` from deleted scratch tests**
+- **9.2 — `tests/conformance/test_zzz_probe.py`**
+- **10.1 — Role-scoped user management.**
+- **10.2 — Create a case manually from the UI.**
+- **10.3 — Case `scope`.**
+- **10.4 — Case `type`.**
+- **10.5 — Case `data classification`.**
+- **10.6 — Case `phase` (IR lifecycle).**
+- **10.8 — Ingestion-token surface + stale webhook copy (mostly absorbed by §6.16 P4).**
+- **10.12 — Ingestion-token lifecycle (§10a–§10c): both outstanding passes discharged 2026-10-19.**
+- **11.1 — M1: does `read-only` mean read-only?**
+- **11.2 — M3: playbook action secrets are global and rendered in cleartext — DONE 2026-11-01.**
+- **11.3 — L1: protocol-relative `href` survives the sanitizer — FIXED 2026-10-17.**
+- **M1 (duplicate of §11.1)**
+- **L3 — the attach form is visible to read-share viewers.**
+- **12.1 — Every UI list was silently truncated at `PAGE_SIZE = 200`, with no pager — FIXED 2026-10-18.**
+- **12.2 — The observables-list filter is decorative — FIXED 2026-10-15.**
+- **12.3 — No cross-case / correlation surface (AGENTS.md §2 Modules B + C) — SHIPPED 2026-10-18 (read-only Similar panel + correlation-ranked, audited attach; automatic bundling deferred).**
+- **  12.5 — Case pages are renderable but not authorable in the UI.**
+- **12.5-fu2 — Enumerate cross-tenant 404 for the three page write routes (observation O1).**
+- **12.6 — Taxonomy: three cards break the monospace convention for their values — FIXED 2026-10-17.**
+- **12.7 — Cases list: make the case title clickable.**
+- **12.8 — Case Details (General): inline edits, Tags, Verdict, and enforced close flow — CLOSED 2026-10-19**
+- **12.8-fu1 — Independent verification re-run of §12.8 — DISCHARGED 2026-10-17.**
+- **12.8-fu3 — Deviation D-N1 RESOLVED 2026-10-18: amended, not implemented.**
+- **12.8-fu2 — Security review of the §12.8 surface — DISCHARGED 2026-10-18 (verdict CONDITIONAL PASS).**
+- **12.8-fu4 — Clear the §12.8 security-review conditions — DONE 2026-10-19 (M1 and L2 were real; M2 re-graded Medium → Info).**
+- **14.5 — Show and remove the alert's current tags.**

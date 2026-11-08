@@ -12,7 +12,7 @@ from django.db.models import Count, Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from alerts.escalation import (
     import_alert_to_case,
@@ -36,9 +36,11 @@ from core.enums import (
     PAP_CHOICES,
     TLP_CHOICES,
 )
+from identity.audit import maybe_record_cross_org_read
 from identity.models import AuditLog
 from identity.scoping import (
     case_visible_q,
+    is_admin,
     org_q,
     resolve_alert,
     resolve_case,
@@ -544,3 +546,90 @@ def alert_tag_remove(request: HttpRequest, alert_id: str) -> HttpResponse:
         messages.error(request, f"Tag {tag_name} not found on this alert.")
 
     return redirect("ui-alert-detail", alert_id=alert.id)
+
+
+# ---------------------------------------------------------------------------
+# §19 — Alert JSON export / import
+# ---------------------------------------------------------------------------
+
+
+@login_required
+@require_GET
+def alert_export_ui(request: HttpRequest, alert_id: str) -> HttpResponse:
+    """Download one alert as an `AlertExport` v1 JSON document."""
+    import json
+
+    from alerts.export import alert_export_document
+
+    alert = resolve_alert(request.user, alert_id)
+    if alert is None:
+        raise Http404()
+
+    maybe_record_cross_org_read(
+        request,
+        actor=request.user,
+        target_obj=alert,
+        target_type="Alert",
+        target_id=str(alert.id),
+    )
+
+    response = HttpResponse(
+        json.dumps(alert_export_document(alert), indent=2, default=str),
+        content_type="application/json",
+    )
+    response["Content-Disposition"] = (
+        f'attachment; filename="alert-{str(alert.id)[:8]}-export.json"'
+    )
+    return response
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def alert_import_ui(request: HttpRequest) -> HttpResponse:
+    """Standalone import page: GET renders the upload form, POST imports one alert.
+
+    Admin/superAdmin only; viewers get the uniform 404 (ADR-006). The upload is accepted as a
+    multipart `file`, bounded to 5 MiB, and imported atomically by `alerts.importing`.
+    """
+    from alerts.importing import (
+        MAX_BYTES,
+        AlertImportError,
+        import_alert_document,
+        parse_alert_export,
+    )
+
+    if not is_admin(request.user):
+        return render(request, "ui/404.html", status=404)
+
+    if request.method == "GET":
+        return render(request, "ui/alert_import.html", _base_context(request))
+
+    upload = request.FILES.get("file")
+    if upload is None:
+        return render(
+            request,
+            "ui/alert_import.html",
+            _base_context(request, error="Choose an AlertExport JSON file to import."),
+            status=400,
+        )
+    if upload.size > MAX_BYTES:
+        return render(
+            request,
+            "ui/alert_import.html",
+            _base_context(request, error="File exceeds the 5 MiB limit."),
+            status=400,
+        )
+
+    try:
+        document = parse_alert_export(upload.read())
+        alert = import_alert_document(document, actor=request.user, source_filename=upload.name)
+    except AlertImportError as exc:
+        return render(
+            request,
+            "ui/alert_import.html",
+            _base_context(request, error=exc.message),
+            status=409 if exc.code == "duplicate" else 400,
+        )
+
+    messages.success(request, f"Alert imported: {alert.title}")
+    return redirect("ui-alert-detail", alert_id=str(alert.id))

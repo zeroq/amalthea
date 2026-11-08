@@ -141,9 +141,9 @@ def test_export_carries_the_linked_alert_raw_payload_verbatim(
     assert response.status_code == 200, response.content
     body = response.json()
     assert body["_type"] == "CaseExport"
-    assert body["version"] == 1
+    assert body["version"] == 2
     assert body["case"]["_id"] == str(case.id)
-    assert body["alerts"][0]["rawPayload"] == raw, "raw payload was not carried verbatim"
+    assert body["alerts"][0]["alert"]["rawPayload"] == raw, "raw payload was not carried verbatim"
     assert body["procedures"] == []
 
 

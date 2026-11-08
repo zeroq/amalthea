@@ -133,3 +133,7 @@ The title input also gets `{% if form_id %}autofocus{% endif %}` (modal.js focus
   <label for="f-tags">Tags (comma-separated)</label>
   <input type="text" id="f-tags" name="tags" value="{{ form_values.tags }}" placeholder="phishing, credential-theft, apt29"{% if form_id %} form="{{ form_id }}"{% endif %}>
 </div>
+
+{% if request.user.role == "admin" or request.user.role == "superAdmin" %}
+<p class="hint">Have an export? <a href="{% url 'ui-case-import' %}">Import from JSON…</a></p>
+{% endif %}

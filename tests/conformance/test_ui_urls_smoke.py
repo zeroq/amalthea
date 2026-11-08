@@ -136,6 +136,8 @@ def test_every_get_routable_ui_page_renders(browser: Client, case: Case) -> None
         "ui-settings",
         "ui-settings-sources",
         "ui-settings-users",
+        "ui-alert-import",
+        "ui-case-import",
         "ui-settings-users-edit",
     }
 
