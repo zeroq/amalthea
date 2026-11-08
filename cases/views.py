@@ -2808,7 +2808,9 @@ def _case_export_document(case: Case) -> dict[str, Any]:
             "ownerOrg": case.owner_org.name if case.owner_org else None,
             "tags": tags,
             "customFields": custom_fields,
-            "sourceTemplate": case.source_template.name if case.source_template_id else None,
+            "sourceTemplate": case.source_template.name
+            if case.source_template is not None
+            else None,
             "ingestionWarnings": case.ingestion_warnings or {},
         },
         "observables": [observable_json(link) for link in observable_rows],

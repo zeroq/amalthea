@@ -26,7 +26,7 @@ def alert_export_document(alert: Alert) -> dict[str, Any]:
         **alert_json(alert),
         "rawPayload": alert.raw_payload or {},
     }
-    if alert.case_id:
+    if alert.case is not None:
         alert_payload["caseNumber"] = alert.case.number
 
     observables = [
