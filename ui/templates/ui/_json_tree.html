@@ -1,28 +1,28 @@
-<ul class="json-tree"{% if truncated %} data-truncated="1"{% endif %}>
+<ul class="json-tree" role="{% if group %}group{% else %}tree{% endif %}"{% if truncated %} data-truncated="1"{% endif %}>
 {% for node in nodes %}
+  <li class="json-node" role="treeitem">
   {% if node.kind == "scalar" %}
     {% if node.key != "" %}
-      <span class="json-key">{{ node.key }}: </span>
+      <span class="json-key">{% if node.is_index %}[{{ node.key }}]{% else %}{{ node.key }}{% endif %}</span><span class="json-punct">:</span>
     {% endif %}
-    <span class="json-val" data-json-path="{{ node.path }}"{% if node.all_path != node.path %} data-json-path-all="{{ node.all_path }}"{% endif %}>
-      {{ node.value_repr }}
-    </span>
-  {% elif node.kind == "object" %}
-    <div class="json-key">{{ node.key }}: </div>
-    <ul class="json-tree children"{% if node.truncated %} data-truncated="1"{% endif %}>
-      {% include "ui/_json_tree.html" with nodes=node.children truncated=node.truncated only %}
-    </ul>
-    {% if node.truncated %}
-      <p class="hint">… truncated</p>
-    {% endif %}
-  {% elif node.kind == "array" %}
-    <div class="json-key">{{ node.key }}: </div>
-    <ul class="json-tree children"{% if node.truncated %} data-truncated="1"{% endif %}>
-      {% include "ui/_json_tree.html" with nodes=node.children truncated=node.truncated only %}
-    </ul>
-    {% if node.truncated %}
-      <p class="hint">… truncated</p>
-    {% endif %}
+    <span class="json-val" data-json-path="{{ node.path }}"{% if node.all_path != node.path %} data-json-path-all="{{ node.all_path }}"{% endif %}>{{ node.value_repr }}</span>
+  {% else %}
+    <details class="json-branch" open>
+      <summary>
+        {% if node.key == "" %}
+          <span class="json-key">$</span>
+        {% else %}
+          <span class="json-key">{% if node.is_index %}[{{ node.key }}]{% else %}{{ node.key }}{% endif %}</span><span class="json-punct">:</span>
+        {% endif %}
+        <span class="json-brace">{% if node.kind == "object" %}{…}{% else %}[…]{% endif %}</span>
+        <span class="json-count">{{ node.count }} {% if node.kind == "object" %}key{{ node.count|pluralize }}{% else %}item{{ node.count|pluralize }}{% endif %}</span>
+      </summary>
+      <ul class="json-tree children" role="group">
+        {% include "ui/_json_tree.html" with nodes=node.children truncated=node.truncated group=True only %}
+      </ul>
+      {% if node.truncated %}<p class="hint">… truncated</p>{% endif %}
+    </details>
   {% endif %}
+  </li>
 {% endfor %}
 </ul>

@@ -86,7 +86,7 @@ class JsonNode:
     key: str
     """Dict key, list index as str, or "" for scalar root."""
     kind: str
-    """"object" | "array" | "scalar"."""
+    """""object" | "array" | "scalar"."""
     value_repr: str
     """Scalars: ``json.dumps(value, ensure_ascii=False)`` truncated to
     ``MAX_VALUE_CHARS`` + "..."; containers: ""."""
@@ -98,6 +98,10 @@ class JsonNode:
     """Child nodes; always empty for kind == "scalar"."""
     truncated: bool = False
     """True when the node was capped by ``max_nodes`` or ``max_depth``."""
+    is_index: bool = False
+    """True if this node's key comes from a list index position."""
+    count: int = 0
+    """Dict size / list length for containers; 0 for scalars."""
 
 
 @dataclass(frozen=True)
@@ -109,32 +113,19 @@ class JsonTree:
     """True when any node hit a cap."""
 
 
-def build_json_tree(
-    value: Any,
-    *,
-    max_nodes: int = MAX_TREE_NODES,
-    max_depth: int = MAX_TREE_DEPTH,
-) -> JsonTree:
-    """Turn a JSON payload into a navigable ``JsonTree`` of ``JsonNode`` objects.
+def _derive_key_isindex(prefix_parts: list[str | int]) -> tuple[str, bool]:
+    """Derive ``key`` and ``is_index`` from *prefix_parts*.
 
-    *dict* → one node per key; *list* → one node per index; *scalar* → one node
-    with ``key=""``.  Counts nodes, stops at the caps and sets ``truncated=True``.
-    Never raises on odd payloads.
-
-    The tree is built depth-first.  A mutable counter tracks how many nodes have
-    been placed; once ``max_nodes`` nodes are placed no further children are
-    created and the tree is marked truncated.  Similarly, descending beyond
-    ``max_depth`` stops and the current node is marked a scalar leaf.
+    - Empty prefix → root: key="", is_index=False.
+    - Last part is int → key=str(idx), is_index=True (list position).
+    - Last part is str → key=str(key), is_index=False (dict key).
     """
-    nodes: list[JsonNode] = []
-    # mutable counter shared across recursive calls
-    placed: list[int] = [0]
-    # mutable flag: True if any cap was hit
-    hit_cap: list[bool] = [False]
-
-    _build(value, max_nodes, max_depth, 0, [], nodes, placed, hit_cap)
-
-    return JsonTree(nodes=tuple(nodes), truncated=hit_cap[0])
+    if not prefix_parts:
+        return ("", False)
+    last = prefix_parts[-1]
+    if isinstance(last, int):
+        return (str(last), True)
+    return (str(last), False)
 
 
 def _build(
@@ -143,84 +134,86 @@ def _build(
     max_depth: int,
     current_depth: int,
     prefix_parts: list[str | int],
-    nodes: list[JsonNode],
     placed: list[int],
     hit_cap: list[bool],
-) -> None:
-    """Recursive builder that respects ``max_nodes`` and ``max_depth``.
+) -> JsonNode:
+    """Recursive builder that returns a ``JsonNode``.
 
-    ``placed[0]` is the number of nodes already appended to ``nodes``.
-    After appending a node we do ``placed[0] += 1``; if it reaches ``max_nodes``
-    we set ``hit_cap[0] = True`` and stop descending.
+    Children are attached to the returned node via the ``children`` field.
+    ``JsonTree.nodes`` contains only the top-level root node (normally one root;
+    scalar roots still one node with ``key=""``).
     """
-    # --- scalar root (the initial call with a non-dict/non-list value) ---
+    # --- derive key / is_index from prefix_parts ---
+    key, is_index = _derive_key_isindex(prefix_parts)
+
+    # --- scalar value (leaf) ---
     if not isinstance(value, (dict, list)):
-        # one scalar node with empty key
         parts = list(prefix_parts)
         path = jsonpath_for(parts) if parts else "$"
         all_path = all_items_path(parts) if parts else "$"
         s = json.dumps(value, ensure_ascii=False)
         value_repr = s if len(s) <= MAX_VALUE_CHARS else s[:MAX_VALUE_CHARS] + "..."
         node = JsonNode(
-            key="",
+            key=key,
             kind="scalar",
             value_repr=value_repr,
             path=path,
             all_path=all_path,
             children=(),
             truncated=False,
+            is_index=is_index,
+            count=0,
         )
-        nodes.append(node)
         placed[0] += 1
         if placed[0] >= max_nodes:
             hit_cap[0] = True
-        return
+        return node
 
     # --- depth check: entering at current_depth + 1 ---
     new_depth = current_depth + 1
     if new_depth > max_depth:
-        # can't descend; treat as scalar leaf
         s = json.dumps(value, ensure_ascii=False)
         value_repr = s if len(s) <= MAX_VALUE_CHARS else s[:MAX_VALUE_CHARS] + "..."
         parts = list(prefix_parts)
         path = jsonpath_for(parts) if parts else "$"
         all_path = all_items_path(parts) if parts else "$"
         node = JsonNode(
-            key="",
+            key=key,
             kind="scalar",
             value_repr=value_repr,
             path=path,
             all_path=all_path,
             children=(),
             truncated=new_depth > max_depth,
+            is_index=is_index,
+            count=0,
         )
-        nodes.append(node)
         placed[0] += 1
         hit_cap[0] = True  # depth cap was hit
-        return
+        return node
 
     # --- count this node ---
     placed[0] += 1
     if placed[0] >= max_nodes:
         hit_cap[0] = True
-        # Still append the node (it's the last one), but don't descend further
         kind = "object" if isinstance(value, dict) else "array"
         parts = list(prefix_parts)
         path = jsonpath_for(parts) if parts else "$"
         all_path = all_items_path(parts) if parts else "$"
         node = JsonNode(
-            key="",
+            key=key,
             kind=kind,
             value_repr="",
             path=path,
             all_path=all_path,
             children=(),
             truncated=True,
+            is_index=is_index,
+            count=len(value),
         )
-        nodes.append(node)
-        return
+        return node
 
-    # --- dict or list ---
+    # --- dict or list: build children ---
     if isinstance(value, dict):
         kind = "object"
     else:
@@ -230,32 +223,68 @@ def _build(
     path = jsonpath_for(parts) if parts else "$"
     all_path = all_items_path(parts) if parts else "$"
 
-    # Append this node
+    # Build children tuple; track if we stopped early due to max_nodes
+    children: list[JsonNode] = []
+    stopped_early = False
+
+    if isinstance(value, dict):
+        for dict_key, val in value.items():
+            if placed[0] >= max_nodes:
+                stopped_early = True
+                hit_cap[0] = True
+                break
+            child = _build(
+                val, max_nodes, max_depth, new_depth, [*prefix_parts, dict_key], placed, hit_cap
+            )
+            children.append(child)
+    elif isinstance(value, list):
+        for idx, val in enumerate(value):
+            if placed[0] >= max_nodes:
+                stopped_early = True
+                hit_cap[0] = True
+                break
+            child = _build(
+                val, max_nodes, max_depth, new_depth, [*prefix_parts, idx], placed, hit_cap
+            )
+            children.append(child)
+
+    count = len(value)  # actual container size, even if truncated
+
     node = JsonNode(
-        key="",
+        key=key,
         kind=kind,
         value_repr="",
         path=path,
         all_path=all_path,
-        children=(),
-        truncated=False,
+        children=tuple(children),
+        truncated=stopped_early,
+        is_index=is_index,
+        count=count,
     )
-    nodes.append(node)
+    return node
 
-    # Descend into children, stopping if cap reached
-    if isinstance(value, dict):
-        for key, val in value.items():
-            if placed[0] >= max_nodes:
-                hit_cap[0] = True
-                break
-            _build(
-                val, max_nodes, max_depth, new_depth, [*prefix_parts, key], nodes, placed, hit_cap
-            )
-    elif isinstance(value, list):
-        for idx, val in enumerate(value):
-            if placed[0] >= max_nodes:
-                hit_cap[0] = True
-                break
-            _build(
-                val, max_nodes, max_depth, new_depth, [*prefix_parts, idx], nodes, placed, hit_cap
-            )
+
+def build_json_tree(
+    value: Any,
+    *,
+    max_nodes: int = MAX_TREE_NODES,
+    max_depth: int = MAX_TREE_DEPTH,
+) -> JsonTree:
+    """Turn a JSON payload into a navigable ``JsonTree`` of ``JsonNode`` objects.
+
+    *dict* → one root node per key; *list* → one root node per index; *scalar* → one
+    root node with ``key=""``.  Counts nodes, stops at the caps and sets
+    ``truncated=True``.  Never raises on odd payloads.
+
+    The tree is built depth-first.  A mutable counter tracks how many nodes have
+    been placed; once ``max_nodes`` nodes are placed no further children are
+    created and the tree is marked truncated.  Similarly, descending beyond
+    ``max_depth`` stops and the current node is marked a scalar leaf.
+
+    The returned ``JsonTree.nodes`` tuple contains the single root node; children
+    are reachable via the root node's ``children`` field.
+    """
+    placed: list[int] = [0]
+    hit_cap: list[bool] = [False]
+    root = _build(value, max_nodes, max_depth, 0, [], placed, hit_cap)
+    return JsonTree(nodes=(root,), truncated=hit_cap[0])

@@ -1406,11 +1406,23 @@ a.rail-org-name:hover {
   color: var(--color-text);
   line-height: 1.5;
   margin: 8px 0;
+  padding-left: 0;
+  list-style: none;
 }
+.json-tree.children {
+  margin: 2px 0 2px 6px;
+  padding-left: 16px;
+  border-left: 1px solid var(--color-line);
+}
+.json-node { margin: 2px 0; }
+.json-branch summary { cursor: pointer; }
 .json-tree .json-key {
   color: var(--color-text-dim);
   font-weight: 500;
-  min-width: 6ch;
+}
+.json-punct {
+  color: var(--color-text-dim);
+  margin-right: 4px;
 }
 .json-tree .json-val {
   color: var(--color-text);
@@ -1429,7 +1441,12 @@ a.rail-org-name:hover {
   background: var(--color-bg-raised);
   border-radius: var(--radius);
 }
-
+.json-brace { color: var(--color-text-dim); }
+.json-count {
+  color: var(--color-text-faint);
+  margin-left: 8px;
+  font-size: 11px;
+}
 /* End JSON tree */
 .search-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
 .search-tabs .btn { margin-top: 0; }

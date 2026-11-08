@@ -216,6 +216,103 @@ def test_is_valid_jsonpath_max_len():
     assert is_valid_jsonpath(long_path) is False
 
 
+# ---- New tests for §20: count / truncated / nested children / keys / indices ----
+
+
+def test_build_json_tree_nested_children_reachable():
+    """Nested children are actually reachable via .children (not flat)."""
+    from ui.json_tree import build_json_tree
+
+    tree = build_json_tree({"a": {"b": 1}})
+    assert len(tree.nodes) == 1
+    root = tree.nodes[0]
+    # root has child "a"
+    assert root.children[0].key == "a"
+    # child "a" has child "b"
+    assert root.children[0].children[0].key == "b"
+    assert root.children[0].children[0].value_repr == "1"
+    print("  nested children reachable: PASS")
+
+
+def test_build_json_tree_dict_key_carried():
+    """Dict key is carried on child nodes."""
+    from ui.json_tree import build_json_tree
+
+    tree = build_json_tree({"metric": {"value": 42}})
+    root = tree.nodes[0]
+    child_a = root.children[0]
+    assert child_a.key == "metric"
+    grandchild = child_a.children[0]
+    assert grandchild.key == "value"
+    print("  dict key carried: PASS")
+
+
+def test_build_json_tree_list_index_and_key():
+    """List child carries index with is_index=True and key="0"."""
+    from ui.json_tree import build_json_tree
+
+    tree = build_json_tree([{"val": 1}, {"val": 2}])
+    root = tree.nodes[0]
+    assert root.kind == "array"
+    assert root.count == 2
+    # first item
+    child0 = root.children[0]
+    assert child0.key == "0"
+    assert child0.is_index
+    assert child0.children[0].key == "val"
+    # second item
+    child1 = root.children[1]
+    assert child1.key == "1"
+    assert child1.is_index
+    print("  list index and is_index=True: PASS")
+
+
+def test_build_json_tree_count_real_size():
+    """count equals real dict size / list length, even when truncated."""
+    from ui.json_tree import build_json_tree
+
+    # Full tree: count should be actual size
+    tree = build_json_tree({"a": 1, "b": 2, "c": 3})
+    assert tree.nodes[0].count == 3
+
+    # Truncated: count should still be actual size (len value), not len(children)
+    tree = build_json_tree({"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}, max_nodes=3)
+    assert tree.nodes[0].count == 5, f"expected count=5, got {tree.nodes[0].count}"
+    assert tree.truncated
+    print("  count = real size even when truncated: PASS")
+
+
+def test_build_json_tree_nested_paths():
+    """Nested paths: $.xs[0].h and $.xs[*].h."""
+    from ui.json_tree import build_json_tree
+
+    tree = build_json_tree({"xs": [{"h": 1}]})
+    root = tree.nodes[0]
+    child0 = root.children[0]  # array node key="xs"
+    grandchild0 = child0.children[0]  # object node key="0", is_index=True
+    greatgrandchild0 = grandchild0.children[0]  # scalar node
+    assert greatgrandchild0.path == "$.xs[0].h"
+    assert greatgrandchild0.all_path == "$.xs[*].h"
+    print("  nested paths $.xs[0].h / $.xs[*].h: PASS")
+
+
+def test_build_json_tree_container_truncated_when_children_cut():
+    """Container node has truncated=True when its children are cut by max_nodes."""
+    from ui.json_tree import build_json_tree
+
+    # A dict with 5 keys, build with max_nodes=3 → root + 2 children = 3 nodes,
+    # the dict node itself should have truncated=True and count=5
+    tree = build_json_tree({"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}, max_nodes=3)
+    root = tree.nodes[0]
+    assert root.kind == "object"
+    assert root.count == 5, f"expected count=5, got {root.count}"
+    # root has 2 children (a, b) because of the cap (3 nodes: root+a+b)
+    assert len(root.children) == 2
+    # the root node itself should be truncated since children were cut
+    assert root.truncated
+    print("  container truncated=True when children cut: PASS")
+
+
 # ---------------------------------------------------------------------------
 # View tests (admin client): raw-data click-to-map prefill behaviour
 # ---------------------------------------------------------------------------

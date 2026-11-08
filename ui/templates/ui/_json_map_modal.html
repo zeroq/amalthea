@@ -1,6 +1,8 @@
-{#  raw-data click-to-map: choose a mapping target for a clicked JSON value.
-    A GET form deliberately carries no CSRF token (it writes nothing); modal.js
-    supplies Esc/backdrop/focus-trap behaviour. No inline script (ADR-003). #}
+{% comment %}
+  raw-data click-to-map: choose a mapping target for a clicked JSON value.
+  A GET form deliberately carries no CSRF token (it writes nothing); modal.js
+  supplies Esc/backdrop/focus-trap behaviour. No inline script (ADR-003).
+{% endcomment %}
 <dialog class="modal" id="json-map-modal" aria-labelledby="json-map-modal-title">
   <div class="modal-content">
     <header class="modal-header">

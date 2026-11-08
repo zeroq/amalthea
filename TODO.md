@@ -91,6 +91,8 @@ hygiene. Every row cites its source; the new audit findings live in **§12**. Sh
 (see [`COMPLETED.md`](./COMPLETED.md)): §6.4 tenant isolation, §6.12 org/user Settings, §6.14/§6.15 CSP
 hardening, §6.16 P1/P2/P3/P5, §10.2 manual case creation (2026-10-13), and the viewer role wave (ADR-006).
 
+**New (2026-11-07, planning only):** **§18 — case JSON import** and **§19 — alert JSON export/import**. Not yet ranked in the table below.
+
 | Priority | Item | Description | Impact on the analyst |
 |----------|------|-------------|-----------------------|
 | **1** | **§12.3 — No cross-case / correlation surface (Modules B + C) — SHIPPED 2026-10-18** | The gap: `correlation_key` was derived, indexed and queryable while **nothing consumed it**. Now a read-only **Similar** panel (cases sharing an observable, correlation-ranked) plus a manual, correlation-ranked and **audited** attach path. **Automatic ingest-time bundling was deliberately deferred** (decision Q1b) → **§12.3-fu1**. Also settled §10.7 "Similar" + Q-D4. | **Done** — the manual half; auto-bundling is §12.3-fu1. Follow-up §12.3-fu2 (an older cross-tenant test this wave left stale on `main`) repaired 2026-10-19. |
@@ -1405,6 +1407,285 @@ superAdmin only (inherits the source-page gate).
 - **Verification:** independent verifier PASS WITH NOTES (10/10 ACs) and security PASS WITH NOTES
   (no Critical/High; M1/M2 accepted). **Still needed:** a manual browser pass (keyboard, focus trap,
   scroll-to-textarea) and a dark-theme contrast check, then a commit once approved.
+
+---
+
+## 18. Case JSON import (PLAN, 2026-11-07)
+
+Status: **PLAN — no implementation.** Builds on the existing case export (`ui-case-export` →
+`cases.views._case_export_document`) and the **New case** modal in `ui/templates/ui/case_list.html`.
+
+### 18.1 Goal
+Let an analyst create a case from a previously exported JSON file, from the case list's **New case**
+flow, and make the export complete enough to round-trip a case (scalars, children, provenance).
+
+### 18.2 Current export gaps (`CaseExport` v1)
+`_case_export_document` emits `{_type, version, exportedAt, case: case_json(detail=True), alerts:
+[id,title,source,sourceRef,severity,rawPayload], procedures}`. Missing or partial:
+- **case:** tags (not in `case_json`), timeline (detail path caps at 50), tasks (title/status/assignee
+  only; no group/flag/order/dates/description/mandatory/notes), comments, pages, shares, attachments,
+  `sourceTemplate` name.
+- **alerts:** five fields + raw payload only — no status/date/tlp/pap/flag/assignee/summary/verdict/
+  observables/tags/custom fields/comments/procedures.
+- `automationRuns` is exported (read-only) but import policy is undecided.
+
+### 18.3 Export v2 schema (recommended)
+Keep `_type: "CaseExport"`, bump to `version: 2`; include:
+- `case`: all `Case` scalars; `ownerOrg` name; `assignee` login; `status` value; `sourceTemplate` name;
+  `tags: [{name}]`; `customFields: [{name, value}]`; `ingestionWarnings`.
+- `tasks: [{title, description, group, status, flag, assignee, order, dueDate, startedAt, endedAt,
+  mandatory, notes: [{message, createdAt, createdBy}]}]`.
+- `timeline: [all events]` (no 50 cap; bounded by the export cap), `comments`, `pages`, `procedures`.
+- `shares: [{organisation, permissions}]`, `attachments: [{name, contentType, size, sha256, external}]`
+  (metadata only — no blobs).
+- `alerts: [full alert export docs]` (same shape as §19), `automationRuns` (export only).
+- Never export secrets, tokens, CSRF material, or `payload_ssdeep` (recompute on import).
+
+### 18.4 Import behaviour
+- Entry: `GET/POST /ui/cases/import` → `ui-case-import`; multipart `file`; admin/superAdmin
+  (`@not_viewer` + `can_mutate`); CSRF. The GET renders the standalone import page. **Route ordering:**
+  register `cases/import` *before* `cases/<str:case_id>` (the `str` converter would swallow it).
+- Parse limits: ≤ 5 MiB; top-level object; `_type == "CaseExport"`; supported `version`; required
+  `case.title`; reject `NaN`/`Infinity`; cap children (e.g. 1k alerts / 5k timeline / 2k observables)
+  and nesting depth.
+- Create in **one `transaction.atomic`**: fresh `number`; `owner_org = actor.org`; resolve `assignee`
+  by login in-org; resolve `status` by value with fallback; tags by name; custom fields by name;
+  tasks/notes, timeline, comments, pages, procedures; links for alerts.
+- Shares are **skipped by default** (cross-org grant is a privilege-escalation surface); attachments
+  are metadata-only with a warning (the JSON has no bytes).
+- Preserve dates where present; a closed case must carry `verdict` (the export does) and a closing
+  timeline entry is synthesised if absent.
+- Provenance: `ingestion_warnings["imported"] = {at, by, sourceFile, originalNumber, originalId}` +
+  a "Case imported from JSON" timeline event.
+- `sourceTemplate` is **provenance only** — do not re-apply its defaults; the file already carries
+  concrete tasks/custom fields/tags (`CaseTemplate.tasks/custom_fields/tags` are JSON blueprints).
+- Task notes mirror into `TimelineEvent(kind="task-note")`; skip exported timeline rows of that kind
+  (or import notes without re-mirroring) so the ledger is not doubled.
+- Any validation/conflict error → no partial import; re-render with field-level errors.
+
+### 18.5 UI
+- `_case_create_fields.html`: add a secondary "Import from JSON…" link that navigates to the standalone
+  import page (no nested modal — keeps the modal's single footer form intact). Keep "New case" primary.
+- `ui/import_case.html` (new, rendered by `GET ui-case-import`): file input, a short "what is imported
+  / not imported" note (shares skipped, attachments metadata only), "Import case" submit.
+- Success → redirect to the new case detail with a flash "Case #N imported from JSON".
+
+### 18.6 Security
+- Upload-only; sanitised display filename; no server path from user input; `|safe` never used.
+- Size/child caps + guarded JSON parse; atomic; CSRF; admin/superAdmin only.
+- Force owner org to the actor's org; shares off by default; no secret material in export
+  (regression test).
+
+### 18.7 Open questions (defaults noted; not yet approved)
+1. Import target org: always the actor's org (recommended) vs a superAdmin org picker?
+   **Default:** actor's org.
+2. Tags: create missing tags vs skip unknown. **Default:** create missing on attach (matches
+   `_apply_case_tags`, which `get_or_create`s by name).
+3. Shares: skip by default vs superAdmin opt-in. **Default:** skip (privilege-escalation surface).
+4. Attachments: metadata-only vs optional base64/zip payload. **Default:** metadata-only + warning.
+5. `automationRuns`: skip on import vs import as read-only history. **Default:** skip.
+6. v1 files: accept with warnings vs reject. **Default:** accept v1 with warnings.
+7. Linked-alert conflict on `(org, source, type, sourceRef)`: atomic fail vs skip with a report.
+   **Default:** atomic fail (no partial import).
+8. Duplicate import: always create a new case vs warn when `originalId` was imported before.
+   **Default:** always create a new case.
+
+### 18.8 Phases + ACs
+- **P1 — export v2.** `IMP-1` export includes every Case scalar + tags + full timeline/tasks(+notes)/
+  comments/pages/procedures/custom fields/shares/attachment metadata + full alert docs; no secrets;
+  `version: 2`.
+- **P2 — import core.** `IMP-2` a v2 file creates a case with scalars/tags/custom fields + provenance;
+  `IMP-3` children (tasks/notes, timeline, comments, pages, procedures) imported; `IMP-4` invalid/
+  oversized/wrong-type/unsupported-version files are rejected atomically with field errors.
+- **P3 — linked alerts.** `IMP-5` exported alerts are recreated and linked, with observables/tags/
+  custom fields/comments/procedures; a duplicate `(source, type, sourceRef)` yields a clear atomic
+  failure.
+- **P4 — UI + security.** `IMP-6` New case modal exposes Import from JSON; success redirects to the
+  case; `IMP-7` shares/attachments handling documented and safe; CSRF/auth/size caps tested.
+- **P5 — verification.** Focused tests + independent verifier + security review.
+
+### 18.9 Testing
+- Export: field-completeness snapshot; no token/secret keys; links resolve.
+- Import: export→import→export equality on the stable subset (ignore ids/timestamps); child counts;
+  status/assignee/tag resolution; missing/extra fields; caps; malformed JSON; wrong `_type`/version;
+  duplicate alert conflict; non-admin 404/403; CSRF.
+- UI: modal link present; upload enctype; success redirect; error re-render.
+
+---
+
+## 19. Alert JSON export/import (PLAN, 2026-11-07)
+
+Status: **PLAN — no implementation.** Naming note: the API already has `alert/<id>/import` meaning
+"import this alert into a case" (merge), so the new UI routes are `ui-alert-export` and
+`ui-alert-import-json` (`alerts/import`).
+
+### 19.1 Goal
+- Alert detail: **Export JSON** button in `{% block actions %}`, same style/location as case detail.
+- Alert list: **Import JSON** button in the filter card, outer right (`btn btn-primary btn-end`), same
+  placement as "New case", opening an upload modal.
+
+### 19.2 Export schema (`AlertExport` v1)
+`GET /ui/alerts/<uuid>/export` → attachment `alert-<shortid>-export.json`:
+```
+{"_type":"AlertExport","version":1,"exportedAt":…,
+ "alert": alert_json(alert) + {"rawPayload": …},
+ "observables":[…],"tags":[{"name":…}],"customFields":[{"name":…,"value":…}],
+ "comments":[…],"procedures":[…]}
+```
+- `raw_payload` is the deliberate exception to "never inlined" (same recorded deviation as the case
+  export). Do **not** export `payload_ssdeep` (recompute on import) or treat ids as authoritative.
+- `Comment` has both `case` and `alert` FKs, so alert comments export/import 1:1. `Share`, `Attachment`
+  and `TimelineEvent` are case-only and are correctly absent from an alert export.
+- Audit superAdmin cross-org read, mirroring case export.
+
+### 19.3 Import behaviour
+- `POST /ui/alerts/import` → `ui-alert-import-json`; multipart `file`; same gate as alert mutation
+  (admin/superAdmin; CSRF).
+- Validate `_type == "AlertExport"`, `version`, size ≤ 5 MiB, required `title/type/source/sourceRef`;
+  child/depth caps.
+- Create a **new** alert in the actor's org: fresh UUID; preserve scalars/enums/date/raw_payload/
+  verdict/correlation key; resolve `status` by value with fallback, `assignee` by login; recompute
+  `payload_ssdeep`.
+- Do **not** reuse the DRF `alerts.views._create_alert` as-is: it is API-only (`request.data`) and
+  currently never persists `raw_payload`. Set `raw_payload`/`payload_ssdeep` explicitly, or extract a
+  shared `alerts/create.py` service (preferred) mirroring `cases/create.py`.
+- Import observables (`resolve_observable` + `AlertObservable`), tags by name, custom fields by name,
+  comments, procedures.
+- Conflict on the `(owner_org, source, type, source_ref)` unique constraint → atomic failure with
+  "An alert with this source/type/sourceRef already exists" and a link to the existing alert.
+- Provenance: `ingestion_warnings["imported"] = {at, by, sourceFile, originalId}`.
+- The exported `caseId` is not portable: export `caseNumber` and import **unlinked** by default
+  (optional `?case=<number>` link is an open question).
+- Success → redirect to the new alert detail with a flash.
+
+### 19.4 UI
+- `alert_detail.html` `{% block actions %}`: `<a class="btn" href="{% url 'ui-alert-export' alert.id %}">
+  Export JSON</a>`.
+- `alert_list.html` filter card — inside the existing `<form method="get" class="inline-form filter-bar">`,
+  exactly mirroring "New case" in `case_list.html`:
+  `{% if can_mutate %}<a class="btn btn-primary btn-end" href="{% url 'ui-alert-import' %}"
+  data-modal-open="import-alert-modal">Import JSON</a>{% endif %}`. Without JS the link opens the
+  standalone `GET ui-alert-import` page (progressive enhancement); with JS `modal.js` opens the modal.
+- Modal: reuse `_modal.html` (add optional `enctype="multipart/form-data"` support) with
+  `_alert_import_fields.html` — `<input type="file" name="file" accept="application/json,.json"
+  required>` + hint — posting to `ui-alert-import-json`.
+
+### 19.5 Security
+- Upload-only; size/child caps; atomic; no `|safe`; sanitised filename; CSRF; admin/superAdmin.
+- Never trust exported ids/org/assignee outside the target org; recompute hashes; force `owner_org`.
+- No secrets in export (regression test); XSS via payload/filename covered.
+
+### 19.6 Open questions (defaults noted; not yet approved)
+1. Preserve exported `status` vs force `New`. **Default:** preserve by value, fallback + warning.
+2. Preserve the case link (export `caseNumber`, resolve if visible) vs import unlinked.
+   **Default:** import unlinked.
+3. Duplicate conflict: hard fail vs skip/overwrite. **Default:** hard fail (atomic).
+4. Tag/custom-field/observable-type resolution. **Default:** create missing tags; skip unknown custom
+   fields/types with a warning.
+5. Import an alert directly into a case from the case detail. **Default:** defer.
+
+### 19.7 Phases + ACs
+- **P1 — export.** `AIMP-1` alert export includes scalars + raw payload + observables/tags/custom
+  fields/comments/procedures; no secrets/internal hash; `Content-Disposition` filename.
+- **P2 — import core.** `AIMP-2` a valid file creates a new alert in the actor's org with the right
+  scalars and provenance; `AIMP-3` status/assignee/date/enums resolved safely; `AIMP-4` malformed/
+  oversized/wrong-type/unsupported-version/duplicate rejected atomically with clear errors.
+- **P3 — children.** `AIMP-5` observables/tags/custom fields/comments/procedures imported and deduped.
+- **P4 — UI.** `AIMP-6` Export JSON on alert detail (same style/location); `AIMP-7` Import JSON
+  outer-right in the alert filter card + upload modal; redirect/flash; CSRF/auth tested.
+- **P5 — verification.** Focused tests + independent verifier + security review.
+
+### 19.8 Testing
+- Round-trip export→import→export on the stable subset; child counts; conflict; caps; malformed;
+  wrong `_type`/version; non-admin; CSRF; XSS via payload/filename; no secrets in export; UI placement
+  (`btn-end`, actions block).
+
+---
+
+## 20. Raw-data JSON tree on the source mapping detail page (PLAN, 2026-11-07)
+
+Status: **IMPLEMENTED 2026-11-07 — verification pending.** Corrects a defect in the shipped §17
+click-to-map tree.
+
+### 20.1 Problem (confirmed)
+`source_detail.html` (`?tab=raw-data`) already calls `{% json_tree latest_raw_data %}`, but
+`ui/json_tree.py::_build()` appends **every** node to the top-level `nodes` list, always with
+`key=""` and `children=()`. The template's recursive `node.children` branch therefore never runs.
+Result: the tab renders a **flat list of clickable values**, with no keys and no object/array
+structure — exactly the reported symptom. Paths, `[*]` variants, caps, and the click-to-map modal
+are otherwise correct.
+
+### 20.2 Goal
+Render the real JSON structure (objects, arrays, keys, indices, expandable branches) and keep the
+existing scalar-click-to-map behaviour, accessibility, and the `[*]` alternative.
+
+### 20.3 Fix — builder (`ui/json_tree.py`)
+- `_build()` returns a `JsonNode`; children are attached to the parent (`children=(...)`) instead of
+  being appended to the root list. `JsonTree.nodes` remains the **top-level roots**.
+- Carry the dict key / list index on the node (`key`; add `is_index: bool = False`,
+  `count: int = 0` for containers). Root `key=""`.
+- Keep `MAX_TREE_NODES=1000`, `MAX_TREE_DEPTH=12`, `MAX_VALUE_CHARS=200`, per-branch `truncated`,
+  and `path`/`all_path` generation exactly as-is (`[*]` for array positions).
+- Containers are **not** clickable (expand/collapse only); scalars keep `.json-val` +
+  `data-json-path` / `data-json-path-all`.
+
+### 20.4 Fix — template + CSS (`django-frontend`)
+Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
+- `<ul class="json-tree" role="tree"><li class="json-node" role="treeitem">` per node.
+- scalar: `<span class="json-key">key</span><span class="json-punct">:</span>
+  <span class="json-val" data-json-path=… data-json-path-all=…>value</span>`.
+- object/array: `<details class="json-branch" open><summary><span class="json-key">key</span>
+  <span class="json-brace">{…}</span> <span class="json-count">N keys</span></summary>
+  <ul class="json-tree children">…</ul></details>`; root shows a `$` label.
+- array items render `[0]:`; truncation hint stays; `<details>` gives native keyboard collapse.
+- CSS in `ui/static/ui/app.src.css`, regenerate `ui/static/ui/app.css` with `make css` (verify
+  `make css-check`): indentation/guides, summary marker, dim keys/braces/counts, keep
+  `.json-val-map` hover/focus.
+- a11y: `role="tree"`/`treeitem`; JS keeps adding `role="button"`, `tabindex`, `aria-label` to values.
+
+### 20.5 Decisions (locked 2026-11-07)
+1. Branch state: **all expanded**; `<details>` per branch.
+2. Root row: **show `$` root**.
+3. Type hints: **counts** (`{…} 3 keys` / `[…] 2 items`).
+4. Container click: **expand only** (not clickable).
+5. Key display: **plain dim `key:`**; array `[0]:`.
+6. Caps: **keep** 1000 nodes / 12 depth / 200 chars + truncation hint.
+
+### 20.6 Implementation Brief (ready on approval)
+- **django-backend** — `ui/json_tree.py`: nest children, carry key/index/count, preserve caps and
+  paths; update `tests/conformance/test_raw_click_map.py` (nesting/keys/index/count + existing caps).
+- **django-frontend** — `ui/templates/ui/_json_tree.html` (valid nested `<ul>/<li>/<details>` keep
+  `.json-val[data-json-path]`), `ui/static/ui/app.src.css` + `make css`, update
+  `tests/conformance/test_raw_click_map_template.py` (keys, branch nesting, leaf paths + `[*]`,
+  containers not clickable, escaping, modal still opens).
+- **Constraints:** no inline JS (`script-src 'self'`); Django autoescape (never `|safe` on
+  keys/values); keep `ui/static/ui/json-map.js` contract unchanged; `.venv/bin/pytest` on the two
+  conformance files; `make check-fast`; `make css-check`.
+- **ACs:** `TREE-1` nested DOM with keys/indices and >1 level of children; `TREE-2` clicking a scalar
+  still opens the map modal with the right path; `TREE-3` `data-json-path-all` (`[*]`) still offered;
+  `TREE-4` node/depth/value caps still truncate with a hint; `TREE-5` keyboard/a11y works and no CSP
+  violation; `TREE-6` hostile keys/values are escaped.
+- **Note:** record the §17 flat-builder correction as a deviation in the plan/verification docs.
+
+### 20.7 Implementation result (2026-11-07)
+- `ui/json_tree.py`: `_build()` returns a `JsonNode`; children nest under the parent; `key` /
+  `is_index` / `count` (real container size) / per-branch `truncated` carried; caps and
+  `jsonpath_for`/`all_items_path` output unchanged. 6 new tests added.
+- `ui/templates/ui/_json_tree.html`: valid `<ul role="tree|group"><li role="treeitem">` markup with
+  `<details open>` branches, `$ {…} N keys` / `[0]:` display, container counts, truncation hints;
+  scalars keep `.json-val[data-json-path]` (+ `data-json-path-all`) so `json-map.js` is untouched.
+- `ui/static/ui/app.src.css` → `app.css`: list reset, indentation guide, summary/brace/count styling;
+  `.json-val-map` hover/focus preserved.
+- Tests: `tests/conformance/test_raw_click_map.py` **28 passed**; `test_raw_click_map_template.py`
+  **7 passed** (nesting, keys/index, containers not clickable, counts, escaping); `test_ui_urls_smoke`
+  **6 passed**; `make css-check` + `make check-fast` green.
+- Deviation note: a frontend sub-agent reported a non-existent `TemplateSyntaxError` for the
+  `<li>`/`data-json-path-all` markup and reverted the template. The valid markup compiles and the
+  rendered response passes the template tests — the revert was discarded.
+- Fixed a visible template comment: `_json_map_modal.html` used a **multi-line** `{# … #}`, which
+  Django does not treat as a comment (only single-line `{# #}` is), so it rendered as text on the
+  raw-data tab. Replaced with `{% comment %}…{% endcomment %}`; the modal test now asserts `{#` and
+  the comment text never appear in the response.
 
 ---
 

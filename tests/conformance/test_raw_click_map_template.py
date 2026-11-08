@@ -112,6 +112,38 @@ def test_raw_tab_has_json_tree_and_leaf_paths(
     # An array element also offers the all-items wildcard variant
     assert 'data-json-path="$.iocs.arr[0].h"' in body
     assert 'data-json-path-all="$.iocs.arr[*].h"' in body
+    # Real nesting: list items and a child group inside a branch
+    assert '<li class="json-node"' in body, "expected tree list items"
+    assert '<details class="json-branch" open>' in body, "expected expandable branches"
+    assert 'class="json-tree children"' in body, "expected nested json-tree children ul"
+    # Keys and array indices are rendered; containers are not clickable
+    assert '<span class="json-key">iocs</span>' in body
+    assert '<span class="json-key">[0]</span>' in body
+    assert 'data-json-path="$.iocs"' not in body
+    assert 'data-json-path="$.iocs.arr"' not in body
+    # Container counts (root object has 1 key; iocs has 2 keys; arr has 1 item)
+    assert ">2 keys<" in body
+    assert ">1 item<" in body
+
+
+def test_raw_tab_json_tree_escapes_keys_and_values(
+    client: Client, source: IngestionSource, org: Organisation
+) -> None:
+    """Hostile keys/values are autoescaped in the tree and never emitted raw."""
+    _make_alert(
+        source,
+        org,
+        source_ref="ref-xss",
+        payload={"<b>k</b>": "<script>alert(1)</script>"},
+        date="2026-01-01",
+    )
+    response = client.get(_url(source) + "?tab=raw-data")
+    body = response.content.decode()
+
+    assert response.status_code == 200
+    assert "&lt;b&gt;k&lt;/b&gt;" in body
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
+    assert "<script>alert(1)</script>" not in body
 
 
 def test_raw_tab_always_contains_modal_markup(
@@ -146,6 +178,10 @@ def test_raw_tab_always_contains_modal_markup(
     assert 'name="map_observable_type"' in body, "expected name='map_observable_type' in select"
     # ObservableType name appears as an option
     assert '<option value="IP">IP</option>' in body, "expected ObservableType 'IP' as an option"
+    # Template comments must never leak as visible text (a multi-line `{# #}` is not a
+    # Django comment and renders literally; only `{% comment %}` may span lines).
+    assert "{#" not in body
+    assert "raw-data click-to-map:" not in body
 
 
 def test_raw_tab_has_external_json_map_script(
