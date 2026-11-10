@@ -24,8 +24,24 @@ from django.utils import timezone
 from alerts.models import Alert, AlertObservable
 from cases.models import Case, CaseObservable
 from ingest.observable_rules import extract_observable_candidates
-from observables.extractor import resolve_observable_for_type
+from observables.extractor import normalize, resolve_observable_for_type
+from observables.hashing import canonical_value_under
 from observables.models import ObservableSuggestion, ObservableType
+
+
+def candidate_link_key(obs_type: ObservableType, raw_value: str) -> tuple[str, str]:
+    """The identity an extracted value will have once linked: `(type name, normalized data)`.
+
+    Preview and sync both call this, so the dialog's "already linked" count cannot drift from what
+    `sync_alert_observables` actually writes. The double canonicalization mirrors
+    `resolve_observable_for_type` exactly (that function is the database boundary; this one adds no
+    database access).
+    """
+    canonical = canonical_value_under(
+        normalize(obs_type.name, raw_value, is_case_sensitive=obs_type.is_case_sensitive),
+        case_sensitive=obs_type.is_case_sensitive,
+    )
+    return (obs_type.name, canonical)
 
 
 @dataclass(frozen=True)
@@ -37,6 +53,10 @@ class AlertObservableSyncResult:
     skipped_unknown_type: int = 0
     truncated: bool = False
     warnings: tuple[str, ...] = field(default_factory=tuple)
+    #: Per-type `{"created": n, "existing": n}`. Defaulted so existing constructors stay valid.
+    observables_by_type: dict[str, dict[str, int]] = field(default_factory=dict)
+    #: Type names skipped because they are not in the vocabulary.
+    unknown_types: tuple[str, ...] = ()
 
     @property
     def changed(self) -> bool:
@@ -86,6 +106,8 @@ def sync_alert_observables(
     skipped_unknown = 0
     created = 0
     existing = 0
+    by_type: dict[str, dict[str, int]] = {}
+    seen: set[tuple[str, str]] = set()
 
     for candidate in extraction.candidates:
         obs_type = vocabulary.get(candidate.type_name)
@@ -93,6 +115,13 @@ def sync_alert_observables(
             unknown_types.add(candidate.type_name)
             skipped_unknown += 1
             continue
+        key = candidate_link_key(obs_type, candidate.raw_value)
+        counts = by_type.setdefault(candidate.type_name, {"created": 0, "existing": 0})
+        if key in seen:
+            existing += 1
+            counts["existing"] += 1
+            continue
+        seen.add(key)
         observable, _observable_created = resolve_observable_for_type(
             obs_type,
             candidate.raw_value,
@@ -105,8 +134,10 @@ def sync_alert_observables(
         )
         if link_created:
             created += 1
+            counts["created"] += 1
         else:
             existing += 1
+            counts["existing"] += 1
 
     if unknown_types:
         names = ", ".join(sorted(unknown_types))
@@ -121,6 +152,8 @@ def sync_alert_observables(
         skipped_unknown_type=skipped_unknown,
         truncated=extraction.truncated,
         warnings=tuple(warning_lines),
+        observables_by_type=by_type,
+        unknown_types=tuple(sorted(unknown_types)),
     )
 
 

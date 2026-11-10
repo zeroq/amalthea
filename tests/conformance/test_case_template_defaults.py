@@ -1165,3 +1165,472 @@ def test_template_re_apply_adds_genuinely_new_task(db: None) -> None:
     assert response.status_code == 302
     case.refresh_from_db()
     assert case.tasks.count() == 2, "Re-apply should add the genuinely new task"
+
+
+# --------------------------------------------------------------------------
+# New: Case-template severity "None" tests
+# --------------------------------------------------------------------------
+
+
+def test_ui_create_form_defaults_to_none(db: None) -> None:
+    """Create form default severity is None; the "None (keep case severity)" option is selected."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    client = Client()
+    _login(client, user)
+
+    response = client.get(reverse("ui-case-template-create"))
+    assert response.status_code == 200
+    content = response.content.decode()
+    severity_select = content.split('id="id_severity"', 1)[1].split("</select>", 1)[0]
+    # The "none" option should be selected by default
+    assert 'value="none" selected' in severity_select
+    # Help text present
+    assert "None leaves the case's existing severity unchanged when applied." in content
+
+
+def test_ui_create_form_submission_defaults_to_none(db: None) -> None:
+    """UI create form submission without severity sets severity to None."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    client = Client()
+    _login(client, user)
+
+    response = client.post(
+        reverse("ui-case-template-create"),
+        {
+            "name": "none-default",
+            "display_name": "None Default",
+            "tasks": "",
+            "custom_fields": "",
+            # severity omitted -> defaults to None
+            "tlp": "2",
+            "pap": "2",
+        },
+    )
+
+    assert response.status_code == 302, response.content
+    template = CaseTemplate.objects.get(name="none-default")
+    assert template.severity is None, f"Expected severity=None, got {template.severity}"
+
+
+def test_ui_create_form_explicit_severity_persists(db: None) -> None:
+    """UI create form with explicit numeric severity persists it."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    client = Client()
+    _login(client, user)
+
+    response = client.post(
+        reverse("ui-case-template-create"),
+        {
+            "name": "explicit-sev",
+            "display_name": "Explicit Severity",
+            "severity": "3",
+            "tasks": "",
+            "custom_fields": "",
+            "tlp": "2",
+            "pap": "2",
+        },
+    )
+
+    assert response.status_code == 302, response.content
+    template = CaseTemplate.objects.get(name="explicit-sev")
+    assert template.severity == 3, f"Expected severity=3, got {template.severity}"
+
+
+def test_ui_edit_form_null_severity_selects_none_not_medium(db: None) -> None:
+    """Edit form with null severity selects None and NOT Medium (regression for |default:2)."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    template = CaseTemplate.objects.create(
+        name="null-sev-template",
+        display_name="Null Sev Template",
+        severity=None,  # explicitly None
+        tlp=2,
+        pap=2,
+        tasks=[],
+        custom_fields=[],
+    )
+    client = Client()
+    _login(client, user)
+
+    response = client.get(
+        reverse("ui-case-template-edit", kwargs={"template_id": str(template.id)})
+    )
+    assert response.status_code == 200
+    content = response.content.decode()
+    severity_select = content.split('id="id_severity"', 1)[1].split("</select>", 1)[0]
+    # The "none" option should be selected
+    assert 'value="none" selected' in severity_select, (
+        "None option should be selected for null template"
+    )
+    # Medium should NOT be selected (regression guard: |default:2 would select Medium for null)
+    assert 'value="2" selected' not in severity_select, (
+        "Medium should NOT be selected when template severity is None"
+    )
+
+
+def test_ui_edit_form_numeric_severity_selects_correctly(db: None) -> None:
+    """Edit form with numeric severity selects that option correctly."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    template = CaseTemplate.objects.create(
+        name="num-sev-template",
+        display_name="Num Sev Template",
+        severity=2,  # Medium
+        tlp=2,
+        pap=2,
+        tasks=[],
+        custom_fields=[],
+    )
+    client = Client()
+    _login(client, user)
+
+    response = client.get(
+        reverse("ui-case-template-edit", kwargs={"template_id": str(template.id)})
+    )
+    assert response.status_code == 200
+    content = response.content.decode()
+    severity_select = content.split('id="id_severity"', 1)[1].split("</select>", 1)[0]
+    # Medium (value="2") should be selected
+    assert 'value="2" selected' in severity_select, "Medium should be selected for severity=2"
+    # None option should NOT be selected
+    assert 'value="none" selected' not in severity_select, (
+        "None should not be selected for numeric severity"
+    )
+
+
+def test_list_renders_none_with_dim_class(db: None) -> None:
+    """List row for null severity renders <span class="dim">None</span> with no sev- class."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    CaseTemplate.objects.create(
+        name="list-none-template",
+        display_name="List None Template",
+        severity=None,
+        tlp=2,
+        pap=2,
+        tasks=[],
+        custom_fields=[],
+    )
+    client = Client()
+    _login(client, user)
+
+    response = client.get(reverse("ui-case-template-list"))
+    assert response.status_code == 200
+    content = response.content.decode()
+    # Should render "None" with class "dim" and NO "sev-" class
+    assert 'class="dim"' in content, "List should have dim class for None severity"
+    assert "None" in content, "List should show None for null severity"
+    # Should NOT have sev- class
+    assert "sev-sev-" not in content, "List should not have sev- class for None"
+
+
+def test_detail_renders_none_keep_case_severity(db: None) -> None:
+    """Detail page for null severity renders 'None — keep case severity' with .dim, no swatch."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    template = CaseTemplate.objects.create(
+        name="detail-none-template",
+        display_name="Detail None Template",
+        severity=None,
+        tlp=2,
+        pap=2,
+        tasks=[],
+        custom_fields=[],
+    )
+    client = Client()
+    _login(client, user)
+
+    response = client.get(
+        reverse("ui-case-template-detail", kwargs={"template_id": str(template.id)})
+    )
+    assert response.status_code == 200
+    content = response.content.decode()
+    # Should render "None — keep case severity" with class "dim"
+    assert "None — keep case severity" in content, "Detail should show 'None — keep case severity'"
+    assert 'class="dim"' in content, "Detail should have dim class for None severity"
+    # Should NOT have sev- class
+    assert "sev-sev-" not in content, "Detail should not have sev- class for None"
+
+
+def test_apply_picker_hint_for_none_template(db: None) -> None:
+    """Apply picker shows '(keeps case severity)' hint for None templates."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+
+    # Create a case for the apply page
+    status = CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
+    case = Case.objects.create(title="Test case", status=status, owner_org=org, assignee=user)
+
+    template = CaseTemplate.objects.create(
+        name="apply-none-template",
+        display_name="Apply None Template",
+        severity=None,
+        tlp=2,
+        pap=2,
+        tasks=[],
+        custom_fields=[],
+    )
+    client = Client()
+    _login(client, user)
+
+    response = client.get(reverse("ui-case-apply-template", kwargs={"case_id": case.number}))
+    assert response.status_code == 200, response.content
+    content = response.content.decode()
+    # The None template should have the hint
+    assert "keeps case severity" in content, "Apply picker should show hint for None template"
+    # The template name should appear
+    assert template.name in content, "Template name should appear in apply picker"
+
+
+@pytest.mark.parametrize("severity", [1, 4])
+def test_ui_apply_template_none_preserves_case_severity(db: None, severity: int) -> None:
+    """UI apply of a None template preserves the case's existing severity."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+
+    status = CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
+    case = Case.objects.create(
+        title="Severity case", status=status, owner_org=org, assignee=user, severity=severity
+    )
+    case.refresh_from_db()
+    original_severity = case.severity
+    assert original_severity == severity
+
+    # Create a None template
+    template = CaseTemplate.objects.create(
+        name="none-apply-template",
+        display_name="None Apply Template",
+        severity=None,
+        tlp=2,
+        pap=2,
+        tasks=[],
+        custom_fields=[],
+    )
+
+    client = Client()
+    _login(client, user)
+
+    # Apply the None template
+    response = client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    assert response.status_code == 302, response.content
+
+    case.refresh_from_db()
+    # Severity should remain unchanged
+    assert case.severity == original_severity, (
+        f"Expected severity {original_severity} preserved, got {case.severity}"
+    )
+
+    # The template should still be recorded as the source
+    assert case.source_template_id == template.id, "Case should have source_template set"
+
+
+def test_ui_apply_template_none_reapply_preserves_case_severity(db: None) -> None:
+    """Re-applying a None template preserves the case's existing severity."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+
+    # Create a case with severity 1 (Low), seeded by a template
+    status = CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})[0]
+    case = Case.objects.create(title="Re-apply case", status=status, owner_org=org, assignee=user)
+
+    # Create and apply a None template first
+    template = CaseTemplate.objects.create(
+        name="reapply-none-template",
+        display_name="Re-apply None Template",
+        severity=None,
+        tlp=2,
+        pap=2,
+        tasks=[],
+        custom_fields=[],
+    )
+
+    client = Client()
+    _login(client, user)
+
+    # First apply
+    client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    case.refresh_from_db()
+    severity_after_first = case.severity
+
+    # Re-apply the same None template
+    client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    case.refresh_from_db()
+
+    # Severity should still be preserved (unchanged from first apply result)
+    assert case.severity == severity_after_first, (
+        f"Re-apply should preserve severity, got {case.severity} vs {severity_after_first}"
+    )
+
+
+def test_edit_apply_to_existing_none_preserves_case_severity(db: None) -> None:
+    """Editing a None template and applying to existing cases keeps each case's severity."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    case = _mk_case(org, "Resync None")
+    case.severity = 3
+    case.save(update_fields=["severity"])
+    template = CaseTemplate.objects.create(
+        name="resync-none-template",
+        display_name="Resync None Template",
+        severity=None,
+        tlp=2,
+        pap=2,
+        tasks=[],
+        custom_fields=[],
+    )
+    client = Client()
+    _login(client, user)
+
+    # Seed `source_template` through a normal apply.
+    client.post(
+        reverse("ui-case-apply-template", kwargs={"case_id": case.number}),
+        {"template_id": str(template.id)},
+    )
+    case.refresh_from_db()
+    assert case.severity == 3
+    assert case.source_template_id == template.id
+
+    response = client.post(
+        reverse("ui-case-template-edit", kwargs={"template_id": str(template.id)}),
+        {
+            "name": template.name,
+            "severity": "none",
+            "tlp": "2",
+            "pap": "2",
+            "tasks": "[]",
+            "custom_fields": "[]",
+            "apply_to_existing": "1",
+        },
+    )
+    assert response.status_code == 302, response.content
+    case.refresh_from_db()
+    assert case.severity == 3, (
+        "Edit + apply-to-existing must preserve a None template's case severity"
+    )
+
+
+def test_api_create_template_omitted_severity_is_none(db: None) -> None:
+    """API create with omitted severity returns severity: null."""
+    from rest_framework.test import APIClient
+
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    api_client = APIClient()
+    api_client.force_login(user)
+
+    response = api_client.post("/api/v1/case/template", {"name": "api-none-omitted"}, format="json")
+
+    assert response.status_code == 201, response.content
+    body = response.json()
+    assert body["severity"] is None, f"Expected severity null, got {body['severity']}"
+    assert body["severityLabel"] == "", (
+        f"Expected severityLabel empty, got {body['severityLabel']!r}"
+    )
+
+
+def test_api_create_template_null_severity_is_none(db: None) -> None:
+    """API create with severity: null returns severity: null."""
+    from rest_framework.test import APIClient
+
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    api_client = APIClient()
+    api_client.force_login(user)
+
+    response = api_client.post(
+        "/api/v1/case/template", {"name": "api-none-explicit", "severity": None}, format="json"
+    )
+
+    assert response.status_code == 201, response.content
+    body = response.json()
+    assert body["severity"] is None, f"Expected severity null, got {body['severity']}"
+    assert body["severityLabel"] == "", (
+        f"Expected severityLabel empty, got {body['severityLabel']!r}"
+    )
+
+
+def test_api_create_template_invalid_severity_400(db: None) -> None:
+    """API create with invalid severity returns 400."""
+    from rest_framework.test import APIClient
+
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    api_client = APIClient()
+    api_client.force_login(user)
+
+    response = api_client.post(
+        "/api/v1/case/template", {"name": "api-bad-sev", "severity": "5"}, format="json"
+    )
+
+    assert response.status_code == 400, response.content
+
+
+def test_api_patch_template_null_severity_sets_none(db: None) -> None:
+    """API patch with severity: null sets severity to None."""
+    from rest_framework.test import APIClient
+
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    template = CaseTemplate.objects.create(
+        name="patch-none-template",
+        display_name="Patch None Template",
+        severity=2,  # Start with Medium
+        tlp=2,
+        pap=2,
+        tasks=[],
+        custom_fields=[],
+    )
+    api_client = APIClient()
+    api_client.force_login(user)
+
+    response = api_client.patch(
+        f"/api/v1/case/template/{template.id}", {"severity": None}, format="json"
+    )
+
+    assert response.status_code == 204, response.content
+    template.refresh_from_db()
+    assert template.severity is None, f"Expected severity=None after patch, got {template.severity}"
+
+
+def test_api_patch_template_absent_severity_unchanged(db: None) -> None:
+    """API patch without severity key leaves severity unchanged."""
+    from rest_framework.test import APIClient
+
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    template = CaseTemplate.objects.create(
+        name="patch-unchanged-template",
+        display_name="Patch Unchanged Template",
+        severity=2,  # Start with Medium
+        tlp=2,
+        pap=2,
+        tasks=[],
+        custom_fields=[],
+    )
+    api_client = APIClient()
+    api_client.force_login(user)
+
+    response = api_client.patch(
+        f"/api/v1/case/template/{template.id}", {"displayName": "Updated"}, format="json"
+    )
+
+    assert response.status_code == 204, response.content
+    template.refresh_from_db()
+    assert template.severity == 2, "Severity should be unchanged when key absent"
+
+
+# --------------------------------------------------------------------------
+# End new None severity tests
+# --------------------------------------------------------------------------

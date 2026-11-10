@@ -365,6 +365,55 @@ def record_ingestion_source_mapping_applied(
     )
 
 
+def record_ingestion_source_observables_applied(
+    request: HttpRequest,
+    *,
+    actor: User,
+    source: IngestionSource,
+    changed_keys: list[str],
+    candidates: int,
+    created: int,
+    existing: int,
+    alerts_with_values: int,
+    observables_by_type: dict[str, dict[str, int]] | None = None,
+) -> None:
+    """Record one observable-only apply to a feed's existing unlinked alerts.
+
+    Counts only: the audit row outlives the alerts, and observable values are tenant evidence that
+    must not leak into a table read by a different audience. `changed_keys` is `[]` when the config
+    was already identical and only the extraction ran.
+    """
+    from identity.models import AuditLog
+
+    types = {
+        name: {
+            "found": counts.get("created", 0) + counts.get("existing", 0),
+            "new": counts.get("created", 0),
+            "existing": counts.get("existing", 0),
+        }
+        for name, counts in sorted((observables_by_type or {}).items())
+    }
+    AuditLog.objects.create(
+        actor=actor,
+        actor_org=getattr(actor, "org", None),
+        target_org=source.organisation,
+        action="ingestion_source.observables_applied",
+        target_type="IngestionSource",
+        target_id=str(source.id),
+        details={
+            "changed": list(changed_keys),
+            "alerts": {
+                "candidates": candidates,
+                "with_values": alerts_with_values,
+                "new_links": created,
+                "existing_links": existing,
+            },
+            "types": types,
+        },
+        ip=_get_client_ip(request),
+    )
+
+
 def record_taxonomy_change(
     request: HttpRequest,
     *,

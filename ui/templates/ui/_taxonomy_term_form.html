@@ -15,12 +15,14 @@ Body of the taxonomy term create/edit modal.
     <option value="case_type"{% if form_values.category == "case_type" or category == "case_type" %} selected{% endif %}>case_type</option>
     <option value="data_classification"{% if form_values.category == "data_classification" or category == "data_classification" %} selected{% endif %}>data_classification</option>
     <option value="case_verdict"{% if form_values.category == "case_verdict" or category == "case_verdict" %} selected{% endif %}>case_verdict</option>
+    <option value="containment_actions"{% if form_values.category == "containment_actions" or category == "containment_actions" %} selected{% endif %}>containment_actions</option>
     {% else %}
     <option value="case_scope"{% if category == "case_scope" %} selected{% endif %}>case_scope</option>
     <option value="case_phase"{% if category == "case_phase" %} selected{% endif %}>case_phase</option>
     <option value="case_type"{% if category == "case_type" %} selected{% endif %}>case_type</option>
     <option value="data_classification"{% if category == "data_classification" %} selected{% endif %}>data_classification</option>
     <option value="case_verdict"{% if category == "case_verdict" %} selected{% endif %}>case_verdict</option>
+    <option value="containment_actions"{% if category == "containment_actions" %} selected{% endif %}>containment_actions</option>
     {% endif %}
   </select>
   {% endif %}

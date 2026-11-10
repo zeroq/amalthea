@@ -37,7 +37,7 @@
           {% else %}{{ t.name }}{% endif %}
         </td>
         <td>{{ t.display_name }}</td>
-        <td><span class="sev sev-{{ t.severity }}">{{ t.get_severity_display }}</span></td>
+        <td><span class="{% if t.severity is None %}dim{% else %}sev sev-{{ t.severity }}{% endif %}">{% if t.severity is None %}None{% else %}{{ t.get_severity_display }}{% endif %}</span></td>
         <td>{{ t.tlp|choice_name:tlp_choices }}</td>
         <td>{{ t.pap|choice_name:pap_choices }}</td>
         <td>{{ t.flag|default:"—" }}</td>

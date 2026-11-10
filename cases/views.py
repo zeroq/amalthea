@@ -59,7 +59,10 @@ from cases.models import (
 )
 from cases.procedures import create_procedure
 from cases.tagging import tag_names_from_payload
-from cases.template_defaults import render_source_alert_payload
+from cases.template_defaults import (
+    parse_case_template_severity,
+    render_source_alert_payload,
+)
 from cases.update import (
     CaseUpdateError,
     _apply_case_tags,
@@ -2147,9 +2150,10 @@ def _apply_template(
 ) -> None:
     """Copy `template`'s defaults onto `case` (AC6.1-P4-c).
 
-    Scalars overwrite; the description is only filled when the case has none, because a template's
-    prose must not clobber what the analyst already wrote. Task and custom-field defaults are
-    copied once, tags are attached. One provenance ledger entry records the template's name.
+    Scalars overwrite except a null template severity, which preserves the case's current severity.
+    The description is only filled when the case has none, because a template's prose must not
+    clobber what the analyst already wrote. Task and custom-field defaults are copied once, tags
+    are attached. One provenance ledger entry records the template's name.
 
     Tasks are matched on `(title, group)` across every apply so that re-applying the same template
     never creates a duplicate. Tags and custom-field values already use `get_or_create`; the task
@@ -2159,7 +2163,8 @@ def _apply_template(
     # Detect re-apply before we overwrite source_template.
     is_reapply = case.source_template_id == template.id
 
-    case.severity = template.severity
+    if template.severity is not None:
+        case.severity = template.severity
     case.tlp = template.tlp
     case.pap = template.pap
     case.flag = template.flag
@@ -2328,12 +2333,21 @@ def _create_case_template(request: Request) -> Response:
             {"phase": [f"must be one of: {', '.join(allowed_phase)}"]},
         )
 
+    severity_raw = payload.get("severity")
+    try:
+        severity_val = parse_case_template_severity(severity_raw)
+    except ValueError:
+        return _bad(
+            "severity must be null, omitted, or an integer 1..4",
+            {"severity": ["must be null, omitted, or an integer 1..4"]},
+        )
+
     template = CaseTemplate.objects.create(
         name=name[:100],
         display_name=str(payload.get("displayName") or "")[:200],
         title_prefix=str(payload.get("titlePrefix") or "")[:100],
         description=str(payload.get("description") or ""),
-        severity=int(payload.get("severity") or 2),
+        severity=severity_val,
         tlp=int(payload.get("tlp") or 2),
         pap=int(payload.get("pap") or 2),
         flag=bool(payload.get("flag") or False),
@@ -2400,7 +2414,17 @@ def _update_case_template(template: CaseTemplate, request: Request) -> Response:
         if key in payload:
             setattr(template, key, str(payload[key] or ""))
             fields.append(key)
-    for key in ("severity", "tlp", "pap"):
+    if "severity" in payload:
+        try:
+            severity_val = parse_case_template_severity(payload["severity"])
+        except ValueError:
+            return _bad(
+                "severity must be null, omitted, or an integer 1..4",
+                {"severity": ["must be null, omitted, or an integer 1..4"]},
+            )
+        template.severity = severity_val
+        fields.append("severity")
+    for key in ("tlp", "pap"):
         if key in payload:
             setattr(template, key, int(payload[key]))
             fields.append(key)

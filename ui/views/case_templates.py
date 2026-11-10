@@ -22,6 +22,7 @@ from cases.models import (
 from cases.template_defaults import (
     DEFAULT_TEMPLATE_CUSTOM_FIELDS,
     DEFAULT_TEMPLATE_TASKS,
+    parse_case_template_severity,
 )
 from cases.views import (
     _apply_template,
@@ -128,6 +129,16 @@ def _parse_template_form(request: HttpRequest) -> dict:
     flag_raw = request.POST.get("flag")
     flag = flag_raw in ("on", "true", "1", True)
 
+    # Parse severity: "none" -> None, absent/empty -> None, otherwise use parser
+    severity_raw = request.POST.get("severity")
+    if severity_raw is None or severity_raw.strip() == "":
+        severity = None
+    else:
+        try:
+            severity = parse_case_template_severity(severity_raw)
+        except ValueError as exc:
+            raise ValueError(f"Invalid severity: {exc}") from exc
+
     return {
         "name": name,
         "display_name": (request.POST.get("display_name") or "").strip(),
@@ -135,7 +146,7 @@ def _parse_template_form(request: HttpRequest) -> dict:
         "description": (request.POST.get("description") or "").strip(),
         "summary": (request.POST.get("summary") or "").strip(),
         "flag": flag,
-        "severity": int(request.POST.get("severity") or 2),
+        "severity": severity,
         "tlp": int(request.POST.get("tlp") or 2),
         "pap": int(request.POST.get("pap") or 2),
         "tags": [t.strip() for t in (request.POST.get("tags") or "").split(",") if t.strip()],
@@ -162,6 +173,7 @@ def case_template_create(request: HttpRequest) -> HttpResponse:
                 form_tasks=copy.deepcopy(DEFAULT_TEMPLATE_TASKS),
                 form_custom_fields=copy.deepcopy(DEFAULT_TEMPLATE_CUSTOM_FIELDS),
                 all_tag_names=all_tag_names,
+                form_severity=None,
             ),
         )
 
@@ -270,6 +282,7 @@ def case_template_edit(request: HttpRequest, template_id: str) -> HttpResponse:
                 form_custom_fields=template.custom_fields,
                 all_tag_names=all_tag_names,
                 source_case_count=source_case_count,
+                form_severity=template.severity,
             ),
         )
 

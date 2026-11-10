@@ -89,6 +89,7 @@ def _taxonomy_context(request: HttpRequest, **extra: Any) -> dict[str, Any]:
             "case_type": [t for t in terms if t.category == "case_type"],
             "data_classification": [t for t in terms if t.category == "data_classification"],
             "case_verdict": [t for t in terms if t.category == "case_verdict"],
+            "containment_actions": [t for t in terms if t.category == "containment_actions"],
         },
         scope_choices=CASE_SCOPE_CHOICES,
         phase_choices=CASE_PHASE_CHOICES,

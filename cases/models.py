@@ -581,7 +581,12 @@ class CaseTemplate(UUIDModel, TimeStampedModel):
     display_name = models.CharField(max_length=200, blank=True)
     title_prefix = models.CharField(max_length=100, blank=True)
     description = models.TextField(blank=True)
-    severity = models.SmallIntegerField(default=2, choices=list(SEVERITY_CHOICES))
+    severity = models.SmallIntegerField(
+        null=True,
+        blank=True,
+        default=None,
+        choices=list(SEVERITY_CHOICES),
+    )
     tlp = models.SmallIntegerField(default=2, choices=list(TLP_CHOICES))
     pap = models.SmallIntegerField(default=2, choices=list(PAP_CHOICES))
     # Q-D6: a template seeds the three that are structurally part of a case blueprint. It
@@ -602,7 +607,13 @@ class CaseTemplate(UUIDModel, TimeStampedModel):
     class Meta:
         db_table = "case_template"
         constraints = [
-            in_range("case_template_severity_range", "severity", SEVERITY_MIN, SEVERITY_MAX),
+            in_range(
+                "case_template_severity_range",
+                "severity",
+                SEVERITY_MIN,
+                SEVERITY_MAX,
+                allow_null=True,
+            ),
             in_range("case_template_tlp_range", "tlp", TLP_MIN, TLP_MAX),
             in_range("case_template_pap_range", "pap", PAP_MIN, PAP_MAX),
         ]

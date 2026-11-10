@@ -135,7 +135,7 @@ def test_alert_detail_tag_colour_valid_hex_renders_swatch(
     default_org,
     db,
 ) -> None:
-    """Valid hex colour on a tag renders a .tag-dot swatch with background-colour.
+    """Valid hex colour on a tag renders a .tag-dot swatch with an SVG fill.
 
     Tests all four documented forms: #RGB, #RGBA, #RRGGBB, #RRGGBBAA.
     """
@@ -151,7 +151,8 @@ def test_alert_detail_tag_colour_valid_hex_renders_swatch(
     html = response.content.decode()
     block = _tags_block(html)
     assert "tag-dot" in block
-    assert "background-color: #f00" in block
+    assert 'fill="#f00"' in block
+    assert "style=" not in block
 
     # Test #RGBA (4 digits)
     tag_rgba = Tag.objects.create(name="transitive", colour="#ff000080")
@@ -160,7 +161,7 @@ def test_alert_detail_tag_colour_valid_hex_renders_swatch(
     html = response.content.decode()
     block = _tags_block(html)
     assert "tag-dot" in block
-    assert "background-color: #ff000080" in block
+    assert 'fill="#ff000080"' in block
 
     # Test #RRGGBB (6 digits)
     tag_hex = Tag.objects.create(name="orange", colour="#ffa500")
@@ -169,7 +170,7 @@ def test_alert_detail_tag_colour_valid_hex_renders_swatch(
     html = response.content.decode()
     block = _tags_block(html)
     assert "tag-dot" in block
-    assert "background-color: #ffa500" in block
+    assert 'fill="#ffa500"' in block
 
     # Test #RRGGBBAA (8 digits)
     tag_aa = Tag.objects.create(name="purple-alpha", colour="#800080ff")
@@ -178,7 +179,7 @@ def test_alert_detail_tag_colour_valid_hex_renders_swatch(
     html = response.content.decode()
     block = _tags_block(html)
     assert "tag-dot" in block
-    assert "background-color: #800080ff" in block
+    assert 'fill="#800080ff"' in block
 
 
 def test_alert_detail_tag_invalid_colour_no_swatch(

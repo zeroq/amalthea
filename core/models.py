@@ -29,6 +29,7 @@ class TaxonomyTerm(UUIDModel, TimeStampedModel):
         ("case_type", "Case Type"),
         ("data_classification", "Data Classification"),
         ("case_verdict", "Case Verdict"),
+        ("containment_actions", "Containment Actions"),
     )
 
     category = models.CharField(max_length=32, choices=CATEGORY_CHOICES)

@@ -5,25 +5,44 @@
 
 {% block content %}
 <div class="card">
-  <form method="get" class="inline-form filter-bar" aria-label="Alert filters">
-    <label class="sr-only" for="f-alert-scope">Scope</label>
-    <select id="f-alert-scope" name="scope" class="filter-type">
-      {% for value, label in scopes %}
-      <option value="{{ value }}" {% if scope == value %}selected{% endif %}>{{ label }}</option>
+  <form method="get" class="filter-bar" aria-label="Alert filters">
+    <div class="control-row">
+      <label class="sr-only" for="f-alert-scope">Scope</label>
+      <select id="f-alert-scope" name="scope" class="filter-type">
+        {% for value, label in scopes %}
+        <option value="{{ value }}" {% if scope == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn btn-primary" type="submit">Filter</button>
+      <a class="btn" href="{% url 'ui-alert-list' %}">Clear</a>
+      {% if mine %}
+        <input type="hidden" name="mine" value="1">
+        <a class="btn btn-primary" href="{% querystring mine=None page=1 %}" aria-current="true" aria-label="Remove Mine filter — showing only alerts assigned to you">Mine</a>
+      {% else %}
+        <a class="btn" href="{% querystring mine=1 page=1 %}" aria-label="Show only alerts assigned to me">Mine</a>
+      {% endif %}
+      {% if request.user.role == "admin" or request.user.role == "superAdmin" %}
+        <a class="btn btn-primary btn-end" href="{% url 'ui-alert-import' %}"
+           data-modal-open="import-alert-modal">Import JSON</a>
+      {% endif %}
+    </div>
+
+    <div class="control-row severity-filter-row" role="group" aria-labelledby="severity-filter-label">
+      <span id="severity-filter-label" class="dim">Severity</span>
+      {% for link in severity_filter_links %}
+        {% if link.selected %}
+          <a class="btn btn-sm severity-filter severity-filter--{{ link.value }}" href="{{ link.url }}"
+             aria-current="true"
+             aria-label="Remove {{ link.label }} severity filter"
+             data-severity="{{ link.value }}">{{ link.label }}</a>
+          <input type="hidden" name="severity" value="{{ link.value }}">
+        {% else %}
+          <a class="btn btn-sm severity-filter severity-filter--{{ link.value }}" href="{{ link.url }}"
+             aria-label="Add {{ link.label }} severity filter"
+             data-severity="{{ link.value }}">{{ link.label }}</a>
+        {% endif %}
       {% endfor %}
-    </select>
-    <button class="btn btn-primary" type="submit">Filter</button>
-    <a class="btn" href="{% url 'ui-alert-list' %}">Clear</a>
-    {% if mine %}
-      <input type="hidden" name="mine" value="1">
-      <a class="btn btn-primary" href="{% querystring mine=None page=1 %}" aria-current="true" aria-label="Remove Mine filter — showing only alerts assigned to you">Mine</a>
-    {% else %}
-      <a class="btn" href="{% querystring mine=1 page=1 %}" aria-label="Show only alerts assigned to me">Mine</a>
-    {% endif %}
-    {% if request.user.role == "admin" or request.user.role == "superAdmin" %}
-      <a class="btn btn-primary btn-end" href="{% url 'ui-alert-import' %}"
-         data-modal-open="import-alert-modal">Import JSON</a>
-    {% endif %}
+    </div>
   </form>
 </div>
 {% if request.user.role == "admin" or request.user.role == "superAdmin" %}

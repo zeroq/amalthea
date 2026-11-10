@@ -184,9 +184,10 @@
     </div>
     <div class="control-row">
       <button class="btn btn-primary" type="submit">Save observable rules</button>
+      <button class="btn" type="submit" name="intent" value="apply">Apply to unlinked alerts…</button>
       <span class="hint">
         Rules for types not in the vocabulary are preserved by a save here and remain editable through
-        the advanced JSON below.
+        the advanced JSON below. Changing rules does not remove links already extracted.
       </span>
     </div>
   </form>
@@ -349,6 +350,15 @@ dialog). Writing it as a `<dialog>` rather than a native `confirm()` is the repo
 {% if apply_pending %}
   {% url 'ui-settings-source-detail' source.id as apply_confirm_url %}
   {% include "ui/_modal.html" with modal_id="mapping-apply-modal" body_template="ui/_source_remap_confirm_body.html" title="Apply this mapping to existing alerts?" confirm_text="Save & re-map" confirm_class="btn-primary" cancel_text="Cancel" form_action=apply_confirm_url extra_fields=apply_confirm_fields confirm_disabled=apply_confirm_disabled autoopen=True size="md" %}
+{% endif %}
+
+{% comment %}
+The observable-only confirmation. The two dialogs are mutually exclusive: the mapping preview carries
+a RemapPreview, this one an ObservableApplyPreview, and the view never sets both.
+{% endcomment %}
+{% if observable_apply_pending %}
+  {% url 'ui-settings-source-detail' source.id as observable_apply_url %}
+  {% include "ui/_modal.html" with modal_id="observable-apply-modal" body_template="ui/_source_observable_apply_body.html" title="Apply these observable rules to existing alerts?" confirm_text="Save & extract" confirm_class="btn-primary" cancel_text="Cancel" form_action=observable_apply_url extra_fields=observable_apply_confirm_fields confirm_disabled=observable_apply_confirm_disabled autoopen=True size="md" %}
 {% endif %}
 {% elif active_tab == "raw-data" %}
 <div class="card">

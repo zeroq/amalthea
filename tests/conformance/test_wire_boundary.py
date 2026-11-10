@@ -56,6 +56,11 @@ WIRE_BOUNDARY = (
     "core/serializers.py",
     "*/views.py",
     "*/urls.py",
+    # JSON export/import documents are a wire surface: they read and write TheHive-shaped
+    # `_type`, `customFields`, `startDate`, `endDate`, etc.
+    "alerts/export.py",
+    "alerts/importing.py",
+    "cases/importing.py",
     # The UI package was `ui/views.py` (matched by `*/views.py`) before the 2026-11-04 split.
     # Its browser-form field names are a presentation boundary, not internal TheHive reads.
     "ui/views/",
@@ -145,6 +150,9 @@ def test_the_boundary_matcher() -> None:
     assert is_wire_boundary("cases/views.py")
     assert is_wire_boundary("cases/urls.py")
     assert is_wire_boundary("ui/views/observables.py")
+    assert is_wire_boundary("alerts/export.py")
+    assert is_wire_boundary("alerts/importing.py")
+    assert is_wire_boundary("cases/importing.py")
     assert not is_wire_boundary("cases/models.py")
     assert not is_wire_boundary("services/foo.py")
     assert not is_wire_boundary("core/events.py")

@@ -47,9 +47,10 @@
     <div class="cols">
       <div class="meta-inline">
         <label for="id_severity">Severity</label>
-        <select id="id_severity" name="severity">
+        <select id="id_severity" name="severity" aria-describedby="severity-help">
+          <option value="none" {% if form_severity is None %}selected{% endif %}>None (keep case severity)</option>
           {% for val, label in severity_labels.items %}
-          <option value="{{ val }}" {% if template.severity|default:2 == val %}selected{% endif %}>{{ label }}</option>
+          <option value="{{ val }}" {% if form_severity == val %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
@@ -74,6 +75,10 @@
         </select>
       </div>
     </div>
+
+    <p class="dim" id="severity-help">
+      None leaves the case's existing severity unchanged when applied.
+    </p>
 
     <div class="meta-inline">
       <label for="id_tags">Tags (comma-separated)</label>

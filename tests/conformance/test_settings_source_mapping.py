@@ -827,7 +827,9 @@ class TestApplyingTheMappingToExistingAlerts(_FeedFixture):
 
         body = client.get(self._url(source)).content.decode()
 
-        assert body.count('name="intent" value="apply"') == 2, "one per writer (table, JSON)"
+        assert body.count('name="intent" value="apply"') == 3, (
+            "one per mapping writer (table, JSON) plus the observable card"
+        )
 
     def test_the_apply_intent_writes_nothing_at_all(self, feed) -> None:
         """AC20 — the first step validates and *counts*. No mapping, no alerts, no audit."""

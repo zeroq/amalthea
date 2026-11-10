@@ -1,10 +1,14 @@
 # TODO — Amalthea
 
 Open work only. Shipped work and closed-item history live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-11-08 — TODO cut down to open items only (114 closed checkboxes moved to
-`COMPLETED.md`); §18 case JSON import + export v2 implemented and verified (uncommitted), §19 alert
-JSON export/import implemented (uncommitted; independent verification pending). The priority table
-below is the source of truth for open work.
+Last updated: 2026-11-10 — TODO cut down to open items only (114 closed checkboxes moved to
+`COMPLETED.md`). Latest uncommitted implementations: source-observable apply (verified), alert-list
+severity filter (verified), case-list severity filter (focused tests green; independent verification
+and full-suite run pending), case-template severity None (focused tests green; migration `cases/0022`;
+full-suite run pending), and full-suite hygiene fixes (CSP-safe tag swatch; JSON import/export
+modules classified as wire boundary). Full suite: **3583 passed, 3 skipped**. §18 case JSON import +
+export v2 and §19 alert JSON export/import remain implemented and uncommitted; §19 security review is
+still pending. The priority table below is the source of truth for open work.
 
 ---
 
@@ -35,7 +39,7 @@ engineering hygiene. Shipped rows were removed in the 2026-11-08 cleanup (see `C
 | **18** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
 | **19** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
 | **20** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
-| **21** | **§12.9 — UI layout/style standardization** | Input/button heights, compact action columns, table/filter convention; codify guidelines. | **Low.** |
+| **21** | **§12.9 — UI layout/style standardization** | Input/button heights, compact action columns, table/filter convention; codify guidelines. Includes the new alert/case severity rows (`.severity-filter-row`, `.severity-filter--N`) as the canonical filter pattern. | **Low.** |
 | **22** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. | **None** — hygiene. |
 
 ---

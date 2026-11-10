@@ -1,6 +1,6 @@
 """Read-only taxonomy resolver for compiled vocabularies.
 
-TaxonomyTerm is the runtime source of truth for the five compiled categories.
+TaxonomyTerm is the runtime source of truth for the six compiled categories.
 This module must never query the database at import time and must not import
 cases/ui to avoid import cycles.
 """
@@ -17,6 +17,7 @@ CATEGORY_CASE_PHASE = "case_phase"
 CATEGORY_CASE_TYPE = "case_type"
 CATEGORY_DATA_CLASSIFICATION = "data_classification"
 CATEGORY_CASE_VERDICT = "case_verdict"
+CATEGORY_CONTAINMENT_ACTIONS = "containment_actions"
 
 ALL_CATEGORIES = (
     CATEGORY_CASE_SCOPE,
@@ -24,6 +25,7 @@ ALL_CATEGORIES = (
     CATEGORY_CASE_TYPE,
     CATEGORY_DATA_CLASSIFICATION,
     CATEGORY_CASE_VERDICT,
+    CATEGORY_CONTAINMENT_ACTIONS,
 )
 
 

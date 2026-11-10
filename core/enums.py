@@ -211,9 +211,22 @@ CASE_CLOSING_VERDICTS: Final[tuple[str, ...]] = ("true_positive", "false_positiv
 # --- Constraint builders ------------------------------------------------------
 
 
-def in_range(name: str, field: str, low: int, high: int) -> models.CheckConstraint:
-    """CHECK that ``field`` is within the inclusive ``low..high`` range."""
+def in_range(
+    name: str,
+    field: str,
+    low: int,
+    high: int,
+    *,
+    allow_null: bool = False,
+) -> models.CheckConstraint:
+    """CHECK that ``field`` is within the inclusive ``low..high`` range.
+
+    ``allow_null=True`` also accepts SQL ``NULL``; it does not weaken the range check for
+    non-null values.
+    """
     condition = Q(**{f"{field}__gte": low, f"{field}__lte": high})
+    if allow_null:
+        condition |= Q(**{f"{field}__isnull": True})
     return models.CheckConstraint(condition=condition, name=name)
 
 

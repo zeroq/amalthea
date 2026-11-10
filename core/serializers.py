@@ -481,7 +481,14 @@ def case_template_json(template: CaseTemplate) -> dict[str, Any]:
     `tags`/`tasks`/`customFields` are echoed as the JSON definitions the row stores. The audit
     pair has no creator columns on `CaseTemplate` and degrades to `null`, the same honest-bucket
     choice `task_json` makes.
+
+    When `template.severity` is `None`, output `"severity": null, "severityLabel": ""` so clients
+    can distinguish "no severity set" from "severity 1..4".
     """
+    if template.severity is None:
+        severity_label = ""
+    else:
+        severity_label = SEVERITY_LABELS.get(template.severity, "")
     return {
         "_id": str(template.id),
         "id": str(template.id),
@@ -495,7 +502,7 @@ def case_template_json(template: CaseTemplate) -> dict[str, Any]:
         "titlePrefix": template.title_prefix,
         "description": template.description,
         "severity": template.severity,
-        "severityLabel": SEVERITY_LABELS.get(template.severity, ""),
+        "severityLabel": severity_label,
         "tags": list(template.tags or []),
         "flag": template.flag,
         "tlp": template.tlp,

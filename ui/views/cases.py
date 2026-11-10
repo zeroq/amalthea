@@ -64,6 +64,7 @@ from identity.services import (
 )
 from ui.case_custom_fields import update_case_custom_field_value
 from ui.pagination import PICKER_PAGE_SIZE, paginate
+from ui.severity_filter import build_severity_filter_links, parse_severity_filter
 
 from .common import (
     CASE_INLINE_EDIT_FIELDS,
@@ -232,6 +233,7 @@ def _render_case_list(
         scope = "open"
 
     mine = request.GET.get("mine") == "1"
+    selected_severities = parse_severity_filter(request.GET)
 
     base_queryset = Case.objects.select_related("status", "assignee", "owner_org").filter(
         case_visible_q(request.user)
@@ -248,10 +250,15 @@ def _render_case_list(
     else:  # scope == "all"
         queryset = base_queryset
 
+    # Apply severity filter after org/scope/mine, before pagination.
+    # Multiple selected severities combine with OR (Django ``severity__in``).
+    if selected_severities:
+        queryset = queryset.filter(severity__in=selected_severities)
+
     # Pagination for the cases list (primary list P). The assignees picker
     # remains capped at PICKER_PAGE_SIZE (class K, not paged).
     # "all" is not a filter; "open"/"closed" narrow the set.
-    has_filter = scope != "all" or mine
+    has_filter = scope != "all" or mine or bool(selected_severities)
     page_obj = paginate(request, queryset.order_by("-severity", "-start_date"))
     filtered_from = (
         unfiltered_count if has_filter and unfiltered_count > page_obj.paginator.count else None
@@ -273,6 +280,8 @@ def _render_case_list(
         "mine": mine,
         "heading": heading,
         "open_new_case": open_new_case,
+        "selected_severities": selected_severities,
+        "severity_filter_links": build_severity_filter_links(request, selected_severities),
     }
 
     # Only include form context for users who can actually create cases.

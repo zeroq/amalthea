@@ -642,6 +642,85 @@
       {% endwith %}
       {% endif %}
     </section>
+
+  <section class="card" aria-labelledby="h-containment-actions">
+    <div class="page-row">
+      <h2 id="h-containment-actions">Containment Actions</h2>
+      {% if can_manage_taxonomy %}
+      <button type="button" class="btn btn-sm" data-modal-open="taxonomy-term-create-containment_actions-modal">
+        <i class="fa-solid fa-plus" aria-hidden="true"></i> Add term
+      </button>
+      {% endif %}
+    </div>
+    {% if taxonomy_terms_by_category.containment_actions %}
+    <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Case containment actions</caption>
+      <thead>
+        <tr><th scope="col">Code</th><th scope="col">Label</th><th scope="col">Order</th><th scope="col">Hidden</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
+      </thead>
+      <tbody>
+        {% for t in taxonomy_terms_by_category.containment_actions %}
+        <tr>
+          <td class="mono">{{ t.code }}{% if t.hidden %} <span class="badge">Hidden</span>{% endif %}{% if t.protected %} <span class="badge">Protected</span>{% endif %}</td>
+          <td>{{ t.label }}</td>
+          <td>{{ t.order }}</td>
+          <td>{{ t.hidden|yesno:"Yes,No" }}</td>
+          <td>
+            {% if can_manage_taxonomy %}
+            {% with modal_id="taxonomy-term-edit-"|concat:t.id form_id="taxonomy-term-edit-form-"|concat:t.id %}
+            {% url 'ui-taxonomy-term-edit' t.id as edit_url %}
+            <button type="button" class="icon-link" data-modal-open="{{ modal_id }}" aria-label="Edit containment action {{ t.code }}"><i class="fa-regular fa-pen-to-square" aria-hidden="true"></i></button>
+            {% endwith %}
+            {% if t.protected or t.in_use_count %}
+            <button type="button" class="icon-link icon-link-err" disabled title="{% if t.protected %}Protected term{% elif t.in_use_count %}In use{% endif %}" aria-label="Cannot delete {{ t.code }}: in use by cases"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+            {% else %}
+            {% with modal_id="taxonomy-term-delete-"|concat:t.id %}
+            {% url 'ui-taxonomy-term-delete' t.id as delete_url %}
+            <button type="button" class="icon-link icon-link-err" data-modal-open="{{ modal_id }}" aria-label="Delete {{ t.code }}"><i class="fa-regular fa-trash-can" aria-hidden="true"></i></button>
+            {% endwith %}
+            {% endif %}
+            {% else %}
+            <span class="dim">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% for t in taxonomy_terms_by_category.containment_actions %}
+      {% if can_manage_taxonomy %}
+      {% with modal_id="taxonomy-term-edit-"|concat:t.id form_id="taxonomy-term-edit-form-"|concat:t.id %}
+      {% url 'ui-taxonomy-term-edit' t.id as edit_url %}
+      {% if form_state.modal_id == modal_id %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="Edit taxonomy term" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=t is_edit=True category=t.category form_values=form_state.values errors=form_state.errors size="md" %}
+      {% else %}
+      {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="Edit taxonomy term" confirm_text="Save" form_action=edit_url form_hx_post=edit_url form_hx_target="#"|add:modal_id|add:"-body" obj=t is_edit=True category=t.category size="md" %}
+      {% endif %}
+      {% endwith %}
+      {% if not t.protected and not t.in_use_count %}
+      {% with modal_id="taxonomy-term-delete-"|concat:t.id %}
+      {% url 'ui-taxonomy-term-delete' t.id as delete_url %}
+      {% include "ui/_modal.html" with modal_id=modal_id title="Delete taxonomy term?" body_template="ui/_taxonomy_delete_body.html" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" modal_static=True entity_label="taxonomy term" identifier=t.code usage_count=0 %}
+      {% endwith %}
+      {% endif %}
+      {% endif %}
+    {% endfor %}
+    {% else %}
+    <p class="empty">No terms defined.</p>
+    {% endif %}
+    {% if can_manage_taxonomy %}
+    {% url 'ui-taxonomy-term-create' as create_url %}
+    {% with modal_id="taxonomy-term-create-containment_actions-modal" form_id="taxonomy-term-create-containment_actions-form" %}
+    {% if form_state.modal_id == modal_id %}
+    {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="New containment action" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False category="containment_actions" form_values=form_state.values errors=form_state.errors size="md" %}
+    {% else %}
+    {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_taxonomy_term_form.html" title="New containment action" confirm_text="Create" form_action=create_url form_hx_post=create_url form_hx_target="#"|add:modal_id|add:"-body" is_edit=False category="containment_actions" size="md" %}
+    {% endif %}
+    {% endwith %}
+    {% endif %}
+  </section>
   </div>
 </div>
 {% endblock %}

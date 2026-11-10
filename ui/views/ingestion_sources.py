@@ -191,6 +191,8 @@ def _source_detail_context(
     json_text: str | None = None,
     apply_pending: object | None = None,
     pending_config_json: str | None = None,
+    observable_apply_pending: object | None = None,
+    observable_pending_config_json: str | None = None,
     active_tab: str = "mapping",
     latest_alert: Alert | None = None,
     latest_raw_payload: str | None = None,
@@ -270,6 +272,23 @@ def _source_detail_context(
         "observable_rows": obs_rows,
         "observable_errors": observable_errors,
         "observable_config_errors": observable_errors.get("", ()),
+        # --- observable-rule apply dialog (PLAN-2026-11-09) --------------------------------------
+        # Kept separate from the mapping-apply keys above: the two dialogs can never share a
+        # pending preview, because one carries a RemapPreview and the other an ObservableApplyPreview.
+        "observable_apply_pending": observable_apply_pending,
+        "observable_apply_rows": _observable_apply_rows(observable_apply_pending),
+        "observable_apply_confirm_fields": (
+            {
+                "form": "observables",
+                "intent": "apply_confirmed",
+                "pending_config": observable_pending_config_json or "{}",
+            }
+            if observable_apply_pending is not None
+            else None
+        ),
+        "observable_apply_confirm_disabled": bool(
+            observable_apply_pending is not None and observable_apply_pending.over_cap
+        ),
         "failed_form": failed_form,
         "mapping_json_text": (
             json_text
@@ -355,6 +374,11 @@ def _source_mapping_post(request: HttpRequest, source) -> HttpResponse:
     `intent` at all, so every existing submission lands on the save path unchanged.
     """
     if request.POST.get("form") == "observables":
+        intent = request.POST.get("intent") or "save"
+        if intent == "apply":
+            return _confirm_observable_apply(request, source)
+        if intent == "apply_confirmed":
+            return _apply_observable_rules(request, source)
         return _save_observable_rules(request, source)
     intent = request.POST.get("intent") or "save"
     if intent == "apply":
@@ -422,6 +446,55 @@ def _observable_rows_from_post(request: HttpRequest) -> dict[str, str]:
     }
 
 
+def _validated_observables(request: HttpRequest, source) -> tuple[dict, dict[str, str], object]:
+    """Read the card and validate it as an edit of only the `observables` key."""
+    from ingest.observable_editor import build_observable_config
+    from observables.models import ObservableType
+
+    before = source.mapping_config or {}
+    submitted = _observable_rows_from_post(request)
+    types = list(ObservableType.objects.order_by("name"))
+    result = build_observable_config(before, submitted, types)
+    return before, submitted, result
+
+
+def _observable_apply_rows(preview: object | None) -> list[dict[str, object]]:
+    """Shape one row per extracted type for the modal's table, ordered by type name."""
+    by_type = getattr(preview, "by_type", None) if preview is not None else None
+    if not isinstance(by_type, dict):
+        return []
+    return [
+        {
+            "type": name,
+            "found": row.found,
+            "new_links": row.new_links,
+            "existing_links": row.existing_links,
+        }
+        for name, row in sorted(by_type.items())
+    ]
+
+
+def _observables_only_change(before: dict, after: dict) -> bool:
+    """True when the only meaningful change is the `observables` key.
+
+    `build_observable_config` bootstraps the current `{version, fields}` shape when an empty config
+    gains its first rule. That shape is not a field remap and is allowed; any non-empty field or
+    value-map change in the hidden config is not.
+    """
+    keys = {*before, *after}
+    for key in keys - {"observables"}:
+        old = before.get(key)
+        new = after.get(key)
+        if old == new:
+            continue
+        if key == "version" and old is None and new == 2:
+            continue
+        if key == "fields" and not old and new == {}:
+            continue
+        return False
+    return True
+
+
 def _reject_observables(
     request: HttpRequest,
     source,
@@ -453,16 +526,9 @@ def _save_observable_rules(request: HttpRequest, source) -> HttpResponse:
     exactly one key, so a field-mapping change and an observable-rule change cannot overwrite each
     other; the no-op path writes no row and no audit event, matching the other two writers (AC24).
     """
-    from ingest.observable_editor import (
-        build_observable_config,
-        observable_save_is_noop,
-    )
-    from observables.models import ObservableType
+    from ingest.observable_editor import observable_save_is_noop
 
-    types = list(ObservableType.objects.order_by("name"))
-    submitted = _observable_rows_from_post(request)
-    before = source.mapping_config or {}
-    result = build_observable_config(before, submitted, types)
+    before, submitted, result = _validated_observables(request, source)
     if not result.ok:
         return _reject_observables(request, source, submitted=submitted, result=result)
 
@@ -481,6 +547,99 @@ def _save_observable_rules(request: HttpRequest, source) -> HttpResponse:
         )
     else:
         messages.success(request, "Observable rules cleared.")
+    return redirect("ui-settings-source-detail", source_id=source.id)
+
+
+def _confirm_observable_apply(request: HttpRequest, source) -> HttpResponse:
+    """`form=observables, intent=apply` — validate, preview extraction, open the modal. No writes."""
+    from ingest.observable_apply import preview_observable_rules
+
+    _before, submitted, result = _validated_observables(request, source)
+    if not result.ok:
+        return _reject_observables(request, source, submitted=submitted, result=result)
+
+    preview = preview_observable_rules(source, result.config)
+    return render(
+        request,
+        "ui/source_detail.html",
+        _base_context(
+            request,
+            **_source_detail_context(
+                request,
+                source,
+                # The page keeps showing stored rules; the dialog carries the candidate config.
+                observable_apply_pending=preview,
+                observable_pending_config_json=json.dumps(result.config, sort_keys=True),
+            ),
+        ),
+    )
+
+
+def _apply_observable_rules(request: HttpRequest, source) -> HttpResponse:
+    """`form=observables, intent=apply_confirmed` — save the rules and extract, atomically."""
+    from identity.audit import record_ingestion_source_observables_applied
+    from ingest.editor import EditorResult, parse_json_config
+    from ingest.observable_apply import apply_observable_rules
+    from ingest.observable_editor import observable_save_is_noop
+    from ingest.remap import MAX_REMAP_ALERTS, summarise_candidates
+
+    pending = request.POST.get("pending_config")
+    result = parse_json_config(pending)
+    if not result.ok:
+        return _reject_observables(request, source, submitted={}, result=result)
+
+    config = result.config or {}
+    before = source.mapping_config or {}
+    if not _observables_only_change(before, config):
+        rejected = EditorResult(errors={"": ("Only observable rules may change in this form.",)})
+        return _reject_observables(request, source, submitted={}, result=rejected)
+
+    summary = summarise_candidates(source)
+    if summary.over_cap:
+        messages.error(
+            request,
+            f"Not applied: this feed now has {summary.candidates} unlinked open alerts, over the "
+            f"{MAX_REMAP_ALERTS}-per-request limit. Narrow the feed or use the API.",
+        )
+        return redirect("ui-settings-source-detail", source_id=source.id)
+
+    config_changed = not observable_save_is_noop(before, config)
+    with transaction.atomic():
+        if config_changed:
+            _persist_mapping(request, source, before, config)
+        counts = apply_observable_rules(source, config, actor=request.user)
+        record_ingestion_source_observables_applied(
+            request,
+            actor=request.user,
+            source=source,
+            changed_keys=["observables"] if config_changed else [],
+            candidates=counts.candidates,
+            created=counts.created,
+            existing=counts.existing,
+            alerts_with_values=counts.alerts_with_values,
+            observables_by_type=counts.by_type,
+        )
+
+    count = len(config.get("observables") or [])
+    type_summary = f"{count} type{'s' if count != 1 else ''}" if count else "no types"
+    messages.success(
+        request,
+        f"Observable rules saved — {type_summary}. Extracted {counts.created} new link"
+        f"{'' if counts.created == 1 else 's'} on {counts.alerts_with_values} alert"
+        f"{'' if counts.alerts_with_values == 1 else 's'}; "
+        f"{counts.existing} already present.",
+    )
+    if counts.unknown_types:
+        messages.warning(
+            request,
+            "Skipped unknown observable type(s): " + ", ".join(counts.unknown_types) + ".",
+        )
+    if counts.truncated_alerts:
+        messages.warning(
+            request,
+            f"Extraction was truncated on {counts.truncated_alerts} alert"
+            f"{'' if counts.truncated_alerts == 1 else 's'}.",
+        )
     return redirect("ui-settings-source-detail", source_id=source.id)
 
 

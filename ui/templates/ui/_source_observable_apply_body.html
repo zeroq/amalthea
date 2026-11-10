@@ -1,0 +1,85 @@
+{% comment %}
+Body of the "Apply these observable rules to existing alerts?" confirmation modal.
+
+Server-rendered and deliberately explicit: this pass saves the observable rules and extracts their
+values on the feed's existing unlinked open alerts. Counts come from a read-only dry pass over the real
+payloads, not from the rule list, so an operator can see what would be added before agreeing. The
+dialog uses `ui/_modal.html` and contains no inline script or style (ADR-003).
+{% endcomment %}
+<p class="modal-body-text">
+  This saves the observable rules
+  {% if observable_apply_pending.candidates %}
+    <strong>and extracts them</strong> on
+    <strong>{{ observable_apply_pending.candidates }} unlinked open alert{{ observable_apply_pending.candidates|pluralize }}</strong>
+  {% else %}
+    — there is nothing to extract from
+  {% endif %}
+  from <span class="mono">{{ source.slug }}</span>.
+</p>
+
+{% if observable_apply_pending.over_cap %}
+  <p class="msg msg-error">
+    This feed has {{ observable_apply_pending.candidates }} unlinked open alerts, which is over the
+    {{ remap_cap }}-per-request limit, so nothing will be changed — the observable rules are
+    <strong>not</strong> saved either. Narrow the candidate set first.
+  </p>
+{% else %}
+  {% if observable_apply_pending.candidates %}
+    <p class="hint">
+      {{ observable_apply_pending.alerts_with_values }} of those
+      {{ observable_apply_pending.candidates }} alert{{ observable_apply_pending.candidates|pluralize }}
+      contain at least one configured value.
+    </p>
+    {% if observable_apply_rows %}
+      <div class="table-wrap">
+        <table class="data-table data-table-tight">
+          <caption class="sr-only">What the observable rules extract from the candidate alerts</caption>
+          <thead>
+            <tr>
+              <th scope="col">Type</th>
+              <th scope="col">Values found</th>
+              <th scope="col">New links</th>
+              <th scope="col">Already linked</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in observable_apply_rows %}
+              <tr>
+                <td class="mono">{{ row.type }}</td>
+                <td class="mono">{{ row.found }}</td>
+                <td class="mono">{{ row.new_links }}</td>
+                <td class="mono">{{ row.existing_links }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  {% else %}
+    <p class="hint">There are no unlinked open alerts to extract from. The rules will still be saved.</p>
+  {% endif %}
+{% endif %}
+
+{% if observable_apply_pending.unknown_types %}
+  <p class="hint">
+    Skipped unknown observable type{{ observable_apply_pending.unknown_types|length|pluralize }}:
+    <span class="mono">{{ observable_apply_pending.unknown_types|join:", " }}</span>. No vocabulary row is
+    created for them.
+  </p>
+{% endif %}
+{% if observable_apply_pending.truncated_alerts %}
+  <p class="hint">
+    Extraction was truncated on {{ observable_apply_pending.truncated_alerts }} alert
+    {{ observable_apply_pending.truncated_alerts|pluralize }}; the per-payload candidate cap was reached.
+  </p>
+{% endif %}
+
+<ul class="hint">
+  <li>Field values, dates, status, assignment and the case link are left exactly as they are.</li>
+  <li>Linked, dismissed, imported and other-feed alerts are never touched.</li>
+  <li>
+    Extraction is append-only: removing a rule later does <strong>not</strong> remove links already
+    extracted, because they are evidence.
+  </li>
+  <li>Re-running this pass adds only links that are missing; existing links are counted and left alone.</li>
+</ul>

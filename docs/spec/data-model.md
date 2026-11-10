@@ -280,7 +280,10 @@ analyst's position in the incident-response loop. The two axes are deliberately 
 
 ### CaseTemplate (`case_template`, extends `UUIDModel` + `TimeStampedModel`) — T2 P4
 - `name` **unique** · `display_name` · `title_prefix` · `description` · `summary` · `flag`.
-- `severity` / `tlp` / `pap` — SmallInteger with the same range CHECKs as `Case`.
+- `tlp` / `pap` — SmallInteger with the same range CHECKs as `Case`.
+- `severity` — nullable SmallInteger, default `NULL`. A value `1..4` overwrites the case severity
+  when the template is applied; `NULL` means “keep the case’s current severity”. The
+  `case_template_severity_range` CHECK permits `NULL` but still rejects out-of-range integers.
 - **Classification fields (Q-D6):** `scope` (choices `CASE_SCOPE_CHOICES`, default `unset`,
   constraint `case_template_scope_valid`), `case_type` (choices `CASE_TYPE_CHOICES`, default `unset`,
   constraint `case_template_case_type_valid`), `phase` (choices `CASE_PHASE_CHOICES`, default
@@ -371,6 +374,18 @@ analyst's position in the incident-response loop. The two axes are deliberately 
   **partial `ar_pending_idx ("created_at") WHERE status='Pending'`** — the dispatch-sweep index
   (planner, not just catalog, is asserted in `tests/conformance/test_indexes.py`).
 - Constraints: `automation_run_status_valid`, `automation_run_triggered_by_valid`.
+
+### TaxonomyTerm (`taxonomy_term`, extends `UUIDModel` + `TimeStampedModel`)
+- Global (not org-scoped) editable vocabulary row: `category`, `code`, `label`, `order`,
+  `hidden`, `protected`, `is_closing`.
+- Unique `(category, code)` (`taxonomy_term_category_code_uniq`); index
+  `(category, order)` (`taxonomy_term_cat_order_idx`).
+- Categories: `case_scope`, `case_phase`, `case_type`, `data_classification`, `case_verdict`,
+  `containment_actions`.
+- `containment_actions` seeds `password_reset` (“Password reset”), `process_killed`
+  (“Process Killed”), `asset_network_contained` (“Asset network contained”), and `user_disabled`
+  (“User disabled”), all editable/deletable and not closing verdicts. This is vocabulary only;
+  recording actions on a case is a future phase.
 
 ## Core value sets (`core/enums.py`)
 

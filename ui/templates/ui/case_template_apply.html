@@ -15,7 +15,7 @@
     <select id="id_template" name="template_id" required>
       <option value="">— select a template —</option>
       {% for t in templates %}
-      <option value="{{ t.id }}">{{ t.name }} — {{ t.display_name }}</option>
+      <option value="{{ t.id }}">{{ t.name }} — {{ t.display_name }}{% if t.severity is None %} (keeps case severity){% endif %}</option>
       {% endfor %}
     </select>
     <button class="btn btn-primary" type="submit">Apply Template</button>

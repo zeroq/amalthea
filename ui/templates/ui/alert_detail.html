@@ -94,7 +94,9 @@
                     <li class="pill">
                       <span>{{ tag.name }}</span>
                       {% if tag.colour|tag_colour %}
-                        <span class="tag-dot" style="background-color: {{ tag.colour|tag_colour }}"></span>
+                        <svg class="tag-dot" viewBox="0 0 8 8" width="8" height="8" aria-hidden="true" focusable="false">
+                          <circle cx="4" cy="4" r="3" fill="{{ tag.colour|tag_colour }}"></circle>
+                        </svg>
                       {% endif %}
                       {% if can_mutate %}
                       <form method="post" action="{% url 'ui-alert-tag-remove' alert.id %}" class="inline-form">

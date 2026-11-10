@@ -12,6 +12,7 @@ from typing import Any
 
 from alerts.models import Alert
 from cases.models import Case
+from core.enums import SEVERITY_MAX, SEVERITY_MIN
 
 # Token that template authors place in task descriptions
 SOURCE_ALERT_PAYLOAD_TOKEN = "{{ alert.raw_payload }}"  # noqa: S105
@@ -34,6 +35,40 @@ MAX_SOURCE_ALERT_PAYLOAD_BYTES = 64 * 1024
 # Prevents browser OOM on extremely large payloads while still allowing normal
 # ingested alerts (typically < 1 MiB) to display completely.
 MAX_FULL_PAYLOAD_BYTES = 8 * 1024 * 1024
+
+
+def parse_case_template_severity(value: Any) -> int | None:
+    """Parse a template severity value.
+
+    Accepted inputs and outputs:
+    - None / null  -> None  (means "keep case severity")
+    - "none" (case-insensitive)  -> None
+    - integer 1..4  -> that integer
+    - numeric string "1".."4"  -> that integer
+    - anything else  -> raises ValueError
+
+    This is the shared parser used by the API and UI so they cannot drift.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("Boolean is not a valid severity value")
+    if isinstance(value, str):
+        if value.strip().lower() == "none":
+            return None
+        try:
+            parsed = int(value.strip())
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"Invalid severity value: {value!r}") from exc
+        if parsed == 0 or parsed < SEVERITY_MIN or parsed > SEVERITY_MAX:
+            raise ValueError(f"Severity must be 1..4, got {parsed}")
+        return parsed
+    if isinstance(value, int):
+        if value == 0 or value < SEVERITY_MIN or value > SEVERITY_MAX:
+            raise ValueError(f"Severity must be 1..4, got {value}")
+        return value
+    raise ValueError(f"Invalid severity value type: {type(value).__name__} {value!r}")
+
 
 # Default task definition for new templates (deep-copied, not shared)
 DEFAULT_TEMPLATE_TASKS: list[dict[str, Any]] = [

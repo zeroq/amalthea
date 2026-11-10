@@ -46,6 +46,7 @@ from identity.scoping import (
     resolve_case,
 )
 from ui.pagination import paginate
+from ui.severity_filter import build_severity_filter_links, parse_severity_filter
 
 from .common import (
     _base_context,
@@ -83,6 +84,9 @@ def alert_list(request: HttpRequest) -> HttpResponse:
         scope = DEFAULT_ALERT_SCOPE
     mine = request.GET.get("mine") == "1"
 
+    # Parse and validate severity filter values from the query string.
+    selected_severities = parse_severity_filter(request.GET)
+
     base_queryset = Alert.objects.select_related(
         "status", "assignee", "ingestion_source", "case", "owner_org"
     ).filter(org_q("owner_org", request.user))
@@ -95,8 +99,16 @@ def alert_list(request: HttpRequest) -> HttpResponse:
 
     queryset = base_queryset.filter(ALERT_SCOPE_PREDICATES[scope])
 
+    # Apply severity filter after org/scope/mine, before pagination.
+    # Multiple selected severities combine with OR (Django ``severity__in``).
+    if selected_severities:
+        queryset = queryset.filter(severity__in=selected_severities)
+
     page_obj = paginate(request, queryset.order_by("-date"))
     filtered_from = unfiltered_count if unfiltered_count > page_obj.paginator.count else None
+
+    # Build the severity filter toggle links for the UI.
+    severity_filter_links = build_severity_filter_links(request, selected_severities)
 
     return render(
         request,
@@ -108,6 +120,8 @@ def alert_list(request: HttpRequest) -> HttpResponse:
             scope=scope,
             mine=mine,
             scopes=ALERT_SCOPE_OPTIONS,
+            selected_severities=selected_severities,
+            severity_filter_links=severity_filter_links,
         ),
     )
 

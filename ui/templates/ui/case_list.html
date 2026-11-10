@@ -5,24 +5,43 @@
 
 {% block content %}
 <div class="card">
-  <form method="get" class="inline-form filter-bar" aria-label="Case filters">
-    <label class="sr-only" for="f-case-scope">Scope</label>
-    <select id="f-case-scope" name="scope" class="filter-type">
-      <option value="open" {% if scope == "open" %}selected{% endif %}>Open</option>
-      <option value="all" {% if scope == "all" %}selected{% endif %}>All</option>
-      <option value="closed" {% if scope == "closed" %}selected{% endif %}>Closed</option>
-    </select>
-    <button class="btn btn-primary" type="submit">Filter</button>
-    <a class="btn" href="{% url 'ui-case-list' %}">Clear</a>
-    {% if mine %}
-      <input type="hidden" name="mine" value="1">
-      <a class="btn btn-primary" href="{% querystring mine=None page=1 %}" aria-current="true" aria-label="Remove Mine filter — showing only cases assigned to you">Mine</a>
-    {% else %}
-      <a class="btn" href="{% querystring mine=1 page=1 %}" aria-label="Show only cases assigned to me">Mine</a>
-    {% endif %}
-    {% if can_mutate %}
-    <a class="btn btn-primary btn-end" href="{% url 'ui-case-create' %}" data-modal-open="new-case-modal">New case</a>
-    {% endif %}
+  <form method="get" class="filter-bar" aria-label="Case filters">
+    <div class="control-row">
+      <label class="sr-only" for="f-case-scope">Scope</label>
+      <select id="f-case-scope" name="scope" class="filter-type">
+        <option value="open" {% if scope == "open" %}selected{% endif %}>Open</option>
+        <option value="all" {% if scope == "all" %}selected{% endif %}>All</option>
+        <option value="closed" {% if scope == "closed" %}selected{% endif %}>Closed</option>
+      </select>
+      <button class="btn btn-primary" type="submit">Filter</button>
+      <a class="btn" href="{% url 'ui-case-list' %}">Clear</a>
+      {% if mine %}
+        <input type="hidden" name="mine" value="1">
+        <a class="btn btn-primary" href="{% querystring mine=None page=1 %}" aria-current="true" aria-label="Remove Mine filter — showing only cases assigned to you">Mine</a>
+      {% else %}
+        <a class="btn" href="{% querystring mine=1 page=1 %}" aria-label="Show only cases assigned to me">Mine</a>
+      {% endif %}
+      {% if can_mutate %}
+      <a class="btn btn-primary btn-end" href="{% url 'ui-case-create' %}" data-modal-open="new-case-modal">New case</a>
+      {% endif %}
+    </div>
+
+    <div class="control-row severity-filter-row" role="group" aria-labelledby="severity-filter-label">
+      <span id="severity-filter-label" class="dim">Severity</span>
+      {% for link in severity_filter_links %}
+        {% if link.selected %}
+          <a class="btn btn-sm severity-filter severity-filter--{{ link.value }}" href="{{ link.url }}"
+             aria-current="true"
+             aria-label="Remove {{ link.label }} severity filter"
+             data-severity="{{ link.value }}">{{ link.label }}</a>
+          <input type="hidden" name="severity" value="{{ link.value }}">
+        {% else %}
+          <a class="btn btn-sm severity-filter severity-filter--{{ link.value }}" href="{{ link.url }}"
+             aria-label="Add {{ link.label }} severity filter"
+             data-severity="{{ link.value }}">{{ link.label }}</a>
+        {% endif %}
+      {% endfor %}
+    </div>
   </form>
 </div>
 
@@ -73,7 +92,7 @@
 
     {% if page_obj.paginator.count == 0 %}
       {# Honest empty state for paginated path #}
-      {% if scope != "open" or mine %}
+      {% if scope != "open" or mine or selected_severities %}
         <p class="empty">No cases match your filters. <a href="{% url 'ui-case-list' %}">Clear filters</a></p>
       {% else %}
         <p class="empty">No cases open.{% if can_mutate %} <a href="{% url 'ui-case-create' %}">Open one</a>.{% endif %}</p>

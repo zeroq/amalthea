@@ -290,6 +290,11 @@ code paths that deliberately circumvent the service layer.
 - `case/template` is the template CRUD; `taxonomy` aggregates the editable vocabularies
   (`caseStatus`, `alertStatus`, `observableType`, `caseTemplate`, `tag`, TTP) for the UI. Both are
   Amalthea extensions (no thehive4py module) — deviations **P4-1**…**P4-3**.
+- Case-template `severity` is nullable. `POST` without a severity stores `null`; `PATCH` with an
+  absent key leaves it unchanged and `PATCH {"severity": null}` clears it. A `null` severity means
+  “do not overwrite the case severity when this template is applied”. Output is
+  `"severity": null, "severityLabel": ""`; numeric `1..4` output is unchanged. This is an Amalthea
+  extension to TheHive’s integer-only `OutputCaseTemplate` shape.
 - `POST case/template` remains explicit: omitted/empty `tasks` and `customFields` stay empty. The
   UI create form pre-fills defaults, but that is an authoring aid, not an API default.
 - The UI exposes the complete source-alert payload at `GET /tasks/<uuid:task_id>/source-payload`

@@ -33,7 +33,7 @@
         <dd>{{ template.flag|default:"—" }}</dd>
 
         <dt>Severity</dt>
-        <dd><span class="sev sev-{{ template.severity }}">{{ template.get_severity_display }}</span></dd>
+        <dd><span class="{% if template.severity is None %}dim{% endif %}">{% if template.severity is None %}None — keep case severity{% else %}{{ template.get_severity_display }}{% endif %}</span></dd>
 
         <dt>TLP</dt>
         <dd>{{ template.tlp|choice_name:tlp_choices }}</dd>
