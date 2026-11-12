@@ -38,6 +38,7 @@ from .automation import (
     playbook_edit,
     playbook_list,
     playbook_run,
+    playbook_scripts,
 )
 from .case_artifacts import (
     case_attachment_delete,
@@ -323,6 +324,7 @@ __all__ = [
     "playbook_edit",
     "playbook_list",
     "playbook_run",
+    "playbook_scripts",
     "settings_home",
     "settings_organisations",
     "settings_organisations_delete",

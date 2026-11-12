@@ -2,7 +2,7 @@
 
 Finished work, with the evidence that it actually happened. Open items live in
 [`TODO.md`](./TODO.md).
-Last updated: 2026-11-08
+Last updated: 2026-11-12
 
 Items are only listed here once independently verified. Where code exists but an acceptance criterion
 is still unproven, the item says so explicitly and the verification gap is cross-linked in `TODO.md`.
@@ -1792,7 +1792,30 @@ Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
   “Import from JSON…” link in the new-case surface.
 - **Verification** — `docs/verification/VERIFY-2026-11-08-case-json-import.md`: IMP-1..IMP-7 MET.
   `tests/conformance/test_case_export_import.py` **17 passed**; adjacent case/UI suite **111
-  passed**; `test_tenant_scoping` route assertions fixed. Uncommitted at the time of writing.
+  passed**; `test_tenant_scoping` route assertions fixed. Committed in `ff139692`.
+
+---
+
+## 2026-11-12 — Playbook script picker on-change refresh (retired TODO §20)
+
+- **Problem** — `automation/scripts/` is deploy-only with no watcher, so a newly deployed `.py`
+  did not appear in the PYTHON Script dropdown without a process restart; the interim GET-time
+  `refresh=True` re-imported scripts on every form load, including HTTP-only playbooks.
+- **Endpoint** — `GET /automation/playbooks/scripts` (`ui-playbook-scripts`; literal route before
+  `automation/playbooks/<str:playbook_id>`): `discover_scripts(refresh=True)`, loadable-only,
+  name-sorted `{name, description, trigger_hint}`; admin/superAdmin only, uniform 404 otherwise.
+- **Client** — `ui/static/ui/playbook_form.js` fetches on Action type → `PYTHON` and on load for an
+  existing python playbook; rebuilds options with DOM APIs (no `innerHTML`), preserves selection,
+  description and empty state, and uses a request sequence so the last response wins. HTTP forms
+  never re-import; `playbook_create`/`playbook_edit` GETs stay cached for the no-JS baseline.
+- **Verification** — `tests/conformance/test_playbook_script_ui.py` (endpoint refresh/broken-script/
+  authz + template hooks): **29 passed + 2 subtests**; loader + authoring + script UI **77 passed +
+  2 subtests**; playbook round-trip/delete/tenant + MVP loop **47 passed**; `test_ui_loop.py` **38
+  passed**; `make check` green. Manual check: `list_playbook_scripts` discovers `enrichment_probe`,
+  `test_playbook`, `test_playbook_2` (3/3 OK), so a newly deployed script is selectable without a
+  restart.
+- **Plans** — `docs/planning/PLAN-2026-11-12-playbook-script-fetch-on-change.md` (implementation);
+  `PLAN-2026-11-12-playbook-script-picker-refresh.md` (superseded).
 
 ---
 

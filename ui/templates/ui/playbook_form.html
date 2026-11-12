@@ -108,26 +108,21 @@
       </div>
     </div>
 
-    <div id="python-fields" class="hidden">
+    <div id="python-fields" class="hidden" data-scripts-url="{% url 'ui-playbook-scripts' %}">
       <div class="meta-inline">
         <label for="id_action_path">Script</label>
-        {% if scripts %}
-        <select id="id_action_path" name="action_path">
+        <select id="id_action_path" name="action_path"{% if not scripts %} class="hidden"{% endif %}>
           <option value="">— select —</option>
           {% for script in scripts %}
           <option value="{{ script.name }}" {% if config.action_path == script.name %}selected{% endif %}>{{ script.name }}</option>
           {% endfor %}
         </select>
-        {% if selected_script and selected_script.description %}
-        <p class="hint">{{ selected_script.description }}</p>
-        {% endif %}
-        {% else %}
-        <div class="empty">
+        <p class="hint{% if not selected_script.description %} hidden{% endif %}" id="script-description">{{ selected_script.description|default:'' }}</p>
+        <p class="hint hidden" id="script-load-error"></p>
+        <div class="empty{% if scripts %} hidden{% endif %}" id="script-empty">
           <p>No playbook scripts found in <code>automation/scripts/</code>.</p>
           <p class="hint">Deploy a <code>.py</code> file to the playbook scripts folder to make it available. The folder is deploy-only — there is no upload control.</p>
         </div>
-        <input type="hidden" name="action_path" id="id_action_path" value="">
-        {% endif %}
       </div>
     </div>
 

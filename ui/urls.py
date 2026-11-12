@@ -264,6 +264,8 @@ urlpatterns = [
     path("automation", views.automation_list, name="ui-automation-list"),
     path("automation/playbooks", views.playbook_list, name="ui-playbook-list"),
     path("automation/playbooks/new", views.playbook_create, name="ui-playbook-create"),
+    # Literal route must precede automation/playbooks/<str:playbook_id>.
+    path("automation/playbooks/scripts", views.playbook_scripts, name="ui-playbook-scripts"),
     path(
         "automation/playbooks/<str:playbook_id>/edit", views.playbook_edit, name="ui-playbook-edit"
     ),

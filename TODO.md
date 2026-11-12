@@ -1,14 +1,11 @@
 # TODO — Amalthea
 
 Open work only. Shipped work and closed-item history live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-11-10 — TODO cut down to open items only (114 closed checkboxes moved to
-`COMPLETED.md`). Latest uncommitted implementations: source-observable apply (verified), alert-list
-severity filter (verified), case-list severity filter (focused tests green; independent verification
-and full-suite run pending), case-template severity None (focused tests green; migration `cases/0022`;
-full-suite run pending), and full-suite hygiene fixes (CSP-safe tag swatch; JSON import/export
-modules classified as wire boundary). Full suite: **3583 passed, 3 skipped**. §18 case JSON import +
-export v2 and §19 alert JSON export/import remain implemented and uncommitted; §19 security review is
-still pending. The priority table below is the source of truth for open work.
+Last updated: 2026-11-12 — the playbook script picker on-change refresh shipped (moved to
+[`COMPLETED.md`](./COMPLETED.md)); §18 case JSON export/import v2 and §19 alert JSON export/import are
+**committed** (`ff139692`, 2026-11-08), with only §19's security review still open. Full suite last run
+2026-11-10 (**3583 passed, 3 skipped**); not re-run for the playbook picker. The priority table below
+is the source of truth for open work.
 
 ---
 
@@ -24,8 +21,8 @@ engineering hygiene. Shipped rows were removed in the 2026-11-08 cleanup (see `C
 | **3** | **§12.3-fu1 — Automatic ingest-time bundling** | `correlation_key` is derived/indexed but only the manual Similar/attach path consumes it. Auto-bundle was deferred (Q1b). Depends on §12.1-fu1. | **High** — the orchestration promise of Modules B+C. |
 | **4** | **§12.12-fu1 — Fuzzy title exclusion (design)** | `ppdeep` similarity excludes title; decide title-fingerprint pass vs opt-in setting and document the trade-off. | **High** — duplicate alerts still surface look-alikes. |
 | **5** | **§12.4 — No bulk actions in the UI** | `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk` exist in the API; the UI stub was deleted (Q2). | **Medium-High** — 200-alert mornings are single-item work. |
-| **6** | **§19 — Alert JSON export/import** | Implemented + independently verified 2026-11-08; security review pending; uncommitted. | **Medium** — exchange/debug single alerts. |
-| **7** | **§18 — Case JSON import (+ export v2)** | Implemented 2026-11-08; verifier MET all ACs; security findings dispositioned; uncommitted. | **Medium** — portability and hand-off. |
+| **6** | **§19 — Alert JSON export/import** | Implemented + independently verified 2026-11-08; committed `ff139692`; security review pending. | **Medium** — exchange/debug single alerts. |
+| **7** | **§18 — Case JSON import (+ export v2)** | Implemented 2026-11-08; verifier MET all ACs; security findings dispositioned; committed `ff139692`. | **Medium** — portability and hand-off. |
 | **8** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; ledger already syncs. |
 | **9** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — ops/onboarding, not triage. |
 | **10** | **§6.13 / §6.16 P4 — Ingestion tokens + audit-log viewer** | **Partial:** token lifecycle shipped (10a–c); read-only `AuditLog` viewer remains. | **Medium** — audit viewer is the accountability half. |
@@ -129,7 +126,6 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
 ---
 
 ## 9. Scratch/probe hygiene
-
 
 ---
 
@@ -463,7 +459,8 @@ the full `pytest` suite green; record any deviation in the plan.
   `alerts.py`, `observables.py`, `identity.py`, `taxonomy.py`, `automation.py`, plus compatibility re-exports.
   Low risk and a good cleanup when serializers are next changed. Source: §13 audit 2026-11-04.
 - [ ] **13.7 — Split `ui/views/automation.py`.**
-  Current: **659 lines** combining playbook-config parsing with list/detail/create/edit/delete/run views.
+  Current: **688 lines** combining playbook-config parsing with list/detail/create/edit/delete/run views
+  (plus the playbook-scripts endpoint added 2026-11-12).
   Target: `playbook_config.py` for parser helpers and `playbooks.py` for views (or an `automation/` package);
   preserve `_parse_playbook_config` / `_get_script_source` compatibility for tests. Source: §13 audit 2026-11-04.
 - [ ] **13.8 — Split `identity/views.py` into organisation and user views.**
@@ -580,9 +577,9 @@ visible on linked alerts, and the API dedupes repeated names before inserting. R
   queryset (a capped second query) and misnames the result `alert_tags_total` (it is the available
   count). Follow `case_detail.py:316-325`: fetch one row past `PICKER_PAGE_SIZE` to detect truncation,
   drop unused annotations, and select/prefetch existing links for the current-tags row in 14.5.
-- [ ] **14.12 — Commit the `.gitignore` fix and purge editor swap files.** `*.swp` is currently only
-  an uncommitted `.gitignore` change; a committed `.swp` blob remains in history. Commit the ignore
-  rule and confirm no swap files are tracked.
+- [ ] **14.12 — Purge the historical editor swap file.** `*.swp` is committed in `.gitignore`
+  (`8fb33229`) and no swap files are tracked, but a `.swp` blob remains in git history; purge it per
+  `SECURITY.md` before the repository is mirrored or copied.
 
 ---
 
@@ -619,9 +616,9 @@ Plan: [`PLAN-2026-11-06-source-detail-raw-data.md`](docs/planning/PLAN-2026-11-0
 
 ---
 
-## 18. Case JSON import (+ export v2) (IMPLEMENTED 2026-11-08, uncommitted)
+## 18. Case JSON import (+ export v2) (IMPLEMENTED 2026-11-08; committed `ff139692`)
 
-Status: **IMPLEMENTED 2026-11-08 — verifier MET all ACs; security findings dispositioned; uncommitted.**
+Status: **IMPLEMENTED 2026-11-08 — verifier MET all ACs; security findings dispositioned; committed in `ff139692`.**
 Builds on the existing case export (`ui-case-export` → `cases.views._case_export_document`) and the
 **New case** modal in `ui/templates/ui/case_list.html`.
 
@@ -722,7 +719,7 @@ Keep `_type: "CaseExport"`, bump to `version: 2`; include:
   duplicate alert conflict; non-admin 404/403; CSRF.
 - UI: modal link present; upload enctype; success redirect; error re-render.
 
-### 18.10 Implementation result (2026-11-08, uncommitted)
+### 18.10 Implementation result (2026-11-08; committed `ff139692`)
 - **Export v2** (`cases/views.py::_case_export_document`, shared by the UI and
   `GET /api/v1/case/{id}/export`): `version: 2`; case scalars via `case_json(case)` (not `detail=True`,
   whose timeline is capped at 50); `ownerOrg`, tags, custom fields, `sourceTemplate` name and
@@ -758,9 +755,9 @@ Keep `_type: "CaseExport"`, bump to `version: 2`; include:
 
 ---
 
-## 19. Alert JSON export/import (IMPLEMENTED 2026-11-08, verified; uncommitted)
+## 19. Alert JSON export/import (IMPLEMENTED 2026-11-08, verified; committed `ff139692`)
 
-Status: **IMPLEMENTED 2026-11-08 — verifier MET all AIMP ACs; security review still pending.** The API already has
+Status: **IMPLEMENTED 2026-11-08 — verifier MET all AIMP ACs; committed in `ff139692`; security review still pending.** The API already has
 `alert/<id>/import` meaning "import this alert into a case" (merge), so the new UI routes are
 `ui-alert-export` (`alerts/<uuid>/export`) and `ui-alert-import` (`alerts/import`, GET page + POST upload).
 
@@ -865,3 +862,4 @@ Status: **IMPLEMENTED 2026-11-08 — verifier MET all AIMP ACs; security review 
   **MET**; 23 focused tests passed. **Still needed:** security review (P5).
 
 ---
+

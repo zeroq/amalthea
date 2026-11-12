@@ -5,11 +5,13 @@ Tests:
 - Analyst gets 404 on create GET+POST and detail POST; admin/superAdmin succeed
 - Detail page renders script source (escaped - assert < in source is HTML-escaped)
 - Empty state renders when PLAYBOOK_SCRIPTS_DIR points at empty dir
+- JSON picker endpoint re-scans on demand, omits broken scripts, and is authoring-only
 """
 
 from __future__ import annotations
 
 import tempfile
+from pathlib import Path
 
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
@@ -120,10 +122,69 @@ class TestPlaybookScriptPicker(TestCase):
                 self.assertIn("deploy-only", content)
                 # Should NOT have an upload control
                 self.assertNotIn('type="file"', content)
-                # Should have a hidden action_path input
-                self.assertIn('type="hidden"', content)
+                # The picker is always present; JS reveals it once the endpoint returns options.
+                self.assertIn('<select id="id_action_path"', content)
                 self.assertIn('name="action_path"', content)
         reset_cache()
+
+    def test_form_exposes_scripts_endpoint(self) -> None:
+        """The form points its picker at the JSON endpoint and loads the enhancement script."""
+        client = _mk_client(self.admin)
+        content = client.get(reverse("ui-playbook-create")).content.decode()
+        url = reverse("ui-playbook-scripts")
+        self.assertIn(f'data-scripts-url="{url}"', content)
+        self.assertIn("ui/playbook_form.js", content)
+
+    def test_scripts_endpoint_refreshes_from_disk(self) -> None:
+        """The endpoint re-scans, so a script deployed after the cache warmed is returned.
+
+        Regression for PLAN-2026-11-12-playbook-script-fetch-on-change: freshness happens
+        when PYTHON is selected, not on every form GET.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "first_probe.py").write_text(
+                'NAME = "first_probe"\n\n\ndef run(**values):\n    return "first"\n'
+            )
+            with override_settings(PLAYBOOK_SCRIPTS_DIR=tmpdir):
+                reset_cache()
+                client = _mk_client(self.admin)
+
+                # Warm the cached baseline via a plain form GET (no refresh there).
+                client.get(reverse("ui-playbook-create"))
+
+                # Deploy a second script after the cache is already warm.
+                (Path(tmpdir) / "second_probe.py").write_text(
+                    'NAME = "second_probe"\n\n\ndef run(**values):\n    return "second"\n'
+                )
+
+                resp = client.get(reverse("ui-playbook-scripts"))
+                self.assertEqual(resp.status_code, 200)
+                names = [script["name"] for script in resp.json()["scripts"]]
+                self.assertEqual(names, ["first_probe", "second_probe"])
+        reset_cache()
+
+    def test_scripts_endpoint_omits_broken_scripts(self) -> None:
+        """Scripts that fail to import are omitted from the picker payload."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "good_probe.py").write_text(
+                'NAME = "good_probe"\n\n\ndef run(**values):\n    return "ok"\n'
+            )
+            (Path(tmpdir) / "bad_probe.py").write_text("raise RuntimeError('boom')\n")
+            with override_settings(PLAYBOOK_SCRIPTS_DIR=tmpdir):
+                reset_cache()
+                client = _mk_client(self.admin)
+                resp = client.get(reverse("ui-playbook-scripts"))
+                self.assertEqual(resp.status_code, 200)
+                names = [script["name"] for script in resp.json()["scripts"]]
+                self.assertEqual(names, ["good_probe"])
+        reset_cache()
+
+    def test_scripts_endpoint_forbidden_for_analyst_and_viewer(self) -> None:
+        """Only authoring roles get the catalogue; everyone else gets the uniform 404."""
+        for user in (self.analyst, self.viewer):
+            with self.subTest(role=user.role):
+                resp = _mk_client(user).get(reverse("ui-playbook-scripts"))
+                self.assertEqual(resp.status_code, 404)
 
 
 class TestPlaybookDetailScriptCard(TestCase):

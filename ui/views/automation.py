@@ -9,7 +9,7 @@ from typing import Any
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
@@ -221,6 +221,31 @@ def playbook_list(request: HttpRequest) -> HttpResponse:
     )
 
 
+@login_required
+@require_GET
+def playbook_scripts(request: HttpRequest) -> JsonResponse:
+    """Return the playbook script catalogue for the form's script picker.
+
+    The folder is deploy-only and has no watcher, so re-scan on every call
+    (`refresh=True`): a script deployed after the process started appears as soon as the
+    author selects PYTHON. Plain form GETs stay cached
+    (PLAN-2026-11-12-playbook-script-fetch-on-change).
+    """
+    if request.user.role not in ("admin", "superAdmin"):
+        return JsonResponse({"detail": "Not found"}, status=404)
+    scripts = discover_scripts(refresh=True)
+    data = [
+        {
+            "name": info.name,
+            "description": info.description,
+            "trigger_hint": info.trigger_hint,
+        }
+        for info in sorted(scripts.values(), key=lambda info: info.name)
+        if info.load_error is None
+    ]
+    return JsonResponse({"scripts": data})
+
+
 @not_viewer
 @login_required
 @require_http_methods(["GET", "POST"])
@@ -236,6 +261,8 @@ def playbook_create(request: HttpRequest) -> HttpResponse:
     from automation.scripts_loader import discover_scripts
 
     if request.method == "GET":
+        # Cached baseline for the no-JS render; the picker refreshes via
+        # ui-playbook-scripts when PYTHON is selected (PLAN-2026-11-12-playbook-script-fetch-on-change).
         scripts = discover_scripts()
         # Only include loadable scripts (load_error is None) for the picker
         script_list = [
@@ -486,6 +513,8 @@ def playbook_edit(request: HttpRequest, playbook_id: str) -> HttpResponse:
 
     if request.method == "GET":
         config = playbook.config or {}
+        # Cached baseline for the no-JS render; the picker refreshes via
+        # ui-playbook-scripts when PYTHON is selected (PLAN-2026-11-12-playbook-script-fetch-on-change).
         scripts = discover_scripts()
         script_list = [
             {
