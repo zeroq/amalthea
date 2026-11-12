@@ -29,7 +29,7 @@
         <dt>Summary</dt>
         <dd>{{ template.summary|default:"—" }}</dd>
 
-        <dt>Flag</dt>
+        <dt>Flag as important</dt>
         <dd>{{ template.flag|default:"—" }}</dd>
 
         <dt>Severity</dt>
@@ -40,9 +40,6 @@
 
         <dt>PAP</dt>
         <dd>{{ template.pap|choice_name:pap_choices }}</dd>
-
-        <dt>Flags</dt>
-        <dd>{{ template.flag|default:"—" }}</dd>
       </dl>
 
       {% if can_mutate %}

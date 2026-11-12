@@ -39,9 +39,11 @@
       <textarea id="id_summary" name="summary" rows="2">{{ template.summary|default:'' }}</textarea>
     </div>
 
-    <div class="meta-inline">
-      <label for="id_flag">Flag</label>
-      <input type="checkbox" id="id_flag" name="flag" {% if template.flag %}checked{% endif %}>
+    <div class="field-row">
+      <label class="check" for="id_flag">
+        <input type="checkbox" id="id_flag" name="flag" {% if template.flag %}checked{% endif %}>
+        Flag as important
+      </label>
     </div>
 
     <div class="cols">

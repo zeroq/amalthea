@@ -10,6 +10,7 @@ Covers the feature plan `PLAN-2026-10-22-case-template-defaults.md`:
 from __future__ import annotations
 
 import json
+import re
 from datetime import timedelta
 
 import pytest
@@ -300,6 +301,54 @@ def test_ui_create_form_prefills_default_task_and_custom_field(db: None) -> None
     assert response.context["form_custom_fields"] == td.DEFAULT_TEMPLATE_CUSTOM_FIELDS
     assert "Triage/Analysis" in response.content.decode()
     assert "Example Field" in response.content.decode()
+
+
+_FLAG_LABEL_RE = re.compile(
+    r'<label class="check"[^>]*>\s*<input type="checkbox" id="id_flag" name="flag"'
+)
+
+
+def test_ui_template_forms_show_flag_as_important_inline(db: None) -> None:
+    """The template flag control reads "Flag as important" and shares one row with its label.
+
+    Regression for PLAN-2026-11-12-case-template-flag-label: the old markup used a bare `Flag`
+    label in a `.meta-inline` row, so the text and checkbox did not share a centre line.
+    """
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    client = Client()
+    _login(client, user)
+    template = CaseTemplate.objects.create(name="blueprint", display_name="Blueprint")
+
+    for url in (
+        reverse("ui-case-template-create"),
+        reverse("ui-case-template-edit", kwargs={"template_id": str(template.id)}),
+    ):
+        content = client.get(url).content.decode()
+        assert "Flag as important" in content
+        # the bare, misaligned label is gone
+        assert '<label for="id_flag">Flag</label>' not in content
+        # the checkbox is a child of the .check label (one flex row, vertically centred)
+        assert _FLAG_LABEL_RE.search(content) is not None, url
+
+
+def test_ui_template_detail_and_list_name_the_field_important(db: None) -> None:
+    """Detail calls it "Flag as important" once (no duplicate "Flags" row); list header is "Important"."""
+    org = _mk_org("Org")
+    user = _mk_user("analyst", org)
+    client = Client()
+    _login(client, user)
+    template = CaseTemplate.objects.create(name="blueprint", display_name="Blueprint")
+
+    detail = client.get(
+        reverse("ui-case-template-detail", kwargs={"template_id": str(template.id)})
+    ).content.decode()
+    assert "Flag as important" in detail
+    assert "<dt>Flag</dt>" not in detail
+    assert "<dt>Flags</dt>" not in detail
+
+    listing = client.get(reverse("ui-case-template-list")).content.decode()
+    assert ">Important</th>" in listing
 
 
 def test_ui_create_empty_submission_keeps_defaults(db: None) -> None:
