@@ -1796,6 +1796,29 @@ Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
 
 ---
 
+## 19. Alert JSON export/import (IMPLEMENTED 2026-11-08)
+
+- **Export** — `GET /ui/alerts/<uuid>/export` (`ui-alert-export`) emits `AlertExport` v1:
+  scalars + raw payload, observables, tags, custom fields, comments and procedures; never
+  `payload_ssdeep` or secrets.
+- **Import** — `POST /ui/alerts/import` (`ui-alert-import`, GET page + POST upload): 5 MiB /
+  node / depth caps, NaN rejection, status-by-value + fallback, in-org assignee, recomputed
+  SSDEEP, atomic duplicate failure on `(owner_org, source, type, source_ref)`, provenance under
+  `ingestion_warnings["imported"]`. Tags create-missing; unknown custom fields/observable types
+  are skipped with warnings.
+- **UI** — Export JSON on alert detail; Import JSON outer-right in the alert filter card with an
+  upload modal (`data-modal-open`); the standalone page is the no-JS fallback; `_modal.html`
+  gained `form_enctype` support.
+- **Verification** — `docs/verification/VERIFY-2026-11-08-alert-json-import.md`: AIMP-1..AIMP-7
+  MET; 23 focused tests passed; `tests/conformance/test_alert_export_import.py` (13) +
+  `test_alert_export_import_ui.py` (4). Committed in `ff139692`.
+- **Deviations** — one route handles GET + POST; import is gated on `is_admin`; `Tag`/`CustomField`
+  are global vocabularies; no `alerts/create.py` extraction (the import service is the single
+  writer).
+- **Open follow-up** — the P5 security review is tracked as TODO §21.
+
+---
+
 ## 2026-11-12 — Playbook script picker on-change refresh (retired TODO §20)
 
 - **Problem** — `automation/scripts/` is deploy-only with no watcher, so a newly deployed `.py`

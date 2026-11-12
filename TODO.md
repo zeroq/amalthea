@@ -1,11 +1,11 @@
 # TODO — Amalthea
 
 Open work only. Shipped work and closed-item history live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-11-12 — the playbook script picker on-change refresh shipped (moved to
-[`COMPLETED.md`](./COMPLETED.md)); §18 case JSON export/import v2 and §19 alert JSON export/import are
-**committed** (`ff139692`, 2026-11-08), with only §19's security review still open. Full suite last run
-2026-11-10 (**3583 passed, 3 skipped**); not re-run for the playbook picker. The priority table below
-is the source of truth for open work.
+Last updated: 2026-11-12 — archived §18 (case JSON import + export v2), §19 (alert JSON
+export/import), and the playbook script picker to [`COMPLETED.md`](./COMPLETED.md). The only remaining
+item from those waves is the §19 alert-import security review, now §21. Full suite last run 2026-11-10
+(**3583 passed, 3 skipped**); not re-run for the playbook picker. The priority table below is the
+source of truth for open work.
 
 ---
 
@@ -21,23 +21,22 @@ engineering hygiene. Shipped rows were removed in the 2026-11-08 cleanup (see `C
 | **3** | **§12.3-fu1 — Automatic ingest-time bundling** | `correlation_key` is derived/indexed but only the manual Similar/attach path consumes it. Auto-bundle was deferred (Q1b). Depends on §12.1-fu1. | **High** — the orchestration promise of Modules B+C. |
 | **4** | **§12.12-fu1 — Fuzzy title exclusion (design)** | `ppdeep` similarity excludes title; decide title-fingerprint pass vs opt-in setting and document the trade-off. | **High** — duplicate alerts still surface look-alikes. |
 | **5** | **§12.4 — No bulk actions in the UI** | `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk` exist in the API; the UI stub was deleted (Q2). | **Medium-High** — 200-alert mornings are single-item work. |
-| **6** | **§19 — Alert JSON export/import** | Implemented + independently verified 2026-11-08; committed `ff139692`; security review pending. | **Medium** — exchange/debug single alerts. |
-| **7** | **§18 — Case JSON import (+ export v2)** | Implemented 2026-11-08; verifier MET all ACs; security findings dispositioned; committed `ff139692`. | **Medium** — portability and hand-off. |
-| **8** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; ledger already syncs. |
-| **9** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — ops/onboarding, not triage. |
-| **10** | **§6.13 / §6.16 P4 — Ingestion tokens + audit-log viewer** | **Partial:** token lifecycle shipped (10a–c); read-only `AuditLog` viewer remains. | **Medium** — audit viewer is the accountability half. |
-| **11** | **S3 + S5 (+ M3 residual)** | **S3** per-account lockout on the API login + stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. M3 shipped; residual same-org cleartext secrets. | **Medium (security)** |
-| **12** | **§12.1-fu1 — Measure filtered-list `COUNT` on Postgres** | Unmeasured `COUNT` on 12 paginated lists; prerequisite for auto-bundling. | **Medium** — pager truthfulness at scale. |
-| **13** | **§2.6 + §2.7 + §7.4 + §8.5/§8.7 + §11.4-L1/§11.5** | Coverage ≥ 80%; Phase-12/T2 QA list; Tailwind source/artifact split; mutation coverage; unaudited procedure attaches; admin role model; log forging. | **None** — engineering hygiene. |
-| **14** | **§10.9 — Status vocabularies have no human labels** | UI prints raw tokens (`InProgress`); add labels without breaking `stage`-keyed automation. | **Low** — cosmetic. |
-| **15** | **§10.11 — Reload mints a second ingestion token** | 200 body re-submits on reload; one-shot nonce or explicit nudge. | **Low** — admin-only exposure. |
-| **16** | **§10.12-fu1…fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, admin paused-state display, test gaps. | **Low–Medium.** |
-| **17** | **§14.1–14.12 — Alert tag follow-ups** | Id validation, parity, truncation text, a11y, query cleanup, swap-file purge. | **Low.** |
-| **18** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
-| **19** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
-| **20** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
-| **21** | **§12.9 — UI layout/style standardization** | Input/button heights, compact action columns, table/filter convention; codify guidelines. Includes the new alert/case severity rows (`.severity-filter-row`, `.severity-filter--N`) as the canonical filter pattern. | **Low.** |
-| **22** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. | **None** — hygiene. |
+| **6** | **§21 — Alert-import security review** | Implementation committed (`ff139692`) and AIMP-1..AIMP-7 MET; the P5 security review is the only remaining step. | **Medium** — closes the §19 exchange/debug surface safely. |
+| **7** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; ledger already syncs. |
+| **8** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — ops/onboarding, not triage. |
+| **9** | **§6.13 / §6.16 P4 — Ingestion tokens + audit-log viewer** | **Partial:** token lifecycle shipped (10a–c); read-only `AuditLog` viewer remains. | **Medium** — audit viewer is the accountability half. |
+| **10** | **S3 + S5 (+ M3 residual)** | **S3** per-account lockout on the API login + stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. M3 shipped; residual same-org cleartext secrets. | **Medium (security)** |
+| **11** | **§12.1-fu1 — Measure filtered-list `COUNT` on Postgres** | Unmeasured `COUNT` on 12 paginated lists; prerequisite for auto-bundling. | **Medium** — pager truthfulness at scale. |
+| **12** | **§2.6 + §2.7 + §7.4 + §8.5/§8.7 + §11.4-L1/§11.5** | Coverage ≥ 80%; Phase-12/T2 QA list; Tailwind source/artifact split; mutation coverage; unaudited procedure attaches; admin role model; log forging. | **None** — engineering hygiene. |
+| **13** | **§10.9 — Status vocabularies have no human labels** | UI prints raw tokens (`InProgress`); add labels without breaking `stage`-keyed automation. | **Low** — cosmetic. |
+| **14** | **§10.11 — Reload mints a second ingestion token** | 200 body re-submits on reload; one-shot nonce or explicit nudge. | **Low** — admin-only exposure. |
+| **15** | **§10.12-fu1…fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, admin paused-state display, test gaps. | **Low–Medium.** |
+| **16** | **§14.1–14.12 — Alert tag follow-ups** | Id validation, parity, truncation text, a11y, query cleanup, swap-file purge. | **Low.** |
+| **17** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
+| **18** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
+| **19** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
+| **20** | **§12.9 — UI layout/style standardization** | Input/button heights, compact action columns, table/filter convention; codify guidelines. Includes the new alert/case severity rows (`.severity-filter-row`, `.severity-filter--N`) as the canonical filter pattern. | **Low.** |
+| **21** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. | **None** — hygiene. |
 
 ---
 
@@ -587,14 +586,14 @@ visible on linked alerts, and the API dedupes repeated names before inserting. R
 
 Plan: [`PLAN-2026-11-06-alert-observables.md`](docs/planning/PLAN-2026-11-06-alert-observables.md)
 (APPROVED; decisions §14; 28 ACs). This is the P6 candidate from
-`PLAN-2026-10-16-source-field-mapping.md`. **Do not commit unless explicitly requested.**
+`PLAN-2026-10-16-source-field-mapping.md`. Status: 15.1–15.6/15.9 shipped 2026-11-06 (28/28 ACs
+verified; residual risk §15.10).
 
 - [ ] **15.7 — Deferred API parity (Q6).** A future `GET /api/v1/alert/{alertId}/observable` read
   endpoint is intentionally omitted until a client needs it.
 - [ ] **15.8 — Deferred provenance decision (Q7).** Explain and decide the trade-off for a per-link
   `AlertObservable.source_path` column before a migration-backed provenance wave.
 - [ ] **15.10 — Security follow-up: redact raw values from mapping warnings.** The AC28 review found
-15.1–15.6/15.9: shipped 2026-11-06 (28/28 ACs verified; residual risk §15.10)
   that `FieldWarning.value_any` can store raw payload values (emails, IPs) in
   `Alert.ingestion_warnings`. This is pre-existing (not introduced by §15) and not a blocker, but the
   warning text should redact or hash sensitive values. Source: `SECURITY-2026-11-06-alert-observables.md`
@@ -607,259 +606,23 @@ Plan: [`PLAN-2026-11-06-alert-observables.md`](docs/planning/PLAN-2026-11-06-ale
 Plan: [`PLAN-2026-11-06-source-detail-raw-data.md`](docs/planning/PLAN-2026-11-06-source-detail-raw-data.md)
 (IMPLEMENTED; decisions §4; ACs SRC-RAW-1..8). Impl brief:
 [`IMPL-2026-11-06-source-detail-raw-data.md`](docs/planning/IMPL-2026-11-06-source-detail-raw-data.md).
-**Do not commit unless explicitly requested.**
+Status: 16.1–16.5 shipped 2026-11-06 (8/8 ACs met; independent verification PASS WITH NOTES).
 
 - [ ] **16.6 — Decide the empty-payload edge.** An alert whose `raw_payload` is the default `{}` renders
-16.1–16.5: shipped 2026-11-06 (8/8 ACs met; independent verification PASS WITH NOTES)
   `{}` in `<pre>` rather than the "No raw data yet." empty state (the plan never specified this case).
   Low priority; either show `{}` intentionally or treat a falsy payload as empty. Verifier observation (a).
 
 ---
 
-## 18. Case JSON import (+ export v2) (IMPLEMENTED 2026-11-08; committed `ff139692`)
+## 21. Alert JSON import — security review (open; follows retired §19)
 
-Status: **IMPLEMENTED 2026-11-08 — verifier MET all ACs; security findings dispositioned; committed in `ff139692`.**
-Builds on the existing case export (`ui-case-export` → `cases.views._case_export_document`) and the
-**New case** modal in `ui/templates/ui/case_list.html`.
+Status: **OPEN — the only remaining item from the §19 alert JSON export/import wave.** The
+implementation is committed (`ff139692`) and independently verified (AIMP-1..AIMP-7 MET:
+`docs/verification/VERIFY-2026-11-08-alert-json-import.md`), but the P5 security review has not been
+run.
 
-### 18.1 Goal
-Let an analyst create a case from a previously exported JSON file, from the case list's **New case**
-flow, and make the export complete enough to round-trip a case (scalars, children, provenance).
-
-### 18.2 Current export gaps (`CaseExport` v1)
-`_case_export_document` emits `{_type, version, exportedAt, case: case_json(detail=True), alerts:
-[id,title,source,sourceRef,severity,rawPayload], procedures}`. Missing or partial:
-- **case:** tags (not in `case_json`), timeline (detail path caps at 50), tasks (title/status/assignee
-  only; no group/flag/order/dates/description/mandatory/notes), comments, pages, shares, attachments,
-  `sourceTemplate` name.
-- **alerts:** five fields + raw payload only — no status/date/tlp/pap/flag/assignee/summary/verdict/
-  observables/tags/custom fields/comments/procedures.
-- `automationRuns` is exported (read-only) but import policy is undecided.
-
-### 18.3 Export v2 schema (recommended)
-Keep `_type: "CaseExport"`, bump to `version: 2`; include:
-- `case`: all `Case` scalars; `ownerOrg` name; `assignee` login; `status` value; `sourceTemplate` name;
-  `tags: [{name}]`; `customFields: [{name, value}]`; `ingestionWarnings`.
-- `tasks: [{title, description, group, status, flag, assignee, order, dueDate, startedAt, endedAt,
-  mandatory, notes: [{message, createdAt, createdBy}]}]`.
-- `timeline: [all events]` (no 50 cap; bounded by the export cap), `comments`, `pages`, `procedures`.
-- `shares: [{organisation, permissions}]`, `attachments: [{name, contentType, size, sha256, external}]`
-  (metadata only — no blobs).
-- `alerts: [full alert export docs]` (same shape as §19), `automationRuns` (export only).
-- Never export secrets, tokens, CSRF material, or `payload_ssdeep` (recompute on import).
-
-### 18.4 Import behaviour
-- Entry: `GET/POST /ui/cases/import` → `ui-case-import`; multipart `file`; admin/superAdmin
-  (`@not_viewer` + `can_mutate`); CSRF. The GET renders the standalone import page. **Route ordering:**
-  register `cases/import` *before* `cases/<str:case_id>` (the `str` converter would swallow it).
-- Parse limits: ≤ 5 MiB; top-level object; `_type == "CaseExport"`; supported `version`; required
-  `case.title`; reject `NaN`/`Infinity`; cap children (e.g. 1k alerts / 5k timeline / 2k observables)
-  and nesting depth.
-- Create in **one `transaction.atomic`**: fresh `number`; `owner_org = actor.org`; resolve `assignee`
-  by login in-org; resolve `status` by value with fallback; tags by name; custom fields by name;
-  tasks/notes, timeline, comments, pages, procedures; links for alerts.
-- Shares are **skipped by default** (cross-org grant is a privilege-escalation surface); attachments
-  are metadata-only with a warning (the JSON has no bytes).
-- Preserve dates where present; a closed case must carry `verdict` (the export does) and a closing
-  timeline entry is synthesised if absent.
-- Provenance: `ingestion_warnings["imported"] = {at, by, sourceFile, originalNumber, originalId}` +
-  a "Case imported from JSON" timeline event.
-- `sourceTemplate` is **provenance only** — do not re-apply its defaults; the file already carries
-  concrete tasks/custom fields/tags (`CaseTemplate.tasks/custom_fields/tags` are JSON blueprints).
-- Task notes mirror into `TimelineEvent(kind="task-note")`; skip exported timeline rows of that kind
-  (or import notes without re-mirroring) so the ledger is not doubled.
-- Any validation/conflict error → no partial import; re-render with field-level errors.
-
-### 18.5 UI
-- `_case_create_fields.html`: add a secondary "Import from JSON…" link that navigates to the standalone
-  import page (no nested modal — keeps the modal's single footer form intact). Keep "New case" primary.
-- `ui/import_case.html` (new, rendered by `GET ui-case-import`): file input, a short "what is imported
-  / not imported" note (shares skipped, attachments metadata only), "Import case" submit.
-- Success → redirect to the new case detail with a flash "Case #N imported from JSON".
-
-### 18.6 Security
-- Upload-only; sanitised display filename; no server path from user input; `|safe` never used.
-- Size/child caps + guarded JSON parse; atomic; CSRF; admin/superAdmin only.
-- Force owner org to the actor's org; shares off by default; no secret material in export
-  (regression test).
-
-### 18.7 Decisions (locked 2026-11-08)
-1. Target org: **actor's org** (no org picker).
-2. Tags: **create missing** by name.
-3. Shares: **skip** (privilege-escalation surface).
-4. Attachments: **export metadata only; import skips rows + warning** (the JSON carries no bytes,
-   and an `Attachment` row without a valid `path` would render a broken download).
-5. `automationRuns`: **skip** on import.
-6. v1 files: **accept with warnings**.
-7. Linked-alert duplicate `(org, source, type, sourceRef)`: **atomic fail** (no partial import).
-8. Duplicate import: **always create a new case**.
-9. Caps: 5 MiB; 10k timeline; 5k tasks/notes, pages and comments; 2k observables; 1k alerts;
-   depth 20.
-10. Unknown custom fields: **skip + warning** (the vocabulary row carries the field `type`, which
-    name+value cannot infer).
-
-### 18.8 Phases + ACs
-- **P1 — export v2.** `IMP-1` export includes every Case scalar + tags + full timeline/tasks(+notes)/
-  comments/pages/procedures/custom fields/shares/attachment metadata + full alert docs; no secrets;
-  `version: 2`.
-- **P2 — import core.** `IMP-2` a v2 file creates a case with scalars/tags/custom fields + provenance;
-  `IMP-3` children (tasks/notes, timeline, comments, pages, procedures) imported; `IMP-4` invalid/
-  oversized/wrong-type/unsupported-version files are rejected atomically with field errors.
-- **P3 — linked alerts.** `IMP-5` exported alerts are recreated and linked, with observables/tags/
-  custom fields/comments/procedures; a duplicate `(source, type, sourceRef)` yields a clear atomic
-  failure.
-- **P4 — UI + security.** `IMP-6` New case modal exposes Import from JSON; success redirects to the
-  case; `IMP-7` shares/attachments handling documented and safe; CSRF/auth/size caps tested.
-- **P5 — verification.** Focused tests + independent verifier + security review.
-
-### 18.9 Testing
-- Export: field-completeness snapshot; no token/secret keys; links resolve.
-- Import: export→import→export equality on the stable subset (ignore ids/timestamps); child counts;
-  status/assignee/tag resolution; missing/extra fields; caps; malformed JSON; wrong `_type`/version;
-  duplicate alert conflict; non-admin 404/403; CSRF.
-- UI: modal link present; upload enctype; success redirect; error re-render.
-
-### 18.10 Implementation result (2026-11-08; committed `ff139692`)
-- **Export v2** (`cases/views.py::_case_export_document`, shared by the UI and
-  `GET /api/v1/case/{id}/export`): `version: 2`; case scalars via `case_json(case)` (not `detail=True`,
-  whose timeline is capped at 50); `ownerOrg`, tags, custom fields, `sourceTemplate` name and
-  `ingestionWarnings`; top-level `observables`, `tasks` (+notes), full `timeline`, `comments`, `pages`,
-  `procedures`, share/attachment metadata, full §19 alert docs, `automationRuns`. Caps are applied and
-  over-caps counts are recorded in `truncated`; `payload_ssdeep` and secrets are never emitted.
-- **Import** (`cases/importing.py`): `parse_case_export` + atomic `import_case_document`; 5 MiB / 10k
-  nodes / depth 20 / child caps; v1 accepted with a warning; actor org forced; status resolved by
-  value with fallback; assignee in-org only; tags created, unknown custom fields skipped; observables
-  linked; tasks/notes, timeline, comments, pages, procedures imported; exported `task-note` rows are
-  skipped and each imported `TaskNote` is mirrored once; embedded alerts use
-  `alerts.importing.import_alert_document` then link to the new case (duplicate → atomic fail).
-  Shares, attachments and `automationRuns` are skipped with warnings. Provenance is written to
-  `ingestion_warnings["imported"]` and a `"Case imported from JSON"` timeline event.
-- **UI** (`GET|POST /cases/import` → `ui-case-import`, before `cases/<str:case_id>`): admin/superAdmin
-  only (uniform 404 otherwise), standalone `ui/import_case.html`, 5 MiB pre-check, 400 validation /
-  409 alert-conflict re-render, success redirect to the new case. `_case_create_fields.html` carries
-  the secondary “Import from JSON…” link for admins.
-- **Tests** (`tests/conformance/test_case_export_import.py`, 17): export completeness/no secrets,
-  round-trip children + provenance, closed-case verdict/closing entry, v1 warning, cross-org assignee,
-  duplicate-alert rollback, parser rejection matrix, UI auth/redirect/error codes, modal link.
-  unknown `scope`/`caseType`/`dataClassification`/`phase`/`verdict` tokens fall back with warnings;
-  `test_ui_urls_smoke`, `test_tenant_scoping` and `test_t2_p5_surface` updated for the new routes/doc.
-- **Deviations:** the view uses `is_admin` (not `@not_viewer` + `can_mutate`) because §18.4 restricts
-  import to admin/superAdmin; `case_json(detail=True)` is deliberately not reused for v2; the case
-  observables list is top-level (v1's nested `case.observables` is still accepted on import); and the
-  v1 `CaseExport` alert entries are wrapped as `AlertExport` v1 documents on import.
-- **Verification:** `docs/verification/VERIFY-2026-11-08-case-json-import.md` — IMP-1..IMP-7 **MET**.
-  Security review: filename sanitised at the service boundary; case vocabulary tokens validated with
-  fallback (added after review); TTP ids are global reference data, `AlertImportError` messages are
-  fixed/generic, and alerts already validate their own required fields, so the reviewed disclosures
-  were non-issues. Custom-field value typing remains permissive for parity with the UI/§19 path.
-
----
-
-## 19. Alert JSON export/import (IMPLEMENTED 2026-11-08, verified; committed `ff139692`)
-
-Status: **IMPLEMENTED 2026-11-08 — verifier MET all AIMP ACs; committed in `ff139692`; security review still pending.** The API already has
-`alert/<id>/import` meaning "import this alert into a case" (merge), so the new UI routes are
-`ui-alert-export` (`alerts/<uuid>/export`) and `ui-alert-import` (`alerts/import`, GET page + POST upload).
-
-### 19.1 Goal
-- Alert detail: **Export JSON** button in `{% block actions %}`, same style/location as case detail.
-- Alert list: **Import JSON** button in the filter card, outer right (`btn btn-primary btn-end`), same
-  placement as "New case", opening an upload modal.
-
-### 19.2 Export schema (`AlertExport` v1)
-`GET /ui/alerts/<uuid>/export` → attachment `alert-<shortid>-export.json`:
-```
-{"_type":"AlertExport","version":1,"exportedAt":…,
- "alert": alert_json(alert) + {"rawPayload": …},
- "observables":[…],"tags":[{"name":…}],"customFields":[{"name":…,"value":…}],
- "comments":[…],"procedures":[…]}
-```
-- `raw_payload` is the deliberate exception to "never inlined" (same recorded deviation as the case
-  export). Do **not** export `payload_ssdeep` (recompute on import) or treat ids as authoritative.
-- `Comment` has both `case` and `alert` FKs, so alert comments export/import 1:1. `Share`, `Attachment`
-  and `TimelineEvent` are case-only and are correctly absent from an alert export.
-- Audit superAdmin cross-org read, mirroring case export.
-
-### 19.3 Import behaviour
-- `POST /ui/alerts/import` → `ui-alert-import`; multipart `file`; same gate as alert mutation
-  (admin/superAdmin; CSRF).
-- Validate `_type == "AlertExport"`, `version`, size ≤ 5 MiB, required `title/type/source/sourceRef`;
-  child/depth caps.
-- Create a **new** alert in the actor's org: fresh UUID; preserve scalars/enums/date/raw_payload/
-  verdict/correlation key; resolve `status` by value with fallback, `assignee` by login; recompute
-  `payload_ssdeep`.
-- Do **not** reuse the DRF `alerts.views._create_alert` as-is: it is API-only (`request.data`) and
-  currently never persists `raw_payload`. Set `raw_payload`/`payload_ssdeep` explicitly, or extract a
-  shared `alerts/create.py` service (preferred) mirroring `cases/create.py`.
-- Import observables (`resolve_observable` + `AlertObservable`), tags by name, custom fields by name,
-  comments, procedures.
-- Conflict on the `(owner_org, source, type, source_ref)` unique constraint → atomic failure with
-  "An alert with this source/type/sourceRef already exists" and a link to the existing alert.
-- Provenance: `ingestion_warnings["imported"] = {at, by, sourceFile, originalId}`.
-- The exported `caseId` is not portable: export `caseNumber` and import **unlinked** by default
-  (optional `?case=<number>` link is an open question).
-- Success → redirect to the new alert detail with a flash.
-
-### 19.4 UI
-- `alert_detail.html` `{% block actions %}`: `<a class="btn" href="{% url 'ui-alert-export' alert.id %}">
-  Export JSON</a>`.
-- `alert_list.html` filter card — inside the existing `<form method="get" class="inline-form filter-bar">`,
-  exactly mirroring "New case" in `case_list.html`:
-  `{% if can_mutate %}<a class="btn btn-primary btn-end" href="{% url 'ui-alert-import' %}"
-  data-modal-open="import-alert-modal">Import JSON</a>{% endif %}`. Without JS the link opens the
-  standalone `GET ui-alert-import` page (progressive enhancement); with JS `modal.js` opens the modal.
-- Modal: reuse `_modal.html` (add optional `enctype="multipart/form-data"` support) with
-  `_alert_import_fields.html` — `<input type="file" name="file" accept="application/json,.json"
-  required>` + hint — posting to `ui-alert-import`.
-
-### 19.5 Security
-- Upload-only; size/child caps; atomic; no `|safe`; sanitised filename; CSRF; admin/superAdmin.
-- Never trust exported ids/org/assignee outside the target org; recompute hashes; force `owner_org`.
-- No secrets in export (regression test); XSS via payload/filename covered.
-
-### 19.6 Decisions (locked 2026-11-08)
-1. Preserve exported `status` vs force `New`. **Default:** preserve by value, fallback + warning.
-2. Preserve the case link (export `caseNumber`, resolve if visible) vs import unlinked.
-   **Default:** import unlinked.
-3. Duplicate conflict: hard fail vs skip/overwrite. **Default:** hard fail (atomic).
-4. Tag/custom-field/observable-type resolution. **Default:** create missing tags; skip unknown custom
-   fields/types with a warning.
-5. Import an alert directly into a case from the case detail. **Default:** defer.
-
-### 19.7 Phases + ACs
-- **P1 — export.** `AIMP-1` alert export includes scalars + raw payload + observables/tags/custom
-  fields/comments/procedures; no secrets/internal hash; `Content-Disposition` filename.
-- **P2 — import core.** `AIMP-2` a valid file creates a new alert in the actor's org with the right
-  scalars and provenance; `AIMP-3` status/assignee/date/enums resolved safely; `AIMP-4` malformed/
-  oversized/wrong-type/unsupported-version/duplicate rejected atomically with clear errors.
-- **P3 — children.** `AIMP-5` observables/tags/custom fields/comments/procedures imported and deduped.
-- **P4 — UI.** `AIMP-6` Export JSON on alert detail (same style/location); `AIMP-7` Import JSON
-  outer-right in the alert filter card + upload modal; redirect/flash; CSRF/auth tested.
-- **P5 — verification.** Focused tests + independent verifier + security review.
-
-### 19.8 Testing
-- Round-trip export→import→export on the stable subset; child counts; conflict; caps; malformed;
-  wrong `_type`/version; non-admin; CSRF; XSS via payload/filename; no secrets in export; UI placement
-  (`btn-end`, actions block).
-
-### 19.9 Implementation result (2026-11-08)
-- **Backend:** `alerts/export.py::alert_export_document` (reuses `alert_json`/`observable_json`/
-  `procedure_json`; excludes `payload_ssdeep`); `alerts/importing.py` (`AlertImportError`,
-  `parse_alert_export`, `import_alert_document`) with 5 MiB / node / depth caps, NaN rejection,
-  status-by-value + fallback, actor-org-only assignee, recomputed SSDEEP, atomic duplicate failure,
-  provenance under `ingestion_warnings["imported"]`; `ui/views/alerts.py` views + `ui/urls.py` routes.
-- **UI:** `alert_detail.html` Export JSON; `alert_list.html` Import JSON modal (`data-modal-open`);
-  `ui/templates/ui/alert_import.html` standalone page; `_alert_import_fields.html`; `_modal.html`
-  gained `form_enctype` (multipart) support.
-- **Tests:** `tests/conformance/test_alert_export_import.py` (13) + `test_alert_export_import_ui.py`
-  (4); `test_ui_urls_smoke.py` admin-route list updated. `make check-fast` green.
-- **Deviations:** (a) one route `ui-alert-import` handles GET page + POST upload (no separate
-  `ui-alert-import-json`); (b) import is gated on `is_admin` (admin/superAdmin), not merely
-  non-viewer; (c) `Tag`/`CustomField` are global vocabularies in this schema — unknown custom fields
-  are skipped, unknown observable types are skipped, missing tags are created; (d) no
-  `alerts/create.py` extraction — the new import service is the single writer.
-- **Independent verifier:** `docs/verification/VERIFY-2026-11-08-alert-json-import.md` — AIMP-1..AIMP-7
-  **MET**; 23 focused tests passed. **Still needed:** security review (P5).
-
----
-
+- [ ] **21.1 — Run the P5 security review of the alert import surface.** Scope: upload parsing and
+  size/node/depth caps; atomicity and duplicate-conflict handling; assignee/tag/custom-field/
+  observable resolution (no cross-org or privilege escalation); XSS via payload/filename; secrets
+  never emitted in the export; CSRF/auth gate (`is_admin`, uniform 404). Record findings and
+  disposition in the verification doc or a new `SECURITY-*` note.
