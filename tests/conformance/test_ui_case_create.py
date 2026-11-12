@@ -1054,6 +1054,7 @@ def test_ui_case_create_route_order(browser: Client) -> None:
 # --------------------------------------------------------------------------
 
 BASE_HTML = Path(__file__).resolve().parents[2] / "ui" / "templates" / "ui" / "base.html"
+PICKER_JS = Path(__file__).resolve().parents[2] / "ui" / "static" / "ui" / "picker.js"
 
 # The ten visible controls plus the hidden `origin` marker the modal posts.
 _MODAL_CONTROL_NAMES = (
@@ -1127,6 +1128,43 @@ def test_ui_case_list_renders_new_case_modal_controls(browser: Client) -> None:
     assert "New case" in body
     for field_name in _MODAL_CONTROL_NAMES:
         assert f'name="{field_name}"' in body, f"missing modal control {field_name}"
+
+
+def test_ui_case_list_modal_assignee_picker_has_org_users(
+    browser: Client, analyst: User, org: Organisation
+) -> None:
+    """The New-case assignee type-ahead lists the org's users and loads picker.js.
+
+    The filter itself is client-side; this pins the server contract it depends on
+    (options + script) so a missing script or an unpopulated select is caught here.
+    """
+    teammate = User.objects.create_user(
+        username="picker-mate",
+        email="picker-mate@example.net",
+        password="picker-mate-password",
+        org=org,
+    )
+    body = browser.get(reverse("ui-case-list")).content.decode()
+    assert 'id="new-case-modal"' in body
+    assert 'src="/static/ui/picker.js"' in body
+    assert 'name="assignee"' in body
+    assert f">{analyst.login}</option>" in body
+    assert f">{teammate.login}</option>" in body
+
+
+def test_assignee_picker_rebuilds_options_for_webkit() -> None:
+    """Filtering must rebuild <option>s; WebKit ignores hidden/display:none on options.
+
+    Source-level guard for the Safari bug where ``option.hidden = true`` left the
+    native dropdown unchanged, making the type-ahead look broken.
+    """
+    source = PICKER_JS.read_text(encoding="utf-8")
+    assert 'select[name="assignee"]' in source
+    assert "option.hidden" not in source
+    assert "opt.hidden" not in source
+    assert "removeChild" in source
+    assert "appendChild" in source
+    assert "htmx:afterSwap" in source
 
 
 def test_ui_case_create_modal_post_success(browser: Client, status_in_progress: CaseStatus) -> None:
