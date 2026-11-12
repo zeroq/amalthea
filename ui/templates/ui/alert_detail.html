@@ -36,6 +36,9 @@
       {% if tab.slug == "observables" %}<i class="fa-solid fa-cube" aria-hidden="true"></i> {% endif %}
       {% if tab.slug == "raw-data" %}<i class="fa-solid fa-code" aria-hidden="true"></i> {% endif %}
       {{ tab.label }}
+      {% if tab.slug == "observables" %}
+        <span class="badge">{{ alert_observables|length }}</span>
+      {% endif %}
     </a>
   {% endfor %}
 </div>
