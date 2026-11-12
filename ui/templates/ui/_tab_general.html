@@ -25,9 +25,11 @@
     <div class="control-row">
       <form method="post" action="{% url 'ui-case-status' case.number %}" class="inline-form">{% csrf_token %}
         <input type="hidden" name="tab" value="general">
-        <label class="sr-only" for="f-stage">Case status</label>
-        <select id="f-stage" name="stage">
-          {% for stage in case_stages %}{% if stage != "Closed" %}<option value="{{ stage }}" {% if case.status.stage == stage %}selected{% endif %}>{{ stage }}</option>{% endif %}{% endfor %}
+        <label class="sr-only" for="f-case-status">Case status</label>
+        <select id="f-case-status" name="status">
+          {% for opt in case_status_control_options %}
+            <option value="{{ opt.value }}" {% if case.status_id == opt.pk %}selected{% endif %}>{{ opt.value }}</option>
+          {% endfor %}
         </select>
         <button type="submit" class="btn">Set status</button>
       </form>
@@ -134,7 +136,11 @@
 {% if can_mutate %}
   {% for f in inline_edit_fields %}
     {% if not f.admin_only or can_classify %}
-    {% include "ui/_modal.html" with modal_id="case-field-"|add:f.slug form_id="case-field-"|add:f.slug|add:"-form" body_template="ui/_case_field_form.html" edit_field=f.slug edit_label=f.label edit_choices=f.choices edit_value=f.value title="Edit "|add:f.label confirm_text="Save" form_action=case_field_edit_url size="sm" %}
+      {% if f.slug == "phase" %}
+      {% include "ui/_modal.html" with modal_id="case-field-"|add:f.slug form_id="case-field-"|add:f.slug|add:"-form" body_template="ui/_case_phase_form.html" edit_field=f.slug edit_label=f.label edit_choices=f.choices edit_value=f.value title="Edit "|add:f.label confirm_text="Save" form_action=case_field_edit_url size="sm" containment_action_choices=containment_action_choices containment_selected_codes=containment_selected_codes containment_other_text=containment_other_text %}
+      {% else %}
+      {% include "ui/_modal.html" with modal_id="case-field-"|add:f.slug form_id="case-field-"|add:f.slug|add:"-form" body_template="ui/_case_field_form.html" edit_field=f.slug edit_label=f.label edit_choices=f.choices edit_value=f.value title="Edit "|add:f.label confirm_text="Save" form_action=case_field_edit_url size="sm" %}
+      {% endif %}
     {% endif %}
   {% endfor %}
 

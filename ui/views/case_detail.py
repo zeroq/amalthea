@@ -26,10 +26,6 @@ from cases.models import (
 )
 from core import taxonomy_read
 from core.enums import (
-    CASE_PHASE_CHOICES,
-    CASE_SCOPE_CHOICES,
-    CASE_TYPE_CHOICES,
-    DATA_CLASSIFICATION_CHOICES,
     PAP_CHOICES,
     SEVERITY_CHOICES,
     TASK_STATUS_CHOICES,
@@ -162,6 +158,11 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     }
 
     case_status_options = list(CaseStatus.objects.filter(hidden=False).order_by("order", "value"))
+    # The General-tab status control lists concrete taxonomy statuses, not stages. Closed-stage
+    # statuses stay out: closing needs the verdict/comment dialog.
+    case_status_control_options = [
+        status for status in case_status_options if status.stage != "Closed"
+    ]
 
     # Task tab context: uncapped assignee list for the person picker, and status vocabulary
     task_assignees = User.objects.filter(org_q("org", request.user), is_active=True).order_by(
@@ -270,10 +271,12 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     audit_logs_total = audit_logs_qs.count()
     audit_logs = list(audit_logs_qs[:RAIL_CAP])
 
-    # Pages: order by (order, created_at) ascending — take newest then reverse
-    pages_qs = case.pages.select_related("created_by", "updated_by").order_by("order", "created_at")
+    # Pages: newest-first by created_at, order as stable tie-breaker; cap at RAIL_CAP
+    pages_qs = case.pages.select_related("created_by", "updated_by").order_by(
+        "-created_at", "-order"
+    )
     pages_total = pages_qs.count()
-    pages = list(pages_qs.order_by("-order", "-created_at")[:RAIL_CAP])[::-1]
+    pages = list(pages_qs[:RAIL_CAP])
 
     # Runs: order by -created_at (newest first), so simple slice is correct
     runs_qs = (
@@ -349,6 +352,7 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             ttps=ttps,
             ttps_total=ttps_total,
             status_choices=case_status_options,
+            case_status_control_options=case_status_control_options,
             assignees=User.objects.filter(org_q("org", request.user), is_active=True).order_by(
                 "login"
             )[:PICKER_PAGE_SIZE],
@@ -377,10 +381,18 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             severity_choices=SEVERITY_CHOICES,
             tlp_choices=TLP_CHOICES,
             pap_choices=PAP_CHOICES,
-            scope_choices=CASE_SCOPE_CHOICES,
-            case_type_choices=CASE_TYPE_CHOICES,
-            data_classification_choices=DATA_CLASSIFICATION_CHOICES,
-            phase_choices=CASE_PHASE_CHOICES,
+            scope_choices=taxonomy_read.choices(
+                taxonomy_read.CATEGORY_CASE_SCOPE, include_hidden=False
+            ),
+            case_type_choices=taxonomy_read.choices(
+                taxonomy_read.CATEGORY_CASE_TYPE, include_hidden=False
+            ),
+            data_classification_choices=taxonomy_read.choices(
+                taxonomy_read.CATEGORY_DATA_CLASSIFICATION, include_hidden=False
+            ),
+            phase_choices=taxonomy_read.choices(
+                taxonomy_read.CATEGORY_CASE_PHASE, include_hidden=False
+            ),
             can_classify=can_classify,
             case_status_options=case_status_options,
             case_edit_extra_fields={"tab": active_tab},
@@ -388,6 +400,20 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             # the edit icon and its `case-field-<slug>` dialog; the close dialog's verdict select
             # offers only the closing verdicts; the Add-tag dialog lists tags not yet on the case.
             inline_edit_fields=_inline_edit_fields(case),
+            containment_action_choices=taxonomy_read.choices(
+                taxonomy_read.CATEGORY_CONTAINMENT_ACTIONS
+            ),
+            containment_selected_codes=list(
+                case.containment_actions.order_by("order", "code").values_list("code", flat=True)
+            ),
+            containment_other_text=(
+                case.containment_action_links.filter(
+                    term__code=taxonomy_read.CONTAINMENT_ACTION_OTHER_CODE
+                )
+                .values_list("other_text", flat=True)
+                .first()
+                or ""
+            ),
             verdict_choices=taxonomy_read.choices(taxonomy_read.CATEGORY_CASE_VERDICT),
             closing_verdict_choices=taxonomy_read.closing_verdict_choices(),
             available_tags=available_tags,
@@ -471,28 +497,38 @@ def _inline_edit_fields(case: Case) -> list[dict[str, Any]]:
             "slug": "scope",
             "label": "Scope",
             "value": case.scope,
-            "choices": list(CASE_SCOPE_CHOICES),
+            "choices": list(
+                taxonomy_read.choices(taxonomy_read.CATEGORY_CASE_SCOPE, include_hidden=False)
+            ),
             "admin_only": False,
         },
         {
             "slug": "case_type",
             "label": "Type",
             "value": case.case_type,
-            "choices": list(CASE_TYPE_CHOICES),
+            "choices": list(
+                taxonomy_read.choices(taxonomy_read.CATEGORY_CASE_TYPE, include_hidden=False)
+            ),
             "admin_only": False,
         },
         {
             "slug": "data_classification",
             "label": "Classification",
             "value": case.data_classification,
-            "choices": list(DATA_CLASSIFICATION_CHOICES),
+            "choices": list(
+                taxonomy_read.choices(
+                    taxonomy_read.CATEGORY_DATA_CLASSIFICATION, include_hidden=False
+                )
+            ),
             "admin_only": True,
         },
         {
             "slug": "phase",
             "label": "Phase",
             "value": case.phase,
-            "choices": list(CASE_PHASE_CHOICES),
+            "choices": list(
+                taxonomy_read.choices(taxonomy_read.CATEGORY_CASE_PHASE, include_hidden=False)
+            ),
             "admin_only": False,
         },
         {

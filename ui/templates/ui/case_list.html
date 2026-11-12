@@ -58,7 +58,7 @@
         <tr>
           <th scope="col">Case</th><th scope="col">Severity</th><th scope="col">Status</th>
           <th scope="col">Title</th><th scope="col">Assignee</th><th scope="col">Started</th>
-          {% if request.user.role == "superAdmin" %}
+          {% if can_delete_cases %}
           <th scope="col">Actions</th>
           {% endif %}
         </tr>
@@ -72,7 +72,7 @@
             <td><a href="{% url 'ui-case-detail' case.number %}">{{ case.title }}</a></td>
             <td>{{ case.assignee.login|default:"—" }}</td>
             <td class="mono dim">{{ case.start_date|date:"Y-m-d H:i" }}</td>
-            {% if request.user.role == "superAdmin" %}
+            {% if can_delete_any_case or can_delete_cases and case.owner_org_id == request.user.org_id %}
             <td>
               <button class="btn btn-ghost btn-sm" data-modal-open="delete-case-{{ case.id }}"
                       aria-label="Delete case {{ case.title }}">

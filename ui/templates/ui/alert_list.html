@@ -62,7 +62,7 @@
         <col class="alert-col-source">
         <col class="alert-col-seen">
         <col class="alert-col-state">
-        {% if request.user.role == "superAdmin" %}
+        {% if request.user.role == "admin" or request.user.role == "superAdmin" %}
         <col class="alert-col-actions">
         {% endif %}
       </colgroup>
@@ -71,8 +71,8 @@
           <th scope="col">Severity</th><th scope="col">Title</th><th scope="col">Type</th>
           <th scope="col">Source</th><th scope="col">Seen</th>
           <th scope="col">State</th>
-          {% if request.user.role == "superAdmin" %}
-          <th scope="col">Actions</th>
+          {% if can_delete_alerts %}
+            <th scope="col">Actions</th>
           {% endif %}
         </tr>
       </thead>
@@ -89,10 +89,9 @@
                 <a href="{% url 'ui-case-detail' alert.case.number %}">#{{ alert.case.number }}</a>
               {% else %}{{ alert.status.value }}{% endif %}
             </td>
-            {% if request.user.role == "superAdmin" %}
+            {% if can_delete_alerts %}
             <td>
-              <button class="btn btn-ghost btn-sm" data-modal-open="delete-alert-{{ alert.id }}"
-                      aria-label="Delete alert {{ alert.title }}">
+              <button class="btn btn-ghost btn-sm" data-modal-open="delete-alert-{{ alert.id }}" aria-label="Delete alert {{ alert.title }}">
                 <i class="fa-solid fa-trash" aria-hidden="true"></i>
               </button>
               {% url 'ui-alert-delete' alert.id as alert_delete_url %}

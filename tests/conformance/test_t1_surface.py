@@ -58,7 +58,7 @@ from alerts.models import Alert
 from amalthea.asgi import application
 from amalthea.settings.base import REST_FRAMEWORK as _BASE_REST_FRAMEWORK
 from cases.ledger import append_timeline_event
-from cases.models import Case, CustomField, Task, TimelineEvent
+from cases.models import Case, CustomField, Share, Task, TimelineEvent
 from core.serializers import custom_event_json, custom_field_json, task_json, user_json
 from identity.models import Organisation, User
 from observables.hashing import data_hash
@@ -236,13 +236,16 @@ def test_case_task_create_defaults_to_waiting(api: APIClient, ids: dict[str, str
 # --- AC-A1 / AC-A2 — deletions and un-linking ------------------------------
 
 
-def test_alert_delete_is_204_empty_and_then_404(api: APIClient, ids: dict[str, str]) -> None:
-    deleted = api.delete(f"/api/v1/alert/{ids['alert']}")
+def test_alert_delete_is_204_empty_and_then_404(super_admin: User, ids: dict[str, str]) -> None:
+    """`DELETE /api/v1/alert/{id}` is administrative (admin own-org or superAdmin any org)."""
+    client = APIClient()
+    client.force_authenticate(user=super_admin)
+    deleted = client.delete(f"/api/v1/alert/{ids['alert']}")
     assert deleted.status_code == 204, deleted.content
     assert deleted.content == b"", "a 204 must carry no body"
     assert not Alert.objects.filter(pk=ids["alert"]).exists()
 
-    again = api.get(f"/api/v1/alert/{ids['alert']}")
+    again = client.get(f"/api/v1/alert/{ids['alert']}")
     assert again.status_code == 404, again.content
     assert again.json()["type"] == "NotFoundError"
 
@@ -268,24 +271,112 @@ def test_alert_import_into_a_named_case_is_the_merge_spelling(
 
 
 def test_case_delete_is_204_and_leaves_the_alert_standing(
-    api: APIClient, ids: dict[str, str]
+    super_admin: User, ids: dict[str, str]
 ) -> None:
     """Deviation **P10-c**: alerts `SET_NULL` and survive, because a deleted case's alert is
     exactly the record an analyst still needs to re-open the investigation.
 
+    `DELETE /api/v1/case/{id}` is administrative, so a superAdmin performs the deletion here.
+
     Asserting the alert row *exists* after the case is gone is the claim; asserting only the
     204 would pass even if the cascade had taken the alert with it.
     """
+    client = APIClient()
+    client.force_authenticate(user=super_admin)
+
     alert = Alert.objects.get(pk=ids["alert"])
     assert alert.case_id is not None, "precondition: the alert is linked to the case"
 
-    deleted = api.delete(f"/api/v1/case/{ids['case']}")
+    deleted = client.delete(f"/api/v1/case/{ids['case']}")
     assert deleted.status_code == 204, deleted.content
     assert deleted.content == b""
 
     alert.refresh_from_db()
     assert alert.case_id is None, "the alert was destroyed with the case instead of standing"
-    assert api.get(f"/api/v1/case/{ids['case']}").status_code == 404
+    assert client.get(f"/api/v1/case/{ids['case']}").status_code == 404
+
+
+def _api_admin_client(org: Organisation) -> APIClient:
+    admin = User.objects.create(
+        login="api-admin",
+        username="api-admin",
+        email="api-admin@example.net",
+        org=org,
+        is_active=True,
+        role="admin",
+    )
+    client = APIClient()
+    client.force_authenticate(user=admin)
+    return client
+
+
+def test_api_case_delete_admin_own_org_is_204(ids: dict[str, str]) -> None:
+    case = Case.objects.get(pk=ids["case"])
+    deleted = _api_admin_client(case.owner_org).delete(f"/api/v1/case/{case.id}")
+    assert deleted.status_code == 204, deleted.content
+    assert not Case.objects.filter(pk=case.id).exists()
+
+
+def test_api_case_delete_admin_other_org_is_404(ids: dict[str, str]) -> None:
+    case = Case.objects.get(pk=ids["case"])
+    other_org = Organisation.objects.create(name="API Other Org")
+    client = _api_admin_client(other_org)
+    deleted = client.delete(f"/api/v1/case/{case.id}")
+    assert deleted.status_code == 404, deleted.content
+    assert Case.objects.filter(pk=case.id).exists()
+
+
+def test_api_case_delete_admin_shared_write_share_is_404(ids: dict[str, str]) -> None:
+    case = Case.objects.get(pk=ids["case"])
+    other_org = Organisation.objects.create(name="API Shared Org")
+    shared_case = _case("API Shared Case", org=other_org)
+    Share.objects.create(
+        case=shared_case, organisation=case.owner_org, permissions={"read": True, "write": True}
+    )
+    client = _api_admin_client(case.owner_org)
+    deleted = client.delete(f"/api/v1/case/{shared_case.id}")
+    assert deleted.status_code == 404, deleted.content
+    assert Case.objects.filter(pk=shared_case.id).exists()
+
+
+def test_api_case_delete_analyst_is_404(api: APIClient, ids: dict[str, str]) -> None:
+    """Analysts may not delete cases through the API (mirrors the UI admin gate)."""
+    deleted = api.delete(f"/api/v1/case/{ids['case']}")
+    assert deleted.status_code == 404, deleted.content
+    assert Case.objects.filter(pk=ids["case"]).exists()
+
+
+def test_api_alert_delete_admin_own_org_is_204(ids: dict[str, str]) -> None:
+    alert = Alert.objects.get(pk=ids["alert"])
+    deleted = _api_admin_client(alert.owner_org).delete(f"/api/v1/alert/{alert.id}")
+    assert deleted.status_code == 204, deleted.content
+    assert not Alert.objects.filter(pk=alert.id).exists()
+
+
+def test_api_alert_delete_admin_other_org_is_404(ids: dict[str, str]) -> None:
+    alert = Alert.objects.get(pk=ids["alert"])
+    other_org = Organisation.objects.create(name="API Other Org")
+    client = _api_admin_client(other_org)
+    deleted = client.delete(f"/api/v1/alert/{alert.id}")
+    assert deleted.status_code == 404, deleted.content
+    assert Alert.objects.filter(pk=alert.id).exists()
+
+
+def test_api_alert_delete_analyst_is_404(api: APIClient, ids: dict[str, str]) -> None:
+    """Analysts may not delete alerts through the API (mirrors the UI admin gate)."""
+    deleted = api.delete(f"/api/v1/alert/{ids['alert']}")
+    assert deleted.status_code == 404, deleted.content
+    assert Alert.objects.filter(pk=ids["alert"]).exists()
+
+
+def test_api_case_delete_superadmin_cross_org_is_204(super_admin: User) -> None:
+    other_org = Organisation.objects.create(name="API Cross Org")
+    other_case = _case("API Cross Org Case", org=other_org)
+    client = APIClient()
+    client.force_authenticate(user=super_admin)
+    deleted = client.delete(f"/api/v1/case/{other_case.id}")
+    assert deleted.status_code == 204, deleted.content
+    assert not Case.objects.filter(pk=other_case.id).exists()
 
 
 def test_unlinking_an_alert_survives_and_is_written_to_the_ledger(

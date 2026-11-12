@@ -1,0 +1,61 @@
+{% comment %}
+Body of the `case-field-phase` dialog (PLAN-2026-11-10-containment-phase-capture).
+
+The phase select is always shown. The containment fieldset is rendered in the
+HTML and stays visible without JavaScript; case_phase.js hides it when the
+selected phase is not "containment". The "Other" detail row is toggled by the
+checkbox whose value is "other".
+
+Context comes from `_modal.html` and the case-detail view:
+  modal_id, form_id, edit_field, edit_label, edit_choices, edit_value
+  containment_action_choices  – (code, label) pairs from the visible vocabulary
+  containment_selected_codes  – codes already on the case
+  containment_other_text      – current free-text value for "Other"
+{% endcomment %}
+<input type="hidden" name="field" value="{{ edit_field }}" form="{{ form_id }}">
+<input type="hidden" name="tab" value="general" form="{{ form_id }}">
+
+<div class="field">
+  <label for="{{ modal_id }}-value">{{ edit_label }}</label>
+  <select id="{{ modal_id }}-value" name="value" form="{{ form_id }}">
+    {% for val, label in edit_choices %}
+    <option value="{{ val }}" {% if val == edit_value %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<fieldset class="containment-fieldset" data-containment-fieldset>
+  <legend>Containment actions</legend>
+  <p class="helper-text">Select at least one action. This also sets the case status to Contained.</p>
+
+  <div class="containment-actions">
+    {% for code, label in containment_action_choices %}
+    <div class="containment-action">
+      <input type="checkbox"
+             id="containment-{{ modal_id }}-{{ code }}"
+             name="containment_actions"
+             value="{{ code }}"
+             form="{{ form_id }}"
+             {% if containment_selected_codes and code in containment_selected_codes %}checked{% endif %}
+             {% if code == "other" %}data-containment-other-checkbox{% endif %}>
+      <label for="containment-{{ modal_id }}-{{ code }}">{{ label }}</label>
+    </div>
+    {% empty %}
+    <p class="empty-state">No containment actions are configured.</p>
+    {% endfor %}
+  </div>
+
+  <div class="field containment-other-row" data-containment-other-row>
+    <label for="containment-other-text-{{ modal_id }}">Other detail</label>
+    <input type="text"
+           id="containment-other-text-{{ modal_id }}"
+           name="other_text"
+           value="{{ containment_other_text|default:'' }}"
+           maxlength="500"
+           form="{{ form_id }}"
+           aria-describedby="containment-other-help-{{ modal_id }}">
+    <p class="helper-text" id="containment-other-help-{{ modal_id }}">
+      Describe the action when "Other" is selected.
+    </p>
+  </div>
+</fieldset>

@@ -148,6 +148,12 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     ("cases", "Share", "case"): models.CASCADE,
     ("cases", "Share", "organisation"): models.CASCADE,
     ("cases", "Share", "created_by"): models.SET_NULL,
+    # T2 P5 containment action capture: a through-row between a case and a containment-action
+    # taxonomy term. The link dies with its case (CASCADE); the term stays deletable only when
+    # nothing references it (PROTECT); the author column is audit (SET_NULL).
+    ("cases", "CaseContainmentAction", "case"): models.CASCADE,
+    ("cases", "CaseContainmentAction", "term"): models.PROTECT,
+    ("cases", "CaseContainmentAction", "created_by"): models.SET_NULL,
     # ---- T2 P3 attachments -------------------------------------------------------------
     # A blob is case-owned: deleting the case must delete the row (the view deletes the blob). The
     # author columns are audit, so they outlive a departing analyst.
@@ -278,7 +284,8 @@ def test_fk_audit_covers_the_whole_model_inventory() -> None:
     # out of `OWN_APPS`, and `EXPECTED_ON_DELETE` already pins the exact set, so a bump here is
     # always a real change.
     # 68 = 67 + Case.source_template (template provenance, SET_NULL).
-    assert len(actual) == 69, f"expected the full FK set, found only {len(actual)}"
+    # 72 = 68 + CaseContainmentAction x3 (case, term, created_by).
+    assert len(actual) == 72, f"expected the full FK set, found only {len(actual)}"
 
 
 @pytest.mark.django_db
@@ -367,6 +374,8 @@ def test_no_cascade_is_reachable_from_a_longer_lived_row() -> None:
         # T2 P3 attachments. A blob row is case-owned — the upload view deletes the file when the
         # row goes — so it cannot outlive the case it was filed against.
         ("cases", "Attachment", "case"),
+        # T2 P5 containment action capture: the through-row dies with its case.
+        ("cases", "CaseContainmentAction", "case"),
         # T2 P5 procedures. A procedure exists only under the case or alert it describes, so it
         # is case-owned like a task; the model CHECK keeps exactly one parent set.
         ("cases", "Procedure", "case"),

@@ -979,6 +979,25 @@ a.rail-org-name:hover {
   cursor: pointer;
 }
 
+/* Containment action-row layout — checkbox and label on one compact row.
+   Scoped to .containment-action so the global `label { display:block; margin }`
+   rule does not override the inline formatting. */
+.containment-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+}
+.containment-action input[type="checkbox"] {
+  margin: 0;
+  flex: none;
+}
+.containment-action label {
+  margin: 0;
+  color: var(--color-text);
+  display: inline;
+}
+
 /* Timeline dot for status transitions. The row class is `tl-<kind|slugify>`, and routing the
    General-tab write through the shared applier makes the kind `status-changed` (see
    deviations V-3). Keep the legacy `status-change` selector too so ledger rows written before

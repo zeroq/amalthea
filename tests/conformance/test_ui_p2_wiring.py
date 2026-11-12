@@ -241,6 +241,47 @@ def test_case_edit_get_prefills_and_preselects(browser: Client, case: Case) -> N
     assert 'value="4" selected' in body  # severity = Critical
 
 
+def test_case_detail_edit_modal_status_options_have_labels(browser: Client, case: Case) -> None:
+    """The optional `CaseStatus` rows have no `label` field; render `value` as the option text."""
+    url = reverse("ui-case-detail", kwargs={"case_id": case.number})
+    body = browser.get(url).content.decode()
+
+    start = body.index('id="f-status"')
+    select_html = body[start : body.index("</select>", start)]
+    assert '<option value="New" selected>New</option>' in select_html
+
+
+def test_case_general_status_control_lists_taxonomy_values(browser: Client, case: Case) -> None:
+    """The General-tab control offers concrete statuses, not only the 3 stage buckets."""
+    contained, _ = CaseStatus.objects.get_or_create(
+        value="Contained", defaults={"stage": "InProgress", "order": 3}
+    )
+
+    body = browser.get(
+        reverse("ui-case-detail", kwargs={"case_id": case.number}), {"tab": "general"}
+    ).content.decode()
+    start = body.index('id="f-case-status"')
+    select_html = body[start : body.index("</select>", start)]
+
+    assert '<option value="New" selected>New</option>' in select_html
+    assert f'<option value="{contained.value}"' in select_html
+    assert ">Contained</option>" in select_html
+    assert 'value="Closed"' not in select_html
+
+
+def test_case_general_status_control_posts_taxonomy_value(browser: Client, case: Case) -> None:
+    contained, _ = CaseStatus.objects.get_or_create(
+        value="Contained", defaults={"stage": "InProgress", "order": 3}
+    )
+    response = browser.post(
+        reverse("ui-case-status", kwargs={"case_id": case.number}), {"status": "Contained"}
+    )
+
+    assert response.status_code == 302
+    case.refresh_from_db()
+    assert case.status_id == contained.id
+
+
 def test_case_edit_post_applies_updates(browser: Client, case: Case) -> None:
     """C2: POST applies the field set and redirects to the case detail page."""
     url = reverse("ui-case-edit", kwargs={"case_id": case.number})

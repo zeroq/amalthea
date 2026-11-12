@@ -536,7 +536,7 @@ def update_taxonomy_term(
 
 
 def delete_taxonomy_term(term: TaxonomyTerm) -> TaxonomyResult:
-    from cases.models import Case, CaseTemplate
+    from cases.models import Case, CaseContainmentAction, CaseTemplate
 
     if term.protected:
         raise TaxonomyError("Protected term cannot be deleted", "non_field")
@@ -566,6 +566,9 @@ def delete_taxonomy_term(term: TaxonomyTerm) -> TaxonomyResult:
     elif term.category == "case_verdict":
         if Case.objects.filter(verdict=term.code).exists():
             raise TaxonomyError("Term is in use", "non_field")
+    elif term.category == "containment_actions":
+        if CaseContainmentAction.objects.filter(term=term).exists():
+            raise TaxonomyError("Term is in use by CaseContainmentAction", "non_field")
 
     old_identifier = f"{term.category}:{term.code}"
     target_id = str(term.id)

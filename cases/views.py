@@ -76,11 +76,10 @@ from cases.update import (
 from compat.bulk import bulk_patch
 from compat.procedures import parse_procedure
 from compat.time import parse_timestamp, to_epoch_ms
+from core import taxonomy_read
 from core.enums import (
-    CASE_PHASE_CHOICES,
-    CASE_SCOPE_CHOICES,
-    CASE_TYPE_CHOICES,
     CUSTOM_FIELD_TYPES,
+    SUPER_ADMIN_ROLE,
     TASK_STATUS_CHOICES,
 )
 from core.serializers import (
@@ -301,6 +300,15 @@ def case_detail(request: Request, case_id: str) -> Response:
     if case is None:
         return _not_found("Case")
     if request.method == "DELETE":
+        # DELETE is administrative: admin (own org only) or superAdmin (any org). A shared-org
+        # case grants access, not ownership, so an admin cannot delete another org's case.
+        if not identity.scoping.is_admin(request.user):
+            return _not_found("Case")
+        case = identity.scoping.resolve_case(request.user, case_id, write=True)
+        if case is None:
+            return _not_found("Case")
+        if request.user.role != SUPER_ADMIN_ROLE and case.owner_org_id != request.user.org_id:
+            return _not_found("Case")
         case.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
     if request.method in ("PATCH", "PUT"):
@@ -2313,9 +2321,9 @@ def _create_case_template(request: Request) -> Response:
     if phase_val in (None, ""):
         phase_val = "initial_triage"
 
-    allowed_scope = tuple(v for v, _ in CASE_SCOPE_CHOICES)
-    allowed_case_type = tuple(v for v, _ in CASE_TYPE_CHOICES)
-    allowed_phase = tuple(v for v, _ in CASE_PHASE_CHOICES)
+    allowed_scope = taxonomy_read.codes(taxonomy_read.CATEGORY_CASE_SCOPE, include_hidden=False)
+    allowed_case_type = taxonomy_read.codes(taxonomy_read.CATEGORY_CASE_TYPE, include_hidden=False)
+    allowed_phase = taxonomy_read.codes(taxonomy_read.CATEGORY_CASE_PHASE, include_hidden=False)
 
     if scope_val not in allowed_scope:
         return _bad(
@@ -2435,7 +2443,7 @@ def _update_case_template(template: CaseTemplate, request: Request) -> Response:
     # Enum fields for CaseTemplate (scope, caseType, phase) — validate against vocabularies
     if "scope" in payload:
         val = str(payload["scope"]).strip()
-        allowed_scope = tuple(v for v, _ in CASE_SCOPE_CHOICES)
+        allowed_scope = taxonomy_read.codes(taxonomy_read.CATEGORY_CASE_SCOPE, include_hidden=False)
         if val not in allowed_scope:
             return _bad(
                 f"scope must be one of: {', '.join(allowed_scope)}",
@@ -2445,7 +2453,9 @@ def _update_case_template(template: CaseTemplate, request: Request) -> Response:
         fields.append("scope")
     if "caseType" in payload:
         val = str(payload["caseType"]).strip()
-        allowed_case_type = tuple(v for v, _ in CASE_TYPE_CHOICES)
+        allowed_case_type = taxonomy_read.codes(
+            taxonomy_read.CATEGORY_CASE_TYPE, include_hidden=False
+        )
         if val not in allowed_case_type:
             return _bad(
                 f"caseType must be one of: {', '.join(allowed_case_type)}",
@@ -2455,7 +2465,7 @@ def _update_case_template(template: CaseTemplate, request: Request) -> Response:
         fields.append("case_type")
     if "phase" in payload:
         val = str(payload["phase"]).strip()
-        allowed_phase = tuple(v for v, _ in CASE_PHASE_CHOICES)
+        allowed_phase = taxonomy_read.codes(taxonomy_read.CATEGORY_CASE_PHASE, include_hidden=False)
         if val not in allowed_phase:
             return _bad(
                 f"phase must be one of: {', '.join(allowed_phase)}",

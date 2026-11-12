@@ -18,6 +18,7 @@ EXPECTED = [
     ("process_killed", "Process Killed", 1),
     ("asset_network_contained", "Asset network contained", 2),
     ("user_disabled", "User disabled", 3),
+    ("other", "Other", 4),
 ]
 
 

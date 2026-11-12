@@ -122,6 +122,7 @@ def alert_list(request: HttpRequest) -> HttpResponse:
             scopes=ALERT_SCOPE_OPTIONS,
             selected_severities=selected_severities,
             severity_filter_links=severity_filter_links,
+            can_delete_alerts=is_admin(request.user),
         ),
     )
 
@@ -326,10 +327,12 @@ def alert_merge(request: HttpRequest, alert_id: str) -> HttpResponse:
 @login_required
 @require_POST
 def alert_delete_ui(request: HttpRequest, alert_id: str) -> HttpResponse:
-    """Delete an alert — superAdmin only (UI endpoint)."""
-    from core.enums import SUPER_ADMIN_ROLE
+    """Delete an alert — admin and superAdmin only (UI endpoint).
 
-    if request.user.role != SUPER_ADMIN_ROLE:
+    `resolve_alert(..., write=True)` already limits admins to own-org alerts and
+    lets superAdmin cross-org; that behaviour is preserved here.
+    """
+    if not is_admin(request.user):
         return render(request, "ui/404.html", status=404)
 
     alert = resolve_alert(request.user, alert_id, write=True)

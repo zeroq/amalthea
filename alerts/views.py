@@ -35,6 +35,7 @@ from cases.procedures import create_procedure
 from cases.tagging import tag_names_from_payload
 from compat.bulk import bulk_patch
 from compat.procedures import parse_procedure
+from core.enums import SUPER_ADMIN_ROLE
 from core.serializers import (
     alert_json,
     alert_status_json,
@@ -79,6 +80,24 @@ def alert_detail(request: Request, alert_id: str) -> Response:
             status=status.HTTP_404_NOT_FOUND,
         )
     if request.method == "DELETE":
+        # DELETE is administrative: admin (own org only) or superAdmin (any org). Alerts have no
+        # shares, so org ownership is the only cross-org path besides superAdmin.
+        if not identity.scoping.is_admin(request.user):
+            return Response(
+                {"type": "NotFoundError", "message": "Alert not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        alert = identity.scoping.resolve_alert(request.user, alert_id, write=True)
+        if alert is None:
+            return Response(
+                {"type": "NotFoundError", "message": "Alert not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if request.user.role != SUPER_ADMIN_ROLE and alert.owner_org_id != request.user.org_id:
+            return Response(
+                {"type": "NotFoundError", "message": "Alert not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
         alert.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
     if request.method in ("PATCH", "PUT"):

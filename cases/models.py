@@ -117,6 +117,12 @@ class Case(UUIDModel, TimeStampedModel):
     phase = models.CharField(max_length=32, default="initial_triage")
     verdict = models.CharField(max_length=32, default="undefined")
     summary = models.TextField(blank=True)
+    containment_actions = models.ManyToManyField(
+        "core.TaxonomyTerm",
+        through="CaseContainmentAction",
+        related_name="cases_with_containment_actions",
+        blank=True,
+    )
     # NOT NULL with a default: on Postgres `ORDER BY start_date DESC` returns NULLs
     # FIRST, so a nullable start_date put undated cases at the top of the queue (L5).
     start_date = models.DateTimeField(default=timezone.now)
@@ -353,6 +359,43 @@ class CaseTagLink(models.Model):
 
     def __str__(self) -> str:
         return f"{self.case_id}:{self.tag_id}"
+
+
+class CaseContainmentAction(UUIDModel, TimeStampedModel):
+    """The through-table linking a Case to a containment action taxonomy term.
+
+    Each row is one currently selected action. The relation is replaced on each
+    containment phase entry/edit; a changed selection also creates a Page snapshot.
+    """
+
+    case = models.ForeignKey(
+        Case,
+        on_delete=models.CASCADE,
+        related_name="containment_action_links",
+        db_index=False,
+    )
+    term = models.ForeignKey(
+        "core.TaxonomyTerm",
+        on_delete=models.PROTECT,
+        related_name="containment_links",
+    )
+    other_text = models.CharField(max_length=500, blank=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_containment_actions",
+    )
+
+    class Meta:
+        db_table = "case_containment_action"
+        # The unique (case, term) index is the left prefix for case lookups; the FK
+        # implicit index covers term lookups (used by the deletion guard).
+        unique_together = (("case", "term"),)
+
+    def __str__(self) -> str:
+        return f"Containment({self.case_id}:{self.term_id})"
 
 
 class Comment(UUIDModel, TimeStampedModel):

@@ -107,7 +107,7 @@ The title input also gets `{% if form_id %}autofocus{% endif %}` (modal.js focus
   <label for="f-status">Status</label>
   <select id="f-status" name="status"{% if form_id %} form="{{ form_id }}"{% endif %}>
     {% for opt in case_status_options %}
-      <option value="{{ opt.value }}" {% if form_values.status == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+      <option value="{{ opt.value }}" {% if form_values.status == opt.value %}selected{% endif %}>{{ opt.value }}</option>
     {% endfor %}
   </select>
 </div>

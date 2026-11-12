@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 from django.template import Context, Template
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
 from alerts.models import Alert
 from automation.models import AutomationRun, Playbook
@@ -468,6 +470,28 @@ def test_case_pages_are_rendered_on_the_case_page(browser: Client) -> None:
     assert f'data-page-id="{page.id}"' in html
     assert "Network map" in html
     assert "10.0.0.0/8 is in scope" in html
+
+
+def test_case_pages_render_newest_first(browser: Client) -> None:
+    """General-tab pages render newest-created first, oldest last."""
+    case = _case("Pages order test")
+    oldest = Page.objects.create(case=case, title="Oldest page")
+    middle = Page.objects.create(case=case, title="Middle page")
+    newest = Page.objects.create(case=case, title="Newest page")
+
+    # `created_at` is auto_now_add, so set deterministic distinct values after insert.
+    now = timezone.now()
+    Page.objects.filter(pk=oldest.pk).update(created_at=now - timedelta(days=2))
+    Page.objects.filter(pk=middle.pk).update(created_at=now - timedelta(days=1))
+    Page.objects.filter(pk=newest.pk).update(created_at=now)
+
+    response = browser.get(
+        reverse("ui-case-detail", kwargs={"case_id": str(case.number)}), {"tab": "general"}
+    )
+    expected = [str(newest.id), str(middle.id), str(oldest.id)]
+
+    assert [str(p.id) for p in response.context["pages"]] == expected
+    assert re.findall(r'data-page-id="([a-f0-9-]+)"', response.content.decode()) == expected
 
 
 def test_a_task_can_be_added_and_completed_from_the_page(browser: Client) -> None:

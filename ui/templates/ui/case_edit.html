@@ -109,7 +109,7 @@
         <label for="f-status">Status</label>
         <select id="f-status" name="status">
           {% for opt in case_status_options %}
-            <option value="{{ opt.value }}" {% if form_values.status|default:case.status.value == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+            <option value="{{ opt.value }}" {% if form_values.status|default:case.status.value == opt.value %}selected{% endif %}>{{ opt.value }}</option>
           {% endfor %}
         </select>
       </div>

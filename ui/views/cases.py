@@ -41,13 +41,12 @@ from cases.views import (
     _as_uuid,
     _resolve_login,
 )
+from core import taxonomy_read
 from core.enums import (
-    CASE_PHASE_CHOICES,
-    CASE_SCOPE_CHOICES,
-    CASE_TYPE_CHOICES,
-    DATA_CLASSIFICATION_CHOICES,
+    ADMIN_ROLE,
     PAP_CHOICES,
     SEVERITY_CHOICES,
+    SUPER_ADMIN_ROLE,
     TLP_CHOICES,
 )
 from identity.models import AuditLog, Organisation, User
@@ -112,14 +111,22 @@ def case_alert_link(request: HttpRequest, case_id: str) -> HttpResponse:
 @login_required
 @require_POST
 def case_delete_ui(request: HttpRequest, case_id: str) -> HttpResponse:
-    """Delete a case — superAdmin only (UI endpoint)."""
-    from core.enums import SUPER_ADMIN_ROLE
+    """Delete a case — admin and superAdmin only (UI endpoint).
 
-    if request.user.role != SUPER_ADMIN_ROLE:
+    Admins may only delete cases belonging to their own organisation.
+    SuperAdmins may delete any case. Non-admin/non-superAdmin users receive a uniform 404.
+    """
+    user = request.user
+    if not is_admin(user):
         return render(request, "ui/404.html", status=404)
 
-    case = resolve_case(request.user, case_id, write=True)
+    case = resolve_case(user, case_id, write=True)
     if case is None:
+        return render(request, "ui/404.html", status=404)
+
+    # superAdmin may delete any case; admin only a case its own org owns. A shared-org case
+    # grants access, not ownership, so it stays undeletable for an admin.
+    if user.role == ADMIN_ROLE and case.owner_org_id != user.org_id:
         return render(request, "ui/404.html", status=404)
 
     case.delete()
@@ -184,10 +191,18 @@ def _case_create_form_context(
         "severity_choices": SEVERITY_CHOICES,
         "tlp_choices": TLP_CHOICES,
         "pap_choices": PAP_CHOICES,
-        "scope_choices": CASE_SCOPE_CHOICES,
-        "case_type_choices": CASE_TYPE_CHOICES,
-        "data_classification_choices": DATA_CLASSIFICATION_CHOICES,
-        "phase_choices": CASE_PHASE_CHOICES,
+        "scope_choices": taxonomy_read.choices(
+            taxonomy_read.CATEGORY_CASE_SCOPE, include_hidden=False
+        ),
+        "case_type_choices": taxonomy_read.choices(
+            taxonomy_read.CATEGORY_CASE_TYPE, include_hidden=False
+        ),
+        "data_classification_choices": taxonomy_read.choices(
+            taxonomy_read.CATEGORY_DATA_CLASSIFICATION, include_hidden=False
+        ),
+        "phase_choices": taxonomy_read.choices(
+            taxonomy_read.CATEGORY_CASE_PHASE, include_hidden=False
+        ),
         "can_classify": can_classify,
     }
 
@@ -282,6 +297,8 @@ def _render_case_list(
         "open_new_case": open_new_case,
         "selected_severities": selected_severities,
         "severity_filter_links": build_severity_filter_links(request, selected_severities),
+        "can_delete_cases": is_admin(request.user),
+        "can_delete_any_case": request.user.role == SUPER_ADMIN_ROLE,
     }
 
     # Only include form context for users who can actually create cases.
@@ -442,24 +459,34 @@ def _case_status_for_stage(case: Case, stage: str) -> CaseStatus | None:
 def case_set_status(request: HttpRequest, case_id: str) -> HttpResponse:
     """Move a case between stages by delegating to the shared applier (PLAN-2026-10-17 §12.8, D1).
 
+    Form field: `status` = a concrete `CaseStatus.value`. The older `stage` field is still
+    accepted for compatibility and resolves to the lowest-order non-hidden status in that stage.
     Nothing is persisted here: `apply_case_update` owns `status`, `closed_date`, `end_date` and the
-    close rule, so the UI can no longer close a case around it. A `stage=Closed` post closes the
+    close rule, so the UI can no longer close a case around it. A Closed-stage status closes the
     case only when a verdict and a closing comment ride along; without them the applier refuses,
     the case stays open and the analyst gets the applier's message. The plain status control omits
-    `Closed` (the dedicated close dialog supplies the two fields), so an accidental close is not
-    reachable from the form at all.
+    Closed-stage statuses (the dedicated close dialog supplies the two fields), so an accidental
+    close is not reachable from the form at all.
     """
     case = resolve_case(request.user, case_id, write=True)
     if case is None:
         raise Http404()
-    stage = (request.POST.get("stage") or DEFAULT_CASE_STATUS).strip()
-    if stage not in CASE_STAGE_VALUES:
-        messages.error(request, f"Unknown case stage: {stage}.")
-        return _case_detail_redirect(request, case.number)
-    target = _case_status_for_stage(case, stage)
-    if target is None:
-        messages.error(request, f"No case status is defined for the {stage} stage.")
-        return _case_detail_redirect(request, case.number)
+    status_val = (request.POST.get("status") or "").strip()
+    if status_val:
+        target = CaseStatus.objects.filter(value=status_val, hidden=False).first()
+        if target is None:
+            messages.error(request, f"Unknown case status: {status_val}.")
+            return _case_detail_redirect(request, case.number)
+    else:
+        # Backwards-compatible path for callers/tests that still post a stage.
+        stage = (request.POST.get("stage") or DEFAULT_CASE_STATUS).strip()
+        if stage not in CASE_STAGE_VALUES:
+            messages.error(request, f"Unknown case stage: {stage}.")
+            return _case_detail_redirect(request, case.number)
+        target = _case_status_for_stage(case, stage)
+        if target is None:
+            messages.error(request, f"No case status is defined for the {stage} stage.")
+            return _case_detail_redirect(request, case.number)
     payload: dict[str, Any] = {"status": target.value}
     comment = (request.POST.get("comment") or "").strip()
     if comment:
@@ -528,6 +555,49 @@ def case_field_edit(request: HttpRequest, case_id: str) -> HttpResponse:
     field = (request.POST.get("field") or "").strip()
     if field not in CASE_INLINE_EDIT_FIELDS:
         raise Http404()
+
+    # Special handling for containment phase entry — actions are required.
+    if field == "phase" and (request.POST.get("value") or "") == "containment":
+        from cases.containment import apply_containment_actions
+
+        action_codes = request.POST.getlist("containment_actions")
+        other_text = (request.POST.get("other_text") or "").strip()
+
+        if not action_codes:
+            messages.error(
+                request,
+                "At least one containment action is required to enter the Containment phase.",
+            )
+            return _case_detail_redirect(request, case.number)
+
+        try:
+            result = apply_containment_actions(
+                case,
+                actor=request.user,
+                action_codes=action_codes,
+                other_text=other_text,
+            )
+        except CaseUpdateError as exc:
+            messages.error(request, exc.message)
+            return _case_detail_redirect(request, case.number)
+        except Exception:
+            logger.exception("Failed to enter containment for case %s", case.number)
+            messages.error(
+                request,
+                "Could not enter containment. No changes were saved.",
+            )
+            return _case_detail_redirect(request, case.number)
+
+        if result.error:
+            messages.error(request, result.error)
+            return _case_detail_redirect(request, case.number)
+
+        # Success: the containment service already applied phase, status, actions, page, audit.
+        case.refresh_from_db()
+        messages.success(request, "Case entered containment phase with actions.")
+        return _case_detail_redirect(request, case.number)
+
+    # Normal path: single field update via the shared applier (unchanged behaviour).
     try:
         apply_case_update(case, {field: request.POST.get("value", "")}, actor=request.user)
     except CaseUpdateError as exc:
@@ -800,10 +870,18 @@ def case_edit(request: HttpRequest, case_id: str) -> HttpResponse:
                 severity_choices=SEVERITY_CHOICES,
                 tlp_choices=TLP_CHOICES,
                 pap_choices=PAP_CHOICES,
-                scope_choices=CASE_SCOPE_CHOICES,
-                case_type_choices=CASE_TYPE_CHOICES,
-                data_classification_choices=DATA_CLASSIFICATION_CHOICES,
-                phase_choices=CASE_PHASE_CHOICES,
+                scope_choices=taxonomy_read.choices(
+                    taxonomy_read.CATEGORY_CASE_SCOPE, include_hidden=False
+                ),
+                case_type_choices=taxonomy_read.choices(
+                    taxonomy_read.CATEGORY_CASE_TYPE, include_hidden=False
+                ),
+                data_classification_choices=taxonomy_read.choices(
+                    taxonomy_read.CATEGORY_DATA_CLASSIFICATION, include_hidden=False
+                ),
+                phase_choices=taxonomy_read.choices(
+                    taxonomy_read.CATEGORY_CASE_PHASE, include_hidden=False
+                ),
                 can_classify=can_classify,
                 case_status_options=status_options,
                 assignees=assignees,
@@ -942,10 +1020,18 @@ def _render_case_edit_form(
             severity_choices=SEVERITY_CHOICES,
             tlp_choices=TLP_CHOICES,
             pap_choices=PAP_CHOICES,
-            scope_choices=CASE_SCOPE_CHOICES,
-            case_type_choices=CASE_TYPE_CHOICES,
-            data_classification_choices=DATA_CLASSIFICATION_CHOICES,
-            phase_choices=CASE_PHASE_CHOICES,
+            scope_choices=taxonomy_read.choices(
+                taxonomy_read.CATEGORY_CASE_SCOPE, include_hidden=False
+            ),
+            case_type_choices=taxonomy_read.choices(
+                taxonomy_read.CATEGORY_CASE_TYPE, include_hidden=False
+            ),
+            data_classification_choices=taxonomy_read.choices(
+                taxonomy_read.CATEGORY_DATA_CLASSIFICATION, include_hidden=False
+            ),
+            phase_choices=taxonomy_read.choices(
+                taxonomy_read.CATEGORY_CASE_PHASE, include_hidden=False
+            ),
             can_classify=can_classify,
             case_status_options=status_options,
             assignees=assignees,

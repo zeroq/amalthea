@@ -217,7 +217,7 @@ def test_the_tags_row_lists_tags_with_a_remove_control(browser: Client, case: Ca
 def test_the_plain_status_select_offers_no_closed_option(browser: Client, case: Case) -> None:
     """Closing is reachable only through the dedicated dialog (plan §9.1)."""
     body = _general(browser, case)
-    select_start = body.index('name="stage"')
+    select_start = body.index('id="f-case-status"')
     select_end = body.index("</select>", select_start)
     select = body[select_start:select_end]
     assert 'value="Closed"' not in select
@@ -265,15 +265,23 @@ def test_a_closed_case_offers_no_close_button(browser: Client, case: Case) -> No
 
 
 def test_field_edit_sets_a_field_through_the_shared_applier(browser: Client, case: Case) -> None:
+    """Setting phase to containment now also sets status=Contained via the containment service."""
     response = browser.post(
         reverse("ui-case-field-edit", kwargs={"case_id": case.number}),
-        {"field": "phase", "value": "containment", "tab": "general"},
+        {
+            "field": "phase",
+            "value": "containment",
+            "tab": "general",
+            "containment_actions": ["password_reset"],
+            "other_text": "",
+        },
     )
     assert response.status_code == 302, response.content
 
     case.refresh_from_db()
     assert case.phase == "containment"
-    assert case.timeline_events.filter(kind="classification-changed").exists()
+    assert case.status.value == "Contained"
+    assert case.timeline_events.filter(kind="containment-actions").exists()
 
 
 def test_field_edit_can_set_the_verdict_before_close(browser: Client, case: Case) -> None:

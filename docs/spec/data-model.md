@@ -218,11 +218,29 @@ boundary for all user-reachable paths.
   `case_scope_valid`, `case_type_valid`, `case_data_classification_valid`, `case_phase_valid`,
   `case_verdict_valid`.
 
+### Containment actions (PLAN-2026-11-10-containment-phase-capture)
+
+- `Case.containment_actions` — M2M to `core.TaxonomyTerm`, through `CaseContainmentAction`,
+  category `containment_actions`, not hidden. Seed terms: `password_reset`,
+  `process_killed`, `asset_network_contained`, `user_disabled`, and `other` (code `other`).
+- The relation stores the current action set; each `Page` with category `containment` is the
+  historical snapshot.
+
+### CaseContainmentAction (`case_containment_action`, through table)
+- `case` — FK → `Case`, `CASCADE`, `related_name="containment_action_links"`.
+- `term` — FK → `TaxonomyTerm`, `PROTECT` (rejects deletion if term is in use).
+- `other_text` — CharField(500, blank), required when `term` code is `other`.
+- `created_by` — FK → `User`, `SET_NULL` · `created_at` — auto-now-add.
+- Unique constraint on `(case, term)`; the `term` FK keeps Django's implicit index.
+  The `case` FK is `db_index=False` because the unique index is its left prefix.
+
 **`Case.status.stage` vs `Case.phase` (Q-D2 / R1 mitigation):** `CaseStatus.stage` is the stable
 3-bucket *openness* axis (`New`, `InProgress`, `Closed`) that automation triggers and `CASE_STAGES`
 key on. `Case.phase` is an independent IR-lifecycle enum (`initial_triage` … `close`) recording the
 analyst's position in the incident-response loop. The two axes are deliberately separate: changing
 `phase` does not move `stage`, and automation must not read `phase` for trigger decisions.
+Entering containment is the one UI flow that deliberately sets both: `phase="containment"` and
+the seeded `Contained` status; leaving containment does not revert the status.
 
 ### Task (`task`, extends `UUIDModel` + `TimeStampedModel`)
 - `case` — FK → `Case`, `CASCADE` · `title`(500) · `description` · `group`(100).
@@ -262,6 +280,8 @@ analyst's position in the incident-response loop. The two axes are deliberately 
 - `case` — FK → `Case`, `CASCADE`, `db_index=False` · `title`(500) · `content` (Text, Markdown) ·
   `order` (default 0) · `category`(100) · `created_by`/`updated_by` — FK → `User`, `SET_NULL`.
 - Index `page_case_order_idx ("case","order","created_at")`.
+- Containment snapshots use `category="containment"`; they are ordinary Pages shown in the
+  General-tab Pages card and are never mutated by later containment edits.
 
 ### Share (`share`, extends `UUIDModel` + `TimeStampedModel`) — T2 P2
 - `case` — FK → `Case`, `CASCADE`, `db_index=False` · `organisation` — FK → `Organisation`,
@@ -383,9 +403,9 @@ analyst's position in the incident-response loop. The two axes are deliberately 
 - Categories: `case_scope`, `case_phase`, `case_type`, `data_classification`, `case_verdict`,
   `containment_actions`.
 - `containment_actions` seeds `password_reset` (“Password reset”), `process_killed`
-  (“Process Killed”), `asset_network_contained` (“Asset network contained”), and `user_disabled`
-  (“User disabled”), all editable/deletable and not closing verdicts. This is vocabulary only;
-  recording actions on a case is a future phase.
+  (“Process Killed”), `asset_network_contained` (“Asset network contained”), `user_disabled`
+  (“User disabled”), and `other` (“Other”), all editable/deletable and not closing verdicts.
+  `other` requires a non-empty `CaseContainmentAction.other_text` when selected.
 
 ## Core value sets (`core/enums.py`)
 

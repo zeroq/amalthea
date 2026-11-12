@@ -14,6 +14,7 @@ from django.views.decorators.http import require_GET
 from alerts.models import AlertStatus
 from cases.models import (
     Case,
+    CaseContainmentAction,
     CaseStatus,
     CaseTemplate,
     Tag,
@@ -21,11 +22,7 @@ from cases.models import (
 from core import taxonomy_read
 from core.enums import (
     ALERT_STAGES,
-    CASE_PHASE_CHOICES,
-    CASE_SCOPE_CHOICES,
     CASE_STAGES,
-    CASE_TYPE_CHOICES,
-    DATA_CLASSIFICATION_CHOICES,
 )
 from observables.models import ObservableType
 
@@ -67,6 +64,8 @@ def _taxonomy_context(request: HttpRequest, **extra: Any) -> dict[str, Any]:
         elif t.category == "case_verdict":
             t.case_count = Case.objects.filter(verdict=t.code).count()
             t.in_use_count = t.case_count
+        elif t.category == "containment_actions":
+            t.in_use_count = CaseContainmentAction.objects.filter(term=t).count()
         else:
             t.in_use_count = 0
 
@@ -91,10 +90,18 @@ def _taxonomy_context(request: HttpRequest, **extra: Any) -> dict[str, Any]:
             "case_verdict": [t for t in terms if t.category == "case_verdict"],
             "containment_actions": [t for t in terms if t.category == "containment_actions"],
         },
-        scope_choices=CASE_SCOPE_CHOICES,
-        phase_choices=CASE_PHASE_CHOICES,
-        case_type_choices=CASE_TYPE_CHOICES,
-        data_classification_choices=DATA_CLASSIFICATION_CHOICES,
+        scope_choices=taxonomy_read.choices(
+            taxonomy_read.CATEGORY_CASE_SCOPE, include_hidden=False
+        ),
+        phase_choices=taxonomy_read.choices(
+            taxonomy_read.CATEGORY_CASE_PHASE, include_hidden=False
+        ),
+        case_type_choices=taxonomy_read.choices(
+            taxonomy_read.CATEGORY_CASE_TYPE, include_hidden=False
+        ),
+        data_classification_choices=taxonomy_read.choices(
+            taxonomy_read.CATEGORY_DATA_CLASSIFICATION, include_hidden=False
+        ),
         verdict_choices=taxonomy_read.choices(taxonomy_read.CATEGORY_CASE_VERDICT),
         case_stage_choices=CASE_STAGES,
         alert_stage_choices=ALERT_STAGES,
