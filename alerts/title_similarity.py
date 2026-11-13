@@ -51,7 +51,7 @@ def _remove_iso_timestamps(title: str) -> str:
 def _remove_hex_tokens(title: str) -> str:
     """Remove hex tokens of length >= 8 that contain a digit, replacing with space."""
 
-    def _replace_hex(m: re.Match) -> str:
+    def _replace_hex(m: re.Match[str]) -> str:
         token = m.group(0)
         # Check if the token contains at least one digit
         if re.search(r"\d", token):
