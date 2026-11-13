@@ -162,7 +162,8 @@ used for the no-JS render). Remove the "refresh on every form load" comments.
 - The empty-state markup changed from a hidden `action_path` input to a hidden `<select>` with the
   placeholder option; a no-JS empty submit still sends `action_path=""` and is rejected the same
   way. One assertion in `test_form_shows_empty_state_when_no_scripts` was updated for this.
-- **Local artifact:** an untracked `automation/scripts/test_playbook_2.py` (a manual copy reusing
-  `NAME = "test_playbook"`) currently makes `make check`'s script scan fail with a duplicate
-  identity error. It is not part of this change; delete it or give it a distinct `NAME`.
+- **Local artifact (resolved 2026-11-13):** an untracked `automation/scripts/test_playbook_2.py`
+  (a manual copy reusing `NAME = "test_playbook"`) made `make check`'s script scan fail with a
+  duplicate identity error. It was not part of this change and has been deleted; the current
+  discovery is `enrichment_probe` + `test_playbook` (2/2).
 - JS syntax was reviewed but not machine-checked (`node` is not installed in this environment).

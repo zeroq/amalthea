@@ -2,7 +2,13 @@
 
 **Date:** 2026-11-02
 
-**Status:** Implemented — frontend + conformance tests complete; checks passing
+**Status:** Implemented 2026-11-02 — frontend + conformance tests complete. Re-verified 2026-11-13:
+`test_ui_nav`, `test_ui_search`, `test_ui_urls_smoke`, `test_ui_inline_assets`, and
+`test_search_api` pass; `make check` (including `make css-check` and `manage.py check`) is green;
+full suite **3673 passed, 3 skipped, 2 subtests passed** on 2026-11-13.
+
+**Post-implementation note (2026-11-13):** search semantics changed independently — digit-only terms
+now also match case title/description/summary (see `PLAN-2026-11-01-global-search.md`, decisions log).
 
 **Supersedes:** `PLAN-2026-11-01-top-nav-global-search.md` (top-nav experiment reverted)
 
@@ -92,19 +98,19 @@ Search page:
 - `docs/planning/PLAN-2026-11-01-top-nav-global-search.md` — mark superseded.
 
 ## Acceptance criteria
-- [ ] No `.top-nav` element or CSS remains.
-- [ ] `.shell` / `.rail` / `.main` layout matches the pre-top-nav two-column layout.
-- [ ] Account avatar + username + dropdown are back in `rail-foot`, opening upward.
-- [ ] **Search** rail link appears directly after **Cases**, with `aria-current` on `/search`.
-- [ ] Search rail link has shortcut `s`; `keys.js` route and cheat-sheet agree (`s` → `/search`).
-- [ ] Sources shortcut is now `d` in the rail, `keys.js` route, and cheat-sheet (`d` → `/sources`).
-- [ ] `/search` renders the search form with `#global-search-q`, visible Search button, `method="get"`, `action="/search"`.
-- [ ] Search form prefills the current query; blank query shows existing instruction and autofocuses the input.
-- [ ] Submitting from a typed tab preserves `type` via hidden field.
-- [ ] Dashboard and other pages do **not** contain `#global-search-q`.
-- [ ] `/` still focuses `#global-search-q` on the Search page and falls back to the first main input elsewhere.
-- [ ] `make check-fast`, `make css-check`, `manage.py check` pass.
-- [ ] Targeted tests pass: `test_ui_nav`, `test_ui_search`, `test_ui_urls_smoke`, `test_ui_inline_assets`, `test_search_api`.
+- [x] No `.top-nav` element or CSS remains.
+- [x] `.shell` / `.rail` / `.main` layout matches the pre-top-nav two-column layout.
+- [x] Account avatar + username + dropdown are back in `rail-foot`, opening upward.
+- [x] **Search** rail link appears directly after **Cases**, with `aria-current` on `/search`.
+- [x] Search rail link has shortcut `s`; `keys.js` route and cheat-sheet agree (`s` → `/search`).
+- [x] Sources shortcut is now `d` in the rail, `keys.js` route, and cheat-sheet (`d` → `/sources`).
+- [x] `/search` renders the search form with `#global-search-q`, visible Search button, `method="get"`, `action="/search"`.
+- [x] Search form prefills the current query; blank query shows existing instruction and autofocuses the input.
+- [x] Submitting from a typed tab preserves `type` via hidden field.
+- [x] Dashboard and other pages do **not** contain `#global-search-q`.
+- [x] `/` still focuses `#global-search-q` on the Search page and falls back to the first main input elsewhere.
+- [x] `make check-fast`, `make css-check`, `manage.py check` pass.
+- [x] Targeted tests pass: `test_ui_nav`, `test_ui_search`, `test_ui_urls_smoke`, `test_ui_inline_assets`, `test_search_api`.
 
 ## Risks
 - Rail/cheat-sheet parity tests are strict; adding Search without matching `keys.js`/cheat-sheet entries will fail.

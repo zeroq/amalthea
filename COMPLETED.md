@@ -2,7 +2,7 @@
 
 Finished work, with the evidence that it actually happened. Open items live in
 [`TODO.md`](./TODO.md).
-Last updated: 2026-11-12
+Last updated: 2026-11-13
 
 Items are only listed here once independently verified. Where code exists but an acceptance criterion
 is still unproven, the item says so explicitly and the verification gap is cross-linked in `TODO.md`.
@@ -1834,16 +1834,46 @@ Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
 - **Verification** — `tests/conformance/test_playbook_script_ui.py` (endpoint refresh/broken-script/
   authz + template hooks): **29 passed + 2 subtests**; loader + authoring + script UI **77 passed +
   2 subtests**; playbook round-trip/delete/tenant + MVP loop **47 passed**; `test_ui_loop.py` **38
-  passed**; `make check` green. Manual check: `list_playbook_scripts` discovers `enrichment_probe`,
-  `test_playbook`, `test_playbook_2` (3/3 OK), so a newly deployed script is selectable without a
-  restart.
+  passed**; `make check` green. Manual check at the time: `list_playbook_scripts` discovered
+  `enrichment_probe`, `test_playbook`, and a local untracked `test_playbook_2` (3/3 OK), so a newly
+  deployed script is selectable without a restart. The local copy was deleted on 2026-11-13; the
+  current discovery is 2/2 (`enrichment_probe`, `test_playbook`).
 - **Plans** — `docs/planning/PLAN-2026-11-12-playbook-script-fetch-on-change.md` (implementation);
   `PLAN-2026-11-12-playbook-script-picker-refresh.md` (superseded).
 
 ---
 
+## 2026-11-02 — Global search (`/search` + `GET /api/v1/search`) — **implemented; verification pending**
+
+- **UI** — `/search` (`ui-search`) with a **Search** rail entry below Cases (`s`), page-level form,
+  `/` focus when the form is present, grouped `type=all` results (top 10 per kind, counts), typed
+  views at 50/page, safe `<mark>` highlighting, and an owning-organisation column for superAdmin.
+  The earlier header-search-box experiment was intentionally superseded by
+  `docs/planning/PLAN-2026-11-02-search-page-rail-entry.md`; `test_ui_search.py` asserts the form is
+  absent from other pages.
+- **API** — `GET /api/v1/search` and its slash twin, backed by the same `query/search.py` service:
+  org-scoped (`case_visible_q` for cases, `org_q` for alerts/observables), envelope + `X-Total`,
+  named 400s, typed paging, and one `cross_org_read_search` audit row per `(kind, target org)` for
+  superAdmin cross-org hits. Raw text only.
+- **Fields** — cases `number/title/description/summary`, alerts `title/description/summary`,
+  observables `data`; case-insensitive substring, AND across terms, max 200 chars / 8 terms.
+- **Digit-only refinement (2026-11-13)** — a digit-only term now matches `Case.number` exactly **and**
+  still matches case title/description/summary (previously number-only). Exact-number ordering is
+  unchanged. Regression tests cover text matches and exact-first ordering.
+- **Verification** — focused search suites `test_search_api.py` + `test_ui_search.py`: **34 passed**;
+  adjacent tenant/nav/URL/inline suites: **779 passed**; `make check` green. Full suite on 2026-11-13:
+  **3673 passed, 3 skipped, 2 subtests passed** (18m16s; 15 pre-existing warnings). **Still open:**
+  independent verifier report, T6 security review, and Postgres `EXPLAIN`/optional trigram index —
+  tracked in TODO §6.16-fu1.
+- **Adjacent test classification** — `test_tenant_scoping.py` and `test_ui_urls_smoke.py` now classify
+  `ui-playbook-scripts` as admin-only; the route shipped in `481a6225` and made those enumerators fail
+  for analysts. Test-only fix; no behavior change.
+
+---
+
 ### Other closed checkbox items (title index)
 
+- **6.16 P6 — Global search — implemented 2026-11-02; verification pending (TODO §6.16-fu1).**
 - **1.1 — `Case.save()` number allocation**
 - **1.2 — `manage.py` default settings module**
 - **1.3 — Replace the four vacuous schema tests**

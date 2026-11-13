@@ -8,7 +8,8 @@ Approved semantics (`docs/planning/PLAN-2026-11-01-global-search.md` §5):
 
 * case-insensitive substring matching (`__icontains`), never regex or raw SQL;
 * all terms are ANDed; fields within one term are ORed;
-* a digit-only term (with optional leading ``#``) matches ``Case.number`` exactly;
+* a digit-only term (with optional leading ``#``) also matches ``Case.number`` exactly;
+  it still matches the case text fields;
 * cases are scoped with ``case_visible_q`` (own org or a share); alerts/observables with ``org_q``;
 * blank queries issue no result queries;
 * max 200 characters / 8 terms;
@@ -136,10 +137,11 @@ def parse_query(raw: str | None) -> SearchQuery:
 
 
 def _term_case_q(term: str) -> Q:
+    text_q = Q(title__icontains=term) | Q(description__icontains=term) | Q(summary__icontains=term)
     candidate = term.lstrip("#")
     if candidate.isdigit():
-        return Q(number=int(candidate))
-    return Q(title__icontains=term) | Q(description__icontains=term) | Q(summary__icontains=term)
+        return text_q | Q(number=int(candidate))
+    return text_q
 
 
 def _term_alert_q(term: str) -> Q:

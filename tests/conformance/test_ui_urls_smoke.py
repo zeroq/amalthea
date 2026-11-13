@@ -133,6 +133,7 @@ def test_every_get_routable_ui_page_renders(browser: Client, case: Case) -> None
     # never reaches it (ADR-010).
     admin_or_superadmin = {
         "ui-playbook-create",
+        "ui-playbook-scripts",
         "ui-settings",
         "ui-settings-sources",
         "ui-settings-users",

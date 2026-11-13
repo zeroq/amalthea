@@ -87,6 +87,45 @@ class TestSearchAPISemantics:
         assert [r["id"] for r in results] == [str(exact.id)]
         assert results[0]["number"] == exact.number
 
+    def test_digit_only_term_also_matches_case_text_fields(self, api, analyst, make_case) -> None:
+        exact = make_case(org=analyst.org, title="Needle exact", severity=1)
+        title_hit = make_case(org=analyst.org, title=f"Ticket {exact.number}", severity=4)
+        description_hit = make_case(
+            org=analyst.org, title="Other", description=f"event {exact.number}", severity=2
+        )
+        summary_hit = make_case(
+            org=analyst.org, title="Other", summary=f"{exact.number} in summary", severity=3
+        )
+        make_case(org=analyst.org, title="Different")
+
+        resp = api.get(
+            reverse("search-api"), {"q": str(exact.number), "type": "case"}, format="json"
+        )
+        assert resp.status_code == 200
+        results = resp.json()["sections"][0]["results"]
+        assert {r["id"] for r in results} == {
+            str(exact.id),
+            str(title_hit.id),
+            str(description_hit.id),
+            str(summary_hit.id),
+        }
+        assert results[0]["id"] == str(exact.id)
+        assert results[0]["number"] == exact.number
+
+    def test_digit_only_term_matches_all_entity_text(
+        self, api, analyst, make_case, make_alert, make_observable
+    ) -> None:
+        case = make_case(org=analyst.org, title="Case without the number")
+        make_alert(org=analyst.org, title=f"Alert {case.number}")
+        make_observable(org=analyst.org, data=f"10.0.0.{case.number}", data_type="ip")
+
+        resp = api.get(reverse("search-api"), {"q": str(case.number), "type": "all"}, format="json")
+        assert resp.status_code == 200
+        counts = resp.json()["counts"]
+        assert counts["case"] == 1
+        assert counts["alert"] == 1
+        assert counts["observable"] == 1
+
     def test_alert_and_observable_fields(self, api, analyst, make_alert, make_observable) -> None:
         make_alert(org=analyst.org, title="Needle alert", description="x", summary="y")
         make_observable(org=analyst.org, data="needle.example", data_type="domain")

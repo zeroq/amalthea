@@ -91,8 +91,9 @@ Simple, org-scoped substring search across cases, alerts and observables. It sha
   only, default `50`, bound `1–200`). Invalid values are a named 400; a page past the end clamps to
   the last page. `type=all` ignores `page`/`per_page`.
 - Semantics: case-insensitive substring, AND across terms and OR across fields; a digit-only term
-  (with optional `#`) matches `Case.number` exactly. Cases use `case_visible_q` (own org or share);
-  alerts/observables use `org_q`. Blank `q` returns 200 with zero counts and `sections=[]`.
+  (with optional `#`) matches `Case.number` exactly **and** still matches case
+  title/description/summary. Cases use `case_visible_q` (own org or share); alerts/observables use
+  `org_q`. Blank `q` returns 200 with zero counts and `sections=[]`.
 - Envelope: `{query, type, total, counts: {case, alert, observable}, sections: [...]}` and an
   `X-Total` header equal to the sum of counts. Every section has
   `{type, total, page, per_page, has_next, results}`; every result has

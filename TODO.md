@@ -1,42 +1,45 @@
 # TODO — Amalthea
 
 Open work only. Shipped work and closed-item history live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-11-12 — archived §18 (case JSON import + export v2), §19 (alert JSON
-export/import), and the playbook script picker to [`COMPLETED.md`](./COMPLETED.md). The only remaining
-item from those waves is the §19 alert-import security review, now §21. Full suite last run 2026-11-10
-(**3583 passed, 3 skipped**); not re-run for the playbook picker. The priority table below is the
-source of truth for open work.
+Last updated: 2026-11-13 — reconciled search (§6.16 P6): it shipped 2026-11-02 (`6427beeb`), so the
+priority row is now the narrow **§6.16 P6-fu1** (independent verification, security review, Postgres
+measurement). The original header-search ACs are superseded by
+`PLAN-2026-11-02-search-page-rail-entry.md`. Also archived §18/§19 and the playbook script picker to
+[`COMPLETED.md`](./COMPLETED.md); the §19 alert-import security review remains §21. Full suite last run
+2026-11-13 (**3673 passed, 3 skipped, 2 subtests passed**, 18m16s), covering search and the playbook
+picker. The priority table below is the source of truth for open work.
 
 ---
 
 ## 🎯 NEXT HIGHEST-IMPACT ITEMS (Priority Order)
 
 Ordered by **impact on the analyst** — the daily IR loop first, then deployment security, then
-engineering hygiene. Shipped rows were removed in the 2026-11-08 cleanup (see `COMPLETED.md`).
+engineering hygiene. Shipped rows were removed in the 2026-11-08 cleanup; the shipped search row moved
+to its narrow follow-up on 2026-11-13 (see `COMPLETED.md`).
 
 | Priority | Item | Description | Impact |
 |----------|------|-------------|--------|
-| **1** | **§6.16 P6 — Global search (B3)** | No search surface anywhere; only browse lists. Plan: `PLAN-2026-10-11-ui-completeness.md` B3/Q5 (cases + alerts + observables). | **Highest** — "have we seen this hash/IP/user?" has no answer. |
-| **2** | **§12.11 — CI red; full suite never run** | Secrets job times out (full-history scan not running); the "migrations, suite" step does not run the suite. | **Highest leverage** — every other claim is unbacked by CI. |
-| **3** | **§12.3-fu1 — Automatic ingest-time bundling** | `correlation_key` is derived/indexed but only the manual Similar/attach path consumes it. Auto-bundle was deferred (Q1b). Depends on §12.1-fu1. | **High** — the orchestration promise of Modules B+C. |
-| **4** | **§12.12-fu1 — Fuzzy title exclusion (design)** | `ppdeep` similarity excludes title; decide title-fingerprint pass vs opt-in setting and document the trade-off. | **High** — duplicate alerts still surface look-alikes. |
-| **5** | **§12.4 — No bulk actions in the UI** | `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk` exist in the API; the UI stub was deleted (Q2). | **Medium-High** — 200-alert mornings are single-item work. |
-| **6** | **§21 — Alert-import security review** | Implementation committed (`ff139692`) and AIMP-1..AIMP-7 MET; the P5 security review is the only remaining step. | **Medium** — closes the §19 exchange/debug surface safely. |
-| **7** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; ledger already syncs. |
-| **8** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — ops/onboarding, not triage. |
-| **9** | **§6.13 / §6.16 P4 — Ingestion tokens + audit-log viewer** | **Partial:** token lifecycle shipped (10a–c); read-only `AuditLog` viewer remains. | **Medium** — audit viewer is the accountability half. |
-| **10** | **S3 + S5 (+ M3 residual)** | **S3** per-account lockout on the API login + stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. M3 shipped; residual same-org cleartext secrets. | **Medium (security)** |
-| **11** | **§12.1-fu1 — Measure filtered-list `COUNT` on Postgres** | Unmeasured `COUNT` on 12 paginated lists; prerequisite for auto-bundling. | **Medium** — pager truthfulness at scale. |
-| **12** | **§2.6 + §2.7 + §7.4 + §8.5/§8.7 + §11.4-L1/§11.5** | Coverage ≥ 80%; Phase-12/T2 QA list; Tailwind source/artifact split; mutation coverage; unaudited procedure attaches; admin role model; log forging. | **None** — engineering hygiene. |
-| **13** | **§10.9 — Status vocabularies have no human labels** | UI prints raw tokens (`InProgress`); add labels without breaking `stage`-keyed automation. | **Low** — cosmetic. |
-| **14** | **§10.11 — Reload mints a second ingestion token** | 200 body re-submits on reload; one-shot nonce or explicit nudge. | **Low** — admin-only exposure. |
-| **15** | **§10.12-fu1…fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, admin paused-state display, test gaps. | **Low–Medium.** |
-| **16** | **§14.1–14.12 — Alert tag follow-ups** | Id validation, parity, truncation text, a11y, query cleanup, swap-file purge. | **Low.** |
-| **17** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
-| **18** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
-| **19** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
-| **20** | **§12.9 — UI layout/style standardization** | Input/button heights, compact action columns, table/filter convention; codify guidelines. Includes the new alert/case severity rows (`.severity-filter-row`, `.severity-filter--N`) as the canonical filter pattern. | **Low.** |
-| **21** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. | **None** — hygiene. |
+| **1** | **§12.11 — CI red; full suite never run** | Secrets job times out (full-history scan not running); the "migrations, suite" step does not run the suite. | **Highest leverage** — every other claim is unbacked by CI. |
+| **2** | **§12.3-fu1 — Automatic ingest-time bundling** | `correlation_key` is derived/indexed but only the manual Similar/attach path consumes it. Auto-bundle was deferred (Q1b). Depends on §12.1-fu1. | **High** — the orchestration promise of Modules B+C. |
+| **3** | **§12.12-fu1 — Fuzzy title exclusion (design)** | `ppdeep` similarity excludes title; decide title-fingerprint pass vs opt-in setting and document the trade-off. | **High** — duplicate alerts still surface look-alikes. |
+| **4** | **§12.4 — No bulk actions in the UI** | `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk` exist in the API; the UI stub was deleted (Q2). | **Medium-High** — 200-alert mornings are single-item work. |
+| **5** | **§21 — Alert-import security review** | Implementation committed (`ff139692`) and AIMP-1..AIMP-7 MET; the P5 security review is the only remaining step. | **Medium** — closes the §19 exchange/debug surface safely. |
+| **6** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; ledger already syncs. |
+| **7** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — ops/onboarding, not triage. |
+| **8** | **§6.13 / §6.16 P4 — Ingestion tokens + audit-log viewer** | **Partial:** token lifecycle shipped (10a–c); read-only `AuditLog` viewer remains. | **Medium** — audit viewer is the accountability half. |
+| **9** | **S3 + S5 (+ M3 residual)** | **S3** per-account lockout on the API login + stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. M3 shipped; residual same-org cleartext secrets. | **Medium (security)** |
+| **10** | **§12.1-fu1 — Measure filtered-list `COUNT` on Postgres** | Unmeasured `COUNT` on 12 paginated lists; prerequisite for auto-bundling. | **Medium** — pager truthfulness at scale. |
+| **11** | **§2.6 + §2.7 + §7.4 + §8.5/§8.7 + §11.4-L1/§11.5** | Coverage ≥ 80%; Phase-12/T2 QA list; Tailwind source/artifact split; mutation coverage; unaudited procedure attaches; admin role model; log forging. | **None** — engineering hygiene. |
+| **12** | **§10.9 — Status vocabularies have no human labels** | UI prints raw tokens (`InProgress`); add labels without breaking `stage`-keyed automation. | **Low** — cosmetic. |
+| **13** | **§10.11 — Reload mints a second ingestion token** | 200 body re-submits on reload; one-shot nonce or explicit nudge. | **Low** — admin-only exposure. |
+| **14** | **§10.12-fu1…fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, admin paused-state display, test gaps. | **Low–Medium.** |
+| **15** | **§14.1–14.12 — Alert tag follow-ups** | Id validation, parity, truncation text, a11y, query cleanup, swap-file purge. | **Low.** |
+| **16** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
+| **17** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
+| **18** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
+| **19** | **§12.9 — UI layout/style standardization** | Input/button heights, compact action columns, table/filter convention; codify guidelines. Includes the new alert/case severity rows (`.severity-filter-row`, `.severity-filter--N`) as the canonical filter pattern. | **Low.** |
+| **20** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. | **None** — hygiene. |
+| **21** | **§6.16 P6-fu1 — Search verification + security + Postgres measurement** | Search shipped (`6427beeb`); write `VERIFY-2026-11-01-global-search.md`, record the T6 security review, and run `EXPLAIN` on seeded Postgres before deciding on a trigram index. | **Medium** — closes the last evidence gap; no user-facing feature is missing. |
 
 ---
 
@@ -83,9 +86,19 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
   case-template edit + password change + 500/403 pages + cheat-sheet as a server-rendered `<dialog>` + Font Awesome
   + keyboard coverage; **P2** alert triage, case edit, observable edit/delete; **P3** procedures/TTP UI; **P4**
   Settings→Ingestion tokens + Audit log (pulls §6.13 forward); **P5** playbook action round-trip + sanitized
-  Markdown; **P6** global search; **P7** per-org realtime + presence + scoped HTMX adoption. Open questions Q1
-  (Markdown dependency) gate P5 and Q2 (bulk stub) gates P1. Source: post-§6.15 UI audit (user decision
-  "everything", 2026-10-11).
+  Markdown; **P6** global search — **SHIPPED 2026-11-02** (`6427beeb`; see §6.16-fu1 and `COMPLETED.md`);
+  **P7** per-org realtime + presence + scoped HTMX adoption. Open questions Q1 (Markdown dependency) gate
+  P5 and Q2 (bulk stub) gates P1. Source: post-§6.15 UI audit (user decision "everything", 2026-10-11).
+- [ ] **6.16-fu1 — Global search follow-up: verification, security review, Postgres measurement.**
+  P6 shipped 2026-11-02 (`6427beeb`): `/search` + `GET /api/v1/search`, shared `query/search.py`, org
+  scoping, highlighting, paging, and tests. Remaining: (a) write
+  `docs/verification/VERIFY-2026-11-01-global-search.md` against the original plan's T7 checklist;
+  (b) run the T6 security review (scoping, caps, highlight/XSS, CSP, viewer, superAdmin API audit) and
+  record the result; (c) run `EXPLAIN (ANALYZE, BUFFERS)` on seeded Postgres for filtered
+  case/alert/observable searches and add a trigram index only if the measurement warrants it. Full
+  suite is green (2026-11-13: **3673 passed, 3 skipped, 2 subtests**); CI itself remains red (§12.11).
+  The header-search ACs in `PLAN-2026-10-11-ui-completeness.md` are superseded by
+  `PLAN-2026-11-02-search-page-rail-entry.md`; do not re-add a global header search form.
 
 
 ---
@@ -296,8 +309,8 @@ Recommended: one small plan (`PLAN-…-analyst-ergonomics`) covering **§12.1 + 
 they share the list-view plumbing and are cheap. **§10.7/Q-D4 is now settled**: §12.3's "Similar" surface was
 re-opened and shipped 2026-10-18 as a read-only, correlation-ranked panel plus a correlation-ranked, audited
 attach path — **automatic** ingest-time bundling was deliberately deferred (see §12.3 and §12.3-fu1). §6.16 P6
-(search) and P7 (realtime) stay in their own plan and should land after
-§12.1/12.2 — searching a truncated list is a half-answer.
+(search) shipped 2026-11-02 (`6427beeb`) after the §12.1 pager fix; its remaining verification/security/
+Postgres work is §6.16-fu1. §6.16 P7 (realtime) remains in its own plan.
 
 - [ ] **12.1-fu1 — Measure the filtered-list `COUNT` on Postgres before trusting it (plan §11 Q7).**
   `observable_list`'s `q` filter is `data__icontains` over a JSONB column with no supporting index; pagination

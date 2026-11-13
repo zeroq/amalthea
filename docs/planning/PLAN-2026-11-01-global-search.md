@@ -1,10 +1,14 @@
 # Plan: Global Search (TODO §6.16 P6 / B3)
 
-**Status:** APPROVED — user accepted defaults; Q4 changed to include highlighting; Q5 changed to add an API endpoint.
+**Status:** IMPLEMENTED 2026-11-02 (`6427beeb`) — search service, UI, and API shipped. The header-form
+requirement was superseded by `PLAN-2026-11-02-search-page-rail-entry.md`; independent verification,
+security review, and Postgres measurement remain in TODO §6.16-fu1.
 **Date:** 2026-11-01
 **Owner:** planner
 **Source:** `TODO.md` §6.16 P6, `docs/planning/PLAN-2026-10-11-ui-completeness.md` B3/Q5
-**Target:** Org-scoped global search across cases, alerts, and observables, with a header search box, `/` shortcut, highlighted matches, a server-rendered results page, and `GET /api/v1/search`.
+**Target:** Org-scoped global search across cases, alerts, and observables, with a `/` shortcut,
+highlighted matches, a server-rendered results page, and `GET /api/v1/search`. The header search box
+was superseded by `PLAN-2026-11-02-search-page-rail-entry.md`; the form now lives on `/search`.
 
 ---
 
@@ -12,8 +16,8 @@
 
 Amalthea has paginated lists but no global search. The most common triage question — *“have we seen this hash / IP / user before?”* — currently requires browsing each list or composing a query API request. This wave adds:
 
-- a header search field on every authenticated page;
-- `/` focuses that field;
+- a **Search** rail entry plus a page-level search field on `/search` (the header box was superseded);
+- `/` focuses the search field when present, otherwise the first main input;
 - a server-rendered results page at `/search`;
 - matches across **cases** (number/title/description/summary), **alerts** (title/description/summary), and **observables** (value);
 - safe server-side `<mark>` highlighting of matched terms;
@@ -42,7 +46,8 @@ No schema change, background index, search engine, or JavaScript typeahead is re
 - No search over comments, timeline entries, tasks, attachments, pages, procedures, playbooks, ingestion tokens, or audit logs.
 - No fuzzy search, stemming, synonym expansion, saved searches, search history, or typeahead/autocomplete.
 - No replacement or extension of the TheHive-compatible `POST /api/v1/query` DSL. The new API endpoint is a simple, documented search surface.
-- No changes to existing list pages beyond adding the shared header search box.
+- No changes to existing list pages; the header search box was superseded by the rail-entry plan
+  (the form lives on `/search`).
 - No cross-org search UI for superAdmin beyond the existing “superAdmin sees all” convention; results label the owning organisation.
 - No API HTML/highlight fragments. The API returns raw text; highlighting is a UI concern.
 
@@ -51,7 +56,7 @@ No schema change, background index, search engine, or JavaScript typeahead is re
 ### 4.1 Runtime shape
 
 ```
-base.html header form ──GET /search?q=…&type=…&page=…──▶ ui.search.global_search ─┐
+search.html form ──────GET /search?q=…&type=…&page=…──▶ ui.search.global_search ─┐
                                                                                     │
 GET /api/v1/search?q=…&type=…&page=…&per_page=… ──▶ query.search_views.search_view ├──▶ query.search service
                                                                                     │      ├─ parse/normalize q
@@ -107,7 +112,8 @@ The new `GET /api/v1/search` is intentionally simple: a fixed field set, substri
 - Blank query => render the search page with an instructional empty state and issue **zero** result queries. The API returns an empty envelope with zero counts.
 - Terms are case-insensitive substring matches (`__icontains`), not regex.
 - Multiple terms are **AND** across terms, **OR** across fields within each term. Example: `apt29 hash` requires one field to match `apt29` and one field to match `hash`.
-- Leading `#` is stripped for case-number matching; a digit-only term also matches `Case.number` exactly.
+- Leading `#` is stripped for case-number matching; a digit-only term also matches `Case.number`
+  exactly **and** still matches the case text fields (title/description/summary).
 - No SQL is constructed from the query. Django’s ORM parameterises values; `LIKE` wildcards are escaped by the ORM.
 
 ### 5.2 Fields
@@ -337,7 +343,8 @@ Always a JSON object with `query`, `type`, `total`, `counts`, and `sections`. `s
 2. Case number, title, description, and summary each match.
 3. Alert title, description, and summary each match.
 4. Observable value matches.
-5. Multiple terms are ANDed; a query matching only one term returns no hit.
+5. Multiple terms are ANDed; a query matching only one term returns no hit; a digit-only term still
+   matches case title/description/summary and orders the exact case number first.
 6. `type=case|alert|observable` filters sections and paginates; invalid type falls back to all.
 7. `type=all` shows per-type counts and only top 10 hits; “View all” preserves `q`.
 8. Case shares: a case shared to the caller’s org is visible; an unrelated org’s case is not.
@@ -356,7 +363,8 @@ Always a JSON object with `query`, `type`, `total`, `counts`, and `sections`. `s
 2. Authenticated analyst gets the envelope; viewer gets 200; read-scoped API key GET works.
 3. Blank `q` returns 200 with zero counts and `sections=[]`.
 4. Case/alert/observable matches and field coverage mirror the UI service.
-5. Multi-term AND; case-number exact; `#123` form.
+5. Multi-term AND; case-number exact **plus case text fields**; `#123` form; exact number ordered
+   first.
 6. `type=all` returns three sections top 10 each, `counts` totals, `X-Total` sum.
 7. Typed `page`/`per_page` works; `has_next`; out-of-range clamps; `per_page` cap.
 8. Invalid `type`/`page`/`per_page` returns named 400.
@@ -414,11 +422,11 @@ If a shared helper changed (e.g. `keys.js` or `base.html`), add the smallest dir
 
 | # | Task | AC |
 |---|---|---|
-| F1 | Add the header search form to `base.html` with accessible label, `role="search"`, and prefilled `q`. | Every authenticated page renders the form; no duplicate IDs. |
+| F1 | ~~Add the header search form to `base.html` with accessible label, `role="search"`, and prefilled `q`.~~ **Superseded** — the form lives on `/search`; see `PLAN-2026-11-02-search-page-rail-entry.md`. | `/search` renders the form; no other page contains `#global-search-q`. |
 | F2 | Create `ui/templates/ui/search.html` with blank, all, typed, empty, and no-result states. | All states render meaningful text; no raw model assumptions leak into the template. |
 | F3 | Add type tabs and “View all N” links preserving `q`; reuse `_list_summary.html`/`_pager.html`. | Links retain the query; counts match the view. |
 | F4 | Add `highlight` filter to `ui/templatetags/ui_tags.py`; use it on case/alert/observable titles and the case number. | `<mark>` only; source/query payloads stay escaped; nested/overlapping terms do not double-render. |
-| F5 | Update `keys.js` so `/` focuses `#global-search-q`; keep the fallback and `isTyping`. | `/` focuses search on pages with the header; typing a shortcut while focused does nothing. |
+| F5 | Update `keys.js` so `/` focuses `#global-search-q`; keep the fallback and `isTyping`. | `/` focuses search on `/search`; elsewhere it focuses the first main input; typing a shortcut while focused does nothing. |
 | F6 | Add `.global-search` and `.search-hit mark` rules to `app.src.css`; run `make css`. | `make css-check` is clean; no inline styles; accessible contrast; responsive wrap. |
 | F7 | Add short notes to `docs/spec/ui-style.md` and `docs/spec/api.md`. | Docs match the shipped UI and API behaviour. |
 
@@ -498,6 +506,9 @@ If a shared helper changed (e.g. `keys.js` or `base.html`), add the smallest dir
 
 - `2026-11-01` — Plan drafted. No implementation started. Q1–Q6 pending.
 - `2026-11-01` — User accepted Q1/Q2/Q3/Q6 defaults; Q4 changed to include highlighting; Q5 changed to add `GET /api/v1/search` alongside the UI. Plan approved for handoff.
+- `2026-11-13` — Digit-only terms now also match case title/description/summary instead of only
+  `Case.number`; exact-number ordering is unchanged. This closes the “also matches” ambiguity in §5.1.
+  The header-search-box requirement remains superseded (see the 2026-11-02 rail-entry plan).
 
 ## 15. Test Results (working log)
 
@@ -509,3 +520,9 @@ If a shared helper changed (e.g. `keys.js` or `base.html`), add the smallest dir
   clean (ruff, mypy, Django check, migrations, CSS drift, playbook discovery).
 - Full suite intentionally skipped per user instruction; final verification/QA/security review still
   to be recorded in `docs/planning/VERIFY-2026-11-01-global-search.md`.
+- `2026-11-13` — Digit-only terms now also match case title/description/summary (in addition to
+  `Case.number`); exact-number ordering unchanged. Regression tests added to
+  `tests/conformance/test_search_api.py` and `test_ui_search.py`. Focused search suites **34 passed**; adjacent
+  tenant/nav/URL/inline suites **779 passed**; `make check` green. Full suite on 2026-11-13:
+  **3673 passed, 3 skipped, 2 subtests passed** (18m16s; 15 pre-existing warnings). Verification,
+  security review, and Postgres measurement remain open in TODO §6.16-fu1.

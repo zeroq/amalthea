@@ -180,11 +180,17 @@ Defects found and fixed during the phase (details in the verification record onc
 
 **P5 status (2026-10-12): DONE — verified + security-reviewed.** Independent verification: `docs/verification/VERIFY-2026-10-12-ui-completeness-p5.md` (18/18 ACs met). Security: `docs/reviews/REVIEW-2026-10-12-ui-completeness-p5.md` (0 Critical, 0 High). Fixed during the batch: textarea stored-XSS in `playbook_form.html` (`|safe` → autoescape, + regression test), unbounded `header_count` → `MAX_HEADERS = 64` reject (M2), missing `@require_http_methods` (L2), undefined CSS var + `.md` `white-space` (D3). **Open, deferred to decisions below:** M1 (does `read-only` mutate? — role policy, pre-existing, matches API), M3 (playbook headers are global + rendered in cleartext → secret exposure), L1 (protocol-relative `href` survives the sanitizer). See `TODO` §10.9.
 
-### P6 — Global search (B3)
+### P6 — Global search (B3) — **SUPERSEDED 2026-11-02**
 
-- [ ] Header search input (`/` focuses it, as the cheat-sheet already promises) → `ui-search` results page: matches across cases (number/title/description), alerts (title), observables (value), **org-scoped**, paginated.
-- [ ] Empty query renders the page; no result renders an empty state; a cross-tenant match never leaks (authz test).
-- [ ] If (and only if) `EXPLAIN` shows a seq scan on seeded volume, add the trigram index in its own migration.
+> **Superseded by [`PLAN-2026-11-02-search-page-rail-entry.md`](PLAN-2026-11-02-search-page-rail-entry.md).**
+> The search service/API/UI shipped in `6427beeb`; the header search box was intentionally removed in
+> favour of a **Search** rail entry and a form on `/search`. Do **not** re-add `#global-search-q` to
+> `base.html` — `test_ui_search.py::test_search_form_is_not_on_other_pages` enforces its absence.
+> The open verification/security/Postgres follow-up is TODO §6.16-fu1.
+
+- ~~Header search input (`/` focuses it, as the cheat-sheet already promises) → `ui-search` results page: matches across cases (number/title/description), alerts (title), observables (value), **org-scoped**, paginated.~~
+- ~~Empty query renders the page; no result renders an empty state; a cross-tenant match never leaks (authz test).~~ (Covered by the shipped `/search` page; see the superseding plan and `test_ui_search.py`.)
+- [ ] **Postgres measurement (still open):** run `EXPLAIN` on seeded volume and add the trigram index only if a seq scan materially affects latency. Tracked in TODO §6.16-fu1.
 
 ### P7 — Realtime breadth + HTMX adoption (D4, D5)
 

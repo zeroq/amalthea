@@ -130,6 +130,15 @@ class TestSearchUI:
         by_number = client.get(reverse("ui-search"), {"q": f"#{case.number}", "type": "case"})
         assert f"<mark>#{case.number}</mark>" in by_number.content.decode()
 
+    def test_digit_only_query_matches_case_text(self, client, analyst, make_case) -> None:
+        case = make_case(org=analyst.org, title="Event 4624")
+        client.force_login(analyst)
+        response = client.get(reverse("ui-search"), {"q": "4624", "type": "case"})
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert reverse("ui-case-detail", args=[case.number]) in content
+        assert "<mark>4624</mark>" in content
+
     def test_all_view_groups_and_links(self, client, analyst, make_case, make_alert) -> None:
         make_case(org=analyst.org, title="Common case")
         make_alert(org=analyst.org, title="Common alert")

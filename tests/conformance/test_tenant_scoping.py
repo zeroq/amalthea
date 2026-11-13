@@ -1677,7 +1677,7 @@ class TestUIRouteEnumerationConformance:
         # ADR-009 org gate, and both are uniform 404s so neither leaks existence). The own-org 200 for
         # an admin, and the cross-org 404 for a foreign admin, are covered by
         # `test_settings_source_mapping.py`.
-        admin_only_routes = {"ui-settings-source-detail"}
+        admin_only_routes = {"ui-settings-source-detail", "ui-playbook-scripts"}
 
         failures = []
         for name, pattern, methods in ui_routes:
