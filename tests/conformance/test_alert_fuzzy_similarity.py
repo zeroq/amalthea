@@ -47,6 +47,7 @@ from django.urls import reverse
 
 from alerts.hashing import VOLATILE_KEYS, canonicalize_payload, compute_payload_ssdeep
 from alerts.models import Alert, AlertStatus
+from alerts.title_similarity import normalize_title_tokens, title_similarity
 from cases.correlation import MAX_FUZZY_COMPARISONS, alerts_fuzzy_similar_to_case
 from cases.models import Case, CaseStatus, TimelineEvent
 from identity.models import AuditLog, Organisation, User
@@ -296,10 +297,10 @@ class TestThresholdBoundary:
             org=org, title="Attached seed", source_ref="seed-1", payload=_base_payload(), case=case
         )
         near_dup = _mk_alert(
-            org=org, title="Near duplicate", source_ref="near-1", payload=_near_dup_payload()
+            org=org, title="Attached seed", source_ref="near-1", payload=_near_dup_payload()
         )
         variant = _mk_alert(
-            org=org, title="Different event", source_ref="variant-1", payload=_variant_payload()
+            org=org, title="Attached seed", source_ref="variant-1", payload=_variant_payload()
         )
 
         score_near = ppdeep.compare(near_dup.payload_ssdeep, attached.payload_ssdeep)
@@ -355,13 +356,13 @@ class TestCrossOrgIsolation:
 
         attached = _mk_alert(
             org=org1,
-            title="Attached seed",
+            title="Same event candidate",
             source_ref="x-attached",
             payload=_base_payload(),
             case=case,
         )
         same_org = _mk_alert(
-            org=org1, title="Same-org candidate", source_ref="x-same-org", payload=_base_payload()
+            org=org1, title="Same event candidate", source_ref="x-same-org", payload=_base_payload()
         )
         cross_org = _mk_alert(
             org=org2,
@@ -382,7 +383,7 @@ class TestCrossOrgIsolation:
 
         # Rendered UI: the card shows the same-org row, never the cross-org sentinel.
         body = _login(analyst1).get(_similar_url(case)).content.decode()
-        assert "Same-org candidate" in body
+        assert "Same event candidate" in body
         assert SENTINEL_TITLE not in body
         assert str(cross_org.id) not in body
 
@@ -459,14 +460,14 @@ class TestAttachedAlertExclusion:
         case = _mk_case("Case Attached", org)
 
         attached_a = _mk_alert(
-            org=org, title="Attached A", source_ref="att-a", payload=_base_payload(), case=case
+            org=org, title="Shared title", source_ref="att-a", payload=_base_payload(), case=case
         )
         # Identical hash to attached_a, also linked to the case → equally "perfect" match.
         attached_b = _mk_alert(
-            org=org, title="Attached B", source_ref="att-b", payload=_base_payload(), case=case
+            org=org, title="Shared title", source_ref="att-b", payload=_base_payload(), case=case
         )
         unlinked = _mk_alert(
-            org=org, title="Unlinked candidate", source_ref="unlinked-1", payload=_base_payload()
+            org=org, title="Shared title", source_ref="unlinked-1", payload=_base_payload()
         )
 
         assert attached_b.payload_ssdeep == attached_a.payload_ssdeep == unlinked.payload_ssdeep
@@ -538,26 +539,26 @@ class TestViewerReadOnly:
 
         _mk_alert(
             org=org,
-            title="Attached seed",
+            title="Same event title",
             source_ref="v-seed",
             payload=_base_payload(),
             case=case,
         )
         candidate = _mk_alert(
             org=org,
-            title="Viewer-visible candidate",
+            title="Same event title",
             source_ref="v-cand",
             payload=_base_payload(),
         )
 
         # Positive control: the analyst (can_mutate) gets the Link button.
         analyst_body = _login(analyst).get(_similar_url(case)).content.decode()
-        assert "Viewer-visible candidate" in analyst_body
+        assert "Same event title" in analyst_body
         assert "Link to case" in analyst_body
 
         viewer_client = _login(viewer)
         viewer_body = viewer_client.get(_similar_url(case)).content.decode()
-        assert "Viewer-visible candidate" in viewer_body  # the card/row is visible
+        assert "Same event title" in viewer_body  # the card/row is visible
         assert "Link to case" not in viewer_body  # …but no affordance to act on it
 
         resp = viewer_client.post(
@@ -598,7 +599,7 @@ class TestLinkFlow:
             case=case,
         )
         candidate = _mk_alert(
-            org=org, title="Fuzzy candidate", source_ref="l-cand", payload=_base_payload()
+            org=org, title="Attached seed", source_ref="l-cand", payload=_base_payload()
         )
 
         # The alert we link is exactly what the fuzzy helper returned.
@@ -820,6 +821,396 @@ class TestEmptyStates:
 # ---------------------------------------------------------------------------
 # 13. Tab gating (AC-B2) — restored from test_ui_similar_alerts.py
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 14. Alert fuzzy title similarity (NEW) — title gate integration
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestTitleSimilarity:
+    """Unit tests for :func:`alerts.title_similarity.normalize_title_tokens`
+    and :func:`alerts.title_similarity.title_similarity`.
+
+    These tests verify the normalization logic and Jaccard similarity computation
+    used by the fuzzy title gate. They are not tied to the Django ORM beyond
+    importing the functions under test.
+    """
+
+    def test_normalize_title_tokens_basic(self):
+        """Basic tokenization: simple words are kept, case is folded."""
+        result = normalize_title_tokens("Phishing Alert")
+        assert "phishing" in result
+        assert "alert" in result
+
+    def test_normalize_title_tokens_case_insensitive(self):
+        """Case folding: different casing produces the same token set."""
+        result1 = normalize_title_tokens("PHISHING ALERT")
+        result2 = normalize_title_tokens("phishing alert")
+        assert result1 == result2
+
+    def test_normalize_title_tokens_uuids_removed(self):
+        """UUIDs are stripped from the token set."""
+        title = "Alert evt-123e4567-e89b-12d3-a456-426614174000 reported"
+        result = normalize_title_tokens(title)
+        # The UUID should not appear as a token
+        assert "123e4567-e89b-12d3-a456-426614174000" not in result
+
+    def test_normalize_title_tokens_iso_timestamps_removed(self):
+        """ISO-8601 timestamps are stripped from the token set."""
+        for title in (
+            "Alert 2026-10-20T10:00:00Z received",
+            "Alert 2026-10-20T10:00:00.123Z received",
+            "Alert 2026-10-20 10:00:00+02:00 received",
+        ):
+            result = normalize_title_tokens(title)
+            assert "2026" not in result
+            assert "received" in result
+
+    def test_normalize_title_tokens_hex_tokens_removed(self):
+        """Hex tokens of length >= 8 containing a digit are stripped."""
+        title = "Alert file hash a1b2c3d4e5f6 detected"
+        result = normalize_title_tokens(title)
+        # The hex token should be removed
+        assert "a1b2c3d4e5f6" not in result
+        # Other words should remain
+        assert "file" in result or "hash" in result or "detected" in result
+
+    def test_normalize_title_tokens_domains_preserve_dots(self):
+        """Dots inside domain-like tokens are preserved."""
+        title = "Alert from user@malware.example.com"
+        result = normalize_title_tokens(title)
+        # The domain should be a single token with dots preserved
+        assert "malware.example.com" in result or "example.com" in result
+
+    def test_normalize_title_tokens_purely_numeric_dropped(self):
+        """Purely numeric tokens are dropped."""
+        title = "Alert 12345 activated"
+        result = normalize_title_tokens(title)
+        # The numeric token should be dropped
+        assert "12345" not in result
+        assert "activated" in result
+
+    def test_normalize_title_tokens_hyphens_to_spaces(self):
+        """Hyphens are replaced with spaces before tokenization."""
+        title = "ALERT-123-Credential-Phishing"
+        result = normalize_title_tokens(title)
+        # "ALERT", "123", "Credential", "Phishing" — 123 is numeric so dropped
+        assert "alert" in result
+        # 123 is purely numeric so dropped
+        assert "123" not in result
+        assert "credential" in result or "phishing" in result
+
+    def test_title_similarity_identical(self):
+        """Identical titles produce 100% similarity."""
+        score = title_similarity("Phishing Alert", "Phishing Alert")
+        assert score == 100
+
+    def test_title_similarity_different_case_same_meaning(self):
+        """Titles differing only in case should have high similarity."""
+        score = title_similarity("Phishing Alert", "phishing alert")
+        assert score == 100
+
+    def test_title_similarity_different_tokens_low_similarity(self):
+        """Titles with different tokens have lower Jaccard similarity."""
+        score = title_similarity("Phishing Alert", "Malware Infection")
+        # "phishing" and "alert" vs "malware" and "infection" — no overlap
+        assert score == 0
+
+    def test_title_similarity_partial_overlap(self):
+        """Titles with some overlapping tokens have proportional similarity."""
+        score = title_similarity("Phishing Alert from jdoe", "Phishing Alert from jane")
+        # Tokens: {"phishing", "alert", "from", "jdoe"} vs {"phishing", "alert", "from", "jane"}
+        # Intersection: {"phishing", "alert", "from"} = 3
+        # Union: {"phishing", "alert", "from", "jdoe", "jane"} = 5
+        # Jaccard = 3/5 = 60%
+        assert score == 60
+
+    def test_title_similarity_empty_either_side_returns_none(self):
+        """If either title normalizes to empty, title_similarity returns None."""
+        score = title_similarity("Phishing Alert", "")
+        assert score is None
+        score = title_similarity("", "Phishing Alert")
+        assert score is None
+
+    def test_title_similarity_both_empty_returns_none(self):
+        """If both titles are empty, title_similarity returns None."""
+        score = title_similarity("", "")
+        assert score is None
+
+
+@pytest.mark.django_db
+class TestAlertFuzzyTitleGate:
+    """Correlation-level tests for the alert fuzzy title gate.
+
+    These tests verify that the title gate in `alerts_fuzzy_similar_to_case`
+    correctly requires both payload SSDEEP similarity AND normalized title similarity
+    against the same case alert.
+    """
+
+    def test_title_gate_same_payload_different_titles_excluded(self, db):
+        """Same payload + different titles should be excluded when gate is on."""
+        org = _mk_org("OrgTitleGateExclude")
+        analyst = _mk_user("analyst", org)
+        case = _mk_case("Case Title Gate Exclude", org)
+
+        # Attached alert with one title
+        attached = _mk_alert(
+            org=org,
+            title="Credential phishing attempt",
+            source_ref="seed-1",
+            payload=_base_payload(),
+            case=case,
+        )
+
+        # Candidate with same payload but a genuinely different title
+        candidate = _mk_alert(
+            org=org,
+            title="Malware beacon detected",
+            source_ref="cand-1",
+            payload=_base_payload(),  # same payload
+        )
+
+        score = ppdeep.compare(candidate.payload_ssdeep, attached.payload_ssdeep)
+        assert score >= settings.ALERT_FUZZY_SIMILARITY_THRESHOLD  # payload passes
+
+        rows, total = alerts_fuzzy_similar_to_case(case, user=analyst)
+        # With gate on (default), different titles should exclude the candidate
+        assert candidate.id not in {r.alert.id for r in rows}
+        assert total == 0
+
+    def test_title_gate_same_payload_same_titles_included(self, db):
+        """Same payload + same titles should be included when gate is on."""
+        org = _mk_org("OrgTitleGateInclude")
+        analyst = _mk_user("analyst", org)
+        case = _mk_case("Case Title Gate Include", org)
+
+        attached = _mk_alert(
+            org=org,
+            title="Same Title Alert",
+            source_ref="seed-1",
+            payload=_base_payload(),
+            case=case,
+        )
+
+        candidate = _mk_alert(
+            org=org,
+            title="Same Title Alert",
+            source_ref="cand-1",
+            payload=_base_payload(),  # same payload
+        )
+
+        score = ppdeep.compare(candidate.payload_ssdeep, attached.payload_ssdeep)
+        assert score >= settings.ALERT_FUZZY_SIMILARITY_THRESHOLD
+
+        rows, total = alerts_fuzzy_similar_to_case(case, user=analyst)
+        # With gate on, same titles should include the candidate
+        assert candidate.id in {r.alert.id for r in rows}
+        assert total >= 1
+
+    def test_title_gate_disabled_restores_payload_only(self, db):
+        """Gate disabled via env var restores original payload-only behavior."""
+        org = _mk_org("OrgGateDisabled")
+        analyst = _mk_user("analyst", org)
+        case = _mk_case("Case Gate Disabled", org)
+
+        _mk_alert(
+            org=org,
+            title="Attached seed",
+            source_ref="seed-1",
+            payload=_base_payload(),
+            case=case,
+        )
+
+        candidate = _mk_alert(
+            org=org,
+            title="Different title",
+            source_ref="cand-1",
+            payload=_base_payload(),  # same payload, different title
+        )
+
+        with override_settings(ALERT_FUZZY_TITLE_GATE_ENABLED=False):
+            rows, total = alerts_fuzzy_similar_to_case(case, user=analyst)
+            # Gate off: payload-only behavior — candidate should be included
+            assert candidate.id in {r.alert.id for r in rows}
+            assert total >= 1
+
+    def test_title_gate_cross_pair_excluded(self, db):
+        """Cross-pair: payload matches A, title matches B → excluded (no mixing)."""
+        org = _mk_org("OrgCrossPair")
+        analyst = _mk_user("analyst", org)
+        case = _mk_case("Case Cross Pair", org)
+
+        # Case signals: A (base payload, Alpha title) and B (variant payload, Beta title).
+        alert_a = _mk_alert(
+            org=org,
+            title="Alpha incident",
+            source_ref="a-1",
+            payload=_base_payload(),
+            case=case,
+        )
+        alert_b = _mk_alert(
+            org=org,
+            title="Beta incident",
+            source_ref="b-1",
+            payload=_variant_payload(),
+            case=case,
+        )
+
+        # Candidate matches A's payload and B's title, but not both against one signal.
+        candidate = _mk_alert(
+            org=org,
+            title="Beta incident",
+            source_ref="cand-cross",
+            payload=_base_payload(),
+            case=None,
+        )
+        # Positive control: matches A on both payload and title.
+        same_pair = _mk_alert(
+            org=org,
+            title="Alpha incident",
+            source_ref="cand-same",
+            payload=_base_payload(),
+            case=None,
+        )
+
+        assert ppdeep.compare(candidate.payload_ssdeep, alert_a.payload_ssdeep) >= 60
+        assert ppdeep.compare(candidate.payload_ssdeep, alert_b.payload_ssdeep) < 60
+
+        rows, total = alerts_fuzzy_similar_to_case(case, user=analyst)
+        ids = _ids(rows)
+        assert candidate.id not in ids  # no cross-pair mixing
+        assert same_pair.id in ids  # positive control
+        assert total == 1
+
+    def test_title_gate_empty_title_fallback(self, db):
+        """Empty normalized title falls back to payload-only (title gate passes)."""
+        org = _mk_org("OrgEmptyTitleFall")
+        analyst = _mk_user("analyst", org)
+        case = _mk_case("Case Empty Title Fall", org)
+
+        _mk_alert(
+            org=org,
+            title="",
+            source_ref="seed-1",  # empty title
+            payload=_base_payload(),
+            case=case,
+        )
+
+        candidate = _mk_alert(
+            org=org,
+            title="Some Candidate",
+            source_ref="cand-1",
+            payload=_base_payload(),  # same payload
+        )
+
+        rows, total = alerts_fuzzy_similar_to_case(case, user=analyst)
+        # Empty title → title gate passes → candidate included (payload-only fallback)
+        assert candidate.id in {r.alert.id for r in rows}
+        assert total >= 1
+
+    def test_title_gate_threshold_boundary(self, db):
+        """Title gate threshold at 70: boundary test with custom threshold."""
+        org = _mk_org("OrgThresholdBoundary")
+        analyst = _mk_user("analyst", org)
+        case = _mk_case("Case Threshold Boundary", org)
+
+        attached_title = "alpha bravo charlie delta echo foxtrot golf hotel india juliet"
+        _mk_alert(
+            org=org,
+            title=attached_title,
+            source_ref="seed-1",
+            payload=_base_payload(),
+            case=case,
+        )
+
+        # 7 of 10 tokens overlap -> Jaccard exactly 70 (inclusive boundary).
+        candidate_high_title = "alpha bravo charlie delta echo foxtrot golf"
+        candidate_high = _mk_alert(
+            org=org,
+            title=candidate_high_title,
+            source_ref="cand-high",
+            payload=_base_payload(),
+        )
+
+        # 6 of 10 tokens overlap -> Jaccard 60 (below the 70 title threshold).
+        candidate_low_title = "alpha bravo charlie delta echo foxtrot"
+        candidate_low = _mk_alert(
+            org=org,
+            title=candidate_low_title,
+            source_ref="cand-low",
+            payload=_base_payload(),
+        )
+
+        assert title_similarity(candidate_high_title, attached_title) == 70
+        assert title_similarity(candidate_low_title, attached_title) == 60
+
+        rows, total = alerts_fuzzy_similar_to_case(case, user=analyst)
+        ids = _ids(rows)
+        assert candidate_high.id in ids
+        assert candidate_low.id not in ids
+        assert total == 1
+
+    def test_similarity_reports_qualifying_pair_score(self, db):
+        """Similarity is the max score among qualifying pairs, not a non-qualifying pair."""
+        org = _mk_org("OrgQualifyingScore")
+        analyst = _mk_user("analyst", org)
+        case = _mk_case("Case Qualifying Score", org)
+
+        _mk_alert(
+            org=org,
+            title="Alpha incident",
+            source_ref="q-alpha",
+            payload_ssdeep="hash-a",
+            case=case,
+        )
+        _mk_alert(
+            org=org,
+            title="Beta incident",
+            source_ref="q-beta",
+            payload_ssdeep="hash-b",
+            case=case,
+        )
+        candidate = _mk_alert(
+            org=org,
+            title="Beta incident",
+            source_ref="q-cand",
+            payload_ssdeep="hash-c",
+        )
+
+        def fake_compare(candidate_hash, case_hash):
+            return {("hash-c", "hash-a"): 100, ("hash-c", "hash-b"): 80}[
+                (candidate_hash, case_hash)
+            ]
+
+        with mock.patch("ppdeep.compare", side_effect=fake_compare):
+            rows, total = alerts_fuzzy_similar_to_case(case, user=analyst)
+
+        assert total == 1
+        assert rows[0].alert.id == candidate.id
+        assert rows[0].similarity == 80
+
+    def test_existing_decision_a_tests_still_valid(self, db):
+        """Existing Decision (A) test: title excluded from payload hash."""
+        org = _mk_org("OrgDecisionAValid")
+
+        a123 = _mk_alert(
+            org=org,
+            title="ALERT-123 Credential phishing attempt",
+            source_ref="ref-123",
+            payload=_base_payload(),
+        )
+        a99 = _mk_alert(
+            org=org,
+            title="ALERT-99 Credential phishing attempt",
+            source_ref="ref-99",
+            payload=_base_payload(),
+        )
+
+        assert a123.title != a99.title
+        assert a123.payload_ssdeep != ""
+        assert a123.payload_ssdeep == a99.payload_ssdeep
+        assert ppdeep.compare(a123.payload_ssdeep, a99.payload_ssdeep) == 100
 
 
 @pytest.mark.django_db

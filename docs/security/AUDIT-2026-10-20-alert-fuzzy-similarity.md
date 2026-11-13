@@ -116,6 +116,13 @@ statement above is now "the configured threshold (default 60) is the only guard"
 opt-in `ALERT_FUZZY_INCLUDE_TITLE` flag and title-fingerprint work remain the correct hardening
 path and are unchanged; the follow-up tracking in `TODO.md` §12.12-fu1 stands.
 
+**Update (2026-11-13):** FIND-05 is resolved by the Option B title gate
+(`PLAN-2026-11-13-alert-fuzzy-title-gate.md`). Alert fuzzy matching now requires payload SSDEEP
+similarity **and** normalized-title Jaccard similarity against the same case alert. The gate is on by
+default (`ALERT_FUZZY_TITLE_GATE_ENABLED=True`, title threshold 70) and can be disabled for
+payload-only behavior. No schema change or backfill is required; the operational trade-off is
+documented in `docs/runbook.md`.
+
 ---
 
 ### FIND-06: Canonicalization Correctness — Volatile key list may be incomplete for some sources
@@ -198,7 +205,7 @@ Lists of scalars are sorted (`sorted(canonicalized)`). If a source system emits 
 
 ### **APPROVE WITH NOTES**
 
-The feature is fundamentally sound with proper tenant isolation, bounded resource usage, and secure defaults. The **High** finding (FIND-05) is a design trade-off documented in the plan with a mitigating threshold; it should be addressed via the recommended configuration flag and title-fingerprint follow-up before enabling broadly in production. The **Medium** findings (FIND-02, FIND-03, FIND-06) are operational hardening items that should be resolved in the next sprint.
+The feature is fundamentally sound with proper tenant isolation, bounded resource usage, and secure defaults. The **High** finding (FIND-05) is resolved by the Option B title gate (2026-11-13). The **Medium** findings (FIND-02, FIND-03, FIND-06) are operational hardening items that should be resolved in the next sprint.
 
 ---
 
@@ -206,7 +213,7 @@ The feature is fundamentally sound with proper tenant isolation, bounded resourc
 
 | ID | Finding | Remediation | Target |
 |----|---------|-------------|--------|
-| FIND-05 | Title exclusion → false positives | Add `ALERT_FUZZY_INCLUDE_TITLE` setting; prototype title-fingerprint matching | Before production enablement |
+| FIND-05 | Title exclusion → false positives | **Resolved (2026-11-13)** — Option B title gate; see `PLAN-2026-11-13-alert-fuzzy-title-gate.md` and `docs/runbook.md` | Done |
 | FIND-02 | Recursive depth check | Replace `_depth` with iterative `_json_depth`; add depth guard in `_canonicalize` | Next sprint |
 | FIND-03 | `ppdeep` CPU on large inputs | Add `ALERT_FUZZY_MAX_TEXT_SIZE` truncation; lower `case_hashes` cap; consider async | Next sprint |
 | FIND-06 | Volatile key list incomplete | Add `ALERT_FUZZY_EXTRA_VOLATILE_KEYS` setting; consider regex heuristic | Next sprint |

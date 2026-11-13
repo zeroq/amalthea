@@ -322,6 +322,12 @@ items are recorded in `TODO.md` rather than fixed here (each is a design/ops cha
   different events with similar payloads can score high; the 80 threshold is the only guard. Mitigation
   candidates: an `ALERT_FUZZY_INCLUDE_TITLE` opt-in setting and/or a title-fingerprint require-both pass.
   **Trade-off is accepted for now and must be documented in the runbook.**
+
+- **FIND-05 superseded (Option B):** The alert fuzzy title gate implemented in `IMPL-2026-11-13-alert-fuzzy-title-gate.md`
+  resolves FIND-05 by adding a normalized-title Jaccard gate alongside the payload SSDEEP similarity. Option B
+  requires both payload and title thresholds to pass against the **same** case alert, accepting the
+  precision/recall trade-off documented in the runbook. This plan entry is superseded by
+  `PLAN-2026-11-13-alert-fuzzy-title-gate.md`.
 - **FIND-03 (Medium)** — `ppdeep.hash/compare` CPU on large inputs; propose `ALERT_FUZZY_MAX_TEXT_SIZE`
   truncation + a lower `case_hashes` cap; measure on Postgres (ties to risk R5).
 - **FIND-06 (Medium)** — `VOLATILE_KEYS` may miss vendor-specific keys; propose

@@ -19,6 +19,8 @@ from uuid import UUID
 from django.conf import settings
 from django.db.models import Q
 
+from alerts.title_similarity import jaccard_similarity, normalize_title_tokens
+
 if TYPE_CHECKING:
     from alerts.models import Alert
     from cases.models import Case, TimelineEvent
@@ -351,11 +353,16 @@ def alerts_fuzzy_similar_to_case(
     """
     Rank UNLINKED, same-org alerts by SSDEEP fuzzy similarity to `case`'s attached alerts.
 
-    Signals: `payload_ssdeep` hashes of the case's attached alerts (non-empty).
+    Signals: `payload_ssdeep` hashes and titles of the case's attached alerts (non-empty).
     Candidates: unlinked alerts in the same org with non-empty `payload_ssdeep`.
 
     Scoring: for each candidate, compute the maximum `ppdeep.compare(candidate_hash, h)`
-    over all case alert hashes. Keep candidates with score >= threshold.
+    over all case alert hashes. Keep candidates where at least one case alert passes
+    both the payload threshold and the title-similarity gate.
+
+    The title gate is on by default (`ALERT_FUZZY_TITLE_GATE_ENABLED=True`) and can be
+    disabled via that setting or the `AMALTHEA_ALERT_FUZZY_TITLE_GATE=false` env var.
+    When disabled, behavior is exactly the current payload-only path.
 
     Returns:
         (top_limit_rows, total_matching) — total is computed BEFORE limit for honest truncation.
@@ -365,25 +372,32 @@ def alerts_fuzzy_similar_to_case(
     if limit is None:
         limit = RAIL_CAP
 
-    # Resolve threshold (global default, overrideable per-call)
-    threshold = (
+    # Resolve thresholds (global defaults, overrideable per-call)
+    payload_threshold = (
         threshold
         if threshold is not None
-        else getattr(settings, "ALERT_FUZZY_SIMILARITY_THRESHOLD", 80)
+        else getattr(settings, "ALERT_FUZZY_SIMILARITY_THRESHOLD", 60)
     )
+    title_threshold = getattr(settings, "ALERT_FUZZY_TITLE_SIMILARITY_THRESHOLD", 70)
+    title_gate_enabled = getattr(settings, "ALERT_FUZZY_TITLE_GATE_ENABLED", True)
 
-    # 1. Collect case signal hashes from attached alerts
+    # 1. Collect case signal hashes AND titles from attached alerts
     from alerts.models import Alert
     from identity.scoping import org_q
 
     case_alerts = (
         Alert.objects.filter(case=case)
         .exclude(payload_ssdeep="")
-        .values_list("payload_ssdeep", flat=True)[:MAX_CORRELATION_OBS]
+        .values_list("payload_ssdeep", "title")[:MAX_CORRELATION_OBS]
     )
 
-    case_hashes = [h for h in case_alerts if h]
-    if not case_hashes:
+    # Precompute title tokens once per case signal.
+    case_signals: list[tuple[str, frozenset[str]]] = []
+    for payload_ssdeep, title in case_alerts:
+        if payload_ssdeep:
+            case_signals.append((payload_ssdeep, normalize_title_tokens(title or "")))
+
+    if not case_signals:
         return [], 0
 
     # 2. Candidates: unlinked, same-org, non-empty hash, ordered by -date, capped
@@ -395,7 +409,8 @@ def alerts_fuzzy_similar_to_case(
         .order_by("-date")[:MAX_FUZZY_COMPARISONS]
     )
 
-    # 3. Score each candidate: max ppdeep.compare against case hashes
+    # 3. Score each candidate: max ppdeep.compare against case hashes,
+    #    with title-gate qualification
     try:
         import ppdeep  # type: ignore[import-untyped]
     except ImportError:
@@ -408,18 +423,37 @@ def alerts_fuzzy_similar_to_case(
             if not candidate_hash:
                 continue
 
+            candidate_tokens = (
+                normalize_title_tokens(alert.title) if title_gate_enabled else frozenset()
+            )
             max_score = 0
-            for case_hash in case_hashes:
+            max_qualifying_score = 0
+
+            for case_hash, case_tokens in case_signals:
                 try:
                     score = ppdeep.compare(candidate_hash, case_hash)
-                    if score > max_score:
-                        max_score = score
-                except (Exception, RecursionError, MemoryError):  # noqa: S112
+                except (Exception, RecursionError, MemoryError):
                     # Treat comparison failures as score 0
-                    continue
+                    score = 0
 
-            if max_score >= threshold:
-                similar_alerts.append(SimilarAlert(alert=alert, similarity=max_score))
+                if score > max_score:
+                    max_score = score
+
+                if not title_gate_enabled:
+                    continue
+                # Only evaluate the title gate after this pair passes the payload
+                # threshold, and only against this same case signal.
+                if score < payload_threshold:
+                    continue
+                title_score = jaccard_similarity(candidate_tokens, case_tokens)
+                if title_score is not None and title_score < title_threshold:
+                    continue
+                if score > max_qualifying_score:
+                    max_qualifying_score = score
+
+            qualifying_score = max_qualifying_score if title_gate_enabled else max_score
+            if qualifying_score >= payload_threshold:
+                similar_alerts.append(SimilarAlert(alert=alert, similarity=qualifying_score))
 
     # 4. Rank: similarity desc, then -date
     similar_alerts.sort(key=lambda sa: (-sa.similarity, -sa.alert.date.timestamp()))

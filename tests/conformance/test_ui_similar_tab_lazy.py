@@ -223,7 +223,7 @@ class TestFragmentEndpoint:
         neighbour = _mk_case("Neighbour Case", org)
         _share_observable(org, "10.42.42.42", case, neighbour)
         _mk_alert(org=org, title="Attached seed", source_ref="fr-seed", case=case)
-        candidate = _mk_alert(org=org, title="Fuzzy candidate", source_ref="fr-cand")
+        candidate = _mk_alert(org=org, title="Attached seed", source_ref="fr-cand")
 
         resp = _login(analyst).get(_fragment_url(case))
         assert resp.status_code == 200
@@ -250,7 +250,7 @@ class TestFragmentEndpoint:
         viewer = _mk_user("viewer", org, role="viewer")
         case = _mk_case("Case Fragment Viewer", org)
         _mk_alert(org=org, title="Attached seed", source_ref="fv-seed", case=case)
-        candidate = _mk_alert(org=org, title="Viewer candidate", source_ref="fv-cand")
+        candidate = _mk_alert(org=org, title="Attached seed", source_ref="fv-cand")
 
         # Positive control: the analyst *does* get the Link button, so the negative
         # assertion below is not vacuous.
@@ -298,7 +298,7 @@ class TestFragmentEndpoint:
         neighbour = _mk_case("Neighbour Full Page", org)
         _share_observable(org, "10.43.43.43", case, neighbour)
         _mk_alert(org=org, title="Attached seed", source_ref="fp-seed", case=case)
-        candidate = _mk_alert(org=org, title="Full page candidate", source_ref="fp-cand")
+        candidate = _mk_alert(org=org, title="Attached seed", source_ref="fp-cand")
 
         resp = _login(analyst).get(_case_url(case, "similar"))
         assert resp.status_code == 200
@@ -379,7 +379,7 @@ class TestBadge:
         neighbour_b = _mk_case("Neighbour Badge B", org)
         _share_observable(org, "10.44.44.44", case, neighbour_a, neighbour_b)
         _mk_alert(org=org, title="Attached seed", source_ref="b-seed", case=case)
-        _mk_alert(org=org, title="Badge candidate", source_ref="b-cand")
+        _mk_alert(org=org, title="Attached seed", source_ref="b-cand")
 
         resp = _login(analyst).get(_case_url(case, "general"))
         assert resp.status_code == 200
@@ -462,7 +462,7 @@ class TestLazyPanelContract:
         neighbour = _mk_case("Neighbour Server Side", org)
         _share_observable(org, "10.45.45.45", case, neighbour)
         _mk_alert(org=org, title="Attached seed", source_ref="ls-seed", case=case)
-        candidate = _mk_alert(org=org, title="Server side candidate", source_ref="ls-cand")
+        candidate = _mk_alert(org=org, title="Attached seed", source_ref="ls-cand")
 
         resp = _login(analyst).get(_case_url(case, "similar"))
         assert resp.status_code == 200

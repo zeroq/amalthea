@@ -1871,9 +1871,39 @@ Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
 
 ---
 
+## 2026-11-13 — Alert fuzzy title gate (FIND-05) — **implemented and verified**
+
+- **Decision** — Option B: keep `title` out of the payload SSDEEP hash, but require a normalized-title
+  gate alongside it. This resolves the High FIND-05 false-positive trade-off without changing the
+  payload hash or forcing operators to rehash existing alerts.
+- **Behavior** — A candidate qualifies only when the **same** case alert passes payload SSDEEP
+  >= `ALERT_FUZZY_SIMILARITY_THRESHOLD` (default 60) **and** title Jaccard >=
+  `ALERT_FUZZY_TITLE_SIMILARITY_THRESHOLD` (default 70). The gate is on by default;
+  `AMALTHEA_ALERT_FUZZY_TITLE_GATE=false` restores payload-only behavior. Empty normalized titles
+  fall back to payload-only. `SimilarAlert.similarity` is the max payload score among qualifying pairs.
+- **Implementation** — `alerts/title_similarity.py` (NFKC/casefold, UUID/timestamp/hex stripping,
+  numeric-token dropping, domain-safe tokenization, Jaccard); `cases/correlation.py` pairwise gate;
+  `amalthea/settings/base.py` title-gate settings and corrected 60-default comment.
+- **No migration/backfill** — title tokens are computed on demand for the bounded candidate set. No
+  schema, API, or UI contract change.
+- **Tests** — new normalization/correlation coverage (different titles excluded, gate-off restores
+  payload-only, cross-pair mixing rejected, 70/60 boundary, empty-title fallback, qualifying-score
+  semantics); existing fuzzy/UI tests updated to same-title true positives. Focused suites:
+  `test_alert_fuzzy_similarity.py` + `test_ui_similar_alerts.py` **46 passed**;
+  `test_ui_similar_tab_lazy.py` + `test_correlation_similar_cases.py` **35 passed**;
+  `make check-fast` green. Full suite remains the standing CI gap (§12.11).
+- **Verification** — `docs/verification/VERIFY-2026-11-13-alert-fuzzy-title-gate.md` — **PASS**,
+  20/20 ACs met, 0 deviations.
+- **Docs** — `docs/planning/PLAN-2026-11-13-alert-fuzzy-title-gate.md`,
+  `docs/planning/IMPL-2026-11-13-alert-fuzzy-title-gate.md`, `docs/runbook.md`; FIND-05 marked resolved
+  in `docs/security/AUDIT-2026-10-20-alert-fuzzy-similarity.md`.
+
+---
+
 ### Other closed checkbox items (title index)
 
 - **6.16 P6 — Global search — implemented 2026-11-02; verification pending (TODO §6.16-fu1).**
+- **12.12-fu1 — Alert fuzzy title gate (FIND-05) — RESOLVED 2026-11-13 (Option B; verified PASS).**
 - **1.1 — `Case.save()` number allocation**
 - **1.2 — `manage.py` default settings module**
 - **1.3 — Replace the four vacuous schema tests**
