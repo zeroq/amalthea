@@ -216,6 +216,7 @@ def case_template_detail(request: HttpRequest, template_id: str) -> HttpResponse
     except ValueError:
         template = get_object_or_404(CaseTemplate, name=template_id)
 
+    mycases = template.cases_from_template.all()
     return render(
         request,
         "ui/case_template_detail.html",
@@ -224,6 +225,13 @@ def case_template_detail(request: HttpRequest, template_id: str) -> HttpResponse
             template=template,
             tlp_choices=TLP_CHOICES,
             pap_choices=PAP_CHOICES,
+            tabs=[
+                {"slug": "general", "label": "General"},
+                {"slug": "cases", "label": "Cases"},
+            ],
+            active_tab=request.GET.get("tab", "general"),
+            mycases=mycases,
+            cases_count=mycases.count(),
         ),
     )
 

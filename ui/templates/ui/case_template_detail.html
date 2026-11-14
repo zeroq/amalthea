@@ -10,68 +10,129 @@
 {% endblock %}
 
 {% block content %}
-<div class="stack">
-  <div class="card">
-      <h3>Details</h3>
-      <dl class="meta">
-        <dt>Name</dt>
-        <dd>{{ template.name }}</dd>
+<div class="tabs" role="tablist" aria-label="Template sections">
+  {% for tab in tabs %}
+    <a class="tab {% if tab.slug == active_tab %}tab-on{% endif %}"
+       role="tab"
+       id="tab-{{ tab.slug }}"
+       href="?tab={{ tab.slug }}"
+       aria-controls="panel-{{ tab.slug }}"
+       aria-selected="{% if tab.slug == active_tab %}true{% else %}false{% endif %}"
+       tabindex="{% if tab.slug == active_tab %}0{% else %}-1{% endif %}"
+       aria-keyshortcuts="{{ forloop.counter }}">
+       {% if tab.slug == "general" %}<i class="fa-solid fa-circle-info" aria-hidden="true"></i> {% endif %}
+       {% if tab.slug == "cases" %}<i class="fa-solid fa-list-check" aria-hidden="true"></i> {% endif %}
+       {{ tab.label }}
+       {% if tab.slug == "cases" %}
+         <span class="badge">{{ cases_count }}</span>
+       {% endif %}
+     </a>
+  {% endfor %}
+</div>
 
-        <dt>Display Name</dt>
-        <dd>{{ template.display_name }}</dd>
+<div class="tabpanels">
+  <section class="tabpanel" role="tabpanel" id="panel-general" aria-labelledby="tab-general" tabindex="0" {% if active_tab != "general" %}hidden{% endif %}>
+    <div class="cols">
+      <div class="stack">
+        <div class="card">
+          <h3>Details</h3>
+          <dl class="meta">
+            <dt>Name</dt>
+            <dd>{{ template.name }}</dd>
 
-        <dt>Title Prefix</dt>
-        <dd>{{ template.title_prefix|default:"—" }}</dd>
+            <dt>Display Name</dt>
+            <dd>{{ template.display_name }}</dd>
 
-        <dt>Description</dt>
-        <dd>{{ template.description|default:"—" }}</dd>
+            <dt>Title Prefix</dt>
+            <dd>{{ template.title_prefix|default:"—" }}</dd>
 
-        <dt>Summary</dt>
-        <dd>{{ template.summary|default:"—" }}</dd>
+            <dt>Description</dt>
+            <dd>{{ template.description|default:"—" }}</dd>
 
-        <dt>Flag as important</dt>
-        <dd>{{ template.flag|default:"—" }}</dd>
+            <dt>Summary</dt>
+            <dd>{{ template.summary|default:"—" }}</dd>
 
-        <dt>Severity</dt>
-        <dd><span class="{% if template.severity is None %}dim{% endif %}">{% if template.severity is None %}None — keep case severity{% else %}{{ template.get_severity_display }}{% endif %}</span></dd>
+            <dt>Flag as important</dt>
+            <dd>{{ template.flag|default:"—" }}</dd>
 
-        <dt>TLP</dt>
-        <dd>{{ template.tlp|choice_name:tlp_choices }}</dd>
+            <dt>Severity</dt>
+            <dd><span class="{% if template.severity is None %}dim{% endif %}">{% if template.severity is None %}None — keep case severity{% else %}{{ template.get_severity_display }}{% endif %}</span></dd>
 
-        <dt>PAP</dt>
-        <dd>{{ template.pap|choice_name:pap_choices }}</dd>
-      </dl>
+            <dt>TLP</dt>
+            <dd>{{ template.tlp|choice_name:tlp_choices }}</dd>
 
-      {% if can_mutate %}
-      {% url 'ui-case-template-delete' template.id as delete_url %}
-      {% with mid="delete-template-"|concat:template.id %}
-      <div class="card-actions">
-        <button type="button" class="btn btn-err" data-modal-open="{{ mid }}">Delete template</button>
+            <dt>PAP</dt>
+            <dd>{{ template.pap|choice_name:pap_choices }}</dd>
+          </dl>
+
+          {% if can_mutate %}
+          {% url 'ui-case-template-delete' template.id as delete_url %}
+          {% with mid="delete-template-"|concat:template.id %}
+          <div class="card-actions">
+            <button type="button" class="btn btn-err" data-modal-open="{{ mid }}">Delete template</button>
+          </div>
+          {% include "ui/_modal.html" with modal_id=mid title="Delete template?" body="This cannot be undone. The template will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
+          {% endwith %}
+          {% endif %}
       </div>
-      {% include "ui/_modal.html" with modal_id=mid title="Delete template?" body="This cannot be undone. The template will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
-      {% endwith %}
-      {% endif %}
-  </div>
 
-  <div class="card">
-    <h3>Tags</h3>
-    <div class="chips">
-      {% for tag in template.tags %}
-      <span class="chip">{{ tag }}</span>
-      {% empty %}
-      <span class="empty">No tags</span>
-      {% endfor %}
+      <div class="card">
+        <h3>Tags</h3>
+        <div class="chips">
+          {% for tag in template.tags %}
+          <span class="chip">{{ tag }}</span>
+          {% empty %}
+          <span class="empty">No tags</span>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="card">
+        <h3>Task Definitions</h3>
+        <pre class="body">{{ template.tasks|prettyjson }}</pre>
+      </div>
+
+      <div class="card">
+        <h3>Custom Field Definitions</h3>
+        <pre class="body">{{ template.custom_fields|prettyjson }}</pre>
+      </div>
+      <hr>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <div class="card">
-    <h3>Task Definitions</h3>
-    <pre class="body">{{ template.tasks|prettyjson }}</pre>
-  </div>
-
-  <div class="card">
-    <h3>Custom Field Definitions</h3>
-    <pre class="body">{{ template.custom_fields|prettyjson }}</pre>
-  </div>
+  <section class="tabpanel" role="tabpanel" id="panel-cases" aria-labelledby="tab-cases" tabindex="0" {% if active_tab != "cases" %}hidden{% endif %}>
+    <div class="stack">
+      <div class="card">
+        <h3>Cases</h3>
+        {% if mycases %}
+        <div class="table-wrap">
+          <table class="data-table data-table-tight">
+            <caption class="sr-only">Cases created from this template</caption>
+            <thead>
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">Title</th>
+                <th scope="col">Status</th>
+                <th scope="col">Owner</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for case in mycases %}
+              <tr>
+                <td>{{ case.number }}</td>
+                <td><a href="{% url 'ui-case-detail' case.number %}">{{ case.title }}</a></td>
+                <td>{{ case.status.value }}</td>
+                <td>{{ case.assignee.login|default:"Unassigned" }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="empty">No cases have been created from this template yet.</p>
+        {% endif %}
+      </div>
+    </div>
+  </section>
 </div>
 {% endblock %}
