@@ -32,51 +32,50 @@
 
 <div class="tabpanels">
   <section class="tabpanel" role="tabpanel" id="panel-general" aria-labelledby="tab-general" tabindex="0" {% if active_tab != "general" %}hidden{% endif %}>
-    <div class="cols">
-      <div class="stack">
-        <div class="card card--full-width">
-          <h3>Details</h3>
-          <dl class="meta">
-            <dt>Name</dt>
-            <dd>{{ template.name }}</dd>
+    <div class="stack">
+      <div class="card">
+        <h3>Details</h3>
+        <dl class="meta">
+          <dt>Name</dt>
+          <dd>{{ template.name }}</dd>
 
-            <dt>Display Name</dt>
-            <dd>{{ template.display_name }}</dd>
+          <dt>Display Name</dt>
+          <dd>{{ template.display_name }}</dd>
 
-            <dt>Title Prefix</dt>
-            <dd>{{ template.title_prefix|default:"—" }}</dd>
+          <dt>Title Prefix</dt>
+          <dd>{{ template.title_prefix|default:"—" }}</dd>
 
-            <dt>Description</dt>
-            <dd>{{ template.description|default:"—" }}</dd>
+          <dt>Description</dt>
+          <dd>{{ template.description|default:"—" }}</dd>
 
-            <dt>Summary</dt>
-            <dd>{{ template.summary|default:"—" }}</dd>
+          <dt>Summary</dt>
+          <dd>{{ template.summary|default:"—" }}</dd>
 
-            <dt>Flag as important</dt>
-            <dd>{{ template.flag|default:"—" }}</dd>
+          <dt>Flag as important</dt>
+          <dd>{{ template.flag|default:"—" }}</dd>
 
-            <dt>Severity</dt>
-            <dd><span class="{% if template.severity is None %}dim{% endif %}">{% if template.severity is None %}None — keep case severity{% else %}{{ template.get_severity_display }}{% endif %}</span></dd>
+          <dt>Severity</dt>
+          <dd><span class="{% if template.severity is None %}dim{% endif %}">{% if template.severity is None %}None — keep case severity{% else %}{{ template.get_severity_display }}{% endif %}</span></dd>
 
-            <dt>TLP</dt>
-            <dd>{{ template.tlp|choice_name:tlp_choices }}</dd>
+          <dt>TLP</dt>
+          <dd>{{ template.tlp|choice_name:tlp_choices }}</dd>
 
-            <dt>PAP</dt>
-            <dd>{{ template.pap|choice_name:pap_choices }}</dd>
-          </dl>
+          <dt>PAP</dt>
+          <dd>{{ template.pap|choice_name:pap_choices }}</dd>
+        </dl>
 
-          {% if can_mutate %}
-          {% url 'ui-case-template-delete' template.id as delete_url %}
-          {% with mid="delete-template-"|concat:template.id %}
-          <div class="card-actions">
-            <button type="button" class="btn btn-err" data-modal-open="{{ mid }}">Delete template</button>
-          </div>
-          {% include "ui/_modal.html" with modal_id=mid title="Delete template?" body="This cannot be undone. The template will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
-          {% endwith %}
-          {% endif %}
+        {% if can_mutate %}
+        {% url 'ui-case-template-delete' template.id as delete_url %}
+        {% with mid="delete-template-"|concat:template.id %}
+        <div class="card-actions">
+          <button type="button" class="btn btn-err" data-modal-open="{{ mid }}">Delete template</button>
+        </div>
+        {% include "ui/_modal.html" with modal_id=mid title="Delete template?" body="This cannot be undone. The template will be permanently removed." confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="sm" %}
+        {% endwith %}
+        {% endif %}
       </div>
 
-      <div class="card card--full-width">
+      <div class="card">
         <h3>Tags</h3>
         <div class="chips">
           {% for tag in template.tags %}
@@ -86,12 +85,12 @@
           {% endfor %}
         </div>
       </div>
-      <div class="card card--full-width">
+      <div class="card">
         <h3>Task Definitions</h3>
         <pre class="body">{{ template.tasks|prettyjson }}</pre>
       </div>
 
-      <div class="card card--full-width">
+      <div class="card">
         <h3>Custom Field Definitions</h3>
         <pre class="body">{{ template.custom_fields|prettyjson }}</pre>
       </div>
