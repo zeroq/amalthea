@@ -34,7 +34,7 @@
   <section class="tabpanel" role="tabpanel" id="panel-general" aria-labelledby="tab-general" tabindex="0" {% if active_tab != "general" %}hidden{% endif %}>
     <div class="cols">
       <div class="stack">
-        <div class="card">
+        <div class="card card--full-width">
           <h3>Details</h3>
           <dl class="meta">
             <dt>Name</dt>
@@ -76,7 +76,7 @@
           {% endif %}
       </div>
 
-      <div class="card">
+      <div class="card card--full-width">
         <h3>Tags</h3>
         <div class="chips">
           {% for tag in template.tags %}
@@ -86,16 +86,14 @@
           {% endfor %}
         </div>
       </div>
-      <div class="card">
+      <div class="card card--full-width">
         <h3>Task Definitions</h3>
         <pre class="body">{{ template.tasks|prettyjson }}</pre>
       </div>
 
-      <div class="card">
+      <div class="card card--full-width">
         <h3>Custom Field Definitions</h3>
         <pre class="body">{{ template.custom_fields|prettyjson }}</pre>
-      </div>
-      <hr>
       </div>
     </div>
   </section>

@@ -173,7 +173,7 @@
 
     <div class="card">
       <h3>Linked Cases ({{ cases|length }})</h3>
-      {% if cases_total is not None and cases_total > cases|length %}
+      {% if cases and cases_total is not None and cases_total > cases|length %}
         <p class="list-summary dim">Showing latest {{ cases|length }} of {{ cases_total }} linked cases</p>
       {% endif %}
       {% if cases %}
@@ -187,18 +187,16 @@
             <th scope="col">Status</th>
             <th scope="col">Severity</th>
             <th scope="col">Created</th>
-            <th scope="col"></th>
           </tr>
         </thead>
         <tbody>
           {% for link in cases %}
           <tr>
             <td><a href="{% url 'ui-case-detail' link.case.number %}">{{ link.case.number }}</a></td>
-            <td>{{ link.case.title|truncatechars:50 }}</td>
+            <td><a href="{% url 'ui-case-detail' link.case.number %}">{{ link.case.title|truncatechars:50 }}</a></td>
             <td><span class="pill sev-{{ link.case.severity }}">{{ link.case.status.value }}</span></td>
             <td><span class="sev sev-{{ link.case.severity }}">{{ link.case.get_severity_display }}</span></td>
             <td>{{ link.case.created_at|date:"Y-m-d H:i" }}</td>
-            <td><a class="btn" href="{% url 'ui-case-detail' link.case.number %}">Open</a></td>
           </tr>
           {% endfor %}
         </tbody>

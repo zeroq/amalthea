@@ -31,14 +31,16 @@
           <th scope="col">Cases</th>
           <th scope="col">First seen</th>
           <th scope="col">Last seen</th>
-          <th scope="col"></th>
+          <th scope="col">Actions</th>
         </tr>
       </thead>
       <tbody>
         {% for obs in page_obj.object_list %}
         <tr>
           <td>{{ obs.data_type.name }}</td>
-          <td class="mono break">{{ obs.data }}</td>
+          <td class="mono break">
+            <a href="{% url 'ui-observable-detail' obs.id %}">{{ obs.data }}</a>
+          </td>
           <td>{{ obs.case_observables.count }}</td>
           <td>{{ obs.created_at|date:"Y-m-d H:i" }}</td>
           <td>{{ obs.updated_at|default:obs.created_at|date:"Y-m-d H:i" }}</td>
