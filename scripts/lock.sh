@@ -108,14 +108,21 @@ BOOTSTRAP_ALLOW="$(printf '%s\n' \
     'build==1.6.1' 'pyproject-hooks==1.3.3' 'pip-tools==7.6.2' 'wheel==0.48.0' \
     'pip==26.2.1' 'setuptools==84.0.0')"
 
-# ------------------------------------------------- deliberate runtime additions (ADR-005)
+# ------------------------------------------------- deliberate runtime additions (ADR-005, ADR-012)
 # A line here authorises the closure comparison to observe this exact name==version *appearing*
 # in base.txt. A version *change* to an already-pinned package still aborts, because the
 # diffed line ("name==newversion") no longer matches the entry. Once the addition is committed,
 # HEAD's snapshot already contains the pin and the entries become inert (harmless to keep).
-# Additions here are reviewed supply-chain changes — see docs/decisions/ADR-005-markdown-rendering.md.
+# Additions here are reviewed supply-chain changes — see docs/decisions/ADR-005-markdown-rendering.md
+# and docs/decisions/ADR-012-mcp-server-boundary.md.
 BASE_ALLOW="$(printf '%s\n' \
-    'markdown-it-py==4.2.0' 'mdurl==0.1.2' 'nh3==0.3.7')"
+    'markdown-it-py==4.2.0' 'mdurl==0.1.2' 'nh3==0.3.7' \
+    'annotated-types==0.8.0' 'anyio==4.16.0' 'h11==0.16.0' 'httpcore2==2.16.0' \
+    'httpx2==2.16.0' 'jsonschema==4.26.0' 'jsonschema-specifications==2025.9.1' \
+    'mcp==2.3.0' 'mcp-types==2.3.0' 'opentelemetry-api==1.45.2' 'pydantic==2.14.3' \
+    'pydantic-core==2.50.4' 'pyjwt==2.15.1' 'python-multipart==0.0.33' 'referencing==0.37.0' \
+    'rpds-py==2026.9.1' 'sse-starlette==3.7.0' 'starlette==1.10.0' 'truststore==0.10.5' \
+    'typing-inspection==0.4.5' 'uvicorn==0.54.0')"
 
 # dev.txt intentionally *loses* packages that moved from dev into the runtime closure (the dev
 # writer filters base-overlapping entries), so their disappearance must be allowed. dev.txt also
