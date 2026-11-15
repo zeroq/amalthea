@@ -4,11 +4,13 @@ Open work only. Shipped work and closed-item history live in [`COMPLETED.md`](./
 Last updated: 2026-11-14 — **MCP Phase 0 partial** (§22): `mcp==2.3.0` dependency closure,
 ASGI mount/lifespan, and protocol echo calls are verified. The CrewAI smoke is pending because
 CrewAI requires Python `<3.14`; Phase 1 has not started. Decisions remain: **CrewAI** first client;
-**AI case summaries auto-post directly** as labelled `ai-summary` timeline entries. Reconciled search (§6.16 P6): it shipped
-2026-11-02 (`6427beeb`), so the priority row is now the narrow **§6.16 P6-fu1** (independent
-verification, security review, Postgres measurement). The original header-search ACs are superseded by
-`PLAN-2026-11-02-search-page-rail-entry.md`. Also archived §18/§19 and the playbook script picker to
-[`COMPLETED.md`](./COMPLETED.md); the §19 alert-import security review remains §21. Full suite last run
+**AI case summaries auto-post directly** as labelled `ai-summary` timeline entries. Reconciled
+search (§6.16 P6): it shipped 2026-11-02 (`6427beeb`), so the priority row is now the narrow
+**§6.16 P6-fu1** (Postgres measurement only; verification and T6 security review are complete). The
+original header-search ACs are superseded by `PLAN-2026-11-02-search-page-rail-entry.md`. Also
+archived §18/§19 and the playbook script picker to [`COMPLETED.md`](./COMPLETED.md); the §19
+alert-import security review is complete (PASS). Requirements lock is current
+(`scripts/lock.sh --check`). Full suite last run
 2026-11-14 (**3699 passed, 3 skipped, 2 subtests passed**, 16m01s), covering search, the playbook
 picker, MCP Phase 0, and the case-template layout fix. Merged upstream `992f316d`; preserved the open
 backlog and imported its Rejected Observables section as §23. The priority table below is the source
@@ -27,25 +29,24 @@ to its narrow follow-up on 2026-11-13 (see `COMPLETED.md`).
 | **1** | **§12.11 — CI red; full suite never run** | Secrets job times out (full-history scan not running); the "migrations, suite" step does not run the suite. | **Highest leverage** — every other claim is unbacked by CI. |
 | **2** | **§12.3-fu1 — Automatic ingest-time bundling** | `correlation_key` is derived/indexed but only the manual Similar/attach path consumes it. Auto-bundle was deferred (Q1b). Depends on §12.1-fu1. | **High** — the orchestration promise of Modules B+C. |
 | **3** | **§12.4 — No bulk actions in the UI** | `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk` exist in the API; the UI stub was deleted (Q2). | **Medium-High** — 200-alert mornings are single-item work. |
-| **4** | **§21 — Alert-import security review** | Implementation committed (`ff139692`) and AIMP-1..AIMP-7 MET; the P5 security review is the only remaining step. | **Medium** — closes the §19 exchange/debug surface safely. |
-| **5** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; ledger already syncs. |
-| **6** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — ops/onboarding, not triage. |
-| **7** | **§6.13 / §6.16 P4 — Ingestion tokens + audit-log viewer** | **Partial:** token lifecycle shipped (10a–c); read-only `AuditLog` viewer remains. | **Medium** — audit viewer is the accountability half. |
-| **8** | **S3 + S5 (+ M3 residual)** | **S3** per-account lockout on the API login + stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. M3 shipped; residual same-org cleartext secrets. | **Medium (security)** |
-| **9** | **§12.1-fu1 — Measure filtered-list `COUNT` on Postgres** | Unmeasured `COUNT` on 12 paginated lists; prerequisite for auto-bundling. | **Medium** — pager truthfulness at scale. |
-| **10** | **§2.6 + §2.7 + §7.4 + §8.5/§8.7 + §11.4-L1/§11.5** | Coverage ≥ 80%; Phase-12/T2 QA list; Tailwind source/artifact split; mutation coverage; unaudited procedure attaches; admin role model; log forging. | **None** — engineering hygiene. |
-| **11** | **§10.9 — Status vocabularies have no human labels** | UI prints raw tokens (`InProgress`); add labels without breaking `stage`-keyed automation. | **Low** — cosmetic. |
-| **12** | **§10.11 — Reload mints a second ingestion token** | 200 body re-submits on reload; one-shot nonce or explicit nudge. | **Low** — admin-only exposure. |
-| **13** | **§10.12-fu1…fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, admin paused-state display, test gaps. | **Low–Medium.** |
-| **14** | **§14.1–14.12 — Alert tag follow-ups** | Id validation, parity, truncation text, a11y, query cleanup, swap-file purge. | **Low.** |
-| **15** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
-| **16** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
-| **17** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
-| **18** | **§12.9 — UI layout/style standardization** | Input/button heights, compact action columns, table/filter convention; codify guidelines. Includes the new alert/case severity rows (`.severity-filter-row`, `.severity-filter--N`) as the canonical filter pattern. | **Low.** |
-| **19** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. | **None** — hygiene. |
-| **20** | **§6.16 P6-fu1 — Search verification + security + Postgres measurement** | Search shipped (`6427beeb`); write `VERIFY-2026-11-01-global-search.md`, record the T6 security review, and run `EXPLAIN` on seeded Postgres before deciding on a trigram index. | **Medium** — closes the last evidence gap; no user-facing feature is missing. |
-| **21** | **§22 — MCP server for AI agents (Phase 0 partial)** | CrewAI first; read-only context, then proposal-first state changes plus direct auto-posted AI summaries; requires org-scoped agent credentials and an approval inbox. | **Medium** — agent-assisted triage; dependency/ASGI verified, CrewAI smoke and Phase 1 pending. |
-| **22** | **§23 — Rejected Observables Management** | Standalone rejection records linked to alerts, suppression in extraction, admin review/promotion, org isolation, confirmation modal. | **Medium** — false-positive suppression; upstream plan still needs acceptance criteria. |
+| **4** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; ledger already syncs. |
+| **5** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — ops/onboarding, not triage. |
+| **6** | **§6.13 / §6.16 P4 — Ingestion tokens + audit-log viewer** | **Partial:** token lifecycle shipped (10a–c); read-only `AuditLog` viewer remains. | **Medium** — audit viewer is the accountability half. |
+| **7** | **S3 + S5 (+ M3 residual)** | **S3** per-account lockout on the API login + stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. M3 shipped; residual same-org cleartext secrets. | **Medium (security)** |
+| **8** | **§12.1-fu1 — Measure filtered-list `COUNT` on Postgres** | Unmeasured `COUNT` on 12 paginated lists; prerequisite for auto-bundling. | **Medium** — pager truthfulness at scale. |
+| **9** | **§2.6 + §2.7 + §7.4 + §8.5/§8.7 + §11.4-L1/§11.5** | Coverage ≥ 80%; Phase-12/T2 QA list; Tailwind source/artifact split; mutation coverage; unaudited procedure attaches; admin role model; log forging. | **None** — engineering hygiene. |
+| **10** | **§10.9 — Status vocabularies have no human labels** | UI prints raw tokens (`InProgress`); add labels without breaking `stage`-keyed automation. | **Low** — cosmetic. |
+| **11** | **§10.11 — Reload mints a second ingestion token** | 200 body re-submits on reload; one-shot nonce or explicit nudge. | **Low** — admin-only exposure. |
+| **12** | **§10.12-fu1…fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, admin paused-state display, test gaps. | **Low–Medium.** |
+| **13** | **§14.1–14.12 — Alert tag follow-ups** | Id validation, parity, truncation text, a11y, query cleanup, swap-file purge. | **Low.** |
+| **14** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
+| **15** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
+| **16** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
+| **17** | **§12.9 — UI layout/style standardization** | Input/button heights, compact action columns, table/filter convention; codify guidelines. Includes the new alert/case severity rows (`.severity-filter-row`, `.severity-filter--N`) as the canonical filter pattern. | **Low.** |
+| **18** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. | **None** — hygiene. |
+| **19** | **§6.16 P6-fu1 — Postgres search measurement** | Search shipped (`6427beeb`); verification and T6 security review are complete (PASS). Remaining: run `EXPLAIN` on seeded Postgres before deciding on a trigram index. | **Medium** — closes the last evidence gap; no user-facing feature is missing. |
+| **20** | **§22 — MCP server for AI agents (Phase 0 partial)** | CrewAI first; read-only context, then proposal-first state changes plus direct auto-posted AI summaries; requires org-scoped agent credentials and an approval inbox. | **Medium** — agent-assisted triage; dependency/ASGI verified, CrewAI smoke and Phase 1 pending. |
+| **21** | **§23 — Rejected Observables Management** | Standalone rejection records linked to alerts, suppression in extraction, admin review/promotion, org isolation, confirmation modal. | **Medium** — false-positive suppression; upstream plan still needs acceptance criteria. |
 
 ---
 
@@ -95,17 +96,18 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
   Markdown; **P6** global search — **SHIPPED 2026-11-02** (`6427beeb`; see §6.16-fu1 and `COMPLETED.md`);
   **P7** per-org realtime + presence + scoped HTMX adoption. Open questions Q1 (Markdown dependency) gate
   P5 and Q2 (bulk stub) gates P1. Source: post-§6.15 UI audit (user decision "everything", 2026-10-11).
-- [ ] **6.16-fu1 — Global search follow-up: verification, security review, Postgres measurement.**
+- [ ] **6.16-fu1 — Global search follow-up: Postgres measurement.**
   P6 shipped 2026-11-02 (`6427beeb`): `/search` + `GET /api/v1/search`, shared `query/search.py`, org
-  scoping, highlighting, paging, and tests. Remaining: (a) write
-  `docs/verification/VERIFY-2026-11-01-global-search.md` against the original plan's T7 checklist;
-  (b) run the T6 security review (scoping, caps, highlight/XSS, CSP, viewer, superAdmin API audit) and
-  record the result; (c) run `EXPLAIN (ANALYZE, BUFFERS)` on seeded Postgres for filtered
-  case/alert/observable searches and add a trigram index only if the measurement warrants it. Full
-  suite is green (2026-11-13: **3673 passed, 3 skipped, 2 subtests**); CI itself remains red (§12.11).
-  The header-search ACs in `PLAN-2026-10-11-ui-completeness.md` are superseded by
+  scoping, highlighting, paging, and tests.
+  - [x] **Independent verification** — `docs/verification/VERIFY-2026-11-01-global-search.md`: **PASS**
+    (34/35 ACs met, 1 superseded, 0 deviations).
+  - [x] **T6 security review** — `docs/reviews/REVIEW-2026-11-13-global-search.md`: no new High/Medium
+    findings; residuals documented.
+  - [ ] **Postgres measurement** — run `EXPLAIN (ANALYZE, BUFFERS)` on seeded Postgres for filtered
+    case/alert/observable searches and add a trigram index only if the measurement warrants it.
+  Full suite is green (2026-11-14: **3699 passed, 3 skipped, 2 subtests**); CI itself remains red
+  (§12.11). The header-search ACs in `PLAN-2026-10-11-ui-completeness.md` are superseded by
   `PLAN-2026-11-02-search-page-rail-entry.md`; do not re-add a global header search form.
-
 
 ---
 
@@ -636,21 +638,6 @@ Status: 16.1–16.5 shipped 2026-11-06 (8/8 ACs met; independent verification PA
 
 ---
 
-## 21. Alert JSON import — security review (open; follows retired §19)
-
-Status: **OPEN — the only remaining item from the §19 alert JSON export/import wave.** The
-implementation is committed (`ff139692`) and independently verified (AIMP-1..AIMP-7 MET:
-`docs/verification/VERIFY-2026-11-08-alert-json-import.md`), but the P5 security review has not been
-run.
-
-- [ ] **21.1 — Run the P5 security review of the alert import surface.** Scope: upload parsing and
-  size/node/depth caps; atomicity and duplicate-conflict handling; assignee/tag/custom-field/
-  observable resolution (no cross-org or privilege escalation); XSS via payload/filename; secrets
-  never emitted in the export; CSRF/auth gate (`is_admin`, uniform 404). Record findings and
-  disposition in the verification doc or a new `SECURITY-*` note.
-
----
-
 ## 22. MCP server for AI agents (Phase 0 partial)
 
 Status: **PHASE 0 PARTIAL — dependency and ASGI/protocol spike verified; CrewAI smoke pending
@@ -708,8 +695,8 @@ retention 90 days; agent credentials managed in Settings UI only; no stdio bridg
     `tests/conformance/test_mcp_phase0.py`; a Channels websocket smoke also passes.
   - [x] Gate: MCP + realtime smoke (`3 passed`), `manage.py check`, `make check-fast`, full suite
     (`3699 passed, 3 skipped, 2 subtests passed`), and secret scan clean. `pip install --dry-run
-    --require-hashes -r requirements/base.txt` passes; `scripts/lock.sh --check` exceeded the local
-    5-minute command budget.
+    --require-hashes -r requirements/base.txt` passes; `scripts/lock.sh --check` passes and the committed
+    requirements are current.
   - [ ] Verify CrewAI `MCPServerHTTP` with a bearer header and one real tool call in an isolated
     **Python 3.13** environment. CrewAI 1.15.41 requires Python `<3.14`; the Amalthea runtime is
     3.14.6. Example: `examples/mcp/crewai_agent.py`; docs: `docs/integrations/crewai.md`.

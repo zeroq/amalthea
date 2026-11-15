@@ -1,8 +1,9 @@
 # Plan: Global Search (TODO §6.16 P6 / B3)
 
 **Status:** IMPLEMENTED 2026-11-02 (`6427beeb`) — search service, UI, and API shipped. The header-form
-requirement was superseded by `PLAN-2026-11-02-search-page-rail-entry.md`; independent verification,
-security review, and Postgres measurement remain in TODO §6.16-fu1.
+requirement was superseded by `PLAN-2026-11-02-search-page-rail-entry.md`; independent verification
+and the T6 security review are complete (PASS), and the Postgres measurement remains in TODO
+§6.16-fu1.
 **Date:** 2026-11-01
 **Owner:** planner
 **Source:** `TODO.md` §6.16 P6, `docs/planning/PLAN-2026-10-11-ui-completeness.md` B3/Q5
@@ -523,6 +524,7 @@ If a shared helper changed (e.g. `keys.js` or `base.html`), add the smallest dir
 - `2026-11-13` — Digit-only terms now also match case title/description/summary (in addition to
   `Case.number`); exact-number ordering unchanged. Regression tests added to
   `tests/conformance/test_search_api.py` and `test_ui_search.py`. Focused search suites **34 passed**; adjacent
-  tenant/nav/URL/inline suites **779 passed**; `make check` green. Full suite on 2026-11-13:
-  **3673 passed, 3 skipped, 2 subtests passed** (18m16s; 15 pre-existing warnings). Verification,
-  security review, and Postgres measurement remain open in TODO §6.16-fu1.
+  tenant/nav/URL/inline suites **779 passed**; `make check` green. Full suite on 2026-11-14:
+  **3699 passed, 3 skipped, 2 subtests passed** (16m01s; 15 pre-existing warnings). Independent
+  verification and the T6 security review are complete (PASS); the Postgres measurement remains
+  open in TODO §6.16-fu1.

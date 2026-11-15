@@ -2,7 +2,7 @@
 
 Finished work, with the evidence that it actually happened. Open items live in
 [`TODO.md`](./TODO.md).
-Last updated: 2026-11-13
+Last updated: 2026-11-14
 
 Items are only listed here once independently verified. Where code exists but an acceptance criterion
 is still unproven, the item says so explicitly and the verification gap is cross-linked in `TODO.md`.
@@ -1815,7 +1815,9 @@ Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
 - **Deviations** — one route handles GET + POST; import is gated on `is_admin`; `Tag`/`CustomField`
   are global vocabularies; no `alerts/create.py` extraction (the import service is the single
   writer).
-- **Open follow-up** — the P5 security review is tracked as TODO §21.
+- **Security review (2026-11-13)** — `docs/reviews/REVIEW-2026-11-13-alert-import.md`: **PASS**;
+  no Critical/High/Medium findings. Accepted informational residual: the API import assignee
+  resolution is not org-filtered (the UI path is org-filtered and admin-gated).
 
 ---
 
@@ -1843,7 +1845,7 @@ Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
 
 ---
 
-## 2026-11-02 — Global search (`/search` + `GET /api/v1/search`) — **implemented; verification pending**
+## 2026-11-02 — Global search (`/search` + `GET /api/v1/search`) — **implemented; verified**
 
 - **UI** — `/search` (`ui-search`) with a **Search** rail entry below Cases (`s`), page-level form,
   `/` focus when the form is present, grouped `type=all` results (top 10 per kind, counts), typed
@@ -1861,10 +1863,11 @@ Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
   still matches case title/description/summary (previously number-only). Exact-number ordering is
   unchanged. Regression tests cover text matches and exact-first ordering.
 - **Verification** — focused search suites `test_search_api.py` + `test_ui_search.py`: **34 passed**;
-  adjacent tenant/nav/URL/inline suites: **779 passed**; `make check` green. Full suite on 2026-11-13:
-  **3673 passed, 3 skipped, 2 subtests passed** (18m16s; 15 pre-existing warnings). **Still open:**
-  independent verifier report, T6 security review, and Postgres `EXPLAIN`/optional trigram index —
-  tracked in TODO §6.16-fu1.
+  adjacent tenant/nav/URL/inline suites: **779 passed**; `make check` green. Full suite on 2026-11-14:
+  **3699 passed, 3 skipped, 2 subtests passed** (16m01s; 15 pre-existing warnings). Independent
+  verification (`docs/verification/VERIFY-2026-11-01-global-search.md`) and T6 security review
+  (`docs/reviews/REVIEW-2026-11-13-global-search.md`) are **PASS**. **Still open:** Postgres
+  `EXPLAIN`/optional trigram index — tracked in TODO §6.16-fu1.
 - **Adjacent test classification** — `test_tenant_scoping.py` and `test_ui_urls_smoke.py` now classify
   `ui-playbook-scripts` as admin-only; the route shipped in `481a6225` and made those enumerators fail
   for analysts. Test-only fix; no behavior change.
@@ -1902,7 +1905,7 @@ Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
 
 ### Other closed checkbox items (title index)
 
-- **6.16 P6 — Global search — implemented 2026-11-02; verification pending (TODO §6.16-fu1).**
+- **6.16 P6 — Global search — implemented 2026-11-02; verification and security review PASS; Postgres measurement pending (TODO §6.16-fu1).**
 - **12.12-fu1 — Alert fuzzy title gate (FIND-05) — RESOLVED 2026-11-13 (Option B; verified PASS).**
 - **1.1 — `Case.save()` number allocation**
 - **1.2 — `manage.py` default settings module**

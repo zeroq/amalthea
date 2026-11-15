@@ -186,7 +186,8 @@ Defects found and fixed during the phase (details in the verification record onc
 > The search service/API/UI shipped in `6427beeb`; the header search box was intentionally removed in
 > favour of a **Search** rail entry and a form on `/search`. Do **not** re-add `#global-search-q` to
 > `base.html` — `test_ui_search.py::test_search_form_is_not_on_other_pages` enforces its absence.
-> The open verification/security/Postgres follow-up is TODO §6.16-fu1.
+> Verification and the security review are complete (PASS); the open Postgres measurement is TODO
+> §6.16-fu1.
 
 - ~~Header search input (`/` focuses it, as the cheat-sheet already promises) → `ui-search` results page: matches across cases (number/title/description), alerts (title), observables (value), **org-scoped**, paginated.~~
 - ~~Empty query renders the page; no result renders an empty state; a cross-tenant match never leaks (authz test).~~ (Covered by the shipped `/search` page; see the superseding plan and `test_ui_search.py`.)

@@ -3,7 +3,7 @@
 **Report Date:** 2026-11-13
 **Commit:** 3e31a65d
 **Scope:** P5 security review of Amalthea's alert JSON import surface — upload parsing and size/node/depth caps; atomicity and duplicate/conflict handling; assignee/tag/custom-field/observable resolution with no cross-org access or privilege escalation; XSS via payload/filename; secrets never emitted in export; CSRF/auth gate (`is_admin`, uniform 404). Also check method restrictions, error-message leakage, and that import cannot mutate another org's data or escalate roles.
-**Reference:** TODO.md §21; VERIFY-2026-11-08-alert-json-import.md; AIMP-1..7
+**Reference:** retired TODO.md §21 (closed; see `COMPLETED.md` §19); VERIFY-2026-11-08-alert-json-import.md; AIMP-1..7
 
 ---
 
