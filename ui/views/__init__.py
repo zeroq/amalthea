@@ -7,6 +7,12 @@ from django.contrib.auth.views import LogoutView, PasswordChangeView
 
 from identity.models import AuditLog
 
+from .agents import (
+    _settings_agents_context,
+    settings_agent_create,
+    settings_agent_revoke,
+    settings_agents,
+)
 from .alerts import (
     ALERT_SCOPE_OPTIONS,
     ALERT_SCOPE_PREDICATES,
@@ -243,6 +249,7 @@ __all__ = [
     "_require_superadmin_ui",
     "_resolve_playbook_ui",
     "_save_source_mapping",
+    "_settings_agents_context",
     "_settings_sources_context",
     "_similar_for_case",
     "_source_detail_context",
@@ -325,6 +332,9 @@ __all__ = [
     "playbook_list",
     "playbook_run",
     "playbook_scripts",
+    "settings_agent_create",
+    "settings_agent_revoke",
+    "settings_agents",
     "settings_home",
     "settings_organisations",
     "settings_organisations_delete",

@@ -1,0 +1,99 @@
+{% extends "ui/base.html" %}
+{% load static %}
+
+{% block heading %}Agent access{% endblock %}
+
+{% block content %}
+{% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
+<div class="card">
+  <div class="card-header">
+    <h2>MCP agent credentials</h2>
+    <button type="button" class="btn btn-primary" data-modal-open="agent-create-modal">
+      <i class="fa-solid fa-plus" aria-hidden="true"></i>
+      New agent credential
+    </button>
+  </div>
+
+  <div class="hint-block hint-block--compact">
+    <p class="dim">
+      MCP endpoint: <code>{{ mcp_url }}</code><br>
+      Header: <code>Authorization: Bearer &lt;agent token&gt;</code><br>
+      Scope: <code>mcp:read</code> only. Every credential is permanently bound to its organisation
+      and can be revoked at any time.
+    </p>
+  </div>
+
+  {% if page_obj %}
+    {% include "ui/_list_summary.html" with entity_name="agent credential" entity_name_plural="agent credentials" %}
+    <div class="table-wrap">
+      <table class="data-table {% if show_org_column %}data-table--with-org{% endif %}">
+        <caption class="sr-only">MCP agent credentials</caption>
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            {% if show_org_column %}<th scope="col">Organisation</th>{% endif %}
+            <th scope="col">Service user</th>
+            <th scope="col">Prefix</th>
+            <th scope="col">Created</th>
+            <th scope="col">Last used</th>
+            <th scope="col">Expires</th>
+            <th scope="col">Status</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for credential in page_obj.object_list %}
+          <tr data-agent-credential-id="{{ credential.id }}">
+            <td>{{ credential.name }}</td>
+            {% if show_org_column %}<td>{{ credential.organisation.name }}</td>{% endif %}
+            <td class="mono">{{ credential.user.login }}</td>
+            <td class="mono">{{ credential.prefix }}</td>
+            <td class="mono dim">{{ credential.created_at|date:"Y-m-d H:i" }}</td>
+            <td class="mono dim">{{ credential.last_used_at|date:"Y-m-d H:i"|default:"never" }}</td>
+            <td class="mono dim">{{ credential.expires_at|date:"Y-m-d H:i"|default:"never" }}</td>
+            <td>
+              {% if credential.is_revoked %}
+                <span class="pill pill-off">Revoked</span>
+                <span class="mono dim">{{ credential.revoked_at|date:"Y-m-d H:i" }}</span>
+              {% elif credential.is_expired %}
+                <span class="pill pill-pending">Expired</span>
+              {% else %}
+                <span class="pill pill-on">Active</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if not credential.is_revoked %}
+                {% url 'ui-settings-agent-access-revoke' credential.id as revoke_url %}
+                {% with sid=credential.id|stringformat:"s" %}
+                {% with modal_id="revoke-agent-"|add:sid form_id="revoke-agent-"|add:sid|add:"-form" %}
+                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body="This permanently disables the credential. Any agent using it will immediately receive 401 responses. This cannot be undone." title="Revoke agent credential?" confirm_text="Revoke" confirm_class="btn-err" cancel_text="Cancel" form_action=revoke_url size="md" %}
+                {% endwith %}
+                {% endwith %}
+                <button type="button" class="icon-link icon-link-err" data-modal-open="revoke-agent-{{ credential.id }}" aria-label="Revoke credential {{ credential.name }}" title="Revoke credential {{ credential.name }}">
+                  <i class="fa-solid fa-ban" aria-hidden="true"></i>
+                </button>
+              {% else %}
+                <span class="dim">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% include "ui/_pager.html" with entity_name="Agent credential" %}
+  {% endif %}
+
+  {% if page_obj and page_obj.paginator.count == 0 %}
+    <p class="empty">No agent credentials yet. Create one to let an MCP client read this organisation's cases.</p>
+  {% endif %}
+</div>
+
+{% url 'ui-settings-agent-access-create' as agent_create_url %}
+{% include "ui/_modal.html" with modal_id="agent-create-modal" form_id="agent-create-form" body_template="ui/_settings_agent_create_form.html" title="New agent credential" confirm_text="Create credential" confirm_class="btn-primary" cancel_text="Cancel" form_action=agent_create_url size="md" %}
+
+{% if credential_created %}
+{% url 'ui-settings-agent-access' as agents_url %}
+{% include "ui/_modal.html" with modal_id="credential-created-modal" title="Agent credential created" body_template="ui/_settings_agent_created.html" confirm_text="Close" confirm_class="btn-primary" show_cancel=False close_url=agents_url size="lg" autoopen=credential_created modal_static=True %}
+{% endif %}
+{% endblock %}

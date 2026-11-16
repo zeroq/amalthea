@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "services",
     "ui",
     "query",
+    "mcp_server",
 ]
 
 MIDDLEWARE = [
@@ -238,3 +239,33 @@ PLAYBOOK_SCRIPTS_DIR = os.getenv(
 # Default organisation name used by the greenfield migration to backfill NULL
 # owner_org / User.org. Can be overridden via env var.
 AMALTHEA_DEFAULT_ORG_NAME = os.environ.get("AMALTHEA_DEFAULT_ORG_NAME", "Default")
+
+# --- MCP server (Phase 1) -----------------------------------------------
+#: When True, the MCP /mcp endpoint is active and credential-verified.
+#: Default False is fail-closed: the endpoint returns 404 and MCP state never starts.
+MCP_ENABLED = os.getenv("AMALTHEA_MCP_ENABLED", "false").lower() == "true"
+#: Public base URL advertised in protected-resource metadata and token audience.
+MCP_BASE_URL = os.getenv("AMALTHEA_MCP_BASE_URL", "").strip()
+#: Maximum number of rows any MCP read tool may return.
+MCP_MAX_ROWS = int(os.getenv("AMALTHEA_MCP_MAX_ROWS", "50"))
+#: Hard timeout (seconds) for any MCP tool execution.
+MCP_TIMEOUT_SECONDS = int(os.getenv("AMALTHEA_MCP_TIMEOUT_SECONDS", "15"))
+#: Maximum request body size (bytes) for MCP POST requests.
+MCP_MAX_BODY_BYTES = int(os.getenv("AMALTHEA_MCP_MAX_BODY_BYTES", str(4 * 1024 * 1024)))
+#: Per-credential and per-IP request budget per fixed one-minute window.
+MCP_RATE_PER_MINUTE = int(os.getenv("AMALTHEA_MCP_RATE_PER_MINUTE", "60"))
+#: Number of trusted reverse proxies in front of Daphne.  0 uses the direct peer
+#: and ignores X-Forwarded-For; set to the exact hop count only behind known proxies.
+MCP_TRUSTED_PROXY_COUNT = max(0, int(os.getenv("AMALTHEA_MCP_TRUSTED_PROXY_COUNT", "0")))
+#: Comma-separated list of allowed browser Origins for MCP requests.
+MCP_ALLOWED_ORIGINS = [
+    value.strip()
+    for value in os.getenv("AMALTHEA_MCP_ALLOWED_ORIGINS", "").split(",")
+    if value.strip()
+]
+#: Hosts allowed in the MCP Host header; defaults to DJANGO_ALLOWED_HOSTS.
+MCP_ALLOWED_HOSTS = [
+    value.strip()
+    for value in os.getenv("AMALTHEA_MCP_ALLOWED_HOSTS", "").split(",")
+    if value.strip()
+] or [host.strip() for host in ALLOWED_HOSTS if host.strip()]

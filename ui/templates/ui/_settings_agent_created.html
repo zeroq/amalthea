@@ -1,0 +1,27 @@
+{% comment %}
+Show-once body. The plaintext exists only in the create POST's 200 response; it is never put in a
+redirect, session, URL or log. The dialog is static and closes through the explicit Close control.
+{% endcomment %}
+<div class="token-created" role="alert">
+  <div class="token-warning">
+    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+    <div>
+      <strong>You will not see this credential again.</strong>
+      <p class="dim">Copy it now. If you lose it, revoke this credential and create a new one.</p>
+    </div>
+  </div>
+
+  <div class="token-display">
+    <label for="agent-credential-plaintext" class="dim">Agent token (plaintext)</label>
+    <div class="token-code-wrap">
+      <code id="agent-credential-plaintext">{{ credential_plaintext }}</code>
+      <button type="button" class="btn" data-clipboard-target="#agent-credential-plaintext" aria-label="Copy agent token to clipboard">Copy</button>
+    </div>
+  </div>
+
+  <div class="token-hint">
+    <p class="dim"><strong>Endpoint:</strong> <code>{{ mcp_url }}</code></p>
+    <p class="dim"><strong>Header:</strong> <code>Authorization: Bearer {{ credential_plaintext }}</code></p>
+    <p class="dim"><strong>Scope:</strong> <code>mcp:read</code>; organisation: {{ credential.organisation.name }}; service user: {{ credential.user.login }}</p>
+  </div>
+</div>

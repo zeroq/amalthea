@@ -8,7 +8,6 @@ lifespan is entered, and that Django still owns non-MCP HTTP paths.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 
 import httpx2
 from mcp import ClientSession
@@ -16,34 +15,7 @@ from mcp.client.streamable_http import streamable_http_client
 
 from amalthea.asgi import build_application
 from mcp_server.asgi import build_mcp_starlette_app
-
-
-@contextlib.asynccontextmanager
-async def _drive_lifespan(app):
-    """Drive the ASGI lifespan protocol the way Daphne does."""
-    incoming: asyncio.Queue = asyncio.Queue()
-    started = asyncio.Event()
-    stopped = asyncio.Event()
-
-    async def receive():
-        return await incoming.get()
-
-    async def send(message):
-        if message["type"] == "lifespan.startup.complete":
-            started.set()
-        elif message["type"] == "lifespan.shutdown.complete":
-            stopped.set()
-
-    scope = {"type": "lifespan", "asgi": {"version": "3.0"}, "state": {}}
-    task = asyncio.create_task(app(scope, receive, send))
-    await incoming.put({"type": "lifespan.startup"})
-    await asyncio.wait_for(started.wait(), 5)
-    try:
-        yield
-    finally:
-        await incoming.put({"type": "lifespan.shutdown"})
-        await asyncio.wait_for(stopped.wait(), 5)
-        await task
+from tests.conformance.conftest import _drive_lifespan
 
 
 async def _mcp_round_trip(client: httpx2.AsyncClient, path: str) -> None:
@@ -63,7 +35,10 @@ async def _mcp_round_trip(client: httpx2.AsyncClient, path: str) -> None:
 
 def test_mcp_protocol_at_both_paths() -> None:
     async def scenario() -> None:
-        app = build_application(build_mcp_starlette_app())
+        app = build_application(
+            build_mcp_starlette_app(include_echo=True, require_auth=False),
+            mcp_enabled=True,
+        )
         async with _drive_lifespan(app):
             transport = httpx2.ASGITransport(app=app)
             async with httpx2.AsyncClient(
@@ -77,9 +52,32 @@ def test_mcp_protocol_at_both_paths() -> None:
     asyncio.run(scenario())
 
 
+def test_mcp_round_trip_without_asgi_lifespan() -> None:
+    """Daphne never sends lifespan, so the manager must start on first request."""
+
+    async def scenario() -> None:
+        mcp_app = build_mcp_starlette_app(include_echo=True, require_auth=False)
+        app = build_application(mcp_app, mcp_enabled=True)
+        transport = httpx2.ASGITransport(app=app)
+        try:
+            async with httpx2.AsyncClient(
+                transport=transport,
+                base_url="http://localhost:8000",
+                follow_redirects=True,
+            ) as client:
+                await _mcp_round_trip(client, "/mcp")
+        finally:
+            await mcp_app.aclose()
+
+    asyncio.run(scenario())
+
+
 def test_django_http_path_is_not_shadowed() -> None:
     async def scenario() -> None:
-        app = build_application(build_mcp_starlette_app())
+        app = build_application(
+            build_mcp_starlette_app(include_echo=True, require_auth=False),
+            mcp_enabled=True,
+        )
         transport = httpx2.ASGITransport(app=app)
         async with httpx2.AsyncClient(
             transport=transport, base_url="http://localhost:8000"

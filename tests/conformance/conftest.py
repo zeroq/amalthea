@@ -10,6 +10,9 @@ module beats conftest), so suites that seed a different organisation are unaffec
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+
 import pytest
 from django.core.cache import cache
 from rest_framework.test import APIClient
@@ -64,3 +67,31 @@ def super_admin(db: None) -> User:
         role="superAdmin",
         is_active=True,
     )
+
+
+@contextlib.asynccontextmanager
+async def _drive_lifespan(app):
+    """Drive ASGI lifespan for lifespan-capable servers (Daphne does not send it)."""
+    incoming: asyncio.Queue = asyncio.Queue()
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def receive():
+        return await incoming.get()
+
+    async def send(message):
+        if message["type"] == "lifespan.startup.complete":
+            started.set()
+        elif message["type"] == "lifespan.shutdown.complete":
+            stopped.set()
+
+    scope = {"type": "lifespan", "asgi": {"version": "3.0"}, "state": {}}
+    task = asyncio.create_task(app(scope, receive, send))
+    await incoming.put({"type": "lifespan.startup"})
+    await asyncio.wait_for(started.wait(), 5)
+    try:
+        yield
+    finally:
+        await incoming.put({"type": "lifespan.shutdown"})
+        await asyncio.wait_for(stopped.wait(), 5)
+        await task

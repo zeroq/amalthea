@@ -2,8 +2,9 @@
 
 **Target client:** CrewAI 1.15.41
 **Server SDK:** MCP Python SDK 2.3.0
-**Status:** example prepared; the CrewAI smoke is pending because CrewAI requires Python `<3.14`
-and the Amalthea runtime uses Python 3.14.6.
+**Status:** verified 2026-11-16 with CrewAI 1.15.41 in an isolated Python 3.13 environment against
+Daphne 4.2.3. CrewAI requires Python `<3.14`; the Amalthea runtime uses Python 3.14.6, so keep
+CrewAI out of the runtime requirements.
 
 ## Overview
 
@@ -80,5 +81,7 @@ API is not used here.
 
 ## Verification status
 
-The Phase 0 ASGI/protocol smoke is covered by `tests/conformance/test_mcp_phase0.py`. The CrewAI
-portion remains an external integration check because of the Python version constraint above.
+The Phase 0 ASGI/protocol smoke is covered by `tests/conformance/test_mcp_phase0.py`. The live
+CrewAI smoke discovered 13 tools and called `list_cases(limit=5)` successfully over Streamable
+HTTP; the test credential was revoked. It remains an external check because of the Python version
+constraint above.

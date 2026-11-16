@@ -452,3 +452,29 @@ def record_taxonomy_change(
         details=details,
         ip=ip,
     )
+
+
+def record_mcp_credential_change(
+    request: HttpRequest,
+    *,
+    actor: User,
+    action: str,
+    credential: object,
+) -> None:
+    """Record an MCP agent-credential lifecycle change.
+
+    ``action`` is one of ``mcp_credential.created``, ``mcp_credential.revoked``
+    or ``mcp_credential.deleted``.  The plaintext token is never part of the
+    audit row; only the credential id and target tenant are recorded.
+    """
+    from identity.models import AuditLog
+
+    AuditLog.objects.create(
+        actor=actor,
+        actor_org=getattr(actor, "org", None),
+        target_org=getattr(credential, "organisation", None),
+        action=action,
+        target_type="McpCredential",
+        target_id=str(getattr(credential, "id", "")),
+        ip=_get_client_ip(request),
+    )

@@ -54,6 +54,9 @@ WIRE_BOUNDARY = (
     "compat/",
     "query/",
     "core/serializers.py",
+    # MCP read tools are an external wire surface: they reuse the TheHive-compatible
+    # serializers and add matching safe field names for observables and timeline rows.
+    "mcp_server/tools/serializers.py",
     "*/views.py",
     "*/urls.py",
     # JSON export/import documents are a wire surface: they read and write TheHive-shaped

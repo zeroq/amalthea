@@ -1,9 +1,17 @@
 # TODO — Amalthea
 
 Open work only. Shipped work and closed-item history live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-11-14 — **MCP Phase 0 partial** (§22): `mcp==2.3.0` dependency closure,
-ASGI mount/lifespan, and protocol echo calls are verified. The CrewAI smoke is pending because
-CrewAI requires Python `<3.14`; Phase 1 has not started. Decisions remain: **CrewAI** first client;
+Last updated: 2026-11-16 — **MCP Phase 0 complete, Phase 1 verified READY** (§22): read-only
+`/mcp`, static-bearer credentials, org-bound scopes, audit/rate limits, read tools/resources/prompts,
+and Settings → Agent access are in place. A live Daphne smoke exposed that Daphne sends no ASGI
+lifespan; `McpLifecycleApp` now starts the session manager lazily on the first `/mcp` request, and
+the no-lifespan path has a conformance test. CrewAI 1.15.41 smoke passed in an isolated Python 3.13
+environment (13 tools; `list_cases` OK); the smoke credential was revoked. Final full suite:
+**3773 passed, 3 skipped, 0 failed, 0 errors, 2 subtests passed** (`/tmp/amalthea-full-pytest.log`).
+Focused suite: `167 passed`. Security review: **PASS**
+(`docs/security/SECURITY-2026-11-15-mcp-phase1.md`). Independent verification:
+**READY — PASS**. Phase 2 is next. Decisions remain: **CrewAI** first
+client;
 **AI case summaries auto-post directly** as labelled `ai-summary` timeline entries. Reconciled
 search (§6.16 P6): it shipped 2026-11-02 (`6427beeb`), so the priority row is now the narrow
 **§6.16 P6-fu1** (Postgres measurement only; verification and T6 security review are complete). The
@@ -11,10 +19,10 @@ original header-search ACs are superseded by `PLAN-2026-11-02-search-page-rail-e
 archived §18/§19 and the playbook script picker to [`COMPLETED.md`](./COMPLETED.md); the §19
 alert-import security review is complete (PASS). Requirements lock is current
 (`scripts/lock.sh --check`). Full suite last run
-2026-11-14 (**3699 passed, 3 skipped, 2 subtests passed**, 16m01s), covering search, the playbook
-picker, MCP Phase 0, and the case-template layout fix. Merged upstream `992f316d`; preserved the open
-backlog and imported its Rejected Observables section as §23. The priority table below is the source
-of truth for open work.
+2026-11-16 (**3773 passed, 3 skipped, 0 failed, 0 errors, 2 subtests passed**, 14m51s), covering MCP
+Phase 0/1, search, the playbook picker, and the case-template layout fix. Merged upstream `992f316d`;
+preserved the open backlog and imported its Rejected Observables section as §23. The priority table
+below is the source of truth for open work.
 
 ---
 
@@ -45,7 +53,7 @@ to its narrow follow-up on 2026-11-13 (see `COMPLETED.md`).
 | **17** | **§12.9 — UI layout/style standardization** | Input/button heights, compact action columns, table/filter convention; codify guidelines. Includes the new alert/case severity rows (`.severity-filter-row`, `.severity-filter--N`) as the canonical filter pattern. | **Low.** |
 | **18** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. | **None** — hygiene. |
 | **19** | **§6.16 P6-fu1 — Postgres search measurement** | Search shipped (`6427beeb`); verification and T6 security review are complete (PASS). Remaining: run `EXPLAIN` on seeded Postgres before deciding on a trigram index. | **Medium** — closes the last evidence gap; no user-facing feature is missing. |
-| **20** | **§22 — MCP server for AI agents (Phase 0 partial)** | CrewAI first; read-only context, then proposal-first state changes plus direct auto-posted AI summaries; requires org-scoped agent credentials and an approval inbox. | **Medium** — agent-assisted triage; dependency/ASGI verified, CrewAI smoke and Phase 1 pending. |
+| **20** | **§22 — MCP server for AI agents (Phase 1 implemented)** | CrewAI first; read-only context, then proposal-first state changes plus direct auto-posted AI summaries. Phase 1 read gateway + Settings → Agent access are implemented and verified READY (full suite clean, CrewAI smoke passed, security PASS). Phase 2 is next. | **Medium** — agent-assisted triage; Phase 2 is next after Phase 1 gates close. |
 | **21** | **§23 — Rejected Observables Management** | Standalone rejection records linked to alerts, suppression in extraction, admin review/promotion, org isolation, confirmation modal. | **Medium** — false-positive suppression; upstream plan still needs acceptance criteria. |
 
 ---
@@ -638,10 +646,12 @@ Status: 16.1–16.5 shipped 2026-11-06 (8/8 ACs met; independent verification PA
 
 ---
 
-## 22. MCP server for AI agents (Phase 0 partial)
+## 22. MCP server for AI agents (Phase 1 implemented)
 
-Status: **PHASE 0 PARTIAL — dependency and ASGI/protocol spike verified; CrewAI smoke pending
-(Python version constraint); Phase 1 not started.**
+Status: **PHASE 0 COMPLETE / PHASE 1 VERIFIED READY — dependency, ASGI/protocol, live Daphne
+and CrewAI spikes verified; read-only gateway, org-bound credentials, audit/rate limits, read
+tools/resources/prompts, and Settings → Agent access implemented. Security review PASS; full suite
+clean (3773 passed, 3 skipped, 0 failed, 0 errors); independent verification READY — PASS.**
 
 Plan: [`PLAN-2026-11-13-mcp-server.md`](docs/planning/PLAN-2026-11-13-mcp-server.md).
 Phase 0/1 brief:
@@ -687,22 +697,45 @@ retention 90 days; agent credentials managed in Settings UI only; no stdio bridg
 - [x] **22.1 — Approve the plan and produce the Phase 0/1 implementation brief.** Issued
   [`IMPL-2026-11-13-mcp-server-phase-0-1.md`](docs/planning/IMPL-2026-11-13-mcp-server-phase-0-1.md)
   with file paths, tasks, and ACs for backend/frontend/QA.
-- [ ] **22.2 — Phase 0 dependency/protocol/CrewAI spike.**
+- [x] **22.2 — Phase 0 dependency/protocol/CrewAI spike.**
   - [x] Pin `mcp==2.3.0` + `mcp-types==2.3.0` with hashes; verify no dependency conflict and a clean
     runtime import. Added the reviewed closure additions to `scripts/lock.sh` `BASE_ALLOW`.
-  - [x] Mount a minimal `MCPServer` at `/mcp` + `/mcp/` with top-level lifespan; verify
+  - [x] Mount a minimal `MCPServer` at `/mcp` + `/mcp/` with lifecycle composition (lazy start for
+    Daphne, lifespan when present); verify
     `initialize`/`tools/list`/`tools/call` and a non-MCP Django path. Results in ADR-012 and
     `tests/conformance/test_mcp_phase0.py`; a Channels websocket smoke also passes.
   - [x] Gate: MCP + realtime smoke (`3 passed`), `manage.py check`, `make check-fast`, full suite
     (`3699 passed, 3 skipped, 2 subtests passed`), and secret scan clean. `pip install --dry-run
     --require-hashes -r requirements/base.txt` passes; `scripts/lock.sh --check` passes and the committed
     requirements are current.
-  - [ ] Verify CrewAI `MCPServerHTTP` with a bearer header and one real tool call in an isolated
+  - [x] Verify CrewAI `MCPServerHTTP` with a bearer header and one real tool call in an isolated
     **Python 3.13** environment. CrewAI 1.15.41 requires Python `<3.14`; the Amalthea runtime is
-    3.14.6. Example: `examples/mcp/crewai_agent.py`; docs: `docs/integrations/crewai.md`.
-- [ ] **22.3 — Phase 1 read-only implementation.** `McpCredential`, `McpInvocation`, ASGI mount,
-  TokenVerifier/scopes, tenant/role enforcement, read tools/resources/prompts, Settings → Agent
-  access UI, CrewAI docs/example, tests, security review, independent verification.
+    3.14.6. Live Daphne smoke: 13 tools discovered and `list_cases(limit=5)` returned `is_error=false`;
+    the smoke credential was revoked. Example: `examples/mcp/crewai_agent.py`; docs:
+    `docs/integrations/crewai.md`. The smoke also found and fixed the Daphne no-lifespan startup
+    path (`McpLifecycleApp`), covered by `test_mcp_phase0.py::test_mcp_round_trip_without_asgi_lifespan`.
+- [x] **22.3 — Phase 1 read-only implementation.**
+  - [x] `McpCredential` / `McpInvocation`, Argon2 mint/verify/revoke/expiry, org+active-user binding.
+  - [x] ASGI `/mcp` + `/mcp/`, fail-closed gate, static-bearer verifier, host/origin/body limits.
+  - [x] Credential-derived scoping: no org argument, cross-org/unknown ids return uniform
+    `not_found`, and credentials cannot use the superAdmin break-glass path.
+  - [x] Read tools (`search`, alerts, cases/digest/timeline, observables, tasks, playbooks), safe
+    serializers, resources, and prompts (triage, summary, suggested actions).
+  - [x] Settings → Agent access (`/settings/agent-access`): create/list/revoke, one-time plaintext
+    modal with `Cache-Control: no-store`, org binding, audit rows, admin/superAdmin gates.
+  - [x] Focused conformance: `167 passed` across MCP credentials/tools/prompts/ASGI/limits, the
+    agent-access UI, UI URL/table/wire-boundary guards, and tenant-scoping conformance; `make check`
+    passes (ruff, format, mypy, Django, migrations, CSS, scripts).
+  - [x] Full suite green after the Phase 1 changes: **3773 passed, 3 skipped, 0 failed, 0 errors,
+    2 subtests passed** (`/tmp/amalthea-full-pytest.log`). The earlier 35 setup errors were fixed by
+    marking the MCP transaction tests `serialized_rollback=True`; the order-targeted reproduction
+    was `209 passed, 2 skipped`.
+  - [x] CrewAI 1.15.x `MCPServerHTTP` smoke in isolated Python 3.13 (13 tools; `list_cases` OK;
+    smoke credential revoked).
+  - [x] Security review: **PASS** (`docs/security/SECURITY-2026-11-15-mcp-phase1.md`); proxy-aware
+    client IP and atomic `last_used_at` follow-ups are closed.
+  - [x] Final independent verification: **READY — PASS** (23 ACs Met, 5 recorded naming/structure
+    deviations, 0 blockers).
 - [ ] **22.4 — Phase 2 proposal-first writes + auto-posted summaries.** Shared service extraction,
   `McpActionProposal`, proposal tools, `/approvals` inbox, four-eyes/expiry/idempotency,
   `post_case_summary` direct write with AI label/source events/rate limits, tests, security review,

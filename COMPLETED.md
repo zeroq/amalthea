@@ -2,7 +2,7 @@
 
 Finished work, with the evidence that it actually happened. Open items live in
 [`TODO.md`](./TODO.md).
-Last updated: 2026-11-14
+Last updated: 2026-11-16
 
 Items are only listed here once independently verified. Where code exists but an acceptance criterion
 is still unproven, the item says so explicitly and the verification gap is cross-linked in `TODO.md`.
@@ -2005,3 +2005,24 @@ Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
 - **12.8-fu2 — Security review of the §12.8 surface — DISCHARGED 2026-10-18 (verdict CONDITIONAL PASS).**
 - **12.8-fu4 — Clear the §12.8 security-review conditions — DONE 2026-10-19 (M1 and L2 were real; M2 re-graded Medium → Info).**
 - **14.5 — Show and remove the alert's current tags.**
+
+## 2026-11-16 — MCP server Phase 0 + Phase 1 — **implemented and verified**
+
+- **Read-only MCP gateway** at `/mcp` and `/mcp/` in the same Daphne/ASGI process as Django +
+  Channels. Static-bearer `McpCredential` (Argon2, 12-char indexed prefix, expiry/revocation),
+  org-scoped scoping derived from the credential, audit/rate/timeout/row limits, 13 read tools,
+  4 resource templates, and 3 prompts. No OAuth, no Phase 2 writes, no raw payloads, no server-side
+  LLM, no cross-org superAdmin reads.
+- **Settings → Agent access** at `/settings/agent-access`: admin/superAdmin gates, org-bound service
+  user, optional expiry, show-once plaintext modal (`Cache-Control: no-store`), revoke, audit rows.
+- **Live Daphne lifecycle fix:** Daphne does not send ASGI lifespan. `McpLifecycleApp` starts the
+  session manager lazily on the first `/mcp` request and still handles lifespan when present. Covered
+  by `tests/conformance/test_mcp_phase0.py::test_mcp_round_trip_without_asgi_lifespan`.
+- **CrewAI 1.15.41** smoke in isolated Python 3.13.18 against Daphne 4.2.3: 13 tools discovered,
+  `list_cases(limit=5)` returned `is_error=false`; smoke credential revoked.
+- **Evidence:** full suite **3773 passed, 3 skipped, 0 failed, 0 errors, 2 subtests passed** in
+  891.73s (`/tmp/amalthea-full-pytest.log`); focused suite **167 passed**; `make check` passes.
+  Security review **PASS** (`docs/security/SECURITY-2026-11-15-mcp-phase1.md`); independent
+  verification **READY — PASS** (`docs/planning/VERIFICATION-2026-11-15-mcp-phase1.md`).
+- **Deferred:** Phase 2 proposal-first writes/approvals/auto-posted summaries, Phase 3 OAuth,
+  Phase 4 autonomy remain in `TODO.md` §22.

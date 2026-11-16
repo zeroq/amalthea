@@ -26,6 +26,19 @@ ALLOWED_HOSTS = [host for host in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",
 if not ALLOWED_HOSTS:
     raise ImproperlyConfigured("DJANGO_ALLOWED_HOSTS must list at least one host in production.")
 
+# The MCP endpoint is fail-closed, but once enabled it must advertise a real
+# HTTPS resource identifier and have an explicit Host allowlist.  Refusing at
+# boot is safer than starting with localhost defaults in production.
+if MCP_ENABLED:  # noqa: F405
+    if not MCP_BASE_URL:  # noqa: F405
+        raise ImproperlyConfigured(
+            "AMALTHEA_MCP_BASE_URL must be set when AMALTHEA_MCP_ENABLED=true in production."
+        )
+    if not MCP_BASE_URL.startswith("https://"):  # noqa: F405
+        raise ImproperlyConfigured("AMALTHEA_MCP_BASE_URL must use https:// in production.")
+    if not MCP_ALLOWED_HOSTS:  # noqa: F405
+        raise ImproperlyConfigured("AMALTHEA_MCP_ALLOWED_HOSTS must not be empty in production.")
+
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_SSL_REDIRECT = True

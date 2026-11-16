@@ -24,7 +24,12 @@ Key constraints from the plan and related ADRs:
 - **MCP is an ASGI-mounted adapter**, not a separate microservice in v1.
 - The MCP Starlette app is mounted at `/mcp/` in the project's top-level `amalthea/asgi.py`, before the Django catch-all.
 - `ProtocolTypeRouter` keeps the `websocket` branch on the existing Channels router.
-- The top-level ASGI lifespan enters `mcp.session_manager.run()` — a mounted sub-application's lifespan does **not** run, so the composition must be handled at the top level.
+- The MCP session manager must start before the first `/mcp` request. A mounted sub-application's lifespan does **not** run automatically.
+- **Implementation note (2026-11-16):** Daphne does not implement the ASGI lifespan protocol
+  (django/daphne#264), so delegating startup to the top-level lifespan is not sufficient for the
+  production server. `McpLifecycleApp` starts `mcp.session_manager.run()` lazily on the first `/mcp`
+  request and still handles lifespan startup/shutdown when the server sends it (Uvicorn or tests).
+  This preserves the same Daphne/ASGI deployment without a sidecar.
 - `stateless_http=True` is the recommended starting point because the 2026-07-28 protocol core is stateless and production may run multiple workers.
 
 **Deployment shape:**
@@ -95,14 +100,15 @@ Key constraints from the plan and related ADRs:
 
 ### 1.8 Phase 0 implementation status
 
-- **Verified:** hashed dependency closure, `MCPServer` import, ASGI mount, MCP lifespan composition,
-  Streamable HTTP `initialize`/`tools/list`/`tools/call`, both MCP paths, and the existing Django
-  `/healthz` path.
+- **Verified:** hashed dependency closure, `MCPServer` import, ASGI mount, MCP lifecycle (lifespan
+  and Daphne's no-lifespan path), Streamable HTTP `initialize`/`tools/list`/`tools/call`, both MCP
+  paths, and the existing Django `/healthz` path.
 - **Not implemented in Phase 0:** `McpCredential`, `McpInvocation`, bearer verification, rate limits,
-  read tools, resources, prompts, and the Settings → Agent access UI. Those remain Phase 1.
-- **CrewAI client:** current CrewAI releases require Python `>=3.10,<3.14`; the Amalthea runtime is
-  Python 3.14.6. The example targets CrewAI 1.15.41 and must be exercised in a separate Python 3.13
-  environment. The Phase 0 CrewAI smoke has **not** been executed in the Amalthea venv.
+  read tools, resources, prompts, and the Settings → Agent access UI. Those are Phase 1.
+- **CrewAI client:** CrewAI 1.15.41 requires Python `>=3.10,<3.14`; the Amalthea runtime is Python
+  3.14.6. The smoke was executed in an isolated Python 3.13 environment against Daphne on
+  `127.0.0.1:8011`: 13 tools discovered, `list_cases` called successfully. The smoke credential was
+  revoked afterwards.
 
 ## 3. Records
 

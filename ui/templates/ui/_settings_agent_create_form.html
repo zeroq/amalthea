@@ -1,0 +1,43 @@
+{% comment %}
+Server-rendered body for the "New agent credential" modal. Fields target the modal form via
+`form="{{ form_id }}"`, so it still works with JavaScript disabled. No plaintext exists until the
+POST succeeds.
+{% endcomment %}
+<div class="meta-inline">
+  <label for="agent-create-name">Name <span class="required">*</span></label>
+  <input type="text" id="agent-create-name" name="name" maxlength="100" required form="{{ form_id }}" placeholder="e.g. CrewAI triage agent" autocomplete="off">
+</div>
+
+{% if is_superadmin %}
+<div class="meta-inline">
+  <label for="agent-create-org">Organisation <span class="required">*</span></label>
+  <select id="agent-create-org" name="organisation" required form="{{ form_id }}">
+    <option value="">— select —</option>
+    {% for org in organisations %}
+    <option value="{{ org.id }}">{{ org.name }}</option>
+    {% endfor %}
+  </select>
+</div>
+{% endif %}
+
+<div class="meta-inline">
+  <label for="agent-create-user">Service user login <span class="required">*</span></label>
+  <input type="text" id="agent-create-user" name="user_login" required form="{{ form_id }}" list="agent-create-users" placeholder="e.g. agent-crewai" autocomplete="off">
+  <datalist id="agent-create-users">
+    {% for service_user in users %}
+    <option value="{{ service_user.login }}">{{ service_user.org.name }}</option>
+    {% endfor %}
+  </datalist>
+  <p class="dim">The credential is read-only and organisation-bound regardless of this user's role.</p>
+</div>
+
+<div class="meta-inline">
+  <label for="agent-create-expires">Expires (optional)</label>
+  <input type="datetime-local" id="agent-create-expires" name="expires_at" form="{{ form_id }}">
+  <p class="dim">Leave blank for no expiry. Expired credentials fail closed.</p>
+</div>
+
+<div class="meta-inline">
+  <label>Scope</label>
+  <p><code>mcp:read</code> <span class="dim">— Phase 1 is strictly read-only.</span></p>
+</div>

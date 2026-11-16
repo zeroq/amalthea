@@ -1,16 +1,49 @@
 # Implementation Brief — MCP server, Phase 0 + Phase 1
 
 **Plan:** [`PLAN-2026-11-13-mcp-server.md`](PLAN-2026-11-13-mcp-server.md)
-**Status:** PHASE 0 PARTIAL / PHASE 1 READY — dependency and ASGI/protocol checks pass; CrewAI
-smoke is pending in an isolated Python 3.13 environment.
+**Status:** PHASE 0 COMPLETE / PHASE 1 VERIFIED READY — dependency, ASGI/protocol, read gateway,
+CrewAI smoke and Settings → Agent access are implemented; security review PASS; full suite clean;
+independent verification PASS.
 **Handoff to:** `django-backend` (Phase 0/1), `django-frontend` (Settings → Agent access), `qa-tester`, then `security-auditor` / `verifier`.
 **Scope:** Phase 0 dependency/protocol/CrewAI spike + Phase 1 read-only gateway. **Do not implement Phase 2** proposals, summary auto-posting, approvals inbox, OAuth, or autonomy.
 
-**Phase 0 status (2026-11-14):** hashed `mcp==2.3.0` closure, ASGI mount, lifespan, and
+**Phase 0 status (2026-11-16):** hashed `mcp==2.3.0` closure, ASGI mount, lifecycle, and
 `initialize`/`tools/list`/`tools/call` are verified by
-`tests/conformance/test_mcp_phase0.py`. CrewAI's smoke is pending because current CrewAI requires
-Python `<3.14` while Amalthea runs Python 3.14.6; run it in an isolated Python 3.13 environment.
-Phase 1 has not started.
+`tests/conformance/test_mcp_phase0.py`. A real Daphne smoke exposed that Daphne does not send ASGI
+lifespan; `McpLifecycleApp` now starts the session manager lazily on the first `/mcp` request (and
+still handles lifespan when present). CrewAI 1.15.41 was exercised in an isolated Python 3.13
+environment against Daphne: 13 tools discovered and `list_cases` called successfully. Phase 1
+implementation landed 2026-11-15.
+
+## Implementation status (2026-11-16)
+
+- Backend: `McpCredential` / `McpInvocation`, Argon2 credential lifecycle, static-bearer
+  `McpTokenVerifier`, credential-derived scoping, audit/rate/timeout/row limits, all Phase 1 read
+  tools, resources and prompts.
+- Frontend: Settings → Agent access at `/settings/agent-access` with admin/superAdmin gates,
+  organisation binding, service-user selection, optional expiry, show-once modal
+  (`Cache-Control: no-store`), revoke modal and audit rows.
+- Focused evidence: `167 passed` across `tests/conformance/test_mcp_*.py`,
+  `test_settings_agent_access.py`, `test_ui_urls_smoke.py`, `test_ui_table_markup.py`,
+  `test_wire_boundary.py`, and `test_tenant_scoping.py`; `make check` passes (ruff, format, mypy,
+  Django check, migrations, CSS drift, playbook scripts).
+- Real-server evidence: Daphne 4.2.3 at `127.0.0.1:8011` returns `initialize` 200 and the CrewAI
+  1.15.41 smoke (isolated Python 3.13) discovers 13 tools and calls `list_cases`. The smoke credential
+  was revoked afterwards. The Daphne run exposed that Daphne does not send ASGI lifespan; the lazy
+  `McpLifecycleApp` startup path is covered by
+  `test_mcp_phase0.py::test_mcp_round_trip_without_asgi_lifespan`.
+- Full-suite evidence (clean rerun): **3773 passed, 3 skipped, 0 failed, 0 errors, 2 subtests
+  passed** in 891.73s (`/tmp/amalthea-full-pytest.log`). The 3 skips are expected Postgres-only
+  planner/race tests on SQLite. The earlier 35 setup errors were fixed by marking the MCP transaction
+  tests `serialized_rollback=True`; the order-targeted reproduction was `209 passed, 2 skipped`.
+- Security review: **PASS** (`docs/security/SECURITY-2026-11-15-mcp-phase1.md`); proxy-aware IP
+  extraction and atomic `last_used_at` follow-ups are closed.
+- Verification: **READY — PASS** (23 acceptance criteria Met, 5 recorded naming/structure
+deviations, 0 blockers). No remaining Phase 0/1 gates.
+- Template filenames use `settings_agents.html` / `_settings_agent_*.html`; route names and paths
+  follow this brief (`/settings/agent-access*`, `ui-settings-agent-access*`). The test module is
+  named `test_settings_agent_access.py` instead of `test_mcp_settings_ui.py`. These are naming-only
+  deviations.
 
 ## 0. Locked decisions
 
@@ -42,7 +75,8 @@ Phase 1 has not started.
 **Files:** temporary branch or `mcp_server/asgi.py`, `amalthea/asgi.py`
 
 1. Build the smallest `MCPServer` with one echo/read tool and `streamable_http_app()`.
-2. Mount it before Django; confirm the top-level ASGI lifespan enters `mcp.session_manager.run()`.
+2. Mount it before Django; confirm `mcp.session_manager.run()` starts via lifespan or the lazy
+   no-lifespan path used by Daphne.
 3. Test `initialize`, `server/discover` (if supported by the pinned SDK), `tools/list`, and `tools/call` with the official client.
 4. Confirm `/mcp` and `/mcp/` both work without a redirect that loses POST bodies.
 5. Record whether `stateless_http=True` and `json_response=True` are compatible with CrewAI.
@@ -62,6 +96,11 @@ older `crewai_tools` adapter API.
 
 **AC:** a minimal CrewAI crew lists tools and calls one read tool over Streamable HTTP; no committed token; tested CrewAI/MCP versions documented; any streamable-HTTP caveat recorded.
 
+**Status (2026-11-16): Met.** Isolated Python 3.13.18 + CrewAI 1.15.41 against MCP SDK 2.3.0 on
+Daphne 4.2.3: 13 tools discovered; `list_cases` returned `is_error=false`. CrewAI's
+`MCPClient.call_tool` exposes only the text content, not `structuredContent`; the text summary
+(`"1 cases"`) and `is_error` flag were asserted. The test credential was revoked.
+
 ---
 
 ## 2. Backend — Phase 1
@@ -77,6 +116,7 @@ older `crewai_tools` adapter API.
   - `MCP_MAX_ROWS` default `50`
   - `MCP_TIMEOUT_SECONDS` default `15`
   - `MCP_RATE_PER_MINUTE` default `60`
+  - `MCP_TRUSTED_PROXY_COUNT` default `0` (direct peer; ignores `X-Forwarded-For` unless explicitly configured)
   - `MCP_MAX_BODY_BYTES` default `4 * 1024 * 1024`
   - `MCP_ALLOWED_ORIGINS` (`AMALTHEA_MCP_ALLOWED_ORIGINS`, comma-separated)
   - `MCP_ALLOWED_HOSTS` (`AMALTHEA_MCP_ALLOWED_HOSTS`, default `DJANGO_ALLOWED_HOSTS`)
@@ -119,7 +159,8 @@ older `crewai_tools` adapter API.
 
 - Build the Starlette/MCP app with bearer verification, Host/Origin validation, body cap, timeout.
 - Mount before the Django HTTP app; keep the WebSocket branch.
-- Compose the MCP lifespan at the top level.
+- Compose the MCP lifecycle at the top level: lazy startup for Daphne (no lifespan) plus
+  lifespan startup/shutdown when the server supports it.
 - Feature gate: when disabled, route to a plain 404; do not import/start MCP state.
 
 **AC:** protocol calls work at `/mcp` and `/mcp/`; Django REST/UI/WebSocket unaffected; disabled mode is clean; startup/shutdown has no orphaned task errors.

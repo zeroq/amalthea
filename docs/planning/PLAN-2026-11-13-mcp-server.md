@@ -1,7 +1,9 @@
 # PLAN 2026-11-13 — MCP server for AI agents
 
-**Status:** PHASE 0 PARTIAL — dependency and ASGI/protocol spike verified; CrewAI smoke pending
-(Python version constraint); Phase 1 implementation not started.
+**Status:** PHASE 0 COMPLETE / PHASE 1 VERIFIED READY — dependency, ASGI/protocol, live Daphne and
+CrewAI 1.15.41 spikes verified; read-only gateway and Settings → Agent access implemented. Security
+review PASS; full suite clean (3773 passed, 3 skipped, 0 failed, 0 errors); independent verification
+READY — PASS. Phase 2 is next.
 
 **Author:** planner
 
@@ -134,8 +136,8 @@ not change status, severity, assignment, tasks, observables, or approvals.
 - The MCP endpoint is `/mcp/` (no `/api/v1` prefix). It is mounted in `amalthea/asgi.py` before the
   Django catch-all.
 - `ProtocolTypeRouter` keeps `websocket` on the existing Channels router.
-- The top-level ASGI lifespan must enter `mcp.session_manager.run()`; a mounted sub-application's
-  lifespan does not run.
+- The MCP session manager must start before the first request. Daphne sends no ASGI lifespan, so the
+  mount uses a lazy-start lifecycle wrapper (and still handles lifespan when the server supports it).
 - `stateless_http=True` is the recommended starting point because the 2026-07-28 protocol core is
   stateless and production may run multiple workers. Approval state lives in PostgreSQL, not in a
   connection.
@@ -849,3 +851,4 @@ Residual implementation defaults:
 | 2026-11-13 | Q10: CrewAI is the first supported MCP client (`MCPServerHTTP`, Streamable HTTP, bearer header) | user |
 | 2026-11-13 | Phase 0/1 implementation brief issued: `IMPL-2026-11-13-mcp-server-phase-0-1.md` | planner |
 | 2026-11-14 | Phase 0: `mcp==2.3.0`/`mcp-types==2.3.0` hashed closure and ASGI/protocol echo spike verified; CrewAI 1.15.41 requires Python `<3.14`, so its smoke moves to an isolated Python 3.13 environment and remains pending | backend |
+| 2026-11-16 | Live Daphne smoke found no ASGI lifespan support; replaced top-level lifespan-only startup with lazy `McpLifecycleApp` startup (plus lifespan when present). CrewAI 1.15.41 smoke passed in Python 3.13.18 (13 tools; `list_cases` OK). Clean full suite: 3773 passed, 3 skipped, 0 failed, 0 errors. Verification READY — PASS. | backend |
