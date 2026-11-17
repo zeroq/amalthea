@@ -2,7 +2,7 @@
 
 Finished work, with the evidence that it actually happened. Open items live in
 [`TODO.md`](./TODO.md).
-Last updated: 2026-11-16
+Last updated: 2026-11-17
 
 Items are only listed here once independently verified. Where code exists but an acceptance criterion
 is still unproven, the item says so explicitly and the verification gap is cross-linked in `TODO.md`.
@@ -2026,3 +2026,17 @@ Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
   verification **READY — PASS** (`docs/planning/VERIFICATION-2026-11-15-mcp-phase1.md`).
 - **Deferred:** Phase 2 proposal-first writes/approvals/auto-posted summaries, Phase 3 OAuth,
   Phase 4 autonomy remain in `TODO.md` §22.
+
+## 2026-11-17 — Fast CI gate repaired (TODO §12.11)
+
+- `.github/workflows/ci.yml` now has two independent jobs, each capped at **5 minutes**:
+  **Fast verify** (pinned install, `make check-ci`, lock-currentness) and **Secret scan (full
+  history)**. Full suite, Postgres, coverage and pip-audit are local/manual gates and are no
+  longer implied by CI step names.
+- Added `make check-ci`: static DoD checks plus a 50-test fast conformance subset.
+- Optimized `scripts/secret-scan.sh --history` to scan each unique blob with a bounded fixed-string
+  candidate pass and exact regex rescan, skipping legacy dependency/cache blobs. The authoritative
+  secret check now completes in ~1m50s locally instead of timing out.
+- Evidence: CI run `44158684927` on `f8abbf9f` — **success** in **2m24s**; Fast verify **2m20s**,
+  secret scan **1m07s**. Local: `make check-ci` 52s / 50 passed, history scan 111s, lock check 105s,
+  `tests/unit/test_secret_scan.py` 20 passed.

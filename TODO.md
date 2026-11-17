@@ -1,7 +1,7 @@
 # TODO — Amalthea
 
 Open work only. Shipped work and closed-item history live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-11-16 — **MCP Phase 0 complete, Phase 1 verified READY** (§22): read-only
+Last updated: 2026-11-17 — **MCP Phase 0 complete, Phase 1 verified READY; CI repaired** (§22): read-only
 `/mcp`, static-bearer credentials, org-bound scopes, audit/rate limits, read tools/resources/prompts,
 and Settings → Agent access are in place. A live Daphne smoke exposed that Daphne sends no ASGI
 lifespan; `McpLifecycleApp` now starts the session manager lazily on the first `/mcp` request, and
@@ -445,7 +445,7 @@ Postgres work is §6.16-fu1. §6.16 P7 (realtime) remains in its own plan.
   scans each unique blob once via a bounded fixed-string candidate pass and exact regex rescan, and
   skips legacy dependency/cache blobs; the authoritative run is **111s** locally and passes. Local
   evidence: `make check-ci` **52s / 50 passed**, `scripts/lock.sh --check` **105s / current**,
-  `tests/unit/test_secret_scan.py` **20 passed**. CI green must now be reconfirmed on the next push.
+  `tests/unit/test_secret_scan.py` **20 passed**. CI green confirmed on run `44158684927` (`f8abbf9f`): **success** in 2m24s; `Fast verify` 2m20s, `Secret scan (full history)` 1m07s.
 
 ---
 
