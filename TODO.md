@@ -21,7 +21,11 @@ alert-import security review is complete (PASS). Requirements lock is current
 (`scripts/lock.sh --check`). Full suite last run
 2026-11-16 (**3773 passed, 3 skipped, 0 failed, 0 errors, 2 subtests passed**, 14m51s), covering MCP
 Phase 0/1, search, the playbook picker, and the case-template layout fix. Merged upstream `992f316d`;
-preserved the open backlog and imported its Rejected Observables section as §23. The priority table
+preserved the open backlog and imported its Rejected Observables section as §23. CI repaired 2026-11-16 (§12.11 closed): two independent jobs capped at five minutes —
+fast static/smoke verification and the authoritative full-history secret scan. Local evidence:
+`make check-ci` 52s (50 passed), `scripts/secret-scan.sh --history` 111s, lock check 105s. The full
+suite, Postgres run and coverage remain local/manual gates and are no longer implied by CI step names.
+The priority table
 below is the source of truth for open work.
 
 ---
@@ -34,28 +38,26 @@ to its narrow follow-up on 2026-11-13 (see `COMPLETED.md`).
 
 | Priority | Item | Description | Impact |
 |----------|------|-------------|--------|
-| **1** | **§12.11 — CI red; full suite never run** | Secrets job times out (full-history scan not running); the "migrations, suite" step does not run the suite. | **Highest leverage** — every other claim is unbacked by CI. |
-| **2** | **§12.3-fu1 — Automatic ingest-time bundling** | `correlation_key` is derived/indexed but only the manual Similar/attach path consumes it. Auto-bundle was deferred (Q1b). Depends on §12.1-fu1. | **High** — the orchestration promise of Modules B+C. |
-| **3** | **§12.4 — No bulk actions in the UI** | `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk` exist in the API; the UI stub was deleted (Q2). | **Medium-High** — 200-alert mornings are single-item work. |
-| **4** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; ledger already syncs. |
-| **5** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — ops/onboarding, not triage. |
-| **6** | **§6.13 / §6.16 P4 — Ingestion tokens + audit-log viewer** | **Partial:** token lifecycle shipped (10a–c); read-only `AuditLog` viewer remains. | **Medium** — audit viewer is the accountability half. |
-| **7** | **S3 + S5 (+ M3 residual)** | **S3** per-account lockout on the API login + stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. M3 shipped; residual same-org cleartext secrets. | **Medium (security)** |
-| **8** | **§12.1-fu1 — Measure filtered-list `COUNT` on Postgres** | Unmeasured `COUNT` on 12 paginated lists; prerequisite for auto-bundling. | **Medium** — pager truthfulness at scale. |
-| **9** | **§2.6 + §2.7 + §7.4 + §8.5/§8.7 + §11.4-L1/§11.5** | Coverage ≥ 80%; Phase-12/T2 QA list; Tailwind source/artifact split; mutation coverage; unaudited procedure attaches; admin role model; log forging. | **None** — engineering hygiene. |
-| **10** | **§10.9 — Status vocabularies have no human labels** | UI prints raw tokens (`InProgress`); add labels without breaking `stage`-keyed automation. | **Low** — cosmetic. |
-| **11** | **§10.11 — Reload mints a second ingestion token** | 200 body re-submits on reload; one-shot nonce or explicit nudge. | **Low** — admin-only exposure. |
-| **12** | **§10.12-fu1…fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, admin paused-state display, test gaps. | **Low–Medium.** |
-| **13** | **§14.1–14.12 — Alert tag follow-ups** | Id validation, parity, truncation text, a11y, query cleanup, swap-file purge. | **Low.** |
-| **14** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
-| **15** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
-| **16** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
-| **17** | **§12.9 — UI layout/style standardization** | Input/button heights, compact action columns, table/filter convention; codify guidelines. Includes the new alert/case severity rows (`.severity-filter-row`, `.severity-filter--N`) as the canonical filter pattern. | **Low.** |
-| **18** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. | **None** — hygiene. |
-| **19** | **§6.16 P6-fu1 — Postgres search measurement** | Search shipped (`6427beeb`); verification and T6 security review are complete (PASS). Remaining: run `EXPLAIN` on seeded Postgres before deciding on a trigram index. | **Medium** — closes the last evidence gap; no user-facing feature is missing. |
-| **20** | **§22 — MCP server for AI agents (Phase 1 implemented)** | CrewAI first; read-only context, then proposal-first state changes plus direct auto-posted AI summaries. Phase 1 read gateway + Settings → Agent access are implemented and verified READY (full suite clean, CrewAI smoke passed, security PASS). Phase 2 is next. | **Medium** — agent-assisted triage; Phase 2 is next after Phase 1 gates close. |
-| **21** | **§23 — Rejected Observables Management** | Standalone rejection records linked to alerts, suppression in extraction, admin review/promotion, org isolation, confirmation modal. | **Medium** — false-positive suppression; upstream plan still needs acceptance criteria. |
-
+| **1** | **§12.3-fu1 — Automatic ingest-time bundling** | `correlation_key` is derived/indexed but only the manual Similar/attach path consumes it. Auto-bundle was deferred (Q1b). Depends on §12.1-fu1. | **High** — the orchestration promise of Modules B+C. |
+| **2** | **§12.4 — No bulk actions in the UI** | `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk` exist in the API; the UI stub was deleted (Q2). | **Medium-High** — 200-alert mornings are single-item work. |
+| **3** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; ledger already syncs. |
+| **4** | **§10.1 — Role-scoped user management** | An `admin` manages own-org users (today `superAdmin`-only). | **Medium** — ops/onboarding, not triage. |
+| **5** | **§6.13 / §6.16 P4 — Ingestion tokens + audit-log viewer** | **Partial:** token lifecycle shipped (10a–c); read-only `AuditLog` viewer remains. | **Medium** — audit viewer is the accountability half. |
+| **6** | **S3 + S5 (+ M3 residual)** | **S3** per-account lockout on the API login + stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. M3 shipped; residual same-org cleartext secrets. | **Medium (security)** |
+| **7** | **§12.1-fu1 — Measure filtered-list `COUNT` on Postgres** | Unmeasured `COUNT` on 12 paginated lists; prerequisite for auto-bundling. | **Medium** — pager truthfulness at scale. |
+| **8** | **§2.6 + §2.7 + §7.4 + §8.5/§8.7 + §11.4-L1/§11.5** | Coverage ≥ 80%; Phase-12/T2 QA list; Tailwind source/artifact split; mutation coverage; unaudited procedure attaches; admin role model; log forging. | **None** — engineering hygiene. |
+| **9** | **§10.9 — Status vocabularies have no human labels** | UI prints raw tokens (`InProgress`); add labels without breaking `stage`-keyed automation. | **Low** — cosmetic. |
+| **10** | **§10.11 — Reload mints a second ingestion token** | 200 body re-submits on reload; one-shot nonce or explicit nudge. | **Low** — admin-only exposure. |
+| **11** | **§10.12-fu1…fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, admin paused-state display, test gaps. | **Low–Medium.** |
+| **12** | **§14.1–14.12 — Alert tag follow-ups** | Id validation, parity, truncation text, a11y, query cleanup, swap-file purge. | **Low.** |
+| **13** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
+| **14** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
+| **15** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
+| **16** | **§12.9 — UI layout/style standardization** | Input/button heights, compact action columns, table/filter convention; codify guidelines. Includes the new alert/case severity rows (`.severity-filter-row`, `.severity-filter--N`) as the canonical filter pattern. | **Low.** |
+| **17** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. | **None** — hygiene. |
+| **18** | **§6.16 P6-fu1 — Postgres search measurement** | Search shipped (`6427beeb`); verification and T6 security review are complete (PASS). Remaining: run `EXPLAIN` on seeded Postgres before deciding on a trigram index. | **Medium** — closes the last evidence gap; no user-facing feature is missing. |
+| **19** | **§22 — MCP server for AI agents (Phase 1 implemented)** | CrewAI first; read-only context, then proposal-first state changes plus direct auto-posted AI summaries. Phase 1 read gateway + Settings → Agent access are implemented and verified READY (full suite clean, CrewAI smoke passed, security PASS). Phase 2 is next. | **Medium** — agent-assisted triage; Phase 2 is next after Phase 1 gates close. |
+| **20** | **§23 — Rejected Observables Management** | Standalone rejection records linked to alerts, suppression in extraction, admin review/promotion, org isolation, confirmation modal. | **Medium** — false-positive suppression; upstream plan still needs acceptance criteria. |
 ---
 
 ## 2. Quality gates not yet met
@@ -401,7 +403,7 @@ Postgres work is §6.16-fu1. §6.16 P7 (realtime) remains in its own plan.
       templates (`source_detail.html`, and the Settings → Sources token row) — generalize/rename it as part
       of this item rather than inventing a second utility. Source: user request 2026-10-17.
 
-- [ ] **12.11 — CI has failed on every run for at least a week, and the full suite is never run locally.**
+- [x] **12.11 — CI repaired 2026-11-16; full suite remains a local/manual gate.**
   Found 2026-10-19 while chasing §12.3-fu2. Evidence (read from the public `actions` API — `gh` is not
   installed here): every non-cancelled run since at least Oct 15 is `failure`, for two independent reasons.
   **(a) The `secrets` job hits its own `timeout-minutes: 10`** (`.github/workflows/ci.yml:88`): the step
@@ -433,6 +435,17 @@ Postgres work is §6.16-fu1. §6.16 P7 (realtime) remains in its own plan.
   Postgres run failed only because Postgres is not installed locally but runs in the compose container
   (`docker-compose.yml`), so the container is the way to reproduce; CI *does* provide a `postgres:16-alpine`
   service, so the CI-side Postgres failure is still unmeasured (its log needs a signed-in session).
+
+  **Closed 2026-11-16 (minimum 5-minute repair).** `.github/workflows/ci.yml` now has two independent
+  jobs, each `timeout-minutes: 5`: `verify` (install pinned closure, `make check-ci`, lock check) and
+  `secrets` (full-history local scanner). `make check-ci` runs static checks plus a 50-test fast
+  conformance subset; `make check` help no longer claims pytest. The full suite, Postgres conformance
+  run, coverage gate and pip-audit are deliberately **not** CI steps — they exceed the budget (or, for
+  pip-audit, report pre-existing dependency advisories) and remain local/manual. The secret scanner now
+  scans each unique blob once via a bounded fixed-string candidate pass and exact regex rescan, and
+  skips legacy dependency/cache blobs; the authoritative run is **111s** locally and passes. Local
+  evidence: `make check-ci` **52s / 50 passed**, `scripts/lock.sh --check` **105s / current**,
+  `tests/unit/test_secret_scan.py` **20 passed**. CI green must now be reconfirmed on the next push.
 
 ---
 

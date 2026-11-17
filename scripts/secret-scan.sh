@@ -32,7 +32,7 @@
 set -euo pipefail
 
 BATCH_SIZE=64   # files handed to the search tool per invocation (ARG_MAX headroom)
-REV_CHUNK=100   # commits handed to `git grep` per invocation
+BLOB_BATCH=512  # unique blob ids handed to `git grep` per invocation
 
 usage() {
     cat <<'EOF'
@@ -128,13 +128,14 @@ filename_violation() {
     esac
 }
 
-# Never scan (or report) anything inside these — mirrors the spec'd exclusions.
-# Applies to --files (which walks the working tree); git-object modes scan
-# whatever git holds, because tracked content is exactly what would publish.
+# Never scan (or report) anything inside these — dependency and cache artifacts.
+# Applies to --files and to --history's legacy blobs; --staged/--tracked still
+# scan every current tracked file, because that is exactly what would publish.
 excluded_path() {
     case "$1" in
         .git|.git/*|.venv|.venv/*|node_modules|node_modules/*) return 0 ;;
-        */.git/*|*/.venv/*|*/node_modules/*)                   return 0 ;;
+        */.git/*|*/.venv/*|*/node_modules/*|*/__pycache__/*)   return 0 ;;
+        *.pyc|*.pyo)                                            return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -255,7 +256,8 @@ record_hits() {
 
 # guard_filenames MODE — stdin: NUL-separated paths.
 #   object   the path comes from the git index or a tree: no working-tree
-#            check, because the object is exactly what would be published
+#            check, because the object is exactly what would be published.
+#            History mode also skips dependency/cache artifacts (below).
 #   worktree paths are user-supplied: skip ones that do not exist right now
 guard_filenames() {
     local require="$1" f reason
@@ -264,7 +266,7 @@ guard_filenames() {
             continue
         fi
         f="${f#./}"
-        if [ "$MODE" = "--files" ] && excluded_path "$f"; then
+        if { [ "$MODE" = "--files" ] || [ "$MODE" = "--history" ]; } && excluded_path "$f"; then
             continue
         fi
         if [ "$require" = "worktree" ] && [ ! -e "$f" ]; then
@@ -319,6 +321,9 @@ files=()
 commits=()
 has_head=0
 scan_files=()
+history_blobs=()
+history_blob_paths=""
+candidate_blobs=""
 
 case "$MODE" in
     --staged|--tracked|--history)
@@ -387,16 +392,13 @@ case "$MODE" in
         fi
         ;;
     --history)
+        # One diff walk instead of one `git ls-tree` per commit: every path that
+        # ever appeared is still checked, and NUL framing survives odd filenames.
         if [ "${#commits[@]}" -gt 0 ]; then
-            history_paths="$workdir/history-paths"
-            : >"$history_paths"
-            for rev in "${commits[@]}"; do
-                if ! git ls-tree -r -z --name-only "$rev" >>"$history_paths"; then
-                    echo "secret-scan: git ls-tree failed for $rev" >&2
-                    exit 2
-                fi
-            done
-            guard_filenames object <"$history_paths"
+            if ! git log --all --pretty=format: --name-only -z | guard_filenames object; then
+                echo "secret-scan: git log failed while listing history paths" >&2
+                exit 2
+            fi
         fi
         ;;
 esac
@@ -460,15 +462,182 @@ scan_worktree_files() {
     done
 }
 
-# scan_history_content: every blob of every commit, in REV_CHUNK-sized batches.
-scan_history_content() {
+# emit_candidate_prefixes: cheap fixed strings that must cover every pattern in
+# emit_patterns. The history scan first collects blobs containing any prefix,
+# then runs the exact regexes only on those candidates. This keeps a full-history
+# scan bounded; scanning every commit tree for every pattern did not.
+emit_candidate_prefixes() {
+    printf '%s\n' \
+        'github_pat_' \
+        'ghp_' 'gho_' 'ghu_' 'ghs_' 'ghr_' \
+        'AKIA' \
+        'xoxb-' 'xoxa-' 'xoxp-' 'xoxr-' 'xoxs-' \
+        'AIza' \
+        'sk_live_' 'rk_live_' \
+        '-----BEGIN ' \
+        '://'
+}
+
+# build_history_blobs: collect each unique blob once, with its first path for
+# readable findings. Pipes through cat-file in the same order as rev-list.
+build_history_blobs() {
+    local objects="$workdir/history-objects"
+    local types="$workdir/history-object-types"
+    local sorted="$workdir/history-blobs"
+    local type_line object_line oid typ path
+
+    history_blob_paths="$workdir/history-blob-paths"
+    candidate_blobs="$workdir/candidate-blobs"
+    : >"$history_blob_paths"
+    : >"$candidate_blobs"
+    : >"$sorted"
+
+    if ! git rev-list --objects --all >"$objects"; then
+        echo "secret-scan: git rev-list failed while listing history objects" >&2
+        exit 2
+    fi
+    if ! cut -d' ' -f1 "$objects" | git cat-file --batch-check >"$types"; then
+        echo "secret-scan: git cat-file failed while typing history objects" >&2
+        exit 2
+    fi
+
+    exec 3<"$objects"
+    while IFS= read -r type_line; do
+        IFS= read -r object_line <&3 || break
+        oid="${type_line%% *}"
+        typ="${type_line#* }"; typ="${typ%% *}"
+        if [ "$typ" = "blob" ]; then
+            path="${object_line#* }"
+            if [ "$path" = "$object_line" ]; then path="$oid"; fi
+            # Legacy dependency/cache blobs are not source and make a full-history
+            # scan both noisy and too slow; source and config blobs are untouched.
+            if excluded_path "$path"; then continue; fi
+            printf '%s\n' "$oid" >>"$sorted"
+            printf '%s %s\n' "$oid" "$path" >>"$history_blob_paths"
+        fi
+    done <"$types"
+    exec 3<&-
+
+    sort -u -o "$sorted" "$sorted"
+    history_blobs=()
+    while IFS= read -r oid; do
+        if [ -n "$oid" ]; then history_blobs+=("$oid"); fi
+    done <"$sorted"
+}
+
+blob_path() {
+    local oid="$1" line path
+    line="$(grep -m1 -F "$oid " "$history_blob_paths" 2>/dev/null || true)"
+    if [ -z "$line" ]; then return 1; fi
+    path="${line#* }"
+    if [ -z "$path" ]; then return 1; fi
+    printf '%s' "$path"
+}
+
+# record_blob_candidates: NUL-framed `blob-id \0 line \0 match \n` from `git grep`.
+record_blob_candidates() {
+    local oid line match rc
+    while true; do
+        oid=""; rc=0
+        IFS= read -r -d '' oid || rc=$?
+        if [ "$rc" -ne 0 ]; then
+            if [ -n "$oid" ]; then
+                printf '%s:0: truncated scanner record — content withheld\n' '?' >>"$findings_file"
+            fi
+            break
+        fi
+        line=""; rc=0
+        IFS= read -r -d '' line || rc=$?
+        if [ "$rc" -ne 0 ]; then
+            printf '%s:0: truncated scanner record — content withheld\n' '?' >>"$findings_file"
+            break
+        fi
+        match=""; rc=0
+        IFS= read -r match || rc=$?
+        if [ "$rc" -ne 0 ] && [ -z "$match" ]; then
+            printf '%s:0: truncated scanner record — content withheld\n' '?' >>"$findings_file"
+            break
+        fi
+        case "$line" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        printf '%s\n' "$oid" >>"$candidate_blobs"
+    done
+}
+
+# record_blob_hits: same framing, but resolves the blob id to a path and writes
+# an ordinary `path:line: label` finding.
+record_blob_hits() {
+    local scope="$1" label="$2"
+    local oid line match rc path
+    while true; do
+        oid=""; rc=0
+        IFS= read -r -d '' oid || rc=$?
+        if [ "$rc" -ne 0 ]; then
+            if [ -n "$oid" ]; then
+                printf '%s:0: %s (truncated scanner record — content withheld)\n' '?' "$label" >>"$findings_file"
+            fi
+            break
+        fi
+        line=""; rc=0
+        IFS= read -r -d '' line || rc=$?
+        if [ "$rc" -ne 0 ]; then
+            printf '%s:0: %s (truncated scanner record — content withheld)\n' '?' "$label" >>"$findings_file"
+            break
+        fi
+        match=""; rc=0
+        IFS= read -r match || rc=$?
+        if [ "$rc" -ne 0 ] && [ -z "$match" ]; then
+            printf '%s:0: %s (truncated scanner record — content withheld)\n' "$oid" "$label" >>"$findings_file"
+            break
+        fi
+        case "$line" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        path="$(blob_path "$oid")" || path="$oid"
+        if [ "$scope" = "url" ] && allowlisted "$path"; then continue; fi
+        printf '%s:%s: %s\n' "$path" "$line" "$label" >>"$findings_file"
+    done
+}
+
+scan_history_candidates() {
+    local i=0 rc p
+    local -a chunk specs
+    while [ "$i" -lt "${#history_blobs[@]}" ]; do
+        chunk=("${history_blobs[@]:i:BLOB_BATCH}")
+        specs=()
+        while IFS= read -r p; do
+            if [ -n "$p" ]; then specs+=("-e" "$p"); fi
+        done < <(emit_candidate_prefixes)
+        rc=0
+        git grep -F -a -n -o -z "${specs[@]}" "${chunk[@]}" \
+            | record_blob_candidates || rc=$?
+        if [ "$rc" -ge 2 ]; then
+            echo "secret-scan: git grep candidate pass failed" >&2
+            exit 2
+        fi
+        i=$((i + BLOB_BATCH))
+    done
+    sort -u -o "$candidate_blobs" "$candidate_blobs"
+}
+
+scan_candidate_patterns() {
     local scope="$1" label="$2" pattern="$3"
-    local i=0 n="${#commits[@]}"
-    local -a chunk
-    while [ "$i" -lt "$n" ]; do
-        chunk=("${commits[@]:i:REV_CHUNK}")
-        scan_revs "$scope" "$label" "$pattern" "${chunk[@]}"
-        i=$((i + REV_CHUNK))
+    local i=0 rc oid
+    local -a chunk candidates=()
+    while IFS= read -r oid; do
+        if [ -n "$oid" ]; then candidates+=("$oid"); fi
+    done <"$candidate_blobs"
+    while [ "$i" -lt "${#candidates[@]}" ]; do
+        chunk=("${candidates[@]:i:BLOB_BATCH}")
+        rc=0
+        git grep -E -a -n -o -z -e "$pattern" "${chunk[@]}" \
+            | record_blob_hits "$scope" "$label" || rc=$?
+        if [ "$rc" -ge 2 ]; then
+            echo "secret-scan: git grep pattern pass failed while scanning for: $label" >&2
+            exit 2
+        fi
+        i=$((i + BLOB_BATCH))
     done
 }
 
@@ -558,10 +727,14 @@ elif [ "$MODE" = "--files" ] && [ "${#scan_files[@]}" -gt 0 ]; then
         scan_worktree_files "$scope" "$label" "$pattern"
     done < <(emit_patterns)
 elif [ "$MODE" = "--history" ] && [ "${#commits[@]}" -gt 0 ]; then
-    while IFS=$'\t' read -r scope label pattern; do
-        if [ -z "$label" ]; then continue; fi
-        scan_history_content "$scope" "$label" "$pattern"
-    done < <(emit_patterns)
+    build_history_blobs
+    if [ "${#history_blobs[@]}" -gt 0 ]; then
+        scan_history_candidates
+        while IFS=$'\t' read -r scope label pattern; do
+            if [ -z "$label" ]; then continue; fi
+            scan_candidate_patterns "$scope" "$label" "$pattern"
+        done < <(emit_patterns)
+    fi
     scan_commit_messages
 fi
 

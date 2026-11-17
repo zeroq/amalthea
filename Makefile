@@ -8,14 +8,23 @@ PYTEST := .venv/bin/pytest
 TAILWIND ?= scripts/tailwindcss
 export DJANGO_SETTINGS_MODULE := amalthea.settings.test
 
+# Fast conformance subset used by CI. The full suite remains a local/manual gate.
+CI_SMOKE_TESTS := \
+	tests/unit/test_secret_scan.py \
+	tests/conformance/test_schema_mutation_guards.py \
+	tests/conformance/test_wire_boundary.py \
+	tests/conformance/test_ui_urls_smoke.py \
+	tests/conformance/test_mcp_phase0.py \
+	tests/conformance/test_mcp_asgi.py
+
 .DEFAULT_GOAL := help
-.PHONY: help check check-fast quality tests typing migrations coverage audit lock hooks secrets clean css css-check
+.PHONY: help check check-fast check-ci quality tests typing migrations coverage audit lock hooks secrets clean css css-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-check: ## Full DoD gate (lint, types, migrations, css compile, pytest)
+check: ## Static DoD gate (lint, types, Django, migrations, css, playbook scripts; no pytest)
 	@echo "── ruff check";        $(RUFF) check .
 	@echo "── ruff format";       $(RUFF) format --check . --quiet || $(RUFF) format --check .
 	@echo "── mypy (scope pinned in pyproject.toml: 73 files)"; $(MYPY)
@@ -30,6 +39,11 @@ check-fast: ## Subset cheap enough for pre-commit (lint only, no pytest)
 	@$(RUFF) check . --quiet
 	@$(RUFF) format --check . --quiet
 	@echo "✓ check-fast passed"
+
+check-ci: ## CI smoke gate (static checks + fast conformance subset; no full suite)
+	@$(MAKE) --no-print-directory check
+	@echo "── fast conformance smoke"; $(PYTEST) -q $(CI_SMOKE_TESTS)
+	@echo "✓ check-ci passed"
 
 css: ## Compile Tailwind CSS from source to ui/static/ui/app.css
 	@$(TAILWIND) -i ui/static/ui/app.src.css -o ui/static/ui/app.css --minify
