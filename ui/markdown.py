@@ -70,7 +70,7 @@ def _strip_protocol_relative_links(state: StateCore) -> None:
             if candidate.type != "link_open":
                 continue
             href = candidate.attrGet("href")
-            if href and href.startswith("//") and not urlsplit(href).scheme:
+            if isinstance(href, str) and href.startswith("//") and not urlsplit(href).scheme:
                 if candidate.attrs is not None:
                     candidate.attrs.pop("href", None)
 

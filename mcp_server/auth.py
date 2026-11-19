@@ -12,7 +12,7 @@ from django.conf import settings
 from django.utils import timezone
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 
-from mcp_server.models import PHASE1_SCOPES, McpCredential
+from mcp_server.models import PHASE1_SCOPES, PHASE2_SCOPES, McpCredential
 
 
 @dataclass(frozen=True)
@@ -46,10 +46,11 @@ class McpTokenVerifier(TokenVerifier):
         if credential is None:
             return None
 
-        # Phase 1 is read-only.  A future scope stored in the row must not widen
-        # today's gateway.
-        scopes = [scope for scope in (credential.scopes or []) if scope in PHASE1_SCOPES]
-        if "mcp:read" not in scopes:
+        # Phase 2 adds propose/summary scopes. Unknown or reserved scopes are
+        # dropped here so a tampered row can never widen the effective principal.
+        allowed_scopes = set(PHASE1_SCOPES) | set(PHASE2_SCOPES)
+        scopes = [scope for scope in (credential.scopes or []) if scope in allowed_scopes]
+        if not scopes:
             return None
 
         now = timezone.now()

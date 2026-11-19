@@ -616,6 +616,21 @@ Consequences, all cosmetic and all handled:
 * The two UI conformance tests that asserted the old kind (`test_ui_loop.py`, `test_realtime.py`)
   now assert `status-changed`; `test_ui_case_verdict.py` covers the new close/verdict flow.
 
+## Wave 6.22 — MCP Phase 2 (2026-11-19)
+
+Per `PLAN-2026-11-17-mcp-phase2.md`; local gates are green (`make check-ci`: 50 passed;
+Phase 2 focused conformance: 77 passed). Full-suite and independent verification evidence are
+still pending.
+
+| ID | Plan said | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **MCP2-1** | one casing for MCP tool arguments and stored proposal arguments | Registered MCP tool signatures take **snake_case** (`case_id`, `alert_id`, `assignee_id`); persisted `McpActionProposal.arguments` and bounded results keep the TheHive-shaped **camelCase** keys (`caseId`, `alertId`, `taskId`, `eventId`) | The SDK-facing wrapper maps public snake_case parameters into the camelCase argument map that the executor stores for audit/replay and passes unchanged to the shared domain services. Rewriting it at execution time would break argument-hash replay checks. `mcp_server/tools/proposals.py::payload`, `mcp_server/services/proposals.py::_execute_service_action`; `tests/conformance/test_wire_boundary.py` now allowlists `mcp_server/services/` as part of this external surface. |
+| **MCP2-2** | summary result shape unspecified beyond labelled event | Service returns snake_case internals; the registered `post_case_summary` tool returns camelCase `caseId`, `eventId`, `createdAt`, `label`, `requiresHumanVerification` | Matches the Phase 1 MCP wire style and the external-only serializer boundary. `mcp_server/services/summaries.py::add_case_summary`, `mcp_server/tools/summaries.py::post_case_summary`. |
+| **MCP2-3** | `TimelineEvent(kind="ai-summary")` with source-event provenance | Adds `label="ai-generated"`, `credential_name`, and `requiresHumanVerification=True` metadata; UI renders an explicit “AI-generated — verify” pill | Provenance alone is not enough for a human reviewer to distinguish generated text from analyst notes at a glance; the label is paired with text, not colour. `mcp_server/services/summaries.py`, `core/serializers.py::timeline_event_json`, `ui/templates/ui/_timeline_entry.html`; `test_mcp_summary.py`. |
+| **MCP2-4** | proposal-first state changes; summaries auto-post directly | `post_case_summary` is the **only** direct MCP write; every other mutation goes through `McpActionProposal` + human decision + revalidating executor | Approved Q6. The summary path is append-only, cannot change case fields, and is constrained by source-event validation, sanitisation and rate limits. `mcp_server/tools/__init__.py`, `mcp_server/services/proposals.py`, `mcp_server/services/summaries.py`. |
+| **MCP2-5** | 90-day invocation/proposal retention; 24-hour proposal expiry | Terminal proposals are retained (no delete path); pending/approved rows expire after 24 hours and are denied by the state machine | Retention is implemented as retain-by-default; there is no automated purge job in this phase, so rows are kept at least 90 days. `mcp_server/models.py::McpActionProposal.is_expired`, `mcp_server/services/proposals.py::transition_allowed`. |
+
+
 ## Evidence index
 
 - `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §13 — full P7/P8/P10/P11 records

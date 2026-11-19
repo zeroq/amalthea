@@ -1,4 +1,4 @@
-"""Shared execution wrapper for authenticated, audited MCP read tools."""
+"""Shared execution wrapper for authenticated, audited MCP tools."""
 
 from __future__ import annotations
 
@@ -30,8 +30,16 @@ def require_principal() -> Principal:
     principal = principal_from_token(get_access_token())
     if principal is None:
         raise ToolError("authentication required")
-    if not principal.has_scope("mcp:read"):
+    if not principal.scopes:
         raise ToolError("insufficient scope")
+    return principal
+
+
+def require_scope(scope: str) -> Principal:
+    """Require a specific MCP scope for the tool being invoked."""
+    principal = require_principal()
+    if not principal.has_scope(scope):
+        raise ToolError("insufficient_scope")
     return principal
 
 
@@ -53,11 +61,13 @@ async def run_read_data(
     arguments: dict[str, Any],
     fn: Callable[..., Any],
     *,
+    scope: str | None = None,
+    call_style: str = "positional",
     target_type: str | None = None,
     target_id: str | None = None,
 ) -> Any:
-    """Run one read with auth, rate limiting, timeout and exactly one audit row."""
-    principal = require_principal()
+    """Run one audited tool call with auth, rate limiting and timeout."""
+    principal = require_scope(scope) if scope else require_principal()
     request = current_request()
 
     if is_rate_limited(principal, request.client_ip):
@@ -79,7 +89,12 @@ async def run_read_data(
     started = time.monotonic()
     try:
         async with asyncio.timeout(timeout_seconds()):
-            result = await sync_to_async(fn, thread_sensitive=True)(principal, **arguments)
+            if call_style == "dict":
+                result = await sync_to_async(fn, thread_sensitive=True)(
+                    arguments=arguments, principal=principal
+                )
+            else:
+                result = await sync_to_async(fn, thread_sensitive=True)(principal, **arguments)
     except ToolFailureError as exc:
         duration = int((time.monotonic() - started) * 1000)
         await record_invocation(
@@ -106,7 +121,7 @@ async def run_read_data(
             target_id=target_id,
         )
         raise ToolError("timeout") from exc
-    except Exception as exc:
+    except Exception:
         duration = int((time.monotonic() - started) * 1000)
         await record_invocation(
             principal=principal,
@@ -118,7 +133,7 @@ async def run_read_data(
             target_type=target_type,
             target_id=target_id,
         )
-        raise ToolError("internal_error") from exc
+        raise ToolError("internal_error") from None
 
     duration = int((time.monotonic() - started) * 1000)
     await record_invocation(
@@ -146,6 +161,47 @@ async def run_read(
         tool_name,
         arguments,
         fn,
+        target_type=target_type,
+        target_id=target_id,
+    )
+
+
+async def run_write_data(
+    tool_name: str,
+    arguments: dict[str, Any],
+    fn: Callable[..., Any],
+    *,
+    scope: str,
+    target_type: str | None = None,
+    target_id: str | None = None,
+) -> Any:
+    """Run a Phase 2 tool body with `(arguments=..., principal=...)` call style."""
+    return await run_read_data(
+        tool_name,
+        arguments,
+        fn,
+        scope=scope,
+        call_style="dict",
+        target_type=target_type,
+        target_id=target_id,
+    )
+
+
+async def run_write(
+    tool_name: str,
+    arguments: dict[str, Any],
+    fn: Callable[..., Any],
+    *,
+    scope: str,
+    target_type: str | None = None,
+    target_id: str | None = None,
+) -> Any:
+    """Run a write-adjacent tool body; `fn` returns plain data."""
+    return await run_write_data(
+        tool_name,
+        arguments,
+        fn,
+        scope=scope,
         target_type=target_type,
         target_id=target_id,
     )

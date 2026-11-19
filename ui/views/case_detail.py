@@ -40,6 +40,7 @@ from identity.scoping import (
     org_q,
     resolve_case,
 )
+from mcp_server.models import McpActionProposal
 from observables.models import ObservableType
 from ui.case_custom_fields import case_custom_field_rows
 from ui.pagination import PICKER_PAGE_SIZE
@@ -327,6 +328,17 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     available_tags = available_tag_choices[:PICKER_PAGE_SIZE]
     available_tags_truncated = len(available_tag_choices) > PICKER_PAGE_SIZE
 
+    # MCP Phase 2: surface pending proposals that target this case. Org-scoped like every
+    # other rail; viewers may see the count but never an inline approve/execute control.
+    proposals_pending = 0
+    if user_org_id is not None:
+        proposals_pending = McpActionProposal.objects.filter(
+            organisation_id=user_org_id,
+            target_type="case",
+            target_id=str(case.id),
+            status="pending",
+        ).count()
+
     return render(
         request,
         "ui/case_detail.html",
@@ -441,6 +453,7 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             suggestions_ignored=suggestions_ignored,
             suggestions_filtered=suggestions_filtered,
             suggestions_filtered_total=suggestions_filtered_total,
+            proposals_pending=proposals_pending,
         ),
     )
 

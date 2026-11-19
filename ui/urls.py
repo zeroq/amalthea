@@ -9,9 +9,27 @@ from django.urls import path, reverse_lazy
 
 from . import taxonomy_views, views
 from .search import global_search
+from .views import approvals as approvals_views
 
 urlpatterns = [
     path("", views.dashboard, name="ui-dashboard"),
+    # MCP Phase 2: human approval inbox and action execution.
+    path("approvals", approvals_views.approvals_list, name="ui-approvals-list"),
+    path(
+        "approvals/<uuid:proposal_id>",
+        approvals_views.approvals_detail,
+        name="ui-approvals-detail",
+    ),
+    path(
+        "approvals/<uuid:proposal_id>/decide",
+        approvals_views.approvals_decide,
+        name="ui-approvals-decide",
+    ),
+    path(
+        "approvals/<uuid:proposal_id>/execute",
+        approvals_views.approvals_execute,
+        name="ui-approvals-execute",
+    ),
     path("alerts", views.alert_list, name="ui-alert-list"),
     # §19 — Alert JSON export/import (place before `alerts/<uuid:alert_id>`)
     path("alerts/import", views.alert_import_ui, name="ui-alert-import"),

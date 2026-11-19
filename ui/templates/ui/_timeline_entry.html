@@ -2,7 +2,7 @@
 <li class="tl tl-{{ event.kind|slugify }}" data-event-id="{{ event.id }}">
   <p class="tl-title">{{ event.title }}</p>
   {% if event.description %}
-    {% if event.kind == "comment" %}
+    {% if event.kind == "comment" or event.kind == "ai-summary" %}
       <div class="tl-body md">{{ event.description|markdown }}</div>
     {% else %}
       <pre class="tl-body">{{ event.description }}</pre>
@@ -14,6 +14,11 @@
     · <span class="dim">{{ event.kind }}</span>
     {% if event.kind == "automation-run" and event.metadata.status %}
       · <span class="pill pill-{{ event.metadata.status|lower }}">{{ event.metadata.status }}</span>
+    {% endif %}
+    {% if event.kind == "ai-summary" %}
+      · <span class="pill pill-pending">AI-generated — verify</span>
+      {% if event.metadata.credential_name %} · {{ event.metadata.credential_name }}{% endif %}
+      {% if event.metadata.sourceEventIds %} · {{ event.metadata.sourceEventIds|length }} source events{% endif %}
     {% endif %}
   </p>
 </li>

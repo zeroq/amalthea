@@ -10,6 +10,8 @@ it recorded remains in the ledger after the run row is gone.
 
 from __future__ import annotations
 
+from typing import Any
+
 from django.db import transaction
 from django.db.models import ProtectedError
 
@@ -56,3 +58,76 @@ def delete_playbook(playbook: Playbook) -> int:
             message="a run was created while deleting the playbook; try again",
         ) from exc
     return run_count
+
+
+def run_playbook_service(
+    target: Any,
+    arguments: dict[str, Any],
+    *,
+    actor: Any | None = None,
+) -> dict[str, Any]:
+    """Queue one manual playbook run from an approved MCP proposal.
+
+    Delegates to :func:`automation.dispatcher.run_now` so the run row, org check,
+    on-commit Celery enqueue, audit and case-ledger feedback all follow the same
+    path as the existing UI action. ``playbookId`` may be a UUID or a name; it
+    must belong to the target case's organisation.
+    """
+    from uuid import UUID
+
+    from automation.dispatcher import run_now
+    from observables.models import Observable
+
+    playbook_ref = arguments.get("playbookId") or arguments.get("playbook")
+    if not playbook_ref:
+        raise ValueError("playbookId is required")
+
+    case = target
+    observable = None
+    observable_ref = arguments.get("observableId")
+    if observable_ref:
+        observable = None
+        if _is_uuid(observable_ref):
+            observable = Observable.objects.filter(
+                pk=str(observable_ref), owner_org=case.owner_org
+            ).first()
+        if observable is None:
+            observable = Observable.objects.filter(
+                data=str(observable_ref), owner_org=case.owner_org
+            ).first()
+        if observable is None:
+            raise ValueError("observableId was not found in this organisation")
+
+    if not hasattr(case, "owner_org_id"):
+        raise ValueError("a case target is required")
+
+    try:
+        pk = UUID(str(playbook_ref))
+    except (TypeError, ValueError):
+        pk = None
+    playbook = None
+    if pk is not None:
+        playbook = Playbook.objects.filter(pk=pk, owner_org=case.owner_org).first()
+    if playbook is None:
+        playbook = Playbook.objects.filter(name=str(playbook_ref), owner_org=case.owner_org).first()
+    if playbook is None:
+        raise ValueError("playbookId was not found in this organisation")
+
+    run = run_now(playbook, case=case, observable=observable)
+    return {
+        "runId": str(run.id),
+        "playbookId": str(playbook.id),
+        "playbookName": playbook.name,
+        "status": run.status,
+        "triggeredBy": run.triggered_by,
+    }
+
+
+def _is_uuid(value: Any) -> bool:
+    from uuid import UUID
+
+    try:
+        UUID(str(value))
+    except (TypeError, ValueError):
+        return False
+    return True

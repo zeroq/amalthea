@@ -18,7 +18,7 @@
     <p class="dim">
       MCP endpoint: <code>{{ mcp_url }}</code><br>
       Header: <code>Authorization: Bearer &lt;agent token&gt;</code><br>
-      Scope: <code>mcp:read</code> only. Every credential is permanently bound to its organisation
+      Scopes: <code>mcp:read</code>, <code>mcp:propose</code> and <code>mcp:summary</code>. Every credential is permanently bound to its organisation
       and can be revoked at any time.
     </p>
   </div>
@@ -33,6 +33,7 @@
             <th scope="col">Name</th>
             {% if show_org_column %}<th scope="col">Organisation</th>{% endif %}
             <th scope="col">Service user</th>
+            <th scope="col">Scopes</th>
             <th scope="col">Prefix</th>
             <th scope="col">Created</th>
             <th scope="col">Last used</th>
@@ -47,6 +48,7 @@
             <td>{{ credential.name }}</td>
             {% if show_org_column %}<td>{{ credential.organisation.name }}</td>{% endif %}
             <td class="mono">{{ credential.user.login }}</td>
+            <td>{% for scope in credential.scopes %}<code>{{ scope }}</code>{% if not forloop.last %} {% endif %}{% empty %}<span class="dim">—</span>{% endfor %}</td>
             <td class="mono">{{ credential.prefix }}</td>
             <td class="mono dim">{{ credential.created_at|date:"Y-m-d H:i" }}</td>
             <td class="mono dim">{{ credential.last_used_at|date:"Y-m-d H:i"|default:"never" }}</td>

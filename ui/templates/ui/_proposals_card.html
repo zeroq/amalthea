@@ -1,0 +1,27 @@
+{% load ui_tags %}
+{% comment %}
+  Compact proposals card on case detail.
+  Shows pending proposal count and a link to the approvals inbox,
+  org-scoped, with no inline approve/execute actions.
+{% endcomment %}
+
+{% if proposals_pending > 0 %}
+  <div class="card proposals-card">
+    <div class="card-header">
+      <h3 class="card-title">MCP Proposals</h3>
+    </div>
+    <div class="card-body">
+      <p class="dim">There are {{ proposals_pending }} pending proposal{% if proposals_pending != 1 %}s{% endif %}.</p>
+      <a href="{% url 'ui-approvals-list' %}?target=case:{{ case.number }}" class="btn btn-secondary small-width">
+        Review proposals
+        <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+      </a>
+    </div>
+  </div>
+{% else %}
+  <div class="card proposals-card" aria-hidden="true">
+    <div class="card-body">
+      <p class="dim">No pending proposals.</p>
+    </div>
+  </div>
+{% endif %}

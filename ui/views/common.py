@@ -28,6 +28,7 @@ from identity.scoping import (
     org_filtered,
     org_q,
 )
+from mcp_server.models import McpActionProposal
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,13 @@ def _base_context(request: HttpRequest, **extra: Any) -> dict[str, Any]:
     The nav badges live here rather than per-view because two views counting them differently is how
     a navigation bar starts lying about what is waiting.
     """
+    nav_approvals_count = 0
+    if not is_viewer(request.user) and getattr(request.user, "org_id", None) is not None:
+        nav_approvals_count = McpActionProposal.objects.filter(
+            organisation_id=request.user.org_id, status="pending"
+        ).count()
     return {
+        "nav_approvals_count": nav_approvals_count,
         "nav_alert_count": Alert.objects.filter(
             org_q("owner_org", request.user), case__isnull=True, status__stage="New"
         ).count(),

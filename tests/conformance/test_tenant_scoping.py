@@ -1577,6 +1577,25 @@ class TestUIRouteEnumerationConformance:
             config={"action": "python", "action_path": "enrichment_probe"},
         )
 
+        # MCP approval routes are tenant detail routes: seed one org1 proposal so the
+        # generic read conformance harness can exercise cross-org/fake-id/own-org access.
+        from datetime import timedelta
+
+        from mcp_server.models import McpActionProposal
+
+        self.proposal1 = McpActionProposal.objects.create(
+            organisation=self.org1,
+            requested_by=self.user1,
+            tool_name="propose_case_comment",
+            action="append_timeline_event",
+            target_type="case",
+            target_id=str(self.case1.id),
+            arguments={"caseId": str(self.case1.id), "markdown": "Tenant enumeration fixture"},
+            risk="low",
+            idempotency_key=f"tenant-ui-proposal-{uuid4()}",
+            expires_at=timezone.now() + timedelta(hours=1),
+        )
+
         # Create an attachment for case-attachment-download/detail test
         from django.core.files.base import ContentFile
         from django.core.files.storage import default_storage
@@ -1659,6 +1678,7 @@ class TestUIRouteEnumerationConformance:
             "ui-observable-list",
             "ui-automation-list",
             "ui-playbook-list",
+            "ui-approvals-list",
             "ui-sources-list",
             "ui-search",
             "ui-password-change",
@@ -1775,6 +1795,7 @@ class TestUIRouteEnumerationConformance:
             "ui-playbook-list": {},
             "ui-playbook-detail": {"playbook_id": str(self.playbook1.id)},
             "ui-playbook-edit": {"playbook_id": str(self.playbook1.id)},
+            "ui-approvals-detail": {"proposal_id": str(self.proposal1.id)},
             "ui-sources-list": {},
             "ui-settings-source-detail": {"source_id": str(self.source1.id)},
             "ui-search": {},

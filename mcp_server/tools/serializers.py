@@ -94,7 +94,7 @@ def _safe_enrichment(value: Any) -> dict[str, Any]:
 
 def safe_timeline_event(event: Any) -> dict[str, Any]:
     """Ledger row without free-form metadata (which automation may populate)."""
-    return {
+    payload = {
         "_id": str(event.id),
         "id": str(event.id),
         "_type": "event",
@@ -105,6 +105,10 @@ def safe_timeline_event(event: Any) -> dict[str, Any]:
         "kind": event.kind,
         "actor": _username(event.actor),
     }
+    if event.kind == "ai-summary":
+        payload["label"] = "ai-generated"
+        payload["requiresHumanVerification"] = True
+    return payload
 
 
 def safe_automation_run(run: Any) -> dict[str, Any]:

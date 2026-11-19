@@ -56,7 +56,12 @@ WIRE_BOUNDARY = (
     "core/serializers.py",
     # MCP read tools are an external wire surface: they reuse the TheHive-compatible
     # serializers and add matching safe field names for observables and timeline rows.
-    "mcp_server/tools/serializers.py",
+    # MCP Phase 2 proposal/summary tools deliberately accept TheHive-shaped camelCase
+    # argument names at the external boundary. The proposal service stores and replays
+    # those externally supplied argument/result maps as audit evidence, so it is part of
+    # that same wire surface (deviation recorded in docs/spec/deviations.md).
+    "mcp_server/tools/",
+    "mcp_server/services/",
     "*/views.py",
     "*/urls.py",
     # JSON export/import documents are a wire surface: they read and write TheHive-shaped

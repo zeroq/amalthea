@@ -107,7 +107,7 @@ def observable_json(link: CaseObservable | AlertObservable) -> dict[str, Any]:
 
 
 def timeline_event_json(event: TimelineEvent) -> dict[str, Any]:
-    return {
+    payload = {
         "_id": str(event.id),
         "id": str(event.id),
         "_type": "event",
@@ -119,6 +119,15 @@ def timeline_event_json(event: TimelineEvent) -> dict[str, Any]:
         "actor": _username(event.actor),
         "metadata": event.metadata or {},
     }
+    if event.kind == "ai-summary" and event.metadata:
+        metadata = dict(event.metadata)
+        provenance = dict(metadata.get("provenance") or {})
+        provenance["label"] = "AI-generated summary — verify against the cited events"
+        if metadata.get("credential_name"):
+            provenance["credential_name"] = metadata["credential_name"]
+        metadata["provenance"] = provenance
+        payload["metadata"] = metadata
+    return payload
 
 
 def task_json(task: Task) -> dict[str, Any]:
