@@ -97,7 +97,7 @@ def preview_observable_rules(
     truncated_alerts = 0
 
     for alert in candidate_alerts(source)[:limit].iterator(chunk_size=200):
-        extraction = extract_observable_candidates(config, alert.raw_payload)
+        extraction = extract_observable_candidates(config, alert.raw_payload, alert=alert)
         existing = _existing_keys(alert)
         seen: set[tuple[str, str]] = set()
         had_known = False

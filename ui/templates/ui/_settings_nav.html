@@ -58,4 +58,15 @@ Usage (from settings_sources.html, settings_organisations.html, settings_users.h
       Sources
     </a>
   {% endif %}
+
+  {% comment %} Rejected Observables tab - admin and superAdmin {% endcomment %}
+  {% if request.user.role == "admin" or request.user.role == "superAdmin" %}
+    {% url 'rejected-observables-list' as rejected_url %}
+    <a class="tab{% if active_tab == 'rejected-observables-list' %} tab-on{% endif %}"
+       href="{{ rejected_url }}"
+       {% if active_tab == 'rejected-observables-list' %}aria-current="page"{% endif %}>
+       <i class="fa-solid fa-list" aria-hidden="true"></i>
+       Observable Mgmt
+    </a>
+  {% endif %}
 </nav>

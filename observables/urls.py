@@ -111,8 +111,13 @@ urlpatterns = [
         name="suggestions-bulk-ignore",
     ),
     path(
-        "suggestions/bulk-ignore/",
-        views.suggestions_bulk_ignore,
-        name="suggestions-bulk-ignore-slash",
+        "rejected-observables/",
+        views.rejected_observables_list,
+        name="rejected-observables-list",
+    ),
+    path(
+        "rejected-observables/",
+        views.rejected_observables_list,
+        name="rejected-observables-list-slash",
     ),
 ]

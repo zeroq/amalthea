@@ -93,7 +93,7 @@ def sync_alert_observables(
             return AlertObservableSyncResult()
         config = source.mapping_config
 
-    extraction = extract_observable_candidates(config, alert.raw_payload)
+    extraction = extract_observable_candidates(config, alert.raw_payload, alert=alert)
     warning_lines = list(extraction.notes)
     if not extraction.candidates:
         return AlertObservableSyncResult(

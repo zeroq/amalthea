@@ -183,9 +183,10 @@ def _as_candidate_value(value: Any) -> tuple[str | None, bool]:
     return None, False
 
 
-def extract_observable_candidates(config: Any, payload: Any) -> ObservableExtraction:
+def extract_observable_candidates(
+    config: Any, payload: Any, alert: Any = None
+) -> ObservableExtraction:
     """Read every scalar a config's observable rules select, with all caps applied.
-
     Deterministic by construction: rules are read in config order, paths in listed order, matches in
     JSON document order. Duplicate `(type, raw value)` pairs are collapsed before the candidate cap,
     so a path repeated across two rules cannot consume the budget twice.
@@ -209,6 +210,20 @@ def extract_observable_candidates(config: Any, payload: Any) -> ObservableExtrac
                     continue
                 if raw is None:
                     continue
+
+                # --- Check for Rejected Observables ---
+                if alert is not None:
+                    from observables.models import RejectedObservable
+
+                    if RejectedObservable.objects.filter(
+                        owner_org=alert.owner_org,
+                        data_type__name=rule.type_name,
+                        normalized_data=raw,
+                    ).exists():
+                        skipped += 1
+                        truncated = True
+                        continue
+
                 key = (rule.type_name, raw)
                 if key in seen:
                     continue

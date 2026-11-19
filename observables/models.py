@@ -310,3 +310,75 @@ class ObservableSuggestion(UUIDModel, TimeStampedModel):
 
     def __str__(self) -> str:
         return f"Suggestion({self.data_type}:{self.normalized_data}) [{self.status}]"
+
+
+class RejectedObservable(UUIDModel, TimeStampedModel):
+    """A record of an observable value rejected during analysis (AGENTS.md Module C).
+
+    This is a separate entity from `Observable` as it represents a decision to *not*
+    ingest the data into the primary forensic ledger. It retains the link to the source
+    `Alert` for auditability but does not contain the full payload.
+    """
+
+    REJECTED_REASON_CHOICES = [
+        ("duplicate", "Duplicate"),
+        ("irrelevant", "Irrelevant"),
+        ("false_positive", "False Positive"),
+        ("incomplete", "Incomplete"),
+        ("too_noisy", "Too Noisy"),
+        ("other", "Other"),
+    ]
+
+    # Mandatory tenant (ADR-004): a rejected observation must belong to an organisation.
+    owner_org = models.ForeignKey(
+        "identity.Organisation",
+        on_delete=models.PROTECT,
+        related_name="rejected_observables",
+    )
+    # The type of the rejected data (e.g., IP, Hash)
+    data_type = models.ForeignKey(
+        ObservableType,
+        on_delete=models.PROTECT,
+        related_name="rejected_observables_types",
+        db_index=True,
+    )
+    # The normalized value that was rejected (e.g., "1.2.3.4")
+    normalized_data = models.TextField()
+    # The source alert that triggered the rejection
+    alert = models.ForeignKey(
+        "alerts.Alert",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="rejected_observables",
+    )
+    # The reason for rejection
+    reason = models.CharField(
+        max_length=32,
+        choices=REJECTED_REASON_CHOICES,
+        blank=True,
+    )
+    # Whether this item has been promoted back to a valid `Observable`
+    is_promoted = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "rejected_observables"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["owner_org", "data_type", "normalized_data", "alert"],
+                condition=models.Q(alert__isnull=False),
+                name="uniq_rejected_alert",
+            ),
+            models.UniqueConstraint(
+                fields=["owner_org", "data_type", "normalized_data"],
+                condition=models.Q(alert__isnull=True),
+                name="uniq_rejected_no_alert",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["owner_org", "-created_at"], name="rejected_obs_org_created_idx"),
+            models.Index(fields=["alert", "-created_at"], name="rejected_obs_alert_created_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Rejected({self.data_type}:{self.normalized_data}) [{self.reason}]"

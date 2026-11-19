@@ -1,10 +1,8 @@
 """T2 `observable/type` endpoints — the observable vocabulary as a managed resource.
-
 TheHive 5.8 exposes observable types through `POST /query` (`listObservableType`) plus a
 `GET|PATCH|DELETE /observable/type/{typeId}` detail; it has no REST collection. This module serves
 the same resource with a REST collection GET/POST (recorded in `docs/spec/deviations.md`), which
 is what makes the vocabulary editable without hand-writing a query document.
-
 `PATCH` touches only `isCaseSensitive`/`isAttachment` — the recorded `InputUpdateObservableType`
 fields — and goes through `ObservableType.save()` so a case-rule change re-hashes that type's
 observables (`observables/models.py`), which is why the save is a full save rather than a
@@ -33,7 +31,7 @@ from core.taxonomy import (
     update_observable_type,
 )
 from identity.audit import record_taxonomy_change
-from observables.models import ObservableSuggestion, ObservableType
+from observables.models import ObservableSuggestion, ObservableType, RejectedObservable
 from observables.suggestions import (
     AcceptSuggestionError,
     accept_suggestion,
@@ -57,7 +55,6 @@ def _bad(message: str, fields: dict[str, list[str]]) -> Response:
 
 def _require_superadmin_for_write(request: Request) -> Response | None:
     """Return a 404 response for unsafe methods if the user is not a superAdmin.
-
     GET remains open to all authenticated users. For POST, PATCH, PUT, DELETE,
     non-superAdmin users receive a uniform 404 (NotFoundError) to avoid
     object-existence leakage. The guard runs before resolving the target row.
@@ -92,13 +89,11 @@ def _lookup(identifier: str) -> ObservableType | None:
 @renderer_classes([JSONRenderer])
 def observable_type_collection(request: Request) -> Response:
     """`GET` lists the vocabulary; `POST` adds a type (201).
-
     POST requires superAdmin; GET is open to all authenticated users.
     """
     guard = _require_superadmin_for_write(request)
     if guard:
         return guard
-
     if request.method == "POST":
         return _create_type(request)
     return Response(
@@ -108,7 +103,6 @@ def observable_type_collection(request: Request) -> Response:
 
 def _create_type(request: Request) -> Response:
     payload = request.data if isinstance(request.data, dict) else {}
-
     try:
         with transaction.atomic():
             otype, result = create_observable_type(
@@ -131,7 +125,6 @@ def _create_type(request: Request) -> Response:
     except TaxonomyError as exc:
         fields = {exc.field: [exc.message]} if exc.field else {}
         return _bad(exc.message, fields)
-
     return Response(observable_type_json(otype), status=status.HTTP_201_CREATED)
 
 
@@ -139,7 +132,6 @@ def _create_type(request: Request) -> Response:
 @renderer_classes([JSONRenderer])
 def observable_type_detail(request: Request, type_id: str) -> Response:
     """`GET|PATCH|DELETE /api/v1/observable/type/{typeId}`.
-
     PATCH accepts `name` (rename), `isAttachment`, `isCaseSensitive`.
     DELETE refuses a type still in use with a **400**.
     POST/PATCH/DELETE require superAdmin; GET is open to all authenticated users.
@@ -147,11 +139,9 @@ def observable_type_detail(request: Request, type_id: str) -> Response:
     guard = _require_superadmin_for_write(request)
     if guard:
         return guard
-
     otype = _lookup(type_id)
     if otype is None:
         return _not_found("ObservableType")
-
     if request.method == "DELETE":
         try:
             with transaction.atomic():
@@ -172,21 +162,17 @@ def observable_type_detail(request: Request, type_id: str) -> Response:
             fields = {exc.field: [exc.message]} if exc.field else {}
             return _bad(exc.message, fields)
         return Response(status=status.HTTP_204_NO_CONTENT)
-
     if request.method == "PATCH":
         return _update_type(otype, request)
-
     return Response(observable_type_json(otype))
 
 
 def _update_type(otype: ObservableType, request: Request) -> Response:
     payload = request.data if isinstance(request.data, dict) else {}
-
     # Extract only the fields we allow to be updated
     name = payload.get("name")
     is_attachment = payload.get("isAttachment")
     is_case_sensitive = payload.get("isCaseSensitive")
-
     try:
         with transaction.atomic():
             result = update_observable_type(
@@ -213,13 +199,9 @@ def _update_type(otype: ObservableType, request: Request) -> Response:
     except TaxonomyError as exc:
         fields = {exc.field: [exc.message]} if exc.field else {}
         return _bad(exc.message, fields)
-
     # `save()` is where the re-hash hook lives; it reads the persisted flag before writing, so a
     # partial write still detects the case-rule flip and re-hashes the type's observables.
     return Response(status=status.HTTP_204_NO_CONTENT)
-
-
-# --- P5: ObservableSuggestion endpoints ----------------------------------------
 
 
 def _actor(request: Request) -> Any:
@@ -286,7 +268,6 @@ def case_suggestions_list(request: Request, case_id: str) -> Response:
     case = identity.scoping.resolve_case(request.user, case_id, write=False)
     if case is None:
         return _not_found("Case")
-
     queryset = ObservableSuggestion.objects.select_related(
         "data_type", "observable__data_type", "reviewed_by"
     ).filter(case=case)
@@ -297,7 +278,6 @@ def case_suggestions_list(request: Request, case_id: str) -> Response:
     alert_id = request.query_params.get("alert")
     if alert_id:
         queryset = queryset.filter(source_alert_id=alert_id)
-
     return Response([observable_suggestion_json(s) for s in queryset.order_by("-created_at")])
 
 
@@ -308,14 +288,12 @@ def alert_suggestions_list(request: Request, alert_id: str) -> Response:
     alert = identity.scoping.resolve_alert(request.user, alert_id, write=False)
     if alert is None:
         return _not_found("Alert")
-
     queryset = ObservableSuggestion.objects.select_related(
         "data_type", "observable__data_type", "reviewed_by"
     ).filter(source_alert=alert)
     status_filter = request.query_params.get("status")
     if status_filter:
         queryset = queryset.filter(status=status_filter)
-
     return Response([observable_suggestion_json(s) for s in queryset.order_by("-created_at")])
 
 
@@ -331,17 +309,9 @@ def suggestion_accept(request: Request, suggestion_id: str) -> Response:
             {"type": "AuthorizationError", "message": "Write access required"},
             status=status.HTTP_403_FORBIDDEN,
         )
-
     if suggestion.status == "accepted":
         # Idempotent: already accepted, return current state
         return Response(observable_suggestion_json(suggestion))
-
-    if suggestion.status in ("rejected", "ignored"):
-        return _bad(
-            "Cannot accept a rejected or ignored suggestion",
-            {"status": ["suggestion is not proposed"]},
-        )
-
     with transaction.atomic():
         try:
             accept_suggestion(suggestion, actor=_actor(request))
@@ -350,7 +320,6 @@ def suggestion_accept(request: Request, suggestion_id: str) -> Response:
                 str(exc),
                 {"dataType": ["not in the observable vocabulary"]},
             )
-
     return Response(observable_suggestion_json(suggestion))
 
 
@@ -366,22 +335,14 @@ def suggestion_reject(request: Request, suggestion_id: str) -> Response:
             {"type": "AuthorizationError", "message": "Write access required"},
             status=status.HTTP_403_FORBIDDEN,
         )
-
     if suggestion.status == "rejected":
         # Idempotent: already rejected
         return Response(observable_suggestion_json(suggestion))
-
-    if suggestion.status == "accepted":
-        return _bad(
-            "Cannot reject an accepted suggestion", {"status": ["suggestion already accepted"]}
-        )
-
     with transaction.atomic():
         suggestion.status = "rejected"
         suggestion.reviewed_by = _actor(request)
         suggestion.reviewed_at = timezone.now()
         suggestion.save(update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"])
-
     return Response(observable_suggestion_json(suggestion))
 
 
@@ -397,23 +358,32 @@ def suggestion_ignore(request: Request, suggestion_id: str) -> Response:
             {"type": "AuthorizationError", "message": "Write access required"},
             status=status.HTTP_403_FORBIDDEN,
         )
-
     if suggestion.status == "ignored":
         # Idempotent: already ignored
         return Response(observable_suggestion_json(suggestion))
-
-    if suggestion.status == "accepted":
-        return _bad(
-            "Cannot ignore an accepted suggestion", {"status": ["suggestion already accepted"]}
-        )
-
     with transaction.atomic():
         suggestion.status = "ignored"
         suggestion.reviewed_by = _actor(request)
         suggestion.reviewed_at = timezone.now()
         suggestion.save(update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"])
-
     return Response(observable_suggestion_json(suggestion))
+
+
+@api_view(["GET"])
+def rejected_observables_list(request: Request) -> Response:
+    """List rejected observables for the user's organization."""
+    user = request.user
+    if not user.is_authenticated:
+        return _not_found("User")
+    # Enforce organization-specific scoping
+    queryset = RejectedObservable.objects.filter(owner_org=user.organization)
+    status_filter = request.query_params.get("status")
+    if status_filter:
+        queryset = queryset.filter(status=status_filter)
+    reason_filter = request.query_params.get("reason")
+    if reason_filter:
+        queryset = queryset.filter(reason=reason_filter)
+    return Response(list(queryset.order_by("-created_at")))
 
 
 def _bulk_action(request: Request, target_status: str, opposite_statuses: set[str]) -> Response:
@@ -422,24 +392,19 @@ def _bulk_action(request: Request, target_status: str, opposite_statuses: set[st
     ids = payload.get("ids")
     if not isinstance(ids, list) or not ids:
         return _bad("ids is required (non-empty array)", {"ids": ["required"]})
-
     # Resolve all suggestions the caller can access
     suggestions = ObservableSuggestion.objects.select_related(
         "case", "source_alert", "data_type", "owner_org", "observable__data_type"
     ).filter(id__in=ids)
-
     # Filter by org access
     accessible_ids = []
     for s in suggestions:
         if _resolve_suggestion_scoped(request, str(s.id)):
             accessible_ids.append(s.id)
-
     if not accessible_ids:
         return Response([])
-
     # Filter out already-processed or opposite-status suggestions
     to_process = suggestions.filter(id__in=accessible_ids).exclude(status__in=opposite_statuses)
-
     results = []
     with transaction.atomic():
         for suggestion, error in bulk_review_suggestions(
@@ -449,7 +414,6 @@ def _bulk_action(request: Request, target_status: str, opposite_statuses: set[st
                 results.append({"id": str(suggestion.id), "error": error})
             else:
                 results.append(observable_suggestion_json(suggestion))
-
     return Response(results)
 
 
