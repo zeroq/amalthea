@@ -273,7 +273,7 @@ def case_suggestions_list(request: Request, case_id: str) -> Response:
     ).filter(case=case)
     status_filter = request.query_params.get("status")
     if status_filter:
-        queryset = queryset.filter(is_promoted=status_filter)
+        queryset = queryset.filter(status=status_filter)
     # Filter by alert if provided
     alert_id = request.query_params.get("alert")
     if alert_id:
@@ -293,7 +293,7 @@ def alert_suggestions_list(request: Request, alert_id: str) -> Response:
     ).filter(source_alert=alert)
     status_filter = request.query_params.get("status")
     if status_filter:
-        queryset = queryset.filter(is_promoted=status_filter)
+        queryset = queryset.filter(status=status_filter)
     return Response([observable_suggestion_json(s) for s in queryset.order_by("-created_at")])
 
 
@@ -379,7 +379,7 @@ def rejected_observables_list(request: Request) -> Response:
     queryset = RejectedObservable.objects.filter(owner_org=user.organization)
     status_filter = request.query_params.get("status")
     if status_filter:
-        queryset = queryset.filter(is_promoted=status_filter)
+        queryset = queryset.filter(status=status_filter)
     reason_filter = request.query_params.get("reason")
     if reason_filter:
         queryset = queryset.filter(reason=reason_filter)
