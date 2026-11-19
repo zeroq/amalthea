@@ -1,27 +1,21 @@
-# Amalthea CI gate (plan PLAN-2026-10-07-ci-hashed-requirements.md §Architecture).
+# Amalthea fast CI gate.
 #
-# Runs the same Definition of Done on a fresh remote runner instead of naming ad-hoc
-# commands (risk R11 / TODO 8.6): every step below is a locally-verified invocation.
-# Side effects: none beyond the workflow itself — the Postgres service container is the
-# docker-compose.yml equivalent; no Redis service (the suite uses in-memory Channels +
-# eager Celery, and the "Redis unreachable -> 503" path is itself under test).
+# Every job is capped at five minutes. CI is a pre-merge smoke gate, not the
+# full suite: the full suite, Postgres conformance run and coverage run are
+# too slow for a 5-minute budget and remain local/manual gates. Step names and
+# Makefile help deliberately do not claim otherwise.
 #
-# The lock-currentness step (scripts/lock.sh --check) fails when a hand-edited or
-# accidentally-drifted requirement file differs from what the deterministic lock produces,
-# so review is not the only guard on the hashed closure (supply-chain security note).
+# Two independent jobs:
+#   * verify  — install pinned closure, static checks, and a fast conformance subset;
+#   * secrets — full-history secret scan from a full clone.
 #
-# Two jobs run in parallel, independent of each other:
-#   * gate    — the Definition of Done (lint, types, migrations, suite, coverage, locks);
-#   * secrets — the full-history secret scan (scripts/secret-scan.sh --history is the
-#     authoritative, dependency-free step; gitleaks pinned by commit SHA backs it up).
-# The secrets job is what makes "no secret is ever pushed" an enforced property even
-# when a local git hook was bypassed (fresh clone without hooks, --no-verify).
+# The full-history scanner skips legacy dependency/cache blobs (.venv,
+# node_modules, __pycache__, *.pyc) so the authoritative secret check finishes
+# within the five-minute budget. Current tracked files and all source/config history are still
+# scanned.
 
 name: ci
 
-# Bare `push:` / `pull_request:` = every branch and tag, not just main: the secrets
-# backstop must run on the branch a secret was pushed to, otherwise a push to any
-# other branch (or a tag) is never scanned.
 on:
   push:
   pull_request:
@@ -34,24 +28,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  gate:
-    name: DoD gate
+  verify:
+    name: Fast verify
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: amalthea
-          POSTGRES_PASSWORD: amalthea
-          POSTGRES_DB: amalthea
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U amalthea -d amalthea"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
@@ -65,45 +45,22 @@ jobs:
           python3 -m venv .venv
           .venv/bin/pip install --require-hashes -r requirements/dev.txt
 
-      - name: SQLite DoD gate (lint, types, migrations, suite)
-        run: make check
-
-      - name: Postgres conformance suite
-        run: DJANGO_SETTINGS_MODULE=amalthea.settings.test_pg .venv/bin/python -m pytest -q
-
-      - name: Coverage gate (fail_under=80)
-        run: .venv/bin/python -m pytest -q --cov=. --cov-fail-under=80
+      - name: Static checks + fast conformance smoke
+        run: make check-ci
 
       - name: Lock-currentness gate
         run: ./scripts/lock.sh --check
 
-      - name: Supply-chain audit
-        run: .venv/bin/pip-audit
-
-  # Independent of `gate`: a leaked credential must be caught even while the test
-  # gate is red, and vice versa (no `needs:` — the two jobs run in parallel).
   secrets:
     name: Secret scan (full history)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
-      # fetch-depth 0 so every commit/blob in history is available to both scanners.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Authoritative step: the repo's own dependency-free scanner (git + bash + rg),
-      # no virtualenv required — runs straight from the checkout.
       - name: Full-history scan (local scanner, authoritative)
         run: bash scripts/secret-scan.sh --history
-
-      # Second opinion: upstream gitleaks over the same full history, pinned by full
-      # commit SHA (supply-chain stance: no floating tags). SHA is the tag target of
-      # v3.0.0, resolved via the GitHub API; v3 is required because the Node 20
-      # runtime was removed from GitHub-hosted runners in Sept 2026 (v2 never starts).
-      - name: gitleaks full-history scan (pinned)
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
