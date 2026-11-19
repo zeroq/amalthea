@@ -1,5 +1,6 @@
 {% load ui_tags %}
 {% url 'ui-case-page-create' case.number as page_create_url %}
+{% if proposals_pending %}{% include "ui/_proposals_card.html" %}{% endif %}
 <section class="card" aria-labelledby="h-meta">
   <div class="case-meta">
     <div class="meta-grid" role="list">

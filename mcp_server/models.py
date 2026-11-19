@@ -1,12 +1,14 @@
-"""MCP credentials and invocation audit rows (Phase 1).
+"""MCP credentials, invocation audit rows and Phase 2 proposal rows.
 
-Phase 1 is read-only: a credential can carry only ``mcp:read``.  The plaintext
-token is returned exactly once by :func:`mcp_server.credentials.mint`; only the
-Argon2 hash is persisted.
+Plaintext tokens are returned exactly once by :func:`mcp_server.credentials.mint`;
+only the Argon2 hash is persisted. Phase 2 adds scoped propose/summary tools and
+an explicit human approval model.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import secrets
 import uuid
 from typing import Any
@@ -18,10 +20,11 @@ from django.db import models
 from django.utils import timezone
 
 from core.enums import in_values
-from identity.models import Organisation, User
+from identity.models import AuditLog, Organisation, User
 
 PHASE1_SCOPES: tuple[str, ...] = ("mcp:read",)
-RESERVED_SCOPES: tuple[str, ...] = ("mcp:propose", "mcp:summary", "mcp:write", "mcp:admin")
+PHASE2_SCOPES: tuple[str, ...] = ("mcp:propose", "mcp:summary")
+RESERVED_SCOPES: tuple[str, ...] = ("mcp:write", "mcp:admin")
 
 _PASSWORD_HASHER = PasswordHasher()
 
@@ -123,10 +126,22 @@ class McpCredential(models.Model):
         if not self.user_id or not self.user.is_active:
             raise ValidationError({"user": "The service user must be active."})
         scopes = self.scopes or []
-        if not isinstance(scopes, list) or any(scope not in PHASE1_SCOPES for scope in scopes):
-            raise ValidationError({"scopes": "Phase 1 credentials may only grant mcp:read."})
+        allowed: set[str] = set(PHASE1_SCOPES) | set(PHASE2_SCOPES)
+        if not isinstance(scopes, list) or any(scope not in allowed for scope in scopes):
+            raise ValidationError({"scopes": f"Allowed scopes are: {', '.join(sorted(allowed))}"})
         if not scopes:
             raise ValidationError({"scopes": "At least one scope is required."})
+        viewer_role = getattr(self.user, "role", "") == "viewer"
+        proposed_summary = any(scope in PHASE2_SCOPES for scope in scopes)
+        if viewer_role and proposed_summary:
+            raise ValidationError(
+                {
+                    "scopes": (
+                        "Viewer/read-only service users cannot be granted "
+                        "mcp:propose or mcp:summary."
+                    )
+                }
+            )
 
     def verify(self, presented: str) -> bool:
         """True only for an active credential whose Argon2 hash matches."""
@@ -143,6 +158,7 @@ class McpCredential(models.Model):
         name: str,
         created_by: User | None = None,
         expires_at: Any = None,
+        scopes: list[str] | None = None,
     ) -> tuple[McpCredential, str]:
         """Create a credential and return ``(credential, plaintext)`` exactly once.
 
@@ -157,6 +173,24 @@ class McpCredential(models.Model):
             raise ValidationError({"user": "The service user must be active."})
         if not name.strip():
             raise ValidationError({"name": "A credential name is required."})
+
+        if scopes is None:
+            scopes = list(PHASE1_SCOPES)
+        allowed: set[str] = set(PHASE1_SCOPES) | set(PHASE2_SCOPES)
+        if not isinstance(scopes, list) or any(scope not in allowed for scope in scopes):
+            raise ValidationError({"scopes": f"Allowed scopes are: {', '.join(sorted(allowed))}"})
+        if not scopes:
+            raise ValidationError({"scopes": "At least one scope is required."})
+        viewer_role = getattr(user, "role", "") == "viewer"
+        if viewer_role and any(scope in PHASE2_SCOPES for scope in scopes):
+            raise ValidationError(
+                {
+                    "scopes": (
+                        "Viewer/read-only service users cannot be granted "
+                        "mcp:propose or mcp:summary."
+                    )
+                }
+            )
 
         plaintext = ""
         prefix = ""
@@ -174,7 +208,7 @@ class McpCredential(models.Model):
             name=name.strip(),
             prefix=prefix,
             secret_hash=hash_secret(plaintext),
-            scopes=list(PHASE1_SCOPES),
+            scopes=list(scopes),
             expires_at=expires_at,
             created_by=created_by,
         )
@@ -242,3 +276,193 @@ class McpInvocation(models.Model):
 
     def __str__(self) -> str:
         return f"McpInvocation({self.tool_name}) status={self.status}"
+
+
+class McpActionProposal(models.Model):
+    """A proposed domain mutation awaiting explicit human approval."""
+
+    class RiskChoices(models.TextChoices):
+        LOW = "low"
+        MEDIUM = "medium"
+        HIGH = "high"
+
+    class StatusChoices(models.TextChoices):
+        PENDING = "pending"
+        APPROVED = "approved"
+        DECLINED = "declined"
+        EXPIRED = "expired"
+        EXECUTED = "executed"
+        FAILED = "failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organisation = models.ForeignKey(
+        Organisation,
+        on_delete=models.PROTECT,
+        related_name="mcp_action_proposals",
+        help_text="Tenant this proposal is bound to.",
+    )
+    requested_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Effective agent service user that created the proposal.",
+    )
+    credential = models.ForeignKey(
+        McpCredential,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="proposals",
+        help_text="Credential that created the proposal.",
+    )
+    tool_name = models.CharField(
+        max_length=100, help_text="Canonical tool name, e.g. propose_case_update."
+    )
+    action = models.CharField(max_length=100, help_text="Canonical service action name.")
+    target_type = models.CharField(max_length=32, help_text="Case, alert, observable or task.")
+    target_id = models.CharField(max_length=64, help_text="UUID of the target record.")
+    arguments = models.JSONField(
+        help_text="Exact validated arguments after canonicalisation; immutable after creation."
+    )
+    arguments_hash = models.CharField(
+        max_length=64,
+        help_text="SHA-256 of the canonical JSON representation of arguments.",
+    )
+    risk = models.CharField(
+        max_length=10,
+        choices=list(RiskChoices.choices),
+        default=RiskChoices.LOW,
+        help_text="low / medium / high. High-risk requires admin decision.",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=list(StatusChoices.choices),
+        default=StatusChoices.PENDING,
+        help_text="pending / approved / declined / expired / executed / failed.",
+    )
+    idempotency_key = models.CharField(
+        max_length=128,
+        unique=True,
+        help_text="Deterministic per credential/tool/target/args; prevents duplicate proposals.",
+    )
+    expires_at = models.DateTimeField(
+        help_text="Default now + 24h. Expired proposals cannot be approved or executed."
+    )
+    decided_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        help_text="Human decision maker who approved or declined.",
+    )
+    decided_at = models.DateTimeField(
+        null=True, blank=True, help_text="When the decision was made."
+    )
+    executed_at = models.DateTimeField(null=True, blank=True, help_text="When execution completed.")
+    result = models.JSONField(
+        default=dict,
+        help_text="Bounded result; no secrets/raw payload. Serialised to audit log.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "mcp_action_proposal"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["organisation", "status", "-created_at"],
+                name="mcp_proposal_org_status_idx",
+            ),
+            models.Index(
+                fields=["requested_by", "-created_at"],
+                name="mcp_proposal_requestor_idx",
+            ),
+            models.Index(
+                fields=["target_type", "target_id", "status"],
+                name="mcp_proposal_target_status_idx",
+            ),
+            models.Index(fields=["expires_at"], name="mcp_proposal_expiry_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["idempotency_key"], name="uniq_mcp_proposal_idempotency_key"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"McpActionProposal({self.tool_name} {self.target_type}:{self.target_id} {self.status})"
+        )
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Ensure arguments are immutable after first save and audit creation."""
+        created = self._state.adding
+        if created:
+            canonical = json.dumps(
+                self.arguments or {}, sort_keys=True, default=str, separators=(",", ":")
+            )
+            self.arguments_hash = hashlib.sha256(canonical.encode()).hexdigest()
+        else:
+            orig = McpActionProposal.objects.get(pk=self.pk)
+            if orig.arguments != self.arguments or orig.arguments_hash != self.arguments_hash:
+                raise ValidationError(
+                    {"arguments": "Arguments are immutable after proposal creation."}
+                )
+        super().save(*args, **kwargs)
+        if created:
+            requester = None
+            if self.requested_by_id is not None:
+                requester = (
+                    User.objects.filter(pk=self.requested_by_id).select_related("org").first()
+                )
+            if (
+                requester is not None
+                and Organisation.objects.filter(pk=self.organisation_id).exists()
+            ):
+                AuditLog.objects.create(
+                    actor=requester,
+                    actor_org=requester.org,
+                    target_org_id=self.organisation_id,
+                    target_type="McpActionProposal",
+                    target_id=str(self.id),
+                    action="mcp_proposal.created",
+                    details={
+                        "proposal_id": str(self.id),
+                        "tool_name": self.tool_name,
+                        "action": self.action,
+                        "risk": self.risk,
+                        "target_type": self.target_type,
+                        "target_id": str(self.target_id),
+                    },
+                )
+
+    def clean(self) -> None:
+        super().clean()
+        if not self.idempotency_key:
+            raise ValidationError({"idempotency_key": "Idempotency key is required."})
+        canonical = json.dumps(
+            self.arguments or {}, sort_keys=True, default=str, separators=(",", ":")
+        )
+        if self.arguments_hash != hashlib.sha256(canonical.encode()).hexdigest():
+            raise ValidationError(
+                {"arguments_hash": "arguments_hash does not match canonical SHA-256 of arguments."}
+            )
+        if self.target_type not in ("case", "alert", "observable", "task"):
+            raise ValidationError({"target_type": f"Unknown target type {self.target_type}."})
+
+    @property
+    def is_expired(self) -> bool:
+        return timezone.now() >= self.expires_at
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.status in (
+            self.StatusChoices.DECLINED,
+            self.StatusChoices.EXPIRED,
+            self.StatusChoices.EXECUTED,
+            self.StatusChoices.FAILED,
+        )

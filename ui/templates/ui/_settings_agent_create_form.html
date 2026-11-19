@@ -28,7 +28,7 @@ POST succeeds.
     <option value="{{ service_user.login }}">{{ service_user.org.name }}</option>
     {% endfor %}
   </datalist>
-  <p class="dim">The credential is read-only and organisation-bound regardless of this user's role.</p>
+  <p class="dim">The credential is organisation-bound and carries only the scopes selected below, regardless of this user's role.</p>
 </div>
 
 <div class="meta-inline">
@@ -37,7 +37,16 @@ POST succeeds.
   <p class="dim">Leave blank for no expiry. Expired credentials fail closed.</p>
 </div>
 
-<div class="meta-inline">
-  <label>Scope</label>
-  <p><code>mcp:read</code> <span class="dim">— Phase 1 is strictly read-only.</span></p>
-</div>
+<fieldset class="meta-inline">
+  <legend>Scopes</legend>
+  {% for scope in allowed_scopes %}
+  <label class="scope-option">
+    <input type="checkbox" name="scopes" value="{{ scope }}" form="{{ form_id }}" {% if scope in phase1_scopes %}checked{% endif %}>
+    <code>{{ scope }}</code>
+    {% if scope == "mcp:read" %}<span class="dim">— read cases, alerts, observables, tasks and playbooks.</span>{% endif %}
+    {% if scope == "mcp:propose" %}<span class="dim">— create proposals that require explicit human approval.</span>{% endif %}
+    {% if scope == "mcp:summary" %}<span class="dim">— append a clearly labelled AI summary to a case timeline.</span>{% endif %}
+  </label>
+  {% endfor %}
+  <p class="dim">Viewer service users can only receive <code>mcp:read</code>. Reserved write/admin scopes are never accepted.</p>
+</fieldset>

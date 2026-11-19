@@ -1,0 +1,99 @@
+{% load ui_tags %}
+{% comment %}
+  Approvals inbox list — shows pending MCP proposals for the organisation.
+  Reuses _pager.html for pagination; no native dialogs; keyboard accessible.
+  All primary actions have visible labels; works without JavaScript.
+  Decision rules enforced server-side; templates only render what they are allowed.
+  Dark theme, WCAG-AA, severity/risk always labelled in text, not colour alone.
+{% endcomment %}
+
+{% if page_obj %}
+  {% include "ui/_list_summary.html" with entity_name="proposal" entity_name_plural="proposals" %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">MCP proposals awaiting decision</caption>
+      <thead>
+        <tr>
+          <th scope="col">Target</th>
+          <th scope="col">Risk</th>
+          <th scope="col">Requester</th>
+          <th scope="col">Expires</th>
+          <th scope="col">Status</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in page_obj %}
+        <tr class="approval-row">
+          <td>
+            <strong>{{ item.proposal.target_type|default:"—" }} #{{ item.proposal.target_id|default:"—" }}</strong>
+            {% if item.proposal.tool_name %}<br><small class="dim">Tool: {{ item.proposal.tool_name }}</small>{% endif %}
+          </td>
+          <td>
+            <span class="pill pill-{{ item.proposal.risk|lower }}">{{ item.proposal.risk|default:"—" }}</span>
+          </td>
+          <td class="mono">{{ item.proposal.requested_by.login|default:"—" }}</td>
+          <td class="mono dim">{{ item.proposal.expires_at|date:"Y-m-d H:i"|default:"—" }}</td>
+          <td>
+            {% if item.proposal.status == "pending" %}
+              <span class="pill pill-pending">pending</span>
+            {% elif item.proposal.status == "approved" %}
+              <span class="pill pill-on">approved</span>
+            {% elif item.proposal.status == "declined" %}
+              <span class="pill pill-err">declined</span>
+            {% elif item.proposal.status == "executed" %}
+              <span class="pill pill-on">executed</span>
+            {% elif item.proposal.status == "expired" %}
+              <span class="pill pill-pending">expired</span>
+            {% elif item.proposal.status == "failed" %}
+              <span class="pill pill-err">failed</span>
+            {% else %}
+              <span class="pill pill-pending">{{ item.proposal.status }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if item.proposal.status == "pending" %}
+              {% if item.can_decide %}
+                <!-- Approve -->
+                <form method="post" action="{% url 'ui-approvals-decide' item.proposal.id %}" class="inline-form">{% csrf_token %}
+                  <input type="hidden" name="action" value="approve">
+                  <button type="submit" class="btn btn-primary" title="Approve">Approve</button>
+                </form>
+
+                <!-- Decline -->
+                <form method="post" action="{% url 'ui-approvals-decide' item.proposal.id %}" class="inline-form">{% csrf_token %}
+                  <input type="hidden" name="action" value="decline">
+                  <button type="submit" class="btn btn-err" title="Decline">Decline</button>
+                </form>
+              {% elif item.can_execute %}
+                <form method="post" action="{% url 'ui-approvals-execute' item.proposal.id %}" class="inline-form">{% csrf_token %}
+                  <button type="submit" class="btn btn-primary" title="Execute">Execute</button>
+                </form>
+              {% else %}
+                <span class="dim">—</span>
+              {% endif %}
+            {% elif item.proposal.status == "approved" %}
+              {% if item.can_execute %}
+                <form method="post" action="{% url 'ui-approvals-execute' item.proposal.id %}" class="inline-form">{% csrf_token %}
+                  <button type="submit" class="btn btn-primary" title="Execute">Execute</button>
+                </form>
+              {% else %}
+                <span class="dim">—</span>
+              {% endif %}
+            {% else %}
+              <span class="dim">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="6" class="empty">No pending proposals.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "ui/_pager.html" with entity_name="Proposal" %}
+{% else %}
+  <p class="empty">No pending proposals.</p>
+{% endif %}

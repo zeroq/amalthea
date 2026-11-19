@@ -17,6 +17,7 @@ def mint(
     name: str,
     created_by: Any | None = None,
     expires_at: datetime | None = None,
+    scopes: list[str] | None = None,
 ) -> tuple[McpCredential, str]:
     """Mint a credential and return ``(credential, plaintext)`` once."""
     return McpCredential.mint(
@@ -25,6 +26,7 @@ def mint(
         name=name,
         created_by=created_by,
         expires_at=expires_at,
+        scopes=scopes,
     )
 
 

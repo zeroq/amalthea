@@ -29,6 +29,12 @@ from .alerts import (
     alert_tag_add,
     alert_tag_remove,
 )
+from .approvals import (
+    approvals_decide,
+    approvals_detail,
+    approvals_execute,
+    approvals_list,
+)
 from .auth import (
     SignInView,
     sign_out,
@@ -270,6 +276,10 @@ __all__ = [
     "alert_status",
     "alert_tag_add",
     "alert_tag_remove",
+    "approvals_decide",
+    "approvals_detail",
+    "approvals_execute",
+    "approvals_list",
     "automation_list",
     "case_alert_link",
     "case_apply_template",
