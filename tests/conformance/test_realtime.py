@@ -70,6 +70,7 @@ SCANNED_APPS = ("alerts", "cases", "ui", "automation")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LEDGER = REPO_ROOT / "cases" / "ledger.py"
+LIVE_JS = REPO_ROOT / "ui" / "static" / "ui" / "live.js"
 
 
 @pytest.fixture(autouse=True)
@@ -537,6 +538,14 @@ def test_the_case_page_wires_the_live_client_and_the_htmx_append(
     hx_post = re.search(r'hx-post="([^"]+)"', comment_form.group(0))
     assert action is not None and hx_post is not None
     assert action.group(1) == hx_post.group(1)
+
+
+def test_the_live_client_keeps_newest_entries_on_top() -> None:
+    """The Audit tab's live list uses the same newest-first order as the rendered rail."""
+    source = LIVE_JS.read_text(encoding="utf-8")
+    assert 'return entries[0].getAttribute("data-event-id")' in source
+    assert "list.insertBefore(entry(event), list.firstChild)" in source
+    assert "list.appendChild(entry(event))" not in source
 
 
 def test_a_plain_browser_still_gets_the_redirect_fallback(browser: Client, analyst: User) -> None:

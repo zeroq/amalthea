@@ -774,8 +774,8 @@ def test_timeline_rail_cap_keeps_newest_and_count_line(
     assert response.context["timeline_total"] == RAIL_CAP + 20
     assert len(timeline) == RAIL_CAP
     titles = [event.title for event in timeline]
-    assert titles[0] == "EVENT-0020", "oldest survivor is the first kept row"
-    assert titles[-1] == "EVENT-0219", "newest event must be the last rendered row"
+    assert titles[0] == "EVENT-0219", "newest event must be the first rendered row"
+    assert titles[-1] == "EVENT-0020", "oldest survivor is the last kept row"
     assert "EVENT-0000" not in titles, "rows beyond the cap (oldest) must be dropped"
 
     text = _text(_body(response))
@@ -785,10 +785,10 @@ def test_timeline_rail_cap_keeps_newest_and_count_line(
 
 
 @pytest.mark.django_db
-def test_timeline_rail_renders_ascending_display_order(
+def test_timeline_rail_renders_descending_display_order(
     browser: Client, org: Organisation, analyst: User, case_status: CaseStatus
 ) -> None:
-    """Below the cap the timeline renders oldest-first, with no count line."""
+    """Below the cap the timeline renders newest-first, with no count line."""
     case = _make_cases(org, case_status, analyst, 1)[0]
     base = timezone.now() - timedelta(days=30)
     TimelineEvent.objects.bulk_create(
@@ -812,7 +812,7 @@ def test_timeline_rail_renders_ascending_display_order(
     assert match, "the audit timeline list must render"
     segment = match.group(0)
     positions = [segment.index(f"EVENT-{i:04d}") for i in range(10)]
-    assert positions == sorted(positions), "timeline must render oldest-first (display order)"
+    assert positions == sorted(positions, reverse=True), "timeline must render newest-first"
     assert "Showing latest" not in _text(body), "no count line when nothing is capped"
 
 

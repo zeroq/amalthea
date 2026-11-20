@@ -23,7 +23,7 @@
  * XSS sink in the one place that renders untrusted text as rich content.
  *
  * Since T2 P2 a frame's `event_type` decides its destination: `page` refreshes the case's Pages card,
- * `task` refreshes the Tasks tab list, every other value is a ledger `kind` and appends to the timeline.
+ * `task` refreshes the Tasks tab list, every other value is a ledger `kind` and prepends to the timeline.
  * Without that split a page (which carries `content`, not `description`) would land in the timeline
  * as a bare title.
  *
@@ -84,12 +84,12 @@
     return !!list.querySelector('[data-event-id="' + id + '"]');
   }
 
-  /* The newest id already on the page: entries only ever append, in server order, so the last
-   * node is the keyset anchor. Null on an empty timeline means "send me everything". */
+  /* The newest id already on the page: entries render newest-first and new ones prepend, so the
+   * first node is the keyset anchor. Null on an empty timeline means "send me everything". */
   function anchor() {
     var entries = list.querySelectorAll("[data-event-id]");
     if (!entries.length) return null;
-    return entries[entries.length - 1].getAttribute("data-event-id");
+    return entries[0].getAttribute("data-event-id");
   }
 
   function node(tag, className, text) {
@@ -100,7 +100,7 @@
   }
 
   /* Mirrors `ui/templates/ui/_timeline_entry.html`: the server renders that for a full page load
-   * and for the HTMX append, this renders the same tree from the JSON the WebSocket delivers. */
+   * and for the HTMX note form, this renders the same tree from the JSON the WebSocket delivers. */
   function entry(event) {
     var item = node("li", "tl tl-" + slug(event.kind));
     item.setAttribute("data-event-id", event.id);
@@ -127,11 +127,11 @@
     return item;
   }
 
-  function append(event) {
+  function prepend(event) {
     if (!event || !event.id || rendered(event.id)) return;
     var placeholder = list.querySelector("li.empty");
     if (placeholder) placeholder.parentNode.removeChild(placeholder);
-    list.appendChild(entry(event));
+    list.insertBefore(entry(event), list.firstChild);
   }
 
   /* A `page` frame carries the raw `page_json`, whose `content` is Markdown, and this bundle ships no
@@ -201,7 +201,7 @@
   function handle(message) {
     if (!message || typeof message !== "object") return;
     if (message.type === "timeline" && Array.isArray(message.events)) {
-      message.events.forEach(append);
+      message.events.forEach(prepend);
       return;
     }
     if (message.type === "event" && message.payload) {
@@ -213,7 +213,7 @@
       } else if (message.event_type === "task") {
         refreshTasks();
       } else {
-        append(message.payload.event);
+        prepend(message.payload.event);
       }
     }
   }

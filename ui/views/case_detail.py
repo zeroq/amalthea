@@ -113,11 +113,11 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     )
     attachments_qs = case.attachments.select_related("created_by").order_by("-created_at")
     # Comments tab = the analyst view: notes only, rendered once and not streamed.
-    # Audit tab = the full ledger, and the list `live.js` owns the socket for.
+    # Audit tab = the full ledger, newest-first, and the list `live.js` owns the socket for.
     comments_qs = (
         case.timeline_events.filter(kind="comment").select_related("actor").order_by("date", "id")
     )
-    timeline_qs = case.timeline_events.select_related("actor").order_by("date", "id")
+    timeline_qs = case.timeline_events.select_related("actor").order_by("-date", "-id")
     audit_logs_qs = AuditLog.objects.filter(target_type="Case", target_id=str(case.id)).order_by(
         "-created_at"
     )
@@ -264,9 +264,9 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
     comments_total = comments_qs.count()
     comments = list(comments_qs.order_by("-date", "-id")[:RAIL_CAP])[::-1]
 
-    # Timeline: order by (date, id) ascending (chronological, contractual for live.js) — take newest then reverse
+    # Timeline: newest-first by (date, id), so the cap keeps the newest N in display order.
     timeline_total = timeline_qs.count()
-    timeline = list(timeline_qs.order_by("-date", "-id")[:RAIL_CAP])[::-1]
+    timeline = list(timeline_qs[:RAIL_CAP])
 
     # Audit logs: order by -created_at (newest first), so simple slice is correct
     audit_logs_total = audit_logs_qs.count()
