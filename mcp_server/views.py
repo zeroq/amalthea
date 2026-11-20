@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from django.conf import settings
-from django.http import HttpRequest, JsonResponse
+from django.http import HttpRequest, HttpResponseNotFound, JsonResponse
 
 from mcp_server.models import PHASE1_SCOPES, PHASE2_SCOPES
 
@@ -34,7 +34,9 @@ def _resource_origin(resource_url: str) -> str:
     return url
 
 
-def oauth_protected_resource_metadata(request: HttpRequest) -> JsonResponse:
+def oauth_protected_resource_metadata(
+    request: HttpRequest,
+) -> HttpResponseNotFound | JsonResponse:
     """RFC 9728 protected-resource metadata endpoint at
     ``/.well-known/oauth-protected-resource/mcp``.
 
@@ -54,8 +56,6 @@ def oauth_protected_resource_metadata(request: HttpRequest) -> JsonResponse:
 
     # In static mode, do not advertise OAuth metadata; return 404
     if auth_mode == "static":
-        from django.http import HttpResponseNotFound
-
         return HttpResponseNotFound("Not Found")
 
     # Build metadata from configured values using django.conf.settings

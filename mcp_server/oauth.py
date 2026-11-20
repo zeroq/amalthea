@@ -35,6 +35,8 @@ try:
 except ImportError:  # pragma: no cover - dependency is pinned in requirements
     jwt = None  # type: ignore[assignment]
 
+_jwt: Any = jwt
+
 JWKS_CACHE_PREFIX = "mcp_oauth_jwks"
 JWKS_CACHE_MIN_SECONDS = 300
 JWKS_CACHE_DEFAULT_SECONDS = 3600
@@ -45,7 +47,15 @@ RESERVED_SCOPES = frozenset({"mcp:write", "mcp:admin"})
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> urllib.request.Request | None:
         return None
 
 
@@ -61,12 +71,20 @@ def _is_safe_jwks_url(url: str) -> bool:
     if not host:
         return False
 
-    candidates = [host]
+    candidates: list[str] = [host]
     try:
         candidates = [str(ipaddress.ip_address(host))]
     except ValueError:
         try:
-            candidates = [info[4][0] for info in socket.getaddrinfo(host, parsed.port or 443)]
+            candidates = []
+            for info in socket.getaddrinfo(host, parsed.port or 443):
+                sockaddr = info[4]
+                if isinstance(sockaddr, (tuple, list)) and sockaddr:
+                    resolved = sockaddr[0]
+                    if isinstance(resolved, str):
+                        candidates.append(resolved)
+            if not candidates:
+                return False
         except OSError:
             return False
 
@@ -142,7 +160,8 @@ class McpOAuthTokenVerifier(TokenVerifier):
 
     def _get_jwks(self, *, force: bool = False) -> dict[str, Any] | None:
         cache_key = f"{JWKS_CACHE_PREFIX}:{self._jwks_url}"
-        cached = cache.get(cache_key)
+        cached_value = cache.get(cache_key)
+        cached: dict[str, Any] | None = cached_value if isinstance(cached_value, dict) else None
         if cached is not None and not force:
             return cached
         fetched = _fetch_jwks(self._jwks_url)
@@ -151,18 +170,18 @@ class McpOAuthTokenVerifier(TokenVerifier):
             return fetched
         return cached
 
-    def _reject(self, reason: str) -> None:
+    def _reject(self, reason: str) -> AccessToken | None:
         _log_failure(reason)
         return None
 
     def _verify_sync(self, token: str) -> AccessToken | None:
-        if jwt is None:
+        if _jwt is None:
             return self._reject("jwks_fetch_failed")
         if not isinstance(token, str) or token.count(".") != 2:
             return self._reject("invalid_token")
 
         try:
-            header = jwt.get_unverified_header(token)
+            header = _jwt.get_unverified_header(token)
         except Exception:
             return self._reject("invalid_token")
 
@@ -198,12 +217,12 @@ class McpOAuthTokenVerifier(TokenVerifier):
         if jwk is None:
             return self._reject("unknown_kid")
         try:
-            key = jwt.PyJWK(jwk).key
+            key = _jwt.PyJWK(jwk).key
         except Exception:
             return self._reject("jwks_fetch_failed")
 
         try:
-            claims = jwt.decode(
+            claims = _jwt.decode(
                 token,
                 key,
                 algorithms=[alg],
@@ -212,11 +231,11 @@ class McpOAuthTokenVerifier(TokenVerifier):
                 leeway=self._clock_skew,
                 options={"require": ["iss", "aud", "exp"]},
             )
-        except jwt.ExpiredSignatureError:
+        except _jwt.ExpiredSignatureError:
             return self._reject("expired")
-        except jwt.InvalidAudienceError:
+        except _jwt.InvalidAudienceError:
             return self._reject("invalid_audience")
-        except jwt.InvalidIssuerError:
+        except _jwt.InvalidIssuerError:
             return self._reject("invalid_issuer")
         except Exception:
             return self._reject("bad_signature")
@@ -283,9 +302,7 @@ class McpOAuthTokenVerifier(TokenVerifier):
             if scope not in ALLOWED_SCOPES:
                 return self._reject("scope_denied")
             validated_scopes.add(scope)
-        final_scopes = tuple(
-            sorted(validated_scopes & set(binding.allowed_scopes or []) & ALLOWED_SCOPES)
-        )
+        final_scopes = sorted(validated_scopes & set(binding.allowed_scopes or []) & ALLOWED_SCOPES)
         if not final_scopes:
             return self._reject("scope_denied")
 

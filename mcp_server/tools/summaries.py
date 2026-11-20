@@ -40,6 +40,9 @@ def post_case_summary(*, arguments: dict[str, Any], principal: Principal) -> dic
             "invalid_arguments", message="source_event_ids must be a list of 1-100 event IDs"
         )
 
+    if principal.credential_id is None:
+        raise ToolFailureError("not_found", status="not_found", message="Credential not found.")
+
     credential = (
         McpCredential.objects.select_related("user", "organisation")
         .filter(pk=principal.credential_id, organisation_id=principal.organisation_id)

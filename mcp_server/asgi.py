@@ -24,6 +24,7 @@ from channels.routing import ProtocolTypeRouter, URLRouter
 from django.conf import settings
 from django.core.asgi import get_asgi_application
 from django.core.exceptions import ImproperlyConfigured
+from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -114,8 +115,8 @@ def build_mcp_server(*, require_auth: bool = True) -> MCPServer:
       - "both":    dispatch JWT-shaped tokens to OAuth verifier,
                    other tokens to static verifier
     """
-    auth = None
-    verifier = None
+    auth: AuthSettings | None = None
+    verifier: TokenVerifier | None = None
 
     auth_mode = getattr(settings, "MCP_AUTH_MODE", "static").lower()
 
@@ -172,7 +173,7 @@ def build_mcp_server(*, require_auth: bool = True) -> MCPServer:
                 accepted as a static credential when OAuth mode would reject it.
                 """
 
-                async def verify_token(self, token: str) -> Any:
+                async def verify_token(self, token: str) -> AccessToken | None:
                     # Quick peek at the header to determine token shape.
                     # Dispatch by JWT structure (three dot-separated parts) rather
                     # than the typ header, which may be absent or unreliable.
