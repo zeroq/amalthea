@@ -111,6 +111,11 @@ urlpatterns = [
         name="suggestions-bulk-ignore",
     ),
     path(
+        "suggestions/bulk-ignore/",
+        views.suggestions_bulk_ignore,
+        name="suggestions-bulk-ignore-slash",
+    ),
+    path(
         "rejected-observables/",
         views.rejected_observables_list,
         name="rejected-observables-list",
@@ -119,5 +124,10 @@ urlpatterns = [
         "rejected-observables/",
         views.rejected_observables_list,
         name="rejected-observables-list-slash",
+    ),
+    path(
+        "rejected-observables/<uuid:id>/promote/",
+        views.rejected_observable_promote,
+        name="rejected-observable-promote",
     ),
 ]

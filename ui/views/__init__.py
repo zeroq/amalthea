@@ -167,6 +167,12 @@ from .observables import (
     observable_edit,
     observable_list,
 )
+from .rejected_observables import (
+    rejected_observable_promote,
+)
+from .rejected_observables import (
+    rejected_observables_list as rejected_observables,
+)
 from .settings import (
     _org_blockers_text,
     settings_home,
@@ -342,6 +348,8 @@ __all__ = [
     "playbook_list",
     "playbook_run",
     "playbook_scripts",
+    "rejected_observable_promote",
+    "rejected_observables",
     "settings_agent_create",
     "settings_agent_revoke",
     "settings_agents",

@@ -196,6 +196,11 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     ("observables", "ObservableSuggestion", "reviewed_by"): models.SET_NULL,
     ("observables", "ObservableSuggestion", "case"): models.CASCADE,
     ("observables", "ObservableSuggestion", "observable"): models.SET_NULL,
+    # RejectedObservable is audit of a suppression decision: tenant and type are protected
+    # vocabulary, while deleting the source alert only clears provenance.
+    ("observables", "RejectedObservable", "owner_org"): models.PROTECT,
+    ("observables", "RejectedObservable", "data_type"): models.PROTECT,
+    ("observables", "RejectedObservable", "alert"): models.SET_NULL,
     # ---- Playbook / AutomationRun: the Module D ledger --------------------------------
     # PROTECT: a tenant that still owns playbooks cannot be deleted out from under them.
     ("automation", "Playbook", "owner_org"): models.PROTECT,
@@ -285,7 +290,8 @@ def test_fk_audit_covers_the_whole_model_inventory() -> None:
     # always a real change.
     # 68 = 67 + Case.source_template (template provenance, SET_NULL).
     # 72 = 68 + CaseContainmentAction x3 (case, term, created_by).
-    assert len(actual) == 72, f"expected the full FK set, found only {len(actual)}"
+    # 75 = 72 + RejectedObservable x3 (owner_org, data_type, alert).
+    assert len(actual) == 75, f"expected the full FK set, found only {len(actual)}"
 
 
 @pytest.mark.django_db

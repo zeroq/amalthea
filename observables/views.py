@@ -3,6 +3,7 @@ TheHive 5.8 exposes observable types through `POST /query` (`listObservableType`
 `GET|PATCH|DELETE /observable/type/{typeId}` detail; it has no REST collection. This module serves
 the same resource with a REST collection GET/POST (recorded in `docs/spec/deviations.md`), which
 is what makes the vocabulary editable without hand-writing a query document.
+
 `PATCH` touches only `isCaseSensitive`/`isAttachment` — the recorded `InputUpdateObservableType`
 fields — and goes through `ObservableType.save()` so a case-rule change re-hashes that type's
 observables (`observables/models.py`), which is why the save is a full save rather than a
@@ -23,7 +24,11 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 import identity.scoping
-from core.serializers import observable_suggestion_json, observable_type_json
+from core.serializers import (
+    observable_suggestion_json,
+    observable_type_json,
+    rejected_observable_json,
+)
 from core.taxonomy import (
     TaxonomyError,
     create_observable_type,
@@ -31,7 +36,9 @@ from core.taxonomy import (
     update_observable_type,
 )
 from identity.audit import record_taxonomy_change
+from identity.scoping import is_viewer
 from observables.models import ObservableSuggestion, ObservableType, RejectedObservable
+from observables.rejected import promote_rejected_observable, scoped_rejected_observables
 from observables.suggestions import (
     AcceptSuggestionError,
     accept_suggestion,
@@ -216,7 +223,7 @@ def _resolve_suggestion_scoped(request: Request, suggestion_id: str) -> Observab
         return None
     suggestion = (
         ObservableSuggestion.objects.select_related(
-            "case", "source_alert", "data_type", "owner_org"
+            "case", "source_alert", "data_type", "owner_org", "observable"
         )
         .filter(pk=pk)
         .first()
@@ -273,7 +280,9 @@ def case_suggestions_list(request: Request, case_id: str) -> Response:
     ).filter(case=case)
     status_filter = request.query_params.get("status")
     if status_filter:
-        queryset = queryset.filter(is_promoted=status_filter)
+        # ObservableSuggestion has `status` choices: proposed/accepted/rejected/ignored
+        # NO is_promoted field. Filter by status directly.
+        queryset = queryset.filter(status=status_filter)
     # Filter by alert if provided
     alert_id = request.query_params.get("alert")
     if alert_id:
@@ -293,7 +302,9 @@ def alert_suggestions_list(request: Request, alert_id: str) -> Response:
     ).filter(source_alert=alert)
     status_filter = request.query_params.get("status")
     if status_filter:
-        queryset = queryset.filter(is_promoted=status_filter)
+        # ObservableSuggestion has `status` choices: proposed/accepted/rejected/ignored
+        # NO is_promoted field. Filter by status directly.
+        queryset = queryset.filter(status=status_filter)
     return Response([observable_suggestion_json(s) for s in queryset.order_by("-created_at")])
 
 
@@ -312,6 +323,18 @@ def suggestion_accept(request: Request, suggestion_id: str) -> Response:
     if suggestion.status == "accepted":
         # Idempotent: already accepted, return current state
         return Response(observable_suggestion_json(suggestion))
+    if suggestion.status == "rejected":
+        # Cannot accept a rejected suggestion
+        return Response(
+            {"type": "BadRequest", "message": "Cannot accept a rejected suggestion"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if suggestion.status == "ignored":
+        # Cannot accept an ignored suggestion
+        return Response(
+            {"type": "BadRequest", "message": "Cannot accept an ignored suggestion"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     with transaction.atomic():
         try:
             accept_suggestion(suggestion, actor=_actor(request))
@@ -338,6 +361,18 @@ def suggestion_reject(request: Request, suggestion_id: str) -> Response:
     if suggestion.status == "rejected":
         # Idempotent: already rejected
         return Response(observable_suggestion_json(suggestion))
+    if suggestion.status == "accepted":
+        # Cannot reject an accepted suggestion
+        return Response(
+            {"type": "BadRequest", "message": "Cannot reject an accepted suggestion"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if suggestion.status == "ignored":
+        # Cannot reject an ignored suggestion
+        return Response(
+            {"type": "BadRequest", "message": "Cannot reject an ignored suggestion"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     with transaction.atomic():
         suggestion.status = "rejected"
         suggestion.reviewed_by = _actor(request)
@@ -361,6 +396,18 @@ def suggestion_ignore(request: Request, suggestion_id: str) -> Response:
     if suggestion.status == "ignored":
         # Idempotent: already ignored
         return Response(observable_suggestion_json(suggestion))
+    if suggestion.status == "accepted":
+        # Cannot ignore an accepted suggestion
+        return Response(
+            {"type": "BadRequest", "message": "Cannot ignore an accepted suggestion"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if suggestion.status == "rejected":
+        # Cannot ignore a rejected suggestion
+        return Response(
+            {"type": "BadRequest", "message": "Cannot ignore a rejected suggestion"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     with transaction.atomic():
         suggestion.status = "ignored"
         suggestion.reviewed_by = _actor(request)
@@ -371,19 +418,63 @@ def suggestion_ignore(request: Request, suggestion_id: str) -> Response:
 
 @api_view(["GET"])
 def rejected_observables_list(request: Request) -> Response:
-    """List rejected observables for the user's organization."""
+    """`GET /api/v1/rejected-observables/` — list rejected observables for the user's organization.
+
+    Viewers are denied to match the UI management page; promote is also viewer-denied.
+    """
     user = request.user
     if not user.is_authenticated:
         return _not_found("User")
-    # Enforce organization-specific scoping
-    queryset = RejectedObservable.objects.filter(owner_org=user.organization)
-    status_filter = request.query_params.get("status")
-    if status_filter:
-        queryset = queryset.filter(is_promoted=status_filter)
-    reason_filter = request.query_params.get("reason")
-    if reason_filter:
-        queryset = queryset.filter(reason=reason_filter)
-    return Response(list(queryset.order_by("-created_at")))
+    if is_viewer(user):
+        return Response(
+            {
+                "type": "AuthorizationError",
+                "message": "Viewer role cannot list rejected observables",
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    queryset = scoped_rejected_observables(
+        user,
+        status=request.query_params.get("status"),
+        reason=request.query_params.get("reason"),
+    )
+    return Response([rejected_observable_json(obj) for obj in queryset])
+
+
+@api_view(["POST"])
+@renderer_classes([JSONRenderer])
+def rejected_observable_promote(request: Request, id: str) -> Response:
+    """`POST /api/v1/rejected-observables/{id}/promote/` — promote a rejected observable.
+
+    Auth required; deny viewers (identity.scoping.is_viewer) with 403.
+    Use promote_rejected_observable; 404 if not scoped; 200 with `{message, promoted, item}`.
+    """
+    user = request.user
+    if not user.is_authenticated:
+        return Response(
+            {"type": "Unauthorized", "message": "Authentication required"},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+    # Deny viewers
+    if is_viewer(user):
+        return Response(
+            {"type": "AuthorizationError", "message": "Viewer role cannot promote"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    try:
+        obj, created = promote_rejected_observable(user, id)
+    except RejectedObservable.DoesNotExist:
+        return Response(
+            {"type": "NotFoundError", "message": "Rejected observable not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    return Response(
+        {
+            "message": "Rejected observable promoted successfully",
+            "promoted": created,
+            "item": rejected_observable_json(obj),
+        }
+    )
 
 
 def _bulk_action(request: Request, target_status: str, opposite_statuses: set[str]) -> Response:
@@ -443,6 +534,8 @@ __all__ = [
     "case_suggestions_list",
     "observable_type_collection",
     "observable_type_detail",
+    "rejected_observable_promote",
+    "rejected_observables_list",
     "suggestion_accept",
     "suggestion_ignore",
     "suggestion_reject",

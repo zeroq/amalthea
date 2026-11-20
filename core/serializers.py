@@ -41,7 +41,7 @@ from cases.models import (
 )
 from compat.enums import PAP_LABELS, SEVERITY_LABELS, TLP_LABELS
 from identity.models import Organisation, User
-from observables.models import Observable, ObservableSuggestion, ObservableType
+from observables.models import Observable, ObservableSuggestion, ObservableType, RejectedObservable
 
 
 def _iso(value: Any) -> str | None:
@@ -734,3 +734,42 @@ def observable_suggestion_json(suggestion: ObservableSuggestion) -> dict[str, An
         "updatedAt": _iso(suggestion.updated_at),
     }
     return payload
+
+
+def rejected_observable_json(obj: RejectedObservable) -> dict[str, Any]:
+    """`OutputRejectedObservable` — JSON-safe camelCase wire representation.
+
+    Returns a flat dict with the keys required by the API spec:
+    id, type (type name), value (normalized_data), reason (token), reasonLabel,
+    isPromoted, alertId, alertTitle, createdAt, updatedAt.
+    """
+    # Type name from the FK
+    type_name = obj.data_type.name if obj.data_type else ""
+
+    # Normalized value
+    value = obj.normalized_data or ""
+
+    # Reason token (from REJECTED_REASON_CHOICES) and label
+    reason_token = obj.reason or ""
+    reason_label = (
+        dict(RejectedObservable.REJECTED_REASON_CHOICES).get(reason_token, reason_token)
+        if reason_token
+        else ""
+    )
+
+    # Alert ID and title (nullable)
+    alert_id = str(obj.alert.id) if obj.alert else None
+    alert_title = obj.alert.title if obj.alert else None
+
+    return {
+        "id": str(obj.id),
+        "type": type_name,
+        "value": value,
+        "reason": reason_token,
+        "reasonLabel": reason_label,
+        "isPromoted": obj.is_promoted,
+        "alertId": alert_id,
+        "alertTitle": alert_title,
+        "createdAt": obj.created_at.isoformat() if obj.created_at else None,
+        "updatedAt": obj.updated_at.isoformat() if obj.updated_at else None,
+    }

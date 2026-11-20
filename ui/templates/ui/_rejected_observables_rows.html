@@ -1,0 +1,45 @@
+{% comment %}
+Row fragment returned for HTMX filter/promotion swaps. It intentionally has no <tbody> wrapper:
+htmx replaces the innerHTML of #rejected-table-body, so the response is bare <tr> elements.
+Promotion dialogs live outside the table and remain available after the swap.
+{% endcomment %}
+{% if rejected_observables %}
+  {% for item in rejected_observables %}
+  <tr data-rejected-observable-id="{{ item.id }}">
+    <td class="mono break">{{ item.normalized_data|escape }}</td>
+    <td>{{ item.data_type.name }}</td>
+    <td>
+      {% if item.alert %}
+      <a href="{% url 'ui-alert-detail' alert_id=item.alert.id %}">{{ item.alert.title|truncatechars:30 }}</a>
+      {% else %}
+      <span class="dim">—</span>
+      {% endif %}
+    </td>
+    <td>{% include "ui/_rejected_reason_badge.html" %}</td>
+    <td class="mono dim">{{ item.created_at|date:"Y-m-d H:i" }}</td>
+    <td>
+      {% url 'ui-rejected-observable-promote' item.id as promote_url %}
+      <form method="post" action="{{ promote_url }}" class="inline-form">
+        {% csrf_token %}
+        <input type="hidden" name="status" value="{{ status_filter|default:'' }}">
+        <input type="hidden" name="reason" value="{{ reason_filter|default:'' }}">
+        <button type="submit" class="icon-link" data-modal-open="promote-modal-{{ item.id }}"
+                aria-label="Promote {{ item.normalized_data }}"
+                title="Promote {{ item.normalized_data }}">
+          <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+        </button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+{% else %}
+  <tr>
+    <td colspan="6" class="empty">
+      {% if status_filter or reason_filter %}
+        No rejected observables match your filters. <a href="{% url 'ui-rejected-observables' %}">Clear filters</a>
+      {% else %}
+        No rejected observables found.
+      {% endif %}
+    </td>
+  </tr>
+{% endif %}

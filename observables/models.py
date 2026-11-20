@@ -334,6 +334,7 @@ class RejectedObservable(UUIDModel, TimeStampedModel):
         "identity.Organisation",
         on_delete=models.PROTECT,
         related_name="rejected_observables",
+        db_index=False,
     )
     # The type of the rejected data (e.g., IP, Hash)
     data_type = models.ForeignKey(
@@ -351,6 +352,7 @@ class RejectedObservable(UUIDModel, TimeStampedModel):
         null=True,
         blank=True,
         related_name="rejected_observables",
+        db_index=False,
     )
     # The reason for rejection
     reason = models.CharField(
@@ -364,8 +366,10 @@ class RejectedObservable(UUIDModel, TimeStampedModel):
     class Meta:
         db_table = "rejected_observables"
         constraints = [
+            # `alert` leads deliberately: the no-alert constraint's columns are not a
+            # prefix of this one, so neither UNIQUE index is redundant (REVIEW M1).
             models.UniqueConstraint(
-                fields=["owner_org", "data_type", "normalized_data", "alert"],
+                fields=["alert", "owner_org", "data_type", "normalized_data"],
                 condition=models.Q(alert__isnull=False),
                 name="uniq_rejected_alert",
             ),
@@ -373,6 +377,20 @@ class RejectedObservable(UUIDModel, TimeStampedModel):
                 fields=["owner_org", "data_type", "normalized_data"],
                 condition=models.Q(alert__isnull=True),
                 name="uniq_rejected_no_alert",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(reason="")
+                | models.Q(
+                    reason__in=[
+                        "duplicate",
+                        "irrelevant",
+                        "false_positive",
+                        "incomplete",
+                        "too_noisy",
+                        "other",
+                    ]
+                ),
+                name="rejected_observable_reason_valid",
             ),
         ]
         indexes = [

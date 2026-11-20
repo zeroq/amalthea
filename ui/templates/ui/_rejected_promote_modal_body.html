@@ -1,0 +1,11 @@
+{% comment %}
+Body for the rejected-observable promotion confirmation dialog. Hosted by `ui/_modal.html`.
+The hidden inputs target the footer form via `form="{{ form_id }}"`, keeping the no-JS POST
+fallback and the filter-preserving redirect intact.
+{% endcomment %}
+<p class="modal-body-text">
+  Promote <span class="mono break">{{ item.normalized_data|escape }}</span>
+  ({{ item.data_type.name }}) back to the proposed review workflow?
+</p>
+<input type="hidden" name="status" value="{{ status_filter|default:'' }}" form="{{ form_id }}">
+<input type="hidden" name="reason" value="{{ reason_filter|default:'' }}" form="{{ form_id }}">

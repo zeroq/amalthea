@@ -1,0 +1,12 @@
+{% comment %}
+Reason badge for RejectedObservable rows. Uses the shared .pill component and reason-specific
+colour variants from app.css; the visible text label means colour is never the only signal.
+{% endcomment %}
+<span class="pill
+  {% if item.reason == 'false_positive' %}pill-reason-false-positive
+  {% elif item.reason == 'incomplete' %}pill-reason-incomplete
+  {% elif item.reason == 'too_noisy' %}pill-reason-too-noisy
+  {% elif item.reason == 'irrelevant' %}pill-reason-irrelevant
+  {% elif item.reason == 'duplicate' %}pill-reason-duplicate
+  {% else %}pill-reason-other{% endif %}"
+  data-reason="{{ item.reason|default:'unknown' }}">{{ item.get_reason_display|default:"N/A" }}</span>

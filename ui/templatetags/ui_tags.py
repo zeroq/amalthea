@@ -84,6 +84,18 @@ def concat(value: Any, arg: Any) -> str:
 
 
 @register.filter
+def is_settings_route(value: Any) -> bool:
+    """True for the Settings rail section and any of its sub-pages.
+
+    The left rail expands its Settings submenu from ``request.resolver_match.url_name``.
+    Keeping the route family here avoids a second, drifting copy of the whitelist in
+    ``base.html`` every time a settings page (or the rejected-observables page) is added.
+    """
+    name = str(value or "")
+    return name == "ui-rejected-observables" or name.startswith("ui-settings")
+
+
+@register.filter
 def prettyjson(value: Any) -> str:
     """Render a JSON-able value as indented JSON for a `<pre>`/`<textarea>`.
 

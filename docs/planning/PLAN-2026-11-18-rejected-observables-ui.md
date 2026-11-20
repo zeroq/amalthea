@@ -1,5 +1,4 @@
 # Rejected Observables - Management UI Plan
-# Rejected Observables - Management UI Plan
 
 ## Summary
 This plan covers Phase 3 of the Rejected Observables feature: building the frontend and management UI for analysts to audit, filter, and promote rejected items.
@@ -18,7 +17,7 @@ This plan covers Phase 3 of the Rejected Observables feature: building the front
 ## Architecture
 - **Backend:** Django 5.x (Views/URLs) + DRF (for Promotion Action).
 - **Frontend:** Django Templates + HTMX + Tailwind CSS.
-- **Interactive Elements:** `<dialog>` for confirmation modals, managed by HTMX to keep the page state consistent.
+- **Interactive Elements:** `<dialog>` for confirmation modals, rendered by the shared `ui/_modal.html` component and driven by `ui/static/ui/modal.js`; HTMX swaps rows and emits `HX-Trigger-After-Swap` to close the source dialog.
 - **Real-time:** Use Django Channels to broadcast a notification if an analyst is currently viewing a promoted item's case (optional refinement).
 
 ## Data Model
@@ -44,7 +43,7 @@ Key fields for this phase:
 ## UI/UX
 - **Organization Context:** The list must only show items where `owner_org` matches the logged-in user's organization.
 - **Layout:**
-  - Table of results with "Reason" as a badge (color-coded by severity: Low, Medium, High).
+  - Table of results with "Reason" as a text-labelled badge; each `REJECTED_REASON_CHOICES` token gets a distinct dark-theme colour so severity is never signalled by colour alone.
   - "Promote" button in the Actions column.
 - **Confirmation Modal:** 
   - Triggered by the Promote button.
@@ -60,14 +59,14 @@ Key fields for this phase:
 ### Phase 1: List View & Filtering (Backend/Frontend)
 **Goal:** Display the list of rejected items with basic filters.
 - **Tasks:**
-    - Create `RejectedObservableListView` in `observables/views.py`.
-    - Create a corresponding URL in `urls.py`.
+    - Create `rejected_observables_list` in `ui/views/rejected_observables.py`.
+    - Register `ui-rejected-observables` / `ui-rejected-observable-promote` in `ui/urls.py`.
     - Implement `owner_org` enforcement on the queryset.
     - Build the initial template using Tailwind CSS components.
 - **Acceptance Criteria (AC):**
-    - [ ] User can see all rejected items for their organization.
-    - [ ] User cannot see records from other organizations (403/Empty).
-    - [ ] Results are paginated and filterable by reason.
+    - [x] User can see all rejected items for their organization.
+    - [x] User cannot see records from other organizations (empty tenant-scoped queryset).
+    - [x] Results are paginated and filterable by reason.
 
 ### Phase 2: Promotion Action & Modal
 **Goal:** Enable the interactive promotion of a rejected item.
@@ -77,9 +76,9 @@ Key fields for this phase:
     - Build the Confirmation Modal using the `<dialog>` element.
     - Wire up the HTMX call to handle the promotion state change without a full page reload.
 - **Acceptance Criteria (AC):**
-    - [ ] Clicking "Promote" opens a modal.
-    - [ ] Confirming in the modal updates the record and closes the modal.
-    - [ ] The UI reflects the updated `is_promoted` status immediately without a refresh.
+    - [x] Clicking "Promote" opens a modal.
+    - [x] Confirming in the modal updates the record and closes the modal.
+    - [x] The UI reflects the updated `is_promoted` status immediately without a refresh.
 
 ### Phase 3: Contextual Links & Styling
 **Goal:** Final polish and integration with Alert details.
@@ -88,21 +87,31 @@ Key fields for this phase:
     - Ensure "Reason" badges are color-coded based on the `RejectedReason`.
     - Verify all buttons have correct ARIA labels and keyboard focus.
 - **Acceptance Criteria (AC):**
-    - [ ] Clicking the Alert ID opens the corresponding Alert detail page.
-    - [ ] All labels and icons meet WCAG contrast requirements in dark mode.
+    - [x] Clicking the Alert ID opens the corresponding Alert detail page.
+    - [x] All labels and icons meet WCAG contrast requirements in dark mode. **Manual browser QA passed** (see `VERIFICATION-2026-11-18-rejected-observables-ui-2026-11-20-083003.md`).
 
 ## Security
-- **Tenant Isolation:** All queries for `RejectedObservable` MUST include `.filter(owner_org=request.user.organization)`.
+- **Tenant Isolation:** All queries for `RejectedObservable` MUST go through `observables.rejected.scoped_rejected_observables()` (or an equivalent `identity.scoping.org_q("owner_org_id", user)` filter). The project user field is `org`, not `organization`.
 - **SuperAdmin Override:** Ensure SuperAdmins can view all records across organizations (if required by policy).
+- **Viewer Guard:** Both the UI management page and the JSON list/promote endpoints deny `viewer` role; mutation returns 403 (API) / 404 (UI).
 
 ## Testing
-- **Unit Tests:** Test the Promotion view's permission logic.
-- **Integration Tests:** Verify that a promoted item actually appears in the `ObservableSuggestion` list.
-- **Manual QA:** Verification of the modal behavior and keyboard navigation.
+- **Unit/Conformance Tests:** `tests/conformance/test_rejected_observables_ui.py` covers list rendering, dialog wiring, reason badges, named alert links, plain/HTMX promotion, and viewer denial. `tests/conformance/test_rejected_observables_api.py` covers tenant scoping, empty filter params, and API viewer denial.
+- **Promotion Semantics:** Promotion sets `RejectedObservable.is_promoted = True`; it deliberately does **not** create an `ObservableSuggestion`.
+- **Manual QA:** Keyboard focus, Esc-to-close, Tab trap, and WCAG-AA contrast were confirmed in a browser on 2026-11-20; JS/DOM behaviour is also pinned by textual conformance tests.
 
 ## Risks
 - **Data Leakage:** Risk of showing rejected items from other organizations if the QuerySet filter is missed.
 - **Double Promotion:** Ensure promotion logic handles cases where a record is already promoted or in an invalid state.
+
+## Deviations / implementation notes
+- The UI list at `/rejected-observables/` is paginated; the JSON API list at `/api/v1/rejected-observables/` remains unpaginated to preserve the project's existing top-level list-route conformance contract.
+- Promotion marks `RejectedObservable.is_promoted = True`; it does not create an `ObservableSuggestion` automatically. This follows the Promotion Action logic above and avoids double-promoting artifacts that were already suppressed.
+- Status filter wire tokens are `pending` and `promoted`; reason filter wire tokens are the `REJECTED_REASON_CHOICES` keys. Empty query params are treated as "no filter".
+- The promotion dialog uses a per-row `<dialog id="promote-modal-<uuid>">` rendered from `ui/_modal.html`; `HX-Trigger-After-Swap: {"closePromoteModal": "<dialog-id>"}` is handled in `ui/static/ui/modal.js`. The button remains a real POST form submit for no-JS fallback.
+- The JSON list endpoint denies `viewer` role with 403 to match the UI page guard.
+- The left-rail Settings submenu in `ui/templates/ui/base.html` is a separate strip from `ui/_settings_nav.html`; it now expands on `ui-rejected-observables` (via the `is_settings_route` template filter) and lists both Agent access and Rejected observables for admin/superAdmin.
+- The rejected-observables page now follows the Agent Access/settings layout conventions: shared heading block, settings tab strip, `card` + `card-header`, `filter-bar`, `table-wrap`, `data-table`, list summary/pager, and shared `pill`/`icon-link` components. Reason-specific pill colours live in `app.src.css`.
 
 ## Open Questions
 1. Should "Promoted" items stay in the Rejected list or be moved to a "History" view? (Decision: Keep in list but filtered by status for now).

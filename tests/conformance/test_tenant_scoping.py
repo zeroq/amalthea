@@ -1249,6 +1249,8 @@ class TestRouteEnumerationConformance:
             "query-api-slash",
             "search-api",
             "search-api-slash",
+            "rejected-observables-list",
+            "rejected-observables-list-slash",
         }
 
         failures = []
@@ -1682,6 +1684,7 @@ class TestUIRouteEnumerationConformance:
             "ui-sources-list",
             "ui-search",
             "ui-password-change",
+            "ui-rejected-observables",
         }
 
         # Routes with known issues that can't be tested generically (allow-listed with justification)
@@ -1897,8 +1900,15 @@ class TestWriteRouteEnumerationConformance:
             config={},
         )
 
-        from observables.models import ObservableSuggestion
+        from observables.models import ObservableSuggestion, RejectedObservable
 
+        self.rejected1 = RejectedObservable.objects.create(
+            owner_org=self.org1,
+            data_type=self.obs1.data_type,
+            normalized_data="10.0.0.3",
+            reason="other",
+            alert=self.alert1,
+        )
         self.suggestion1 = ObservableSuggestion.objects.create(
             owner_org=self.org1,
             data_type=self.obs1.data_type,
@@ -2227,6 +2237,7 @@ class TestWriteRouteEnumerationConformance:
             "observable-detail": {"observable_id": str(self.obs1.id)},
             "task-detail": {"task_id": str(self.task1.id)},
             "procedure-detail": {"procedure_id": str(self.proc1.id)},
+            "rejected-observable-promote": {"id": str(self.rejected1.id)},
         }
         # Add -slash variants with same params
         slash_variants = {}

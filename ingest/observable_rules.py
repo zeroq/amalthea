@@ -183,6 +183,34 @@ def _as_candidate_value(value: Any) -> tuple[str | None, bool]:
     return None, False
 
 
+def _batch_observable_types(rule_types: list[str]) -> dict[str, Any]:
+    """Look up ObservableType rows for a list of rule type names, once.
+
+    Returns a dict mapping type_name -> ObservableType instance (or None if not found).
+    """
+    from observables.models import ObservableType
+
+    result: dict[str, Any] = {}
+    for t in rule_types:
+        result[t] = ObservableType.objects.filter(name=t).first()
+    return result
+
+
+def _normalize_value(type_name: str, raw: str, obs_type: Any | None) -> str:
+    """Normalize a raw extracted value using the type's own normalization rules.
+
+    If obs_type is available (is_case_sensitive attribute), use it; otherwise normalize
+    with case-insensitivity (the default in the extractor module).
+    """
+    if obs_type is not None and hasattr(obs_type, "is_case_sensitive"):
+        from observables.extractor import normalize
+
+        return normalize(type_name, raw, is_case_sensitive=obs_type.is_case_sensitive)
+    from observables.extractor import normalize
+
+    return normalize(type_name, raw, is_case_sensitive=False)
+
+
 def extract_observable_candidates(
     config: Any, payload: Any, alert: Any = None
 ) -> ObservableExtraction:
@@ -195,12 +223,18 @@ def extract_observable_candidates(
     if not rules:
         return ObservableExtraction(truncated=limited)
 
+    # Type rows are only needed for normalization when a real alert is being ingested.
+    # Keeping this DB-free when `alert is None` preserves the pure extraction contract
+    # exercised by unit conformance tests.
+    type_map = _batch_observable_types([r.type_name for r in rules]) if alert is not None else {}
+
     candidates: list[ObservableCandidate] = []
     seen: set[tuple[str, str]] = set()
     skipped = 0
     truncated = limited
 
     for rule in rules:
+        obs_type = type_map.get(rule.type_name)
         for path in rule.paths:
             for value in extract_all_by_jsonpath(path, payload):
                 raw, rejected = _as_candidate_value(value)
@@ -215,13 +249,17 @@ def extract_observable_candidates(
                 if alert is not None:
                     from observables.models import RejectedObservable
 
+                    # Normalize against the type's case-sensitivity rules before comparing
+                    # with stored normalized_data.
+                    normalized = _normalize_value(rule.type_name, raw, obs_type)
                     if RejectedObservable.objects.filter(
                         owner_org=alert.owner_org,
                         data_type__name=rule.type_name,
-                        normalized_data=raw,
+                        normalized_data=normalized,
                     ).exists():
                         skipped += 1
-                        truncated = True
+                        # Do NOT set truncated=True merely because a value was suppressed/rejected;
+                        # that corrupts truncation semantics. Only skipped is updated.
                         continue
 
                 key = (rule.type_name, raw)

@@ -56,6 +56,18 @@
     }
   });
 
+  // HTMX responses for single-row promotions name the dialog to close. Falling back to the
+  // first open modal keeps the event useful for any future caller that omits the id.
+  document.addEventListener("closePromoteModal", function (event) {
+    var modalId = typeof event.detail === "string" ? event.detail : null;
+    var modal = modalId
+      ? document.getElementById(modalId)
+      : document.querySelector("dialog.modal[open]");
+    if (modal && typeof modal.close === "function" && modal.open) {
+      modal.close();
+    }
+  });
+
   document.addEventListener("click", function (event) {
     var opener = event.target.closest("[data-modal-open]");
     if (opener) {

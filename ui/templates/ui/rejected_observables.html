@@ -1,107 +1,87 @@
-{% extends "base.html" %}
+{% extends "ui/base.html" %}
+{% load ui_tags %}
+
+{% block title %}Rejected observables · Amalthea{% endblock %}
+{% block heading %}Rejected observables{% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-    <header class="mb-8 flex items-center justify-between">
-        <div>
-            <h1 class="text-2xl font-bold text-white">Rejected Observables</h1>
-            <p class="text-gray-400">Manage and audit values that were excluded during extraction.</p>
-        </div>
-        <div class="flex gap-2">
-            <button 
-                hx-get="/observables/rejected-observables/" 
-                hx-target="#rejected-table-body"
-                class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-md border border-gray-700 transition">
-                Refresh
-            </button>
-        </div>
-    </header>
+{% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
 
-    <!-- Filters -->
-    <div class="mb-6 flex flex-wrap items-center gap-4 bg-gray-900 p-4 rounded-lg border border-gray-800">
-        <div class="flex flex-col">
-            <label class="text-xs font-medium text-gray-400 mb-1">Status</label>
-            <select name="status" 
-                    hx-get="/observables/rejected-observables/" 
-                    hx-target="#rejected-table-body"
-                    class="bg-gray-800 border border-gray-700 text-white rounded px-3 py-1 focus:ring-1 focus:ring-blue-500">
-                <option value="">All Statuses</option>
-                <option value="Rejected">Rejected</option>
-                <option value="Pending Review">Pending Review</option>
-            </select>
-        </div>
-        <div class="flex flex-col">
-            <label class="text-xs font-medium text-gray-400 mb-1">Reason</label>
-            <select name="reason" 
-                    hx-get="/observables/rejected-observables/" 
-                    hx-target="#rejected-table-body"
-                    class="bg-gray-800 border border-gray-700 text-white rounded px-3 py-1 focus:ring-1 focus:ring-blue-500">
-                <option value="">All Reasons</option>
-                <option value="False Positive">False Positive</option>
-                <option value="Irrelevant">Irrelevant</option>
-                <option value="Duplicate">Duplicate</option>
-            </select>
-        </div>
-    </div>
+<div class="card">
+  <form method="get" class="filter-bar" aria-label="Rejected observable filters">
+    <div class="control-row">
+      <label class="sr-only" for="f-rejected-status">Status</label>
+      <select id="f-rejected-status" name="status" class="filter-type"
+              hx-get="{% url 'ui-rejected-observables' %}"
+              hx-target="#rejected-table-body"
+              hx-swap="innerHTML"
+              hx-include="closest form">
+        <option value="">All statuses</option>
+        <option value="pending" {% if status_filter == "pending" %}selected{% endif %}>Pending</option>
+        <option value="promoted" {% if status_filter == "promoted" %}selected{% endif %}>Promoted</option>
+      </select>
 
-    <!-- Table -->
-    <div class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
-        <table class="min-w-full divide-y divide-gray-800">
-            <thead class="bg-gray-800/50">
-                <tr>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Value</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Type</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Source Alert</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Reason</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Created</th>
-                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
-                </tr>
-            </thead>
-            <tbody id="rejected-table-body" class="divide-y divide-gray-800">
-                {% for item in rejected_observables %}
-                <tr class="hover:bg-gray-800/30 transition">
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                        <span class="font-mono">{{ item.normalized_data|escape }}</span>
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap">
-                        <span class="px-2 py-1 text-xs rounded bg-blue-900/30 text-blue-400 border border-blue-800/50">
-                            {{ item.type }}
-                        </span>
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                        {% if item.alert %}
-                        <a href="/alerts/{{ item.alert.id|default:'' }}" class="text-blue-400 hover:underline">
-                            {{ item.alert.title|truncatechars:30 }}
-                        </a>
-                        {% else %}
-                        <span class="text-gray-600">No Alert</span>
-                        {% endif %}
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 italic">
-                        {{ item.reason|default:"N/A" }}
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {{ item.created_at|datetime:"short" }}
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <button class="text-blue-400 hover:text-blue-300 flex items-center justify-end gap-1">
-                            Promote
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M15 14S14 14 13 14l-3-4h1.2l.3-.8l1.2 3.2l3.9-3.9l.8.8l-3.9 3.9zM10 11.5l-1.5.5.5-1.5.5 1.5-1.5.5z"/>
-                                <path d="M14.5 7a.5.5 0 0 1-.38-.44L13.95 6.45V5.5l-.5.5-.5-.5h-.3l-.2-.2L12.5 4.5v.3h-.2l-.3.3-.3-.3h-.3l-.2-.2L10.3 2.6l-.5.5-2.6.5-.5-.5-.5.5z"/>
-                            </svg>
-                        </button>
-                    </td>
-                </tr>
-                {% empty %}
-                <tr>
-                    <td colspan="6" class="px-6 py-10 text-center text-gray-500">
-                        No rejected observables found.
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+      <label class="sr-only" for="f-rejected-reason">Reason</label>
+      <select id="f-rejected-reason" name="reason" class="filter-type"
+              hx-get="{% url 'ui-rejected-observables' %}"
+              hx-target="#rejected-table-body"
+              hx-swap="innerHTML"
+              hx-include="closest form">
+        <option value="">All reasons</option>
+        <option value="duplicate" {% if reason_filter == "duplicate" %}selected{% endif %}>Duplicate</option>
+        <option value="irrelevant" {% if reason_filter == "irrelevant" %}selected{% endif %}>Irrelevant</option>
+        <option value="false_positive" {% if reason_filter == "false_positive" %}selected{% endif %}>False positive</option>
+        <option value="incomplete" {% if reason_filter == "incomplete" %}selected{% endif %}>Incomplete</option>
+        <option value="too_noisy" {% if reason_filter == "too_noisy" %}selected{% endif %}>Too noisy</option>
+        <option value="other" {% if reason_filter == "other" %}selected{% endif %}>Other</option>
+      </select>
+
+      <button class="btn btn-primary" type="submit">Filter</button>
+      <a class="btn" href="{% url 'ui-rejected-observables' %}">Clear</a>
     </div>
+  </form>
 </div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>Rejected values</h2>
+    <button type="button" class="btn"
+            hx-get="{% querystring %}"
+            hx-target="#rejected-table-body"
+            hx-swap="innerHTML">
+      <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+      Refresh
+    </button>
+  </div>
+
+  {% if page_obj.paginator %}
+    {% include "ui/_list_summary.html" with entity_name="rejected observable" entity_name_plural="rejected observables" %}
+    <div class="table-wrap">
+      <table class="data-table">
+        <caption class="sr-only">Rejected observables</caption>
+        <thead>
+          <tr>
+            <th scope="col">Value</th>
+            <th scope="col">Type</th>
+            <th scope="col">Source alert</th>
+            <th scope="col">Reason</th>
+            <th scope="col">Created</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="rejected-table-body">
+          {% include "ui/_rejected_observables_rows.html" %}
+        </tbody>
+      </table>
+    </div>
+    {% if page_obj.paginator.count > 0 %}
+      {% include "ui/_pager.html" with entity_name="Rejected observable" %}
+    {% endif %}
+  {% endif %}
+</div>
+
+{% for item in rejected_observables %}
+{% url 'ui-rejected-observable-promote' item.id as promote_url %}
+{% include "ui/_modal.html" with modal_id="promote-modal-"|concat:item.id title="Promote rejected observable?" body_template="ui/_rejected_promote_modal_body.html" confirm_text="Confirm Promotion" confirm_class="btn-primary" form_action=promote_url form_hx_post=promote_url form_hx_target="#rejected-table-body" size="md" item=item %}
+{% endfor %}
 {% endblock %}

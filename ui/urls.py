@@ -312,6 +312,13 @@ urlpatterns = [
     ),
     # Settings (superAdmin only)
     path("settings", views.settings_home, name="ui-settings"),
+    # Rejected observables (admin + superAdmin)
+    path("rejected-observables", views.rejected_observables, name="ui-rejected-observables"),
+    path(
+        "rejected-observables/<uuid:id>/promote",
+        views.rejected_observable_promote,
+        name="ui-rejected-observable-promote",
+    ),
     path(
         "settings/agent-access",
         views.settings_agents,

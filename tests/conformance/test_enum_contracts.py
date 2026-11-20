@@ -37,7 +37,7 @@ from automation.models import AutomationRun, Playbook
 from cases.models import Case, CaseStatus, CaseTemplate, CustomField, Task
 from identity.models import User
 from ingest.models import IngestionSource
-from observables.models import Observable, ObservableSuggestion, ObservableType
+from observables.models import Observable, ObservableSuggestion, ObservableType, RejectedObservable
 
 #: The domain of every graded enum, as PLAN §6.1 defines it. `TLP` carries an extra
 #: `Unknown` step (0..4); `PAP` is a plain 0..3 four-step scale; severity is 1..4.
@@ -72,6 +72,7 @@ CHOICE_FIELDS: dict[tuple[str, str], str] = {
     ("observable", "tlp"): "observable_tlp_range",
     ("observable_suggestion", "status"): "observable_suggestion_status_valid",
     ("observable", "pap"): "observable_pap_range",
+    ("rejected_observables", "reason"): "rejected_observable_reason_valid",
     ("task", "status"): "task_status_valid",
 }
 
@@ -301,6 +302,14 @@ _SAMPLE_ROW_BUILDERS: dict[str, Callable[[User, Any], Any]] = {
         raw_data="enum-probe",
         owner_org=default_org,
     ),
+    "rejected_observables": lambda analyst, default_org: RejectedObservable.objects.create(
+        data_type=ObservableType.objects.get_or_create(
+            name="rejected-enum", defaults={"is_case_sensitive": False}
+        )[0],
+        normalized_data="enum-probe",
+        owner_org=default_org,
+        reason="other",
+    ),
     "task": lambda analyst, default_org: Task.objects.create(
         case=_SAMPLE_ROW_BUILDERS["case_record"](analyst, default_org), title="t"
     ),
@@ -344,6 +353,11 @@ GRADED_DOMAIN: dict[str, tuple[str, str, tuple[Any, ...]]] = {
         "observable_suggestion",
         "status",
         ("bogus", ""),
+    ),
+    "rejected_observable_reason_valid": (
+        "rejected_observables",
+        "reason",
+        ("bogus",),
     ),
     "task_status_valid": ("task", "status", ("AlmostDone", "")),
     "automation_run_status_valid": ("automation_run", "status", ("AlmostDone", "")),
