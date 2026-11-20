@@ -136,6 +136,7 @@ def test_every_get_routable_ui_page_renders(browser: Client, case: Case) -> None
         "ui-playbook-scripts",
         "ui-settings",
         "ui-settings-agent-access",
+        "ui-settings-oauth-binding-list",
         "ui-settings-sources",
         "ui-settings-users",
         "ui-alert-import",

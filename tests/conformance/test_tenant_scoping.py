@@ -1702,6 +1702,7 @@ class TestUIRouteEnumerationConformance:
         # `test_settings_source_mapping.py`.
         admin_only_routes = {
             "ui-settings-agent-access",
+            "ui-settings-oauth-binding-list",
             "ui-settings-source-detail",
             "ui-playbook-scripts",
         }
