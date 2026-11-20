@@ -1,0 +1,13 @@
+{% comment %}
+  Body of the proposal decline dialog. The note is associated with the footer form via the
+  HTML `form` attribute so it submits on both the plain POST and JS-enabled paths.
+{% endcomment %}
+<input type="hidden" name="action" value="decline" form="{{ form_id }}">
+
+<p class="modal-body-text">The requester will be notified. This decision cannot be undone.</p>
+
+<div class="form-row">
+  <label for="{{ form_id }}-note">Decline note (optional)</label>
+  <input id="{{ form_id }}-note" type="text" name="note" maxlength="200"
+         placeholder="Optional decline note" form="{{ form_id }}">
+</div>

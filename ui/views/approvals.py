@@ -14,6 +14,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from identity.scoping import is_viewer
@@ -128,6 +129,8 @@ def approvals_detail(request: HttpRequest, proposal_id: str) -> HttpResponse:
             "can_decide": can_decide,
             "can_execute": can_execute,
             "is_expired": proposal.is_expired,
+            "decline_url": reverse("ui-approvals-decide", kwargs={"proposal_id": proposal.id}),
+            "execute_url": reverse("ui-approvals-execute", kwargs={"proposal_id": proposal.id}),
         },
     )
 

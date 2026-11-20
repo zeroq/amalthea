@@ -114,6 +114,18 @@ class TestApprovalsList:
         resp = client.get(reverse("ui-approvals-list"))
         assert resp.status_code == 404
 
+    def test_list_uses_app_shell_and_card_layout(self, db: None) -> None:
+        """The Approvals list must not render as an unstyled fragment."""
+        org = _mk_org("TestOrg")
+        analyst = _mk_user("analyst", org, role="analyst")
+
+        content = _ui_client(analyst).get(reverse("ui-approvals-list")).content.decode()
+
+        assert '<html lang="en" data-theme="dark">' in content
+        assert 'class="card"' in content
+        assert "Pending MCP proposals" in content
+        assert "Approvals" in content
+
     def test_proposals_list_shows_pending_only(self, db: None) -> None:
         """/approvals list shows only pending proposals."""
         org = _mk_org("TestOrg")
@@ -188,6 +200,23 @@ class TestApprovalsDetail:
         )
         list_html = _ui_client(analyst_b).get(reverse("ui-approvals-list")).content.decode()
         assert str(proposal.id) not in list_html
+
+    def test_detail_uses_app_shell_and_card_layout(self, db: None) -> None:
+        """The proposal detail page must not render as an unstyled fragment."""
+        org = _mk_org("TestOrg")
+        analyst = _mk_user("analyst", org, role="analyst")
+        proposal = _create_proposal(org, analyst)
+
+        content = (
+            _ui_client(analyst)
+            .get(reverse("ui-approvals-detail", kwargs={"proposal_id": str(proposal.id)}))
+            .content.decode()
+        )
+
+        assert '<html lang="en" data-theme="dark">' in content
+        assert 'class="card"' in content
+        assert "Proposal overview" in content
+        assert "Decision rules" in content
 
     def test_detail_shows_risk_and_status(self, db: None) -> None:
         """Detail page shows risk pill and status pill (P2.6 AC)."""

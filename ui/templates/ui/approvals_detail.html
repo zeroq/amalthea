@@ -1,149 +1,121 @@
+{% extends "ui/base.html" %}
 {% load ui_tags %}
+
 {% comment %}
   Approval detail page — shows exact arguments, risk, requester, target, expiry, status.
-  Uses existing modal patterns; no native dialogs; keyboard accessible.
-  Role checks are passed from the view as can_decide/can_execute.
+  Role checks are passed from the view as can_decide/can_execute; enforcement is server-side.
+  Confirmation dialogs use the shared modal component (native <dialog>, no browser dialogs).
 {% endcomment %}
 
-<h1>Proposal {{ proposal.id|default:"—" }}</h1>
+{% block title %}Proposal {{ proposal.id }} · Amalthea{% endblock %}
+{% block heading %}Proposal {{ proposal.id|truncatechars:8 }}{% endblock %}
 
-<p class="dim">
-  <strong>Risk:</strong> <span class="pill pill-{{ proposal.risk|lower }}">{{ proposal.risk|default:"—" }}</span>
-  &nbsp;|&nbsp;
-  <strong>Status:</strong> <span class="pill pill-{{ proposal.status|lower }}">{{ proposal.status|default:"—" }}</span>
-  &nbsp;|&nbsp;
-  <strong>Expires:</strong> <span class="mono">{{ proposal.expires_at|date:"Y-m-d H:i"|default:"—" }}</span>
-</p>
-
-<h2>Details</h2>
-<table class="data-table">
-  <tr>
-    <th>Target</th>
-    <td>
-      <strong>{{ proposal.target_type|default:"—" }}:</strong> {{ proposal.target_id|default:"—" }}
-    </td>
-  </tr>
-  <tr>
-    <th>Tool</th>
-    <td>{{ proposal.tool_name|default:"—" }}</td>
-  </tr>
-  <tr>
-    <th>Action</th>
-    <td>{{ proposal.action|default:"—" }}</td>
-  </tr>
-  <tr>
-    <th>Requester</th>
-    <td class="mono">{{ proposal.requested_by.login|default:"—" }}</td>
-  </tr>
-  <tr>
-    <th>Decision maker</th>
-    <td>
-      {% if proposal.decided_by %}
-        {{ proposal.decided_by.login }}
-      {% else %}
-        — (not yet decided)
-      {% endif %}
-    </td>
-  </tr>
-  <tr>
-    <th>Decision date</th>
-    <td>
-      {% if proposal.decided_at %}
-        {{ proposal.decided_at|date:"Y-m-d H:i" }}
-      {% else %}
-        — (not yet decided)
-      {% endif %}
-    </td>
-  </tr>
-  <tr>
-    <th>Executed date</th>
-    <td>
-      {% if proposal.executed_at %}
-        {{ proposal.executed_at|date:"Y-m-d H:i" }}
-      {% else %}
-        — (not yet executed)
-      {% endif %}
-    </td>
-  </tr>
-</table>
-
-<h2>Arguments</h2>
-{% if proposal.arguments %}
-  <pre class="arguments-json mono">{{ proposal.arguments }}</pre>
-  <p class="small dim">(Sanitised; no raw payloads or secrets)</p>
-{% else %}
-  <p class="dim">— (no arguments)</p>
-{% endif %}
-
-<h2>Decision rules</h2>
-{% if proposal.status == "pending" %}
-  <p>This proposal is pending decision.</p>
-  {% if can_decide %}
-    <!-- Approve form -->
-    <form method="post" action="{% url 'ui-approvals-decide' proposal.id %}" class="inline-form">{% csrf_token %}
-      <input type="hidden" name="action" value="approve">
-      <button type="submit" class="btn btn-primary" title="Approve">Approve</button>
-    </form>
-
-    <!-- Decline confirmation modal (server-rendered form; works without JS) -->
-    <button type="button" class="btn btn-err" data-modal-open="proposal-decline-{{ proposal.id }}" title="Decline">Decline…</button>
-    <dialog id="proposal-decline-{{ proposal.id }}" class="modal modal--md" role="dialog" aria-modal="true" aria-labelledby="proposal-decline-title-{{ proposal.id }}">
-      <div class="modal-content">
-        <header class="modal-header">
-          <h2 id="proposal-decline-title-{{ proposal.id }}" class="modal-title">Decline this proposal?</h2>
-          <button type="button" class="modal-close" aria-label="Close" data-modal-close="proposal-decline-{{ proposal.id }}">&times;</button>
-        </header>
-        <form method="post" action="{% url 'ui-approvals-decide' proposal.id %}">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="decline">
-          <div class="modal-body">
-            <p class="modal-body-text">The requester will be notified. This decision cannot be undone.</p>
-            <label class="sr-only" for="decline-note-{{ proposal.id }}">Decline note (optional)</label>
-            <input id="decline-note-{{ proposal.id }}" type="text" name="note" maxlength="200" placeholder="Optional decline note">
-          </div>
-          <footer class="modal-footer">
-            <button type="button" class="btn modal-cancel" data-modal-close="proposal-decline-{{ proposal.id }}">Cancel</button>
-            <button type="submit" class="btn btn-err">Decline</button>
-          </footer>
-        </form>
-      </div>
-    </dialog>
-  {% else %}
-    <p class="dim">You do not have permission to decide this proposal.</p>
-  {% endif %}
-  {% if is_expired %}
-    <p class="dim">This proposal has expired.</p>
-  {% endif %}
-{% elif proposal.status == "approved" %}
-  <p>This proposal has been approved.</p>
-  {% if can_execute %}
-    <!-- Execute confirmation modal (server-rendered form; works without JS) -->
-    <button type="button" class="btn btn-primary" data-modal-open="proposal-execute-{{ proposal.id }}" title="Execute">Execute…</button>
-    <dialog id="proposal-execute-{{ proposal.id }}" class="modal modal--md" role="dialog" aria-modal="true" aria-labelledby="proposal-execute-title-{{ proposal.id }}">
-      <div class="modal-content">
-        <header class="modal-header">
-          <h2 id="proposal-execute-title-{{ proposal.id }}" class="modal-title">Execute this proposal?</h2>
-          <button type="button" class="modal-close" aria-label="Close" data-modal-close="proposal-execute-{{ proposal.id }}">&times;</button>
-        </header>
-        <form method="post" action="{% url 'ui-approvals-execute' proposal.id %}">
-          {% csrf_token %}
-          <div class="modal-body">
-            <p class="modal-body-text">The approved action will run now. This cannot be undone.</p>
-          </div>
-          <footer class="modal-footer">
-            <button type="button" class="btn modal-cancel" data-modal-close="proposal-execute-{{ proposal.id }}">Cancel</button>
-            <button type="submit" class="btn btn-primary">Execute</button>
-          </footer>
-        </form>
-      </div>
-    </dialog>
-  {% else %}
-    <p class="dim">You do not have permission to execute this proposal.</p>
-  {% endif %}
-{% else %}
-  <p>This proposal is {{ proposal.status|capfirst }} and is no longer actionable.</p>
-{% endif %}
-
-<p class="small dim">
+{% block content %}
+<p class="hint">
   <a href="{% url 'ui-approvals-list' %}">← Back to approvals inbox</a>
 </p>
+
+<div class="card">
+  <div class="card-header">
+    <h2>Proposal overview</h2>
+  </div>
+
+  <dl class="meta-inline">
+    <dt>Risk</dt>
+    <dd><span class="pill pill-{{ proposal.risk|lower }}">{{ proposal.risk|default:"—" }}</span></dd>
+    <dt>Status</dt>
+    <dd><span class="pill pill-{{ proposal.status|lower }}">{{ proposal.status|default:"—" }}</span></dd>
+    <dt>Expires</dt>
+    <dd class="mono">{{ proposal.expires_at|date:"Y-m-d H:i"|default:"—" }}</dd>
+  </dl>
+
+  <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Proposal details</caption>
+      <thead>
+        <tr>
+          <th scope="col">Field</th>
+          <th scope="col">Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Target</th>
+          <td><strong>{{ proposal.target_type|default:"—" }}:</strong> {{ proposal.target_id|default:"—" }}</td>
+        </tr>
+        <tr>
+          <th scope="row">Tool</th>
+          <td class="mono">{{ proposal.tool_name|default:"—" }}</td>
+        </tr>
+        <tr>
+          <th scope="row">Action</th>
+          <td class="mono">{{ proposal.action|default:"—" }}</td>
+        </tr>
+        <tr>
+          <th scope="row">Requester</th>
+          <td class="mono">{{ proposal.requested_by.login|default:"—" }}</td>
+        </tr>
+        <tr>
+          <th scope="row">Decision maker</th>
+          <td>{{ proposal.decided_by.login|default:"— (not yet decided)" }}</td>
+        </tr>
+        <tr>
+          <th scope="row">Decision date</th>
+          <td>{{ proposal.decided_at|date:"Y-m-d H:i"|default:"— (not yet decided)" }}</td>
+        </tr>
+        <tr>
+          <th scope="row">Executed date</th>
+          <td>{{ proposal.executed_at|date:"Y-m-d H:i"|default:"— (not yet executed)" }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>Arguments</h2>
+  </div>
+  {% if proposal.arguments %}
+    <pre class="arguments-json mono">{{ proposal.arguments }}</pre>
+    <p class="small dim">Sanitised; no raw payloads or secrets.</p>
+  {% else %}
+    <p class="dim">— (no arguments)</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>Decision rules</h2>
+  </div>
+
+  {% if proposal.status == "pending" %}
+    <p class="hint">This proposal is pending decision.</p>
+    {% if can_decide %}
+      <form method="post" action="{% url 'ui-approvals-decide' proposal.id %}" class="inline-form">{% csrf_token %}
+        <input type="hidden" name="action" value="approve">
+        <button type="submit" class="btn btn-primary">Approve</button>
+      </form>
+      <button type="button" class="btn btn-err"
+              data-modal-open="proposal-decline-{{ proposal.id }}">Decline…</button>
+      {% include "ui/_modal.html" with modal_id="proposal-decline-"|concat:proposal.id form_id="proposal-decline-form-"|concat:proposal.id body_template="ui/_proposal_decline_modal_body.html" title="Decline this proposal?" confirm_text="Decline" confirm_class="btn-err" form_action=decline_url size="md" %}
+    {% else %}
+      <p class="empty">You do not have permission to decide this proposal.</p>
+    {% endif %}
+    {% if is_expired %}
+      <p class="empty">This proposal has expired.</p>
+    {% endif %}
+  {% elif proposal.status == "approved" %}
+    <p class="hint">This proposal has been approved and is ready to execute.</p>
+    {% if can_execute %}
+      <button type="button" class="btn btn-primary"
+              data-modal-open="proposal-execute-{{ proposal.id }}">Execute…</button>
+      {% include "ui/_modal.html" with modal_id="proposal-execute-"|concat:proposal.id title="Execute this proposal?" body="The approved action will run now. This cannot be undone." confirm_text="Execute" form_action=execute_url size="md" %}
+    {% else %}
+      <p class="empty">You do not have permission to execute this proposal.</p>
+    {% endif %}
+  {% else %}
+    <p class="empty">This proposal is {{ proposal.status|capfirst }} and is no longer actionable.</p>
+  {% endif %}
+</div>
+{% endblock %}
