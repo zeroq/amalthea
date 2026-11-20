@@ -24,7 +24,7 @@ from django.test import Client
 
 from cases.models import Case, CaseStatus
 from identity.models import Organisation, User
-from observables.models import ObservableSuggestion, ObservableType
+from observables.models import ObservableSuggestion, ObservableType, RejectedObservable
 
 
 @pytest.fixture
@@ -92,6 +92,49 @@ def test_ui_single_action_sets_status(client, case, action, expected):
     assert suggestion.reviewed_at is not None
 
 
+def test_ui_single_reject_records_rejected_observable(client, case):
+    suggestion = _suggestion(case, "rejected-ledger@example.com")
+
+    response = client.post(
+        f"/suggestions/{suggestion.id}/reject",
+        {"reason": "too_noisy", "tab": "observables"},
+    )
+
+    assert response.status_code == 302
+    rejected = RejectedObservable.objects.get(
+        owner_org=case.owner_org,
+        data_type=suggestion.data_type,
+        normalized_data="rejected-ledger@example.com",
+        alert__isnull=True,
+    )
+    assert rejected.reason == "too_noisy"
+    assert rejected.is_promoted is False
+
+
+def test_ui_single_reject_rejects_unknown_reason(client, case):
+    suggestion = _suggestion(case, "bad-ui-reason@example.com")
+
+    response = client.post(
+        f"/suggestions/{suggestion.id}/reject",
+        {"reason": "not-a-reason"},
+    )
+
+    assert response.status_code == 302
+    suggestion.refresh_from_db()
+    assert suggestion.status == "proposed"
+    assert not RejectedObservable.objects.filter(owner_org=case.owner_org).exists()
+
+
+def test_rejected_suggestion_appears_on_rejected_observables_page(client, case):
+    suggestion = _suggestion(case, "visible-in-ledger@example.com")
+
+    client.post(f"/suggestions/{suggestion.id}/reject", {"reason": "irrelevant"})
+    content = client.get("/rejected-observables").content.decode()
+
+    assert "visible-in-ledger@example.com" in content
+    assert "Irrelevant" in content
+
+
 def test_ui_accept_links_observable_to_case(client, case):
     suggestion = _suggestion(case, "linked@example.com")
 
@@ -154,6 +197,33 @@ def test_ui_bulk_action_sets_status(client, case, action, expected):
     second.refresh_from_db()
     assert first.status == expected
     assert second.status == expected
+
+
+def test_ui_bulk_reject_records_reasons_and_visible_badges(client, case):
+    first = _suggestion(case, "bulk-rejected-1@example.com")
+    second = _suggestion(case, "bulk-rejected-2@example.com")
+
+    response = client.post(
+        f"/cases/{case.number}/suggestions/bulk-reject",
+        {
+            "suggestion_ids": [str(first.id), str(second.id)],
+            "reason": "duplicate",
+        },
+    )
+
+    assert response.status_code == 302
+    assert (
+        RejectedObservable.objects.filter(
+            owner_org=case.owner_org,
+            reason="duplicate",
+            alert__isnull=True,
+        ).count()
+        == 2
+    )
+    content = client.get("/rejected-observables").content.decode()
+    assert "bulk-rejected-1@example.com" in content
+    assert "bulk-rejected-2@example.com" in content
+    assert content.count('data-reason="duplicate"') == 2
 
 
 def test_ui_bulk_accept_dispatches_once_per_new_observable(client, case):
@@ -224,6 +294,10 @@ def test_enrichment_modal_body_template_loads_its_filters():
 
 def test_suggestions_bulk_modal_body_template_compiles():
     get_template("ui/_suggestions_bulk_action_modal_body.html")
+
+
+def test_suggestion_reject_modal_body_template_compiles():
+    get_template("ui/_suggestion_reject_modal_body.html")
 
 
 # --- re-extraction -----------------------------------------------------------------

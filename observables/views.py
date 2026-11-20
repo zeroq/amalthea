@@ -38,7 +38,12 @@ from core.taxonomy import (
 from identity.audit import record_taxonomy_change
 from identity.scoping import is_viewer
 from observables.models import ObservableSuggestion, ObservableType, RejectedObservable
-from observables.rejected import promote_rejected_observable, scoped_rejected_observables
+from observables.rejected import (
+    normalize_rejection_reason,
+    promote_rejected_observable,
+    reject_suggestion,
+    scoped_rejected_observables,
+)
 from observables.suggestions import (
     AcceptSuggestionError,
     accept_suggestion,
@@ -349,7 +354,7 @@ def suggestion_accept(request: Request, suggestion_id: str) -> Response:
 @api_view(["POST"])
 @renderer_classes([JSONRenderer])
 def suggestion_reject(request: Request, suggestion_id: str) -> Response:
-    """`POST /api/v1/suggestions/{suggestionId}/reject` — reject a suggestion (mark reviewed, no link)."""
+    """Reject a suggestion, stamp review metadata, and record it in the suppression ledger."""
     suggestion = _resolve_suggestion_scoped(request, suggestion_id)
     if suggestion is None:
         return _not_found("ObservableSuggestion")
@@ -358,9 +363,6 @@ def suggestion_reject(request: Request, suggestion_id: str) -> Response:
             {"type": "AuthorizationError", "message": "Write access required"},
             status=status.HTTP_403_FORBIDDEN,
         )
-    if suggestion.status == "rejected":
-        # Idempotent: already rejected
-        return Response(observable_suggestion_json(suggestion))
     if suggestion.status == "accepted":
         # Cannot reject an accepted suggestion
         return Response(
@@ -373,11 +375,13 @@ def suggestion_reject(request: Request, suggestion_id: str) -> Response:
             {"type": "BadRequest", "message": "Cannot reject an ignored suggestion"},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    payload = request.data if isinstance(request.data, dict) else {}
+    try:
+        reason = normalize_rejection_reason(payload.get("reason"))
+    except ValueError as exc:
+        return _bad("Invalid rejection reason", {"reason": [str(exc)]})
     with transaction.atomic():
-        suggestion.status = "rejected"
-        suggestion.reviewed_by = _actor(request)
-        suggestion.reviewed_at = timezone.now()
-        suggestion.save(update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"])
+        reject_suggestion(suggestion, actor=_actor(request), reason=reason)
     return Response(observable_suggestion_json(suggestion))
 
 
@@ -483,6 +487,12 @@ def _bulk_action(request: Request, target_status: str, opposite_statuses: set[st
     ids = payload.get("ids")
     if not isinstance(ids, list) or not ids:
         return _bad("ids is required (non-empty array)", {"ids": ["required"]})
+    reason: str | None = None
+    if target_status == "rejected":
+        try:
+            reason = normalize_rejection_reason(payload.get("reason"))
+        except ValueError as exc:
+            return _bad("Invalid rejection reason", {"reason": [str(exc)]})
     # Resolve all suggestions the caller can access
     suggestions = ObservableSuggestion.objects.select_related(
         "case", "source_alert", "data_type", "owner_org", "observable__data_type"
@@ -499,7 +509,7 @@ def _bulk_action(request: Request, target_status: str, opposite_statuses: set[st
     results = []
     with transaction.atomic():
         for suggestion, error in bulk_review_suggestions(
-            to_process, target_status=target_status, actor=_actor(request)
+            to_process, target_status=target_status, actor=_actor(request), reason=reason
         ):
             if error is not None:
                 results.append({"id": str(suggestion.id), "error": error})

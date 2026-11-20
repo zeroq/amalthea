@@ -41,7 +41,7 @@ from identity.scoping import (
     resolve_case,
 )
 from mcp_server.models import McpActionProposal
-from observables.models import ObservableType
+from observables.models import ObservableType, RejectedObservable
 from ui.case_custom_fields import case_custom_field_rows
 from ui.pagination import PICKER_PAGE_SIZE
 
@@ -446,6 +446,7 @@ def case_detail(request: HttpRequest, case_id: str) -> HttpResponse:
             task_assignees=task_assignees,
             task_status_options=task_status_options,
             # Suggestions (P6)
+            rejection_reason_choices=RejectedObservable.REJECTED_REASON_CHOICES,
             suggestions_total=suggestions_total,
             suggestions_proposed=suggestions_proposed,
             suggestions_accepted=suggestions_accepted,

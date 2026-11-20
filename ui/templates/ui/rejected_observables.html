@@ -45,13 +45,6 @@
 <div class="card">
   <div class="card-header">
     <h2>Rejected values</h2>
-    <button type="button" class="btn"
-            hx-get="{% querystring %}"
-            hx-target="#rejected-table-body"
-            hx-swap="innerHTML">
-      <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
-      Refresh
-    </button>
   </div>
 
   {% if page_obj.paginator %}

@@ -17,6 +17,7 @@ from identity.scoping import (
     resolve_case,
 )
 from observables.models import ObservableSuggestion
+from observables.rejected import normalize_rejection_reason, reject_suggestion
 
 from .common import (
     _case_detail_redirect,
@@ -80,20 +81,19 @@ def suggestion_reject(request: HttpRequest, suggestion_id: uuid.UUID) -> HttpRes
     if case is None:
         raise Http404()
 
-    if suggestion.status == "rejected":
-        messages.success(request, "Suggestion rejected.")
-        return _case_detail_redirect(request, case.number)
-
     if suggestion.status == "accepted":
         messages.error(request, "Cannot reject an accepted suggestion")
         return _case_detail_redirect(request, case.number)
 
-    suggestion.status = "rejected"
-    suggestion.reviewed_by = request.user
-    suggestion.reviewed_at = timezone.now()
-    suggestion.save(update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"])
+    try:
+        reason = normalize_rejection_reason(request.POST.get("reason"))
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return _case_detail_redirect(request, case.number)
 
-    messages.success(request, "Suggestion rejected.")
+    reject_suggestion(suggestion, actor=request.user, reason=reason)
+
+    messages.success(request, "Suggestion rejected and recorded in rejected observables.")
     return _case_detail_redirect(request, case.number)
 
 
@@ -159,13 +159,21 @@ def _bulk_suggestion_action(
         messages.error(request, "No suggestions selected.")
         return _case_detail_redirect(request, case.number)
 
+    reason: str | None = None
+    if target_status == "rejected":
+        try:
+            reason = normalize_rejection_reason(request.POST.get("reason"))
+        except ValueError as exc:
+            messages.error(request, str(exc))
+            return _case_detail_redirect(request, case.number)
+
     suggestions = ObservableSuggestion.objects.select_related(
         "case", "source_alert", "data_type", "owner_org"
     ).filter(id__in=suggestion_ids, case=case)
 
     with transaction.atomic():
         results = bulk_review_suggestions(
-            suggestions, target_status=target_status, actor=request.user
+            suggestions, target_status=target_status, actor=request.user, reason=reason
         )
 
     errors = [error for _suggestion, error in results if error is not None]

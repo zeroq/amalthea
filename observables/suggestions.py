@@ -21,6 +21,7 @@ from django.utils import timezone
 from observables.extractor import find_observables, json_paths_and_values, resolve_observable
 from observables.filtering import should_keep_finding
 from observables.models import Observable, ObservableSuggestion, ObservableType
+from observables.rejected import reject_suggestion
 
 if TYPE_CHECKING:
     from alerts.models import Alert
@@ -214,6 +215,7 @@ def bulk_review_suggestions(
     *,
     target_status: str,
     actor: User | None = None,
+    reason: str | None = None,
 ) -> list[tuple[ObservableSuggestion, str | None]]:
     """Apply a review status to many suggestions, collecting per-item errors.
 
@@ -225,6 +227,7 @@ def bulk_review_suggestions(
         suggestions: The already-scoped suggestions to act on.
         target_status: One of `accepted`, `rejected`, `ignored`.
         actor: The reviewing user, stamped on each suggestion.
+        reason: Rejection reason token; used only when `target_status` is `rejected`.
 
     Returns:
         One `(suggestion, error)` pair per suggestion; `error` is `None` on success. Suggestions
@@ -233,7 +236,13 @@ def bulk_review_suggestions(
     results: list[tuple[ObservableSuggestion, str | None]] = []
     for suggestion in suggestions:
         if suggestion.status == target_status:
-            # Idempotent: already in the target status.
+            if target_status == "rejected":
+                # Backfill legacy rows that were rejected before the suppression ledger existed.
+                try:
+                    reject_suggestion(suggestion, actor=actor, reason=reason)
+                except ValueError as exc:
+                    results.append((suggestion, str(exc)))
+                    continue
             results.append((suggestion, None))
             continue
 
@@ -244,6 +253,12 @@ def bulk_review_suggestions(
             try:
                 accept_suggestion(suggestion, actor=actor)
             except AcceptSuggestionError as exc:
+                results.append((suggestion, str(exc)))
+                continue
+        elif target_status == "rejected":
+            try:
+                reject_suggestion(suggestion, actor=actor, reason=reason)
+            except ValueError as exc:
                 results.append((suggestion, str(exc)))
                 continue
         else:

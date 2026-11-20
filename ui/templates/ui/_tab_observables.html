@@ -191,13 +191,9 @@
                       <i class="fa-solid fa-check" aria-hidden="true"></i> Accept
                     </button>
                   </form>
-                  <form method="post" action="{% url 'ui-suggestion-reject' suggestion.id %}" class="inline-form suggestion-form">
-                    {% csrf_token %}
-                    <input type="hidden" name="tab" value="observables">
-                    <button type="submit" class="btn btn-sm" aria-label="Reject {{ suggestion.raw_data }}">
-                      <i class="fa-solid fa-xmark" aria-hidden="true"></i> Reject
-                    </button>
-                  </form>
+                  <button type="button" class="btn btn-sm" data-modal-open="suggestion-reject-{{ suggestion.id }}" aria-label="Reject {{ suggestion.raw_data }}">
+                    <i class="fa-solid fa-xmark" aria-hidden="true"></i> Reject
+                  </button>
                   <form method="post" action="{% url 'ui-suggestion-ignore' suggestion.id %}" class="inline-form suggestion-form">
                     {% csrf_token %}
                     <input type="hidden" name="tab" value="observables">
@@ -472,9 +468,18 @@
 {% endfor %}
 
 {% comment %}
+  Per-suggestion Reject dialogs. The URL is resolved inside the loop so each dialog posts to
+  its own suggestion (the same pitfall the observable edit/remove modals guard against).
+{% endcomment %}
+{% for suggestion in suggestions_proposed %}
+  {% url 'ui-suggestion-reject' suggestion.id as suggestion_reject_url %}
+  {% include "ui/_modal.html" with modal_id="suggestion-reject-"|concat:suggestion.id form_id="suggestion-reject-form-"|concat:suggestion.id body_template="ui/_suggestion_reject_modal_body.html" title="Reject suggested observable?" confirm_text="Reject" confirm_class="btn-err" form_action=suggestion_reject_url size="md" suggestion=suggestion rejection_reason_choices=rejection_reason_choices %}
+{% endfor %}
+
+{% comment %}
   Bulk action modals for suggestions
 {% endcomment %}
 {% include "ui/_modal.html" with modal_id="suggestions-bulk-accept-modal" form_id="suggestions-bulk-accept-form" body_template="ui/_suggestions_bulk_action_modal_body.html" title="Accept selected suggestions?" confirm_text="Accept" form_action=suggestions_bulk_accept_url size="md" action="accept" %}
-{% include "ui/_modal.html" with modal_id="suggestions-bulk-reject-modal" form_id="suggestions-bulk-reject-form" body_template="ui/_suggestions_bulk_action_modal_body.html" title="Reject selected suggestions?" confirm_text="Reject" confirm_class="btn-err" form_action=suggestions_bulk_reject_url size="md" action="reject" %}
+{% include "ui/_modal.html" with modal_id="suggestions-bulk-reject-modal" form_id="suggestions-bulk-reject-form" body_template="ui/_suggestions_bulk_action_modal_body.html" title="Reject selected suggestions?" confirm_text="Reject" confirm_class="btn-err" form_action=suggestions_bulk_reject_url size="md" action="reject" rejection_reason_choices=rejection_reason_choices %}
 {% include "ui/_modal.html" with modal_id="suggestions-bulk-ignore-modal" form_id="suggestions-bulk-ignore-form" body_template="ui/_suggestions_bulk_action_modal_body.html" title="Ignore selected suggestions?" confirm_text="Ignore" form_action=suggestions_bulk_ignore_url size="md" action="ignore" %}
 {% endif %}

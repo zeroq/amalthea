@@ -1,0 +1,20 @@
+{% comment %}
+  Body of the per-suggestion Reject dialog. The select is associated with the footer form via
+  the HTML `form` attribute so it submits on both the plain POST and HTMX paths.
+{% endcomment %}
+<input type="hidden" name="tab" value="observables" form="{{ form_id }}">
+
+<p class="modal-body-text">
+  Reject <span class="mono">{{ suggestion.raw_data }}</span> and record it in Rejected observables?
+  The value will be suppressed in future mapping-rule extraction. Case re-extraction may still
+  propose it again.
+</p>
+
+<div class="form-row">
+  <label for="{{ form_id }}-reason">Reason</label>
+  <select id="{{ form_id }}-reason" name="reason" form="{{ form_id }}" required>
+    {% for value, label in rejection_reason_choices %}
+    <option value="{{ value }}"{% if value == "other" %} selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</div>

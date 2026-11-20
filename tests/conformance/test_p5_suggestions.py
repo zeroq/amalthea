@@ -6,7 +6,7 @@ from rest_framework.test import APIClient
 from alerts.models import Alert, AlertStatus
 from cases.models import Case, CaseStatus
 from identity.models import Organisation, User
-from observables.models import ObservableSuggestion, ObservableType
+from observables.models import ObservableSuggestion, ObservableType, RejectedObservable
 
 
 @pytest.fixture
@@ -88,13 +88,22 @@ def test_suggestion_reject_no_link(db, api_client, case, mail_type):
     )
 
     url = f"/api/v1/suggestions/{suggestion.id}/reject/"
-    response = api_client.post(url, {}, format="json")
+    response = api_client.post(url, {"reason": "false_positive"}, format="json")
     assert response.status_code == 200, response.content
 
     suggestion.refresh_from_db()
     assert suggestion.status == "rejected"
     assert suggestion.observable is None
     assert suggestion.reviewed_by is not None
+
+    rejected = RejectedObservable.objects.get(
+        owner_org=case.owner_org,
+        data_type=mail_type,
+        normalized_data="test2@example.com",
+        alert__isnull=True,
+    )
+    assert rejected.reason == "false_positive"
+    assert rejected.is_promoted is False
 
     # No CaseObservable link should exist
     from cases.models import CaseObservable
@@ -186,7 +195,11 @@ def test_bulk_reject(db, api_client, case, mail_type):
     )
 
     url = "/api/v1/suggestions/bulk-reject/"
-    response = api_client.post(url, {"ids": [str(sugg1.id), str(sugg2.id)]}, format="json")
+    response = api_client.post(
+        url,
+        {"ids": [str(sugg1.id), str(sugg2.id)], "reason": "irrelevant"},
+        format="json",
+    )
     assert response.status_code == 200, response.content
     results = response.json()
     assert len(results) == 2
@@ -197,6 +210,12 @@ def test_bulk_reject(db, api_client, case, mail_type):
     assert sugg2.status == "rejected"
     assert sugg1.observable is None
     assert sugg2.observable is None
+    assert (
+        RejectedObservable.objects.filter(
+            owner_org=case.owner_org, reason="irrelevant", alert__isnull=True
+        ).count()
+        == 2
+    )
 
 
 def test_case_suggestions_list(db, api_client, case, mail_type):
@@ -313,6 +332,59 @@ def test_reject_idempotent(db, api_client, case, mail_type):
     url = f"/api/v1/suggestions/{suggestion.id}/reject/"
     response = api_client.post(url, {}, format="json")
     assert response.status_code == 200, response.content
+    assert RejectedObservable.objects.filter(
+        owner_org=case.owner_org,
+        data_type=mail_type,
+        normalized_data="idem2@example.com",
+        alert__isnull=True,
+    ).exists()
+
+
+def test_reject_twice_updates_one_rejected_observable(db, api_client, case, mail_type):
+    suggestion = ObservableSuggestion.objects.create(
+        owner_org=case.owner_org,
+        data_type=mail_type,
+        normalized_data="double-reject@example.com",
+        raw_data="double-reject@example.com",
+        case=case,
+        source_paths=["description"],
+        reason="Test",
+        status="proposed",
+    )
+    url = f"/api/v1/suggestions/{suggestion.id}/reject/"
+
+    assert api_client.post(url, {"reason": "false_positive"}, format="json").status_code == 200
+    assert api_client.post(url, {"reason": "irrelevant"}, format="json").status_code == 200
+
+    rows = RejectedObservable.objects.filter(
+        owner_org=case.owner_org,
+        data_type=mail_type,
+        normalized_data="double-reject@example.com",
+        alert__isnull=True,
+    )
+    assert rows.count() == 1
+    assert rows.get().reason == "irrelevant"
+
+
+def test_reject_rejects_unknown_reason(db, api_client, case, mail_type):
+    suggestion = ObservableSuggestion.objects.create(
+        owner_org=case.owner_org,
+        data_type=mail_type,
+        normalized_data="bad-reason@example.com",
+        raw_data="bad-reason@example.com",
+        case=case,
+        source_paths=["description"],
+        reason="Test",
+        status="proposed",
+    )
+
+    url = f"/api/v1/suggestions/{suggestion.id}/reject/"
+    response = api_client.post(url, {"reason": "not-a-reason"}, format="json")
+
+    assert response.status_code == 400, response.content
+    suggestion.refresh_from_db()
+    assert suggestion.status == "proposed"
+    assert not RejectedObservable.objects.filter(owner_org=case.owner_org).exists()
 
 
 def test_cannot_accept_rejected(db, api_client, case, mail_type):

@@ -13,7 +13,7 @@ from ingest.models import IngestionSource
 from ingest.observable_apply import apply_observable_rules, preview_observable_rules
 from ingest.observable_rules import MAX_OBSERVABLE_CANDIDATES
 from observables.alert_sync import sync_alert_observables
-from observables.models import Observable, ObservableType
+from observables.models import Observable, ObservableType, RejectedObservable
 
 pytestmark = pytest.mark.django_db
 
@@ -221,6 +221,23 @@ class TestApply:
         assert (second.created, second.existing) == (0, 2)
         assert AlertObservable.objects.count() == 2
         assert Observable.objects.count() == 1
+
+    def test_a_rejected_value_is_suppressed_for_future_mapping_extraction(
+        self, org: Organisation, mail_type: ObservableType
+    ) -> None:
+        feed = _source(org)
+        alert = _alert(feed, ref="suppressed", email="blocked@example.test")
+        RejectedObservable.objects.create(
+            owner_org=org,
+            data_type=mail_type,
+            normalized_data="blocked@example.test",
+            reason="false_positive",
+        )
+
+        sync_alert_observables(alert)
+
+        assert not AlertObservable.objects.filter(alert=alert).exists()
+        assert not Observable.objects.filter(normalized_data="blocked@example.test").exists()
 
     def test_removing_a_rule_does_not_remove_evidence(
         self, org: Organisation, mail_type: ObservableType

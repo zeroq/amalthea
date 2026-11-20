@@ -8,7 +8,7 @@
   {% if action == "accept" %}
     <p>Accept the selected suggestions? This will link the observables to the case and trigger any associated automation playbooks.</p>
   {% elif action == "reject" %}
-    <p>Reject the selected suggestions? They will be marked as reviewed but not linked to the case. Re-extraction may re-suggest them.</p>
+    <p>Reject the selected suggestions? They will be marked as reviewed, recorded in Rejected observables to suppress future mapping-rule extraction, and left unlinked to the case. Case re-extraction may re-suggest them.</p>
   {% elif action == "ignore" %}
     <p>Ignore the selected suggestions? They will be marked as reviewed and hidden from the proposed list. Re-extraction may re-suggest them.</p>
   {% endif %}
@@ -18,6 +18,17 @@
   <label for="{{ form_id }}-count">Selected count</label>
   <output id="{{ form_id }}-count" class="mono">{{ selected_count|default:0 }}</output>
 </div>
+
+{% if action == "reject" %}
+<div class="form-row">
+  <label for="{{ form_id }}-reason">Reason</label>
+  <select id="{{ form_id }}-reason" name="reason" form="{{ form_id }}" required>
+    {% for value, label in rejection_reason_choices %}
+    <option value="{{ value }}"{% if value == "other" %} selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</div>
+{% endif %}
 
 {% comment %}
   The actual selected IDs are passed via hidden inputs in the form footer (added by JS when modal opens).
