@@ -2,7 +2,7 @@
 
 Plaintext tokens are returned exactly once by :func:`mcp_server.credentials.mint`;
 only the Argon2 hash is persisted. Phase 2 adds scoped propose/summary tools and
-an explicit human approval model.
+an explicit human approval model. Phase 3 adds OAuth 2.1 resource-server binding.
 """
 
 from __future__ import annotations
@@ -36,6 +36,10 @@ INVOCATION_STATUS_CHOICES: tuple[tuple[str, str], ...] = (
     ("rate_limited", "rate_limited"),
     ("error", "error"),
 )
+
+# Phase 3 OAuth scope constants
+PHASE3_OAUTH_SCOPES: tuple[str, ...] = ("mcp:read",)
+RESERVED_OAUTH_SCOPES: tuple[str, ...] = ("mcp:write", "mcp:admin")
 
 
 def hash_secret(plaintext: str) -> str:
@@ -232,6 +236,23 @@ class McpInvocation(models.Model):
         blank=True,
         on_delete=models.SET_NULL,
         related_name="invocations",
+    )
+    auth_mode = models.CharField(
+        max_length=16,
+        choices=[
+            ("static", "static"),
+            ("oauth", "oauth"),
+        ],
+        default="static",
+        help_text="Authentication mode used for this invocation.",
+    )
+    oauth_binding = models.ForeignKey(
+        "McpOAuthBinding",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="invocations",
+        help_text="OAuth binding attribution for OAuth-mode invocations.",
     )
     actor = models.ForeignKey(
         User,
@@ -466,3 +487,134 @@ class McpActionProposal(models.Model):
             self.StatusChoices.EXECUTED,
             self.StatusChoices.FAILED,
         )
+
+
+class McpOAuthBinding(models.Model):
+    """One OAuth 2.1 binding from (issuer, client_id, subject) to an org/service user.
+
+    Tokens presenting this binding are authenticated; client-supplied org claims are
+    ignored — the organisation comes only from the active binding row.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100, help_text="Human label in Settings.")
+    issuer = models.CharField(
+        max_length=500, help_text="Exact expected `iss`; must match configured issuer."
+    )
+    client_id = models.CharField(max_length=255, help_text="OAuth client identifier from the IdP.")
+    subject = models.CharField(max_length=255, help_text="Expected JWT `sub`; required in v1.")
+    organisation = models.ForeignKey(
+        Organisation,
+        on_delete=models.PROTECT,
+        related_name="mcp_oauth_bindings",
+        help_text="Tenant this agent is bound to.",
+    )
+    service_user = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="mcp_oauth_bindings",
+        help_text="Effective actor; must belong to organisation and be active.",
+    )
+    allowed_scopes = models.JSONField(
+        default=list,
+        help_text="Subset of mcp:read, mcp:propose, mcp:summary; non-empty, no reserved scopes.",
+    )
+    is_active = models.BooleanField(default=True, help_text="Revocation/disable without delete.")
+    last_used_at = models.DateTimeField(
+        null=True, blank=True, help_text="Atomic touch at most once per minute."
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Human administrator.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "mcp_oauth_binding"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["issuer", "client_id", "subject"],
+                name="uniq_mcp_oauth_binding_issuer_client_subject",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["organisation", "-created_at"], name="mcp_oauth_org_idx"),
+            models.Index(
+                fields=["issuer", "client_id", "subject"],
+                name="mcp_oauth_issuer_sub_idx",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"McpOAuthBinding({self.name} issuer={self.issuer} client={self.client_id})"
+
+    @property
+    def is_revoked(self) -> bool:
+        return not self.is_active
+
+    def clean(self) -> None:
+        super().clean()
+        # Service user must belong to the organisation
+        if self.service_user_id and self.organisation_id:
+            if self.service_user.org_id != self.organisation_id:
+                raise ValidationError(
+                    {"service_user": "The service user must belong to the credential organisation."}
+                )
+        # User must be active
+        if self.service_user_id and not self.service_user.is_active:
+            raise ValidationError({"service_user": "The service user must be active."})
+        # Viewer service users may receive only mcp:read
+        viewer_role = getattr(self.service_user, "role", "") == "viewer"
+        scopes = self.allowed_scopes or []
+        proposed = any(scope in PHASE2_SCOPES for scope in scopes)
+        if viewer_role and proposed:
+            raise ValidationError(
+                {
+                    "allowed_scopes": (
+                        "Viewer/read-only service users cannot be granted "
+                        "mcp:propose or mcp:summary."
+                    )
+                }
+            )
+        # Reject reserved scopes
+        for scope in scopes:
+            if scope in RESERVED_OAUTH_SCOPES:
+                raise ValidationError(
+                    {"allowed_scopes": f"Reserved scope '{scope}' is not allowed."}
+                )
+        # allowed_scopes must be non-empty
+        if not scopes:
+            raise ValidationError({"allowed_scopes": "At least one scope is required."})
+        # All scopes must be MCP-relevant (begin with mcp:)
+        allowed_scopes = set(PHASE1_SCOPES) | set(PHASE2_SCOPES)
+        for scope in scopes:
+            if not scope.startswith("mcp:"):
+                raise ValidationError({"allowed_scopes": f"Scope '{scope}' is not an MCP scope."})
+            if scope not in allowed_scopes:
+                raise ValidationError({"allowed_scopes": f"Unknown MCP scope '{scope}'."})
+
+    @classmethod
+    def validate_scopes(cls, scopes: list[str]) -> set[str]:
+        """Return the set of validated scopes, rejecting reserved/unknown mcp:* scopes."""
+        allowed: set[str] = set(PHASE1_SCOPES) | set(PHASE2_SCOPES)
+        validated: set[str] = set()
+        for scope in scopes:
+            if scope in RESERVED_OAUTH_SCOPES:
+                raise ValidationError(
+                    {"allowed_scopes": f"Reserved scope '{scope}' is not allowed."}
+                )
+            if not scope.startswith("mcp:"):
+                # Non-MCP scopes are ignored (caller handles intersection)
+                continue
+            if scope in allowed:
+                validated.add(scope)
+            elif scope.startswith("mcp:"):
+                # Unknown mcp:* scope — reject
+                raise ValidationError({"allowed_scopes": f"Unknown MCP scope '{scope}'."})
+        return validated

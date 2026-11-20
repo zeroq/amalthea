@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.urls import include, path
 
+from mcp_server.views import oauth_protected_resource_metadata
 from realtime.routing import http_fallback_urlpatterns
 
 # Error handlers are referenced by dotted path, not imported. `ui` is deliberately outside the
@@ -27,6 +28,13 @@ urlpatterns = [
     path("api/v1/", include("automation.urls")),
     path("api/v1/", include("query.urls")),
     path("api/v1/", include("compat.urls")),
+    # MCP endpoints (Phase 3: OAuth 2.1 resource server)
+    # The metadata endpoint must be registered before the catch-all below.
+    path(
+        ".well-known/oauth-protected-resource/mcp",
+        oauth_protected_resource_metadata,
+        name="mcp_oauth_protected_resource_metadata",
+    ),
     # Realtime HTTP fallback (friendly error for WebSocket endpoints accessed via HTTP)
     path("", include(http_fallback_urlpatterns)),
 ]

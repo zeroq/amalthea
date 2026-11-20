@@ -39,6 +39,46 @@ if MCP_ENABLED:  # noqa: F405
     if not MCP_ALLOWED_HOSTS:  # noqa: F405
         raise ImproperlyConfigured("AMALTHEA_MCP_ALLOWED_HOSTS must not be empty in production.")
 
+# Phase 3 OAuth mode gating — fail fast if OAuth is configured without the
+# required issuer/JWKS settings.  Static mode is always available; both/oauth
+# require the full profile.
+_auth_mode = os.getenv("AMALTHEA_MCP_AUTH_MODE", "static").lower()
+if _auth_mode in ("oauth", "both"):
+    _issuer = os.getenv("AMALTHEA_MCP_OAUTH_ISSUER", "").strip()
+    _jwks_url = os.getenv("AMALTHEA_MCP_OAUTH_JWKS_URL", "").strip()
+    if not _issuer:
+        raise ImproperlyConfigured(
+            "AMALTHEA_MCP_OAUTH_ISSUER must be set when MCP_AUTH_MODE is oauth or both."
+        )
+    if not _jwks_url:
+        raise ImproperlyConfigured(
+            "AMALTHEA_MCP_OAUTH_JWKS_URL must be set when MCP_AUTH_MODE is oauth or both."
+        )
+    if not _issuer.startswith("https://"):
+        raise ImproperlyConfigured("AMALTHEA_MCP_OAUTH_ISSUER must use https:// in production.")
+    if not _jwks_url.startswith("https://"):
+        raise ImproperlyConfigured("AMALTHEA_MCP_OAUTH_JWKS_URL must use https:// in production.")
+    # Reject localhost/private IP literals in JWKS URL (SSRF guard)
+    from ipaddress import ip_address as _ip_addr
+
+    try:
+        host = _jwks_url.split("/")[2]
+        _ip_addr(host)
+        # If we get here, it's a valid IP literal; reject it
+        raise ImproperlyConfigured(
+            "AMALTHEA_MCP_OAUTH_JWKS_URL must not be a localhost or private IP literal."
+        )
+    except (IndexError, ValueError):
+        # Not a valid IP literal — good, it's a hostname
+        pass
+    # Reject 'none' and symmetric algorithms
+    _allowed = os.getenv("AMALTHEA_MCP_OAUTH_JWT_ALGS", "RS256").split(",")
+    _allowed = [a.strip() for a in _allowed if a.strip()]
+    if "none" in _allowed or any(a.startswith("HS") for a in _allowed):
+        raise ImproperlyConfigured(
+            "AMALTHEA_MCP_OAUTH_JWT_ALGS must not contain 'none' or symmetric algorithms such as HS256."
+        )
+
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_SSL_REDIRECT = True

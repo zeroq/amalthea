@@ -779,8 +779,17 @@ retention 90 days; agent credentials managed in Settings UI only; no stdio bridg
     15 warnings, 2 subtests passed** (`/tmp/amalthea-full-pytest.log`).
   - [x] Final independent verification: **READY — PASS** (37/37 ACs Met, 0 blockers)
     (`docs/reviews/VERIFY-2026-11-19-mcp-phase2-final.md`).
-- [ ] **22.5 — Phase 3 OAuth + external-client hardening.** OAuth 2.1 resource-server profile,
+- [x] **22.5 — Phase 3 OAuth + external-client hardening.** OAuth 2.1 resource-server profile,
   protected-resource metadata, proxy/SSE/multi-worker hardening, client docs.
+  - [x] Implemented external-IdP resource-server validation, binding UI, metadata/challenge,
+    deployment hardening, docs, ADR, and audit/observability changes.
+  - [x] Security audit **PASS** after two blocking findings were fixed (`legacy_static_use` logging
+    and bounded JWKS refresh on unknown `kid`)
+    (`docs/security/SECURITY-2026-11-20-mcp-phase3.md`).
+  - [x] Targeted verification green: 216 passed across MCP/settings/prod-settings conformance tests;
+    `manage.py check`, `makemigrations --check --dry-run`, tracked and changed-file secret scans clean.
+  - [x] Final independent verification: **READY — PASS** (55 ACs evaluated, 0 Not Met, 5 documented
+    deviations, 0 blockers) (`docs/planning/VERIFY-2026-11-20-mcp-phase3.md`).
 - [ ] **22.6 — Phase 4 policy-bounded autonomy.** `McpOrgPolicy`, shadow-mode evaluation, low-risk
   allowlist, kill switch, autonomy UI; no autonomous closure.
 

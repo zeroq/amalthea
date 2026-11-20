@@ -1,0 +1,62 @@
+{% comment %}
+Server-rendered body for the "New OAuth binding" modal.
+Fields target the modal form via `form="{{ form_id }}"` so the flow works without JavaScript.
+No bearer material or client-side material is accepted by this form.
+{% endcomment %}
+<div class="meta-inline">
+  <label for="oauth-binding-name">Name <span class="required">*</span></label>
+  <input type="text" id="oauth-binding-name" name="name" maxlength="100" required form="{{ form_id }}" placeholder="e.g. External threat intelligence feed" autocomplete="off">
+</div>
+
+{% if is_superadmin %}
+<div class="meta-inline">
+  <label for="oauth-binding-org">Organisation <span class="required">*</span></label>
+  <select id="oauth-binding-org" name="organisation" required form="{{ form_id }}">
+    <option value="">— select organisation —</option>
+    {% for org in organisations %}
+    <option value="{{ org.id }}">{{ org.name }}</option>
+    {% endfor %}
+  </select>
+</div>
+{% endif %}
+
+<div class="meta-inline">
+  <label for="oauth-binding-issuer">Issuer <span class="required">*</span></label>
+  <input type="text" id="oauth-binding-issuer" name="issuer" required form="{{ form_id }}" value="{{ configured_issuer|default:'' }}" readonly autocomplete="off">
+  <p class="dim">Set by the configured MCP issuer. Configure <code>MCP_OAUTH_ISSUER</code> before creating bindings.</p>
+</div>
+
+<div class="meta-inline">
+  <label for="oauth-binding-client_id">Client ID <span class="required">*</span></label>
+  <input type="text" id="oauth-binding-client_id" name="client_id" maxlength="255" required form="{{ form_id }}" placeholder="e.g. amalthea-client-01" autocomplete="off">
+</div>
+
+<div class="meta-inline">
+  <label for="oauth-binding-subject">Subject <span class="required">*</span></label>
+  <input type="text" id="oauth-binding-subject" name="subject" maxlength="255" required form="{{ form_id }}" placeholder="e.g. service-agent@example.net" autocomplete="off">
+</div>
+
+<div class="meta-inline">
+  <label for="oauth-binding-service_user">Service user login <span class="required">*</span></label>
+  <input type="text" id="oauth-binding-service_user" name="service_user_login" required form="{{ form_id }}" list="oauth-binding-users"{% if not is_superadmin %} value="{{ request.user.login }}" readonly{% endif %} autocomplete="off">
+  <datalist id="oauth-binding-users">
+    {% for service_user in users %}
+    <option value="{{ service_user.login }}">{{ service_user.org.name }}/{{ service_user.login }}</option>
+    {% endfor %}
+  </datalist>
+  <p class="dim">The service user must belong to the target organisation and be active.</p>
+</div>
+
+<fieldset class="meta-inline">
+  <legend>Scopes</legend>
+  {% for scope in allowed_scopes %}
+  <label class="scope-option">
+    <input type="checkbox" name="scopes" value="{{ scope }}" form="{{ form_id }}" {% if scope in phase1_scopes %}checked{% endif %}>
+    <code>{{ scope }}</code>
+    {% if scope == "mcp:read" %}<span class="dim">— read cases, alerts, observables, tasks and playbooks.</span>{% endif %}
+    {% if scope == "mcp:propose" %}<span class="dim">— create proposals that require explicit human approval.</span>{% endif %}
+    {% if scope == "mcp:summary" %}<span class="dim">— append a clearly labelled AI summary to a case timeline.</span>{% endif %}
+  </label>
+  {% endfor %}
+  <p class="dim">Viewer service users can only receive <code>mcp:read</code>. Reserved write/admin scopes are never accepted.</p>
+</fieldset>

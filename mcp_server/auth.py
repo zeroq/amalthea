@@ -19,12 +19,14 @@ from mcp_server.models import PHASE1_SCOPES, PHASE2_SCOPES, McpCredential
 class Principal:
     """The authenticated agent identity for one MCP request."""
 
-    credential_id: UUID
+    credential_id: UUID | None
     credential_prefix: str
     actor_id: UUID
     organisation_id: UUID
     role: str
     scopes: tuple[str, ...]
+    auth_mode: str = "static"
+    oauth_binding_id: UUID | None = None
 
     def has_scope(self, scope: str) -> bool:
         return scope in self.scopes
@@ -66,6 +68,7 @@ class McpTokenVerifier(TokenVerifier):
             resource=_base_url(),
             subject=str(credential.user_id),
             claims={
+                "auth_mode": "static",
                 "credential_id": str(credential.id),
                 "credential_prefix": credential.prefix,
                 "organisation_id": str(credential.organisation_id),
@@ -92,12 +95,38 @@ class McpTokenVerifier(TokenVerifier):
         McpCredential.objects.filter(pk=credential_id).update(last_used_at=timezone.now())
 
 
+def _principal_from_credential(credential: McpCredential, auth_mode: str = "static") -> Principal:
+    """Build a Principal from a verified McpCredential, used by the static verifier."""
+    return Principal(
+        credential_id=credential.id,
+        credential_prefix=credential.prefix,
+        actor_id=credential.user_id,
+        organisation_id=credential.organisation_id,
+        role=credential.user.role,
+        scopes=tuple(credential.scopes or []),
+        auth_mode=auth_mode,
+        oauth_binding_id=None,
+    )
+
+
 def principal_from_token(token: AccessToken | None) -> Principal | None:
     """Build the tool-facing principal from the SDK's authenticated token."""
     if token is None:
         return None
     claims = token.claims or {}
     try:
+        auth_mode = str(claims.get("auth_mode", "static"))
+        if auth_mode in ("oauth", "both"):
+            return Principal(
+                credential_id=None,
+                credential_prefix=str(claims.get("client_id", "oauth")),
+                actor_id=UUID(str(claims["user_id"])),
+                organisation_id=UUID(str(claims["organisation_id"])),
+                role=str(claims["role"]),
+                scopes=tuple(token.scopes),
+                auth_mode=auth_mode,
+                oauth_binding_id=UUID(str(claims["oauth_binding_id"])),
+            )
         return Principal(
             credential_id=UUID(str(claims["credential_id"])),
             credential_prefix=str(claims["credential_prefix"]),
@@ -105,6 +134,8 @@ def principal_from_token(token: AccessToken | None) -> Principal | None:
             organisation_id=UUID(str(claims["organisation_id"])),
             role=str(claims["role"]),
             scopes=tuple(token.scopes),
+            auth_mode="static",
+            oauth_binding_id=None,
         )
     except (KeyError, TypeError, ValueError):
         return None

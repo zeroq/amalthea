@@ -12,6 +12,9 @@ from .agents import (
     settings_agent_create,
     settings_agent_revoke,
     settings_agents,
+    settings_oauth_binding_create,
+    settings_oauth_binding_disable,
+    settings_oauth_bindings,
 )
 from .alerts import (
     ALERT_SCOPE_OPTIONS,
@@ -354,6 +357,9 @@ __all__ = [
     "settings_agent_revoke",
     "settings_agents",
     "settings_home",
+    "settings_oauth_binding_create",
+    "settings_oauth_binding_disable",
+    "settings_oauth_bindings",
     "settings_organisations",
     "settings_organisations_delete",
     "settings_organisations_edit",

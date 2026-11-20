@@ -33,12 +33,30 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mcp_server.context import McpRequestContextMiddleware
+from mcp_server.oauth import McpOAuthTokenVerifier
+from mcp_server.views import McpAuthChallengeMiddleware
 
 logger = logging.getLogger(__name__)
 
 
 def _base_url() -> str:
     return (settings.MCP_BASE_URL or "http://localhost:8000").rstrip("/")
+
+
+def _absolute_url(value: str | None, fallback: str) -> str:
+    """Resolve a possibly-relative configured URL to an absolute URL.
+
+    Tests and local configs commonly set MCP_RESOURCE_URL="/mcp"; AuthSettings
+    requires an absolute http(s) URL, so resolve against MCP_BASE_URL.
+    """
+    candidate = str(value or "").strip()
+    if not candidate:
+        return fallback.rstrip("/")
+    if candidate.startswith(("http://", "https://")):
+        return candidate.rstrip("/")
+    if candidate.startswith("/"):
+        return f"{fallback.rstrip('/')}{candidate}".rstrip("/")
+    return f"{fallback.rstrip('/')}/{candidate}".rstrip("/")
 
 
 def _transport_security() -> TransportSecuritySettings:
@@ -88,22 +106,97 @@ def _strict_tool_schemas(server: MCPServer) -> None:
 
 
 def build_mcp_server(*, require_auth: bool = True) -> MCPServer:
-    """Build the Phase 1 MCP server with all read surfaces registered."""
+    """Build the MCP server with mode-selective verifier composition (Phase 3).
+
+    Auth mode determines which verifier is active:
+      - "static":  McpTokenVerifier only (Phase 1/2 bearer credentials)
+      - "oauth":   McpOAuthTokenVerifier only (OAuth 2.1 access-tokens)
+      - "both":    dispatch JWT-shaped tokens to OAuth verifier,
+                   other tokens to static verifier
+    """
     auth = None
     verifier = None
-    if require_auth:
-        # Import lazily: this pulls in the Django model layer, so the app
-        # registry must already be ready when the ASGI entrypoint is loaded.
-        from mcp_server.auth import McpTokenVerifier
 
-        base = _base_url()
-        auth = AuthSettings(
-            issuer_url=AnyHttpUrl(base),
-            resource_server_url=AnyHttpUrl(base),
-            required_scopes=["mcp:read"],
-            validate_token_resource=False,
+    auth_mode = getattr(settings, "MCP_AUTH_MODE", "static").lower()
+
+    # Validate auth mode early — reject unknown values
+    if auth_mode not in ("static", "oauth", "both"):
+        raise ImproperlyConfigured(
+            f"AMALTHEA_MCP_AUTH_MODE must be one of: static, oauth, both. Got: {auth_mode}"
         )
-        verifier = McpTokenVerifier()
+
+    if require_auth:
+        base = _base_url()
+
+        # Build AuthSettings with the resource server URL and issuer
+        # resource_server_url must be MCP_RESOURCE_URL (the full /mcp URL),
+        # not just the base URL.
+        configured_resource = getattr(settings, "MCP_RESOURCE_URL", "") or f"{base}/mcp"
+        resource_url = _absolute_url(configured_resource, base)
+        issuer_url = _absolute_url(getattr(settings, "MCP_OAUTH_ISSUER", ""), base)
+
+        auth_kwargs: dict[str, Any] = {
+            "issuer_url": AnyHttpUrl(issuer_url if auth_mode in ("oauth", "both") else base),
+            "resource_server_url": AnyHttpUrl(resource_url)
+            if auth_mode in ("oauth", "both")
+            else None,
+            "required_scopes": ["mcp:read"],
+            "validate_token_resource": False,
+        }
+
+        auth = AuthSettings(**auth_kwargs)
+
+        # Mode-selective verifier composition
+        if auth_mode == "static":
+            from mcp_server.auth import McpTokenVerifier
+
+            verifier = McpTokenVerifier()
+        elif auth_mode == "oauth":
+            verifier = McpOAuthTokenVerifier()
+        elif auth_mode == "both":
+            from mcp_server.auth import McpTokenVerifier
+
+            oauth_verifier = McpOAuthTokenVerifier()
+            static_verifier = McpTokenVerifier()
+
+            class _CompositeVerifier:
+                """Dispatch JWT-shaped tokens to OAuth verifier and other tokens
+                to the static bearer verifier.
+
+                Dispatch is based on the presence of JWT dot-delimited segments
+                (three-part header.payload.signature shape), not on the ``typ``
+                header alone. This avoids relying on header values that may be
+                absent or spoofed.
+
+                Security still comes from full verification — no token is silently
+                accepted as a static credential when OAuth mode would reject it.
+                """
+
+                async def verify_token(self, token: str) -> Any:
+                    # Quick peek at the header to determine token shape.
+                    # Dispatch by JWT structure (three dot-separated parts) rather
+                    # than the typ header, which may be absent or unreliable.
+                    try:
+                        parts = token.split(".")
+                        is_jwt = len(parts) == 3 and all(p.strip() for p in parts)
+                    except Exception:
+                        is_jwt = False
+
+                    if is_jwt:
+                        # OAuth verification failed; do not fall back to static
+                        # that would silently accept an invalid OAuth token.
+                        return await oauth_verifier.verify_token(token)
+
+                    # Non-JWT-shaped tokens → static bearer verifier.
+                    result = await static_verifier.verify_token(token)
+                    if result is not None:
+                        logger.info(
+                            "mcp oauth legacy_static_use client_id=%s",
+                            getattr(result, "client_id", "-"),
+                        )
+                    return result
+
+            verifier = _CompositeVerifier()
 
     server = MCPServer(
         name="amalthea-mcp",
@@ -312,10 +405,13 @@ def build_application(
 
     from realtime import routing as realtime_routing
 
+    # Wrap the HTTP app with the OAuth 401 challenge middleware when OAuth is enabled
+    http_app_wrapped = McpAuthChallengeMiddleware(http_app)
+
     lifespan = mcp_starlette_app if mcp_starlette_app is not None else _noop_lifespan
     return ProtocolTypeRouter(
         {
-            "http": http_app,
+            "http": http_app_wrapped,
             "websocket": AuthMiddlewareStack(
                 URLRouter(cast(Any, realtime_routing.websocket_urlpatterns))
             ),

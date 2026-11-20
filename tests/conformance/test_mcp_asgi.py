@@ -8,10 +8,11 @@ import httpx2
 import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.server.auth.provider import AccessToken
 
 from cases.models import Case, CaseStatus
 from identity.models import Organisation, User
-from mcp_server.asgi import build_application, build_mcp_starlette_app
+from mcp_server.asgi import build_application, build_mcp_server, build_mcp_starlette_app
 from mcp_server.credentials import mint
 from mcp_server.models import McpInvocation
 from tests.conformance.conftest import _drive_lifespan
@@ -116,3 +117,86 @@ def test_top_level_router_keeps_websocket_branch() -> None:
 
     app = build_application(mcp_enabled=False)
     assert set(app.application_mapping) == {"http", "websocket", "lifespan"}
+
+
+def _unauthenticated_post(mode: str):
+    from django.test import override_settings
+
+    async def scenario():
+        settings = {
+            "MCP_AUTH_MODE": mode,
+            "MCP_BASE_URL": "https://mcp.example.com",
+            "MCP_RESOURCE_URL": "https://mcp.example.com/mcp",
+            "MCP_OAUTH_ISSUER": "https://idp.example.com",
+            "MCP_OAUTH_JWKS_URL": "https://idp.example.com/.well-known/jwks.json",
+        }
+        with override_settings(**settings):
+            app = build_application(build_mcp_starlette_app(), mcp_enabled=True)
+            async with _drive_lifespan(app):
+                transport = httpx2.ASGITransport(app=app)
+                async with httpx2.AsyncClient(
+                    transport=transport, base_url="http://localhost:8000"
+                ) as client:
+                    return await client.post(
+                        "/mcp",
+                        json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                        headers={
+                            "Accept": "application/json, text/event-stream",
+                            "Content-Type": "application/json",
+                        },
+                    )
+
+    return asyncio.run(scenario())
+
+
+@pytest.mark.django_db
+def test_static_mode_401_has_no_oauth_challenge() -> None:
+    response = _unauthenticated_post("static")
+    assert response.status_code == 401
+    assert "resource_metadata" not in response.headers.get("www-authenticate", "")
+
+
+@pytest.mark.parametrize("mode", ["oauth", "both"])
+@pytest.mark.django_db
+def test_oauth_modes_challenge_without_token_leakage(mode: str) -> None:
+    response = _unauthenticated_post(mode)
+    assert response.status_code == 401
+    challenge = response.headers["www-authenticate"]
+    assert challenge == (
+        'Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/mcp", '
+        'error="invalid_token"'
+    )
+    assert response.headers["x-accel-buffering"] == "no"
+    assert "invalid-token" not in response.text.lower()
+
+
+def test_both_mode_logs_legacy_static_use(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
+    caplog.set_level("INFO", logger="mcp_server.asgi")
+
+    async def fake_static_verify(self, token: str) -> AccessToken:
+        return AccessToken(
+            token=token,
+            client_id="legacy-client",
+            scopes=["mcp:read"],
+            expires_at=None,
+            resource="https://mcp.example.com/mcp",
+            subject="legacy-subject",
+            claims={"auth_mode": "static"},
+        )
+
+    monkeypatch.setattr("mcp_server.auth.McpTokenVerifier.verify_token", fake_static_verify)
+
+    from django.test import override_settings
+
+    with override_settings(
+        MCP_AUTH_MODE="both",
+        MCP_BASE_URL="https://mcp.example.com",
+        MCP_RESOURCE_URL="https://mcp.example.com/mcp",
+        MCP_OAUTH_ISSUER="https://idp.example.com",
+        MCP_OAUTH_JWKS_URL="https://idp.example.com/.well-known/jwks.json",
+    ):
+        verifier = build_mcp_server()._token_verifier
+        result = asyncio.run(verifier.verify_token("legacy-credential"))
+
+    assert result is not None
+    assert "legacy_static_use" in caplog.text

@@ -5,6 +5,86 @@
 
 {% block content %}
 {% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
+
+<div class="card">
+  <div class="card-header">
+    <h2>External OAuth bindings</h2>
+    <button type="button" class="btn btn-primary" data-modal-open="oauth-binding-create-modal">
+      <i class="fa-solid fa-plus" aria-hidden="true"></i>
+      New OAuth binding
+    </button>
+  </div>
+
+  <div class="hint-block hint-block--compact">
+    <p class="dim">
+      {% if oauth_enabled %}
+        External issuer: <code>{{ configured_issuer|default:"not configured" }}</code><br>
+        Bindings map an exact issuer, client ID and subject to one service user and organisation.
+      {% else %}
+        OAuth access is disabled in this deployment (<code>MCP_AUTH_MODE=static</code>).
+      {% endif %}
+    </p>
+  </div>
+
+  {% if oauth_bindings %}
+    <div class="table-wrap">
+      <table class="data-table {% if is_superadmin %}data-table--with-org{% endif %}">
+        <caption class="sr-only">External OAuth bindings</caption>
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            {% if is_superadmin %}<th scope="col">Organisation</th>{% endif %}
+            <th scope="col">Issuer</th>
+            <th scope="col">Client ID</th>
+            <th scope="col">Subject</th>
+            <th scope="col">Service user</th>
+            <th scope="col">Scopes</th>
+            <th scope="col">Status</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for binding in oauth_bindings %}
+          <tr data-oauth-binding-id="{{ binding.id }}">
+            <td>{{ binding.name }}</td>
+            {% if is_superadmin %}<td>{{ binding.organisation.name }}</td>{% endif %}
+            <td class="mono">{{ binding.issuer }}</td>
+            <td class="mono">{{ binding.client_id }}</td>
+            <td class="mono">{{ binding.subject }}</td>
+            <td class="mono">{{ binding.service_user.login }}</td>
+            <td>{% for scope in binding.allowed_scopes %}<code>{{ scope }}</code>{% if not forloop.last %} {% endif %}{% empty %}<span class="dim">—</span>{% endfor %}</td>
+            <td>
+              {% if binding.is_active %}
+                <span class="pill pill-on">Active</span>
+              {% else %}
+                <span class="pill pill-off">Disabled</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if binding.is_active %}
+                {% url 'ui-settings-oauth-binding-disable' binding.id as disable_binding_url %}
+                {% with sid=binding.id|stringformat:"s" %}
+                {% with modal_id="disable-oauth-binding-"|add:sid form_id="disable-oauth-binding-"|add:sid|add:"-form" %}
+                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body="This immediately stops this binding from authorising MCP requests. This cannot be undone." title="Disable OAuth binding?" confirm_text="Disable" confirm_class="btn-err" cancel_text="Cancel" form_action=disable_binding_url size="md" %}
+                {% endwith %}
+                {% endwith %}
+                <button type="button" class="icon-link icon-link-err" data-modal-open="disable-oauth-binding-{{ binding.id }}" aria-label="Disable OAuth binding {{ binding.name }}" title="Disable OAuth binding {{ binding.name }}">
+                  <i class="fa-solid fa-ban" aria-hidden="true"></i>
+                </button>
+              {% else %}
+                <span class="dim">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No OAuth bindings yet.</p>
+  {% endif %}
+</div>
+
 <div class="card">
   <div class="card-header">
     <h2>MCP agent credentials</h2>
@@ -93,6 +173,14 @@
 
 {% url 'ui-settings-agent-access-create' as agent_create_url %}
 {% include "ui/_modal.html" with modal_id="agent-create-modal" form_id="agent-create-form" body_template="ui/_settings_agent_create_form.html" title="New agent credential" confirm_text="Create credential" confirm_class="btn-primary" cancel_text="Cancel" form_action=agent_create_url size="md" %}
+
+{% url 'ui-settings-oauth-binding-create' as oauth_binding_create_url %}
+{% include "ui/_modal.html" with modal_id="oauth-binding-create-modal" form_id="oauth-binding-create-form" body_template="ui/_settings_oauth_binding_create_form.html" title="New OAuth binding" confirm_text="Create binding" confirm_class="btn-primary" cancel_text="Cancel" form_action=oauth_binding_create_url size="lg" %}
+
+{% if oauth_binding_created %}
+{% url 'ui-settings-oauth-binding-list' as oauth_bindings_url %}
+{% include "ui/_modal.html" with modal_id="oauth-binding-created-modal" title="OAuth binding created" body_template="ui/_settings_oauth_binding_created.html" confirm_text="Close" confirm_class="btn-primary" show_cancel=False close_url=oauth_bindings_url size="md" autoopen=oauth_binding_created %}
+{% endif %}
 
 {% if credential_created %}
 {% url 'ui-settings-agent-access' as agents_url %}

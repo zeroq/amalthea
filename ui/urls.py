@@ -334,6 +334,22 @@ urlpatterns = [
         views.settings_agent_revoke,
         name="ui-settings-agent-access-revoke",
     ),
+    # MCP Phase 3: external-IdP OAuth bindings.
+    path(
+        "settings/agent-access/oauth-bindings",
+        views.settings_oauth_bindings,
+        name="ui-settings-oauth-binding-list",
+    ),
+    path(
+        "settings/agent-access/oauth-bindings/create",
+        views.settings_oauth_binding_create,
+        name="ui-settings-oauth-binding-create",
+    ),
+    path(
+        "settings/agent-access/oauth-bindings/<uuid:binding_id>/disable",
+        views.settings_oauth_binding_disable,
+        name="ui-settings-oauth-binding-disable",
+    ),
     path("settings/sources", views.settings_sources, name="ui-settings-sources"),
     path("settings/sources/token", views.settings_token_create, name="ui-settings-token-create"),
     # ADR-009: a source is org-owned, so this route is gated by role *and* org (404, not 403).

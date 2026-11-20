@@ -478,3 +478,29 @@ def record_mcp_credential_change(
         target_id=str(getattr(credential, "id", "")),
         ip=_get_client_ip(request),
     )
+
+
+def record_mcp_oauth_binding_change(
+    request: HttpRequest,
+    *,
+    actor: User,
+    action: str,
+    binding: object,
+) -> None:
+    """Record an MCP OAuth binding lifecycle change.
+
+    ``action`` is one of ``mcp_oauth_binding.created``, ``mcp_oauth_binding.revoked``
+    or ``mcp_oauth_binding.deleted``.  The plaintext token is never part of the
+    audit row; only the binding id, issuer, and target tenant are recorded.
+    """
+    from identity.models import AuditLog
+
+    AuditLog.objects.create(
+        actor=actor,
+        actor_org=getattr(actor, "org", None),
+        target_org=getattr(binding, "organisation", None),
+        action=action,
+        target_type="McpOAuthBinding",
+        target_id=str(getattr(binding, "id", "")),
+        ip=_get_client_ip(request),
+    )

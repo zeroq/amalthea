@@ -42,6 +42,8 @@ def record_invocation(
     return McpInvocation.objects.create(
         request_id=request.request_id or uuid.uuid4().hex,
         credential_id=principal.credential_id,
+        auth_mode=principal.auth_mode,
+        oauth_binding_id=principal.oauth_binding_id,
         actor_id=principal.actor_id,
         organisation_id=principal.organisation_id,
         tool_name=tool_name[:100],

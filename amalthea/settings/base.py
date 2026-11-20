@@ -257,7 +257,7 @@ MCP_RATE_PER_MINUTE = int(os.getenv("AMALTHEA_MCP_RATE_PER_MINUTE", "60"))
 #: Number of trusted reverse proxies in front of Daphne.  0 uses the direct peer
 #: and ignores X-Forwarded-For; set to the exact hop count only behind known proxies.
 MCP_TRUSTED_PROXY_COUNT = max(0, int(os.getenv("AMALTHEA_MCP_TRUSTED_PROXY_COUNT", "0")))
-#: Comma-separated list of allowed browser Origins for MCP requests.
+#: Comma-separated allowed origins for Cross-origin MCP requests.
 MCP_ALLOWED_ORIGINS = [
     value.strip()
     for value in os.getenv("AMALTHEA_MCP_ALLOWED_ORIGINS", "").split(",")
@@ -269,3 +269,36 @@ MCP_ALLOWED_HOSTS = [
     for value in os.getenv("AMALTHEA_MCP_ALLOWED_HOSTS", "").split(",")
     if value.strip()
 ] or [host.strip() for host in ALLOWED_HOSTS if host.strip()]
+
+# --- MCP server (Phase 3) -----------------------------------------------
+#: Authentication mode for MCP: "static" (Phase 1/2 bearer credentials only),
+#: "oauth" (OAuth 2.1 access-tokens only), or "both" (hybrid migration mode).
+#: Defaults to "static" to preserve existing deployments.
+MCP_AUTH_MODE = os.getenv("AMALTHEA_MCP_AUTH_MODE", "static").lower()
+#: Expected JWT `iss` value from the external OAuth/OIDC provider.
+MCP_OAUTH_ISSUER = os.getenv("AMALTHEA_MCP_OAUTH_ISSUER", "").strip()
+#: HTTPS URI of the provider's JWKS endpoint for public key resolution.
+MCP_OAUTH_JWKS_URL = os.getenv("AMALTHEA_MCP_OAUTH_JWKS_URL", "").strip()
+#: Comma-separated list of allowed JWT signing algorithms. Default RS256.
+MCP_OAUTH_JWT_ALGS = [
+    alg.strip()
+    for alg in os.getenv("AMALTHEA_MCP_OAUTH_JWT_ALGS", "RS256").split(",")
+    if alg.strip()
+]
+#: Seconds to cache the JWKS response in Django cache. Minimum 300.
+MCP_OAUTH_JWKS_CACHE_SECONDS = max(
+    300,
+    int(os.getenv("AMALTHEA_MCP_OAUTH_JWKS_CACHE_SECONDS", "3600")),
+)
+#: Clock skew tolerance (seconds) for JWT expiry / iat checks. Maximum 60.
+MCP_OAUTH_CLOCK_SKEW_SECONDS = min(
+    60,
+    max(0, int(os.getenv("AMALTHEA_MCP_OAUTH_CLOCK_SKEW_SECONDS", "30"))),
+)
+
+# Derived value: resource URL for audience validation
+# MCP_BASE_URL already ends in /mcp or not; we append /mcp exactly once.
+if MCP_BASE_URL.endswith("/mcp"):
+    MCP_RESOURCE_URL = MCP_BASE_URL
+else:
+    MCP_RESOURCE_URL = MCP_BASE_URL.rstrip("/") + "/mcp"

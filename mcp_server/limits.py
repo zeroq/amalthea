@@ -40,7 +40,8 @@ def is_rate_limited(principal: Principal, client_ip: str | None) -> bool:
     never to an unbounded allow.
     """
     window = int(time.time() // 60)
-    keys = [f"mcp:cred:{principal.credential_id}:{window}"]
+    identity = principal.credential_id or principal.oauth_binding_id or principal.actor_id
+    keys = [f"mcp:identity:{identity}:{window}"]
     if client_ip:
         keys.append(f"mcp:ip:{client_ip}:{window}")
 
