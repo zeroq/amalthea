@@ -1,0 +1,11 @@
+{% comment %}
+Modal body for deleting an MCP credential. Rendered inside ui/_modal.html via body_template.
+No token/client-secret values are included.
+{% endcomment %}
+<p class="modal-body-text">
+  Delete credential <strong>{{ credential.name }}</strong>?
+</p>
+<p class="modal-body-text">
+  This permanently removes the credential from the system. History records will retain the credential
+  ID, but the credential itself cannot be restored.
+</p>

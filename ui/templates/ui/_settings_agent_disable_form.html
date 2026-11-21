@@ -1,0 +1,11 @@
+{% comment %}
+Modal body for disabling an MCP credential. Rendered inside ui/_modal.html via body_template.
+No token/client-secret values are included.
+{% endcomment %}
+<p class="modal-body-text">
+  Disable credential <strong>{{ credential.name }}</strong>?
+</p>
+<p class="modal-body-text">
+  This will soft‑disable the credential. The credential remains in the system and can be re‑enabled
+  at any time. Any agent using it will immediately receive 401 responses.
+</p>

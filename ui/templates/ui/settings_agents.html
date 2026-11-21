@@ -61,19 +61,29 @@
               {% endif %}
             </td>
             <td>
-              {% if binding.is_active %}
-                {% url 'ui-settings-oauth-binding-disable' binding.id as disable_binding_url %}
-                {% with sid=binding.id|stringformat:"s" %}
-                {% with modal_id="disable-oauth-binding-"|add:sid form_id="disable-oauth-binding-"|add:sid|add:"-form" %}
-                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body="This immediately stops this binding from authorising MCP requests. This cannot be undone." title="Disable OAuth binding?" confirm_text="Disable" confirm_class="btn-err" cancel_text="Cancel" form_action=disable_binding_url size="md" %}
-                {% endwith %}
-                {% endwith %}
-                <button type="button" class="icon-link icon-link-err" data-modal-open="disable-oauth-binding-{{ binding.id }}" aria-label="Disable OAuth binding {{ binding.name }}" title="Disable OAuth binding {{ binding.name }}">
-                  <i class="fa-solid fa-ban" aria-hidden="true"></i>
-                </button>
-              {% else %}
-                <span class="dim">—</span>
-              {% endif %}
+              <div class="control-row">
+                {% if binding.is_active %}
+                  {% url 'ui-settings-oauth-binding-disable' binding.id as disable_binding_url %}
+                  {% with sid=binding.id|stringformat:"s" %}
+                  {% with modal_id="disable-oauth-binding-"|add:sid form_id="disable-oauth-binding-"|add:sid|add:"-form" %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body="This immediately stops this binding from authorising MCP requests. This cannot be undone." title="Disable OAuth binding?" confirm_text="Disable" confirm_class="btn-err" cancel_text="Cancel" form_action=disable_binding_url size="md" %}
+                  {% endwith %}
+                  {% endwith %}
+                  <button type="button" class="icon-link icon-link-err" data-modal-open="disable-oauth-binding-{{ binding.id }}" aria-label="Disable OAuth binding {{ binding.name }}" title="Disable OAuth binding {{ binding.name }}">
+                    <i class="fa-solid fa-ban" aria-hidden="true"></i>
+                  </button>
+                {% else %}
+                  {% url 'ui-settings-oauth-binding-delete' binding.id as delete_binding_url %}
+                  {% with sid=binding.id|stringformat:"s" %}
+                  {% with modal_id="delete-oauth-binding-"|add:sid form_id="delete-oauth-binding-"|add:sid|add:"-form" %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_oauth_binding_delete_form.html" title="Delete OAuth binding?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_binding_url size="md" %}
+                  {% endwith %}
+                  {% endwith %}
+                  <button type="button" class="icon-link icon-link-err" data-modal-open="delete-oauth-binding-{{ binding.id }}" aria-label="Delete OAuth binding {{ binding.name }}" title="Delete OAuth binding {{ binding.name }}">
+                    <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+                  </button>
+                {% endif %}
+              </div>
             </td>
           </tr>
           {% endfor %}
@@ -97,7 +107,7 @@
   <div class="hint-block hint-block--compact">
     <p class="dim">
       MCP endpoint: <code>{{ mcp_url }}</code><br>
-      Header: <code>Authorization: Bearer &lt;agent token&gt;</code><br>
+      Header: <code>Authorization: Bearer <agent token></code><br>
       Scopes: <code>mcp:read</code>, <code>mcp:propose</code> and <code>mcp:summary</code>. Every credential is permanently bound to its organisation
       and can be revoked at any time.
     </p>
@@ -137,6 +147,8 @@
               {% if credential.is_revoked %}
                 <span class="pill pill-off">Revoked</span>
                 <span class="mono dim">{{ credential.revoked_at|date:"Y-m-d H:i" }}</span>
+              {% elif credential.is_disabled %}
+                <span class="pill pill-pending">Disabled</span>
               {% elif credential.is_expired %}
                 <span class="pill pill-pending">Expired</span>
               {% else %}
@@ -144,19 +156,73 @@
               {% endif %}
             </td>
             <td>
-              {% if not credential.is_revoked %}
-                {% url 'ui-settings-agent-access-revoke' credential.id as revoke_url %}
-                {% with sid=credential.id|stringformat:"s" %}
-                {% with modal_id="revoke-agent-"|add:sid form_id="revoke-agent-"|add:sid|add:"-form" %}
-                {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body="This permanently disables the credential. Any agent using it will immediately receive 401 responses. This cannot be undone." title="Revoke agent credential?" confirm_text="Revoke" confirm_class="btn-err" cancel_text="Cancel" form_action=revoke_url size="md" %}
-                {% endwith %}
-                {% endwith %}
-                <button type="button" class="icon-link icon-link-err" data-modal-open="revoke-agent-{{ credential.id }}" aria-label="Revoke credential {{ credential.name }}" title="Revoke credential {{ credential.name }}">
-                  <i class="fa-solid fa-ban" aria-hidden="true"></i>
-                </button>
-              {% else %}
-                <span class="dim">—</span>
-              {% endif %}
+              <div class="control-row">
+                {% if credential.is_revoked %}
+                  {% url 'ui-settings-agent-access-delete' credential.id as delete_url %}
+                  {% with sid=credential.id|stringformat:"s" %}
+                  {% with modal_id="delete-agent-"|add:sid form_id="delete-agent-"|add:sid|add:"-form" %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_agent_delete_form.html" title="Delete credential?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
+                  {% endwith %}
+                  {% endwith %}
+                  <button type="button" class="icon-link icon-link-err" data-modal-open="delete-agent-{{ credential.id }}" aria-label="Delete credential {{ credential.name }}" title="Delete credential {{ credential.name }}">
+                    <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+                  </button>
+                {% elif credential.is_disabled %}
+                  {% url 'ui-settings-agent-access-enable' credential.id as enable_url %}
+                  {% url 'ui-settings-agent-access-revoke' credential.id as revoke_url %}
+                  {% url 'ui-settings-agent-access-delete' credential.id as delete_url %}
+                  <form method="post" action="{{ enable_url }}" class="inline-form">{% csrf_token %}
+                    <button type="submit" class="icon-link" aria-label="Enable credential {{ credential.name }}" title="Enable credential {{ credential.name }}">
+                      <i class="fa-solid fa-toggle-on" aria-hidden="true"></i>
+                    </button>
+                  </form>
+                  {% with sid=credential.id|stringformat:"s" %}
+                  {% with modal_id="revoke-agent-"|add:sid form_id="revoke-agent-"|add:sid|add:"-form" %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body="This permanently disables the credential. Any agent using it will immediately receive 401 responses. This cannot be undone." title="Revoke credential?" confirm_text="Revoke" confirm_class="btn-err" cancel_text="Cancel" form_action=revoke_url size="md" %}
+                  {% endwith %}
+                  {% endwith %}
+                  {% with sid=credential.id|stringformat:"s" %}
+                  {% with modal_id="delete-agent-"|add:sid form_id="delete-agent-"|add:sid|add:"-form" %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_agent_delete_form.html" title="Delete credential?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
+                  {% endwith %}
+                  {% endwith %}
+                  <button type="button" class="icon-link icon-link-err" data-modal-open="revoke-agent-{{ credential.id }}" aria-label="Revoke credential {{ credential.name }}" title="Revoke credential {{ credential.name }}">
+                    <i class="fa-solid fa-ban" aria-hidden="true"></i>
+                  </button>
+                  <button type="button" class="icon-link icon-link-err" data-modal-open="delete-agent-{{ credential.id }}" aria-label="Delete credential {{ credential.name }}" title="Delete credential {{ credential.name }}">
+                    <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+                  </button>
+                {% elif credential.is_expired %}
+                  {% url 'ui-settings-agent-access-delete' credential.id as delete_url %}
+                  {% with sid=credential.id|stringformat:"s" %}
+                  {% with modal_id="delete-agent-"|add:sid form_id="delete-agent-"|add:sid|add:"-form" %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_agent_delete_form.html" title="Delete credential?" confirm_text="Delete" confirm_class="btn-err" cancel_text="Cancel" form_action=delete_url size="md" %}
+                  {% endwith %}
+                  {% endwith %}
+                  <button type="button" class="icon-link icon-link-err" data-modal-open="delete-agent-{{ credential.id }}" aria-label="Delete credential {{ credential.name }}" title="Delete credential {{ credential.name }}">
+                    <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+                  </button>
+                {% else %}
+                  {% url 'ui-settings-agent-access-disable' credential.id as disable_url %}
+                  {% url 'ui-settings-agent-access-revoke' credential.id as revoke_url %}
+                  {% with sid=credential.id|stringformat:"s" %}
+                  {% with modal_id="disable-agent-"|add:sid form_id="disable-agent-"|add:sid|add:"-form" %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body_template="ui/_settings_agent_disable_form.html" title="Disable credential?" confirm_text="Disable" confirm_class="btn-err" cancel_text="Cancel" form_action=disable_url size="md" %}
+                  {% endwith %}
+                  {% endwith %}
+                  {% with sid=credential.id|stringformat:"s" %}
+                  {% with modal_id="revoke-agent-"|add:sid form_id="revoke-agent-"|add:sid|add:"-form" %}
+                  {% include "ui/_modal.html" with modal_id=modal_id form_id=form_id body="This permanently disables the credential. Any agent using it will immediately receive 401 responses. This cannot be undone." title="Revoke credential?" confirm_text="Revoke" confirm_class="btn-err" cancel_text="Cancel" form_action=revoke_url size="md" %}
+                  {% endwith %}
+                  {% endwith %}
+                  <button type="button" class="icon-link icon-link-err" data-modal-open="disable-agent-{{ credential.id }}" aria-label="Disable credential {{ credential.name }}" title="Disable credential {{ credential.name }}">
+                    <i class="fa-solid fa-toggle-off" aria-hidden="true"></i>
+                  </button>
+                  <button type="button" class="icon-link icon-link-err" data-modal-open="revoke-agent-{{ credential.id }}" aria-label="Revoke credential {{ credential.name }}" title="Revoke credential {{ credential.name }}">
+                    <i class="fa-solid fa-ban" aria-hidden="true"></i>
+                  </button>
+                {% endif %}
+              </div>
             </td>
           </tr>
           {% endfor %}

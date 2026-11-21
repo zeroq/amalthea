@@ -56,3 +56,43 @@ def revoke(credential_id: Any) -> bool:
             revoked_at=timezone.now()
         )
     )
+
+
+def disable(credential_id: Any) -> bool:
+    """Disable a credential (set ``disabled_at``).
+
+    Idempotent: a no-op if already disabled. Returns ``True`` if the row was updated.
+    The caller owns audit recording so the actor is present on the audit row.
+    """
+    return bool(
+        McpCredential.objects.filter(pk=credential_id, disabled_at__isnull=True).update(
+            disabled_at=timezone.now()
+        )
+    )
+
+
+def enable(credential_id: Any) -> bool:
+    """Enable a credential (clear ``disabled_at``).
+
+    Idempotent: a no-op if not disabled. Returns ``True`` if the row was updated.
+    The caller owns audit recording so the actor is present on the audit row.
+    """
+    return bool(
+        McpCredential.objects.filter(pk=credential_id, disabled_at__isnull=False).update(
+            disabled_at=None
+        )
+    )
+
+
+def delete(credential_id: Any) -> bool:
+    """Delete an inactive credential.
+
+    Refuses deletion if the credential is active (not revoked, not expired, not disabled).
+    Returns ``True`` if the row was deleted, ``False`` if deletion was refused. The caller
+    owns audit recording so the actor is present on the audit row.
+    """
+    credential = McpCredential.objects.get(pk=credential_id)
+    if credential.is_active:
+        return False
+    deleted, _ = McpCredential.objects.filter(pk=credential_id).delete()
+    return bool(deleted)

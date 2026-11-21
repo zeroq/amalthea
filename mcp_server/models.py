@@ -88,6 +88,7 @@ class McpCredential(models.Model):
     )
     expires_at = models.DateTimeField(null=True, blank=True)
     revoked_at = models.DateTimeField(null=True, blank=True)
+    disabled_at = models.DateTimeField(null=True, blank=True)
     last_used_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
         User,
@@ -118,8 +119,12 @@ class McpCredential(models.Model):
         return self.expires_at is not None and timezone.now() >= self.expires_at
 
     @property
+    def is_disabled(self) -> bool:
+        return self.disabled_at is not None
+
+    @property
     def is_active(self) -> bool:
-        return not (self.is_revoked or self.is_expired)
+        return not (self.is_revoked or self.is_expired or self.is_disabled)
 
     def clean(self) -> None:
         super().clean()

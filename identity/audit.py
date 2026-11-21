@@ -463,9 +463,14 @@ def record_mcp_credential_change(
 ) -> None:
     """Record an MCP agent-credential lifecycle change.
 
-    ``action`` is one of ``mcp_credential.created``, ``mcp_credential.revoked``
-    or ``mcp_credential.deleted``.  The plaintext token is never part of the
-    audit row; only the credential id and target tenant are recorded.
+    ``action`` is one of
+        ``mcp_credential.created``,
+        ``mcp_credential.revoked``,
+        ``mcp_credential.disabled``,
+        ``mcp_credential.enabled``,
+        ``mcp_credential.deleted``.
+    The plaintext token is never part of the audit row; only the credential id
+    and target tenant are recorded.
     """
     from identity.models import AuditLog
 
@@ -489,9 +494,12 @@ def record_mcp_oauth_binding_change(
 ) -> None:
     """Record an MCP OAuth binding lifecycle change.
 
-    ``action`` is one of ``mcp_oauth_binding.created``, ``mcp_oauth_binding.revoked``
-    or ``mcp_oauth_binding.deleted``.  The plaintext token is never part of the
-    audit row; only the binding id, issuer, and target tenant are recorded.
+    ``action`` is one of
+        ``mcp_oauth_binding.created``,
+        ``mcp_oauth_binding.revoked``,
+        ``mcp_oauth_binding.deleted``.
+    The plaintext token is never part of the audit row; only the binding id,
+    issuer, and target tenant are recorded.
     """
     from identity.models import AuditLog
 

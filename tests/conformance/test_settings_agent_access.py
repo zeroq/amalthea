@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import re
+from datetime import timedelta
 
 import pytest
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
 from identity.models import AuditLog, Organisation, User
 from mcp_server.models import McpCredential
@@ -267,3 +269,136 @@ class TestShowOnceTemplate:
         body = _ui_client(admin).get(reverse("ui-settings-agent-access")).content.decode()
         assert "agent-credential-plaintext" not in body
         assert "credential-created-modal" not in body
+
+
+class TestDisableEnableAndDelete:
+    def test_disable_fail_closed_and_enable_is_reversible_with_one_audit_each(
+        self, db: None
+    ) -> None:
+        org = _mk_org("Org")
+        admin = _mk_user("admin", org, role="admin")
+        service = _mk_user("agent", org)
+        credential, plaintext = _mk_credential(org, service, "lifecycle")
+        client = _ui_client(admin)
+
+        disable_url = reverse(
+            "ui-settings-agent-access-disable", kwargs={"credential_id": credential.id}
+        )
+        enable_url = reverse(
+            "ui-settings-agent-access-enable", kwargs={"credential_id": credential.id}
+        )
+
+        assert client.post(disable_url).status_code == 302
+        credential.refresh_from_db()
+        assert credential.disabled_at is not None
+        assert credential.is_disabled is True
+        assert credential.is_active is False
+        assert credential.verify(plaintext) is False
+
+        disable_audits = AuditLog.objects.filter(
+            action="mcp_credential.disabled", target_id=str(credential.id)
+        )
+        assert disable_audits.count() == 1
+        assert disable_audits.get().actor_id == admin.id
+
+        # Repeated disable is a no-op and does not duplicate the audit row.
+        assert client.post(disable_url).status_code == 302
+        assert disable_audits.count() == 1
+
+        assert client.post(enable_url).status_code == 302
+        credential.refresh_from_db()
+        assert credential.disabled_at is None
+        assert credential.is_active is True
+        assert credential.verify(plaintext) is True
+        enable_audits = AuditLog.objects.filter(
+            action="mcp_credential.enabled", target_id=str(credential.id)
+        )
+        assert enable_audits.count() == 1
+        assert enable_audits.get().actor_id == admin.id
+
+        assert client.post(enable_url).status_code == 302
+        assert enable_audits.count() == 1
+
+    def test_active_credential_cannot_be_deleted(self, db: None) -> None:
+        org = _mk_org("Org")
+        admin = _mk_user("admin", org, role="admin")
+        credential, _ = _mk_credential(org, _mk_user("agent", org), "active")
+        response = _ui_client(admin).post(
+            reverse("ui-settings-agent-access-delete", kwargs={"credential_id": credential.id})
+        )
+
+        assert response.status_code == 302
+        assert McpCredential.objects.filter(pk=credential.id).exists()
+        assert not AuditLog.objects.filter(
+            action="mcp_credential.deleted", target_id=str(credential.id)
+        ).exists()
+
+    def test_disabled_revoked_and_expired_credentials_can_be_deleted(self, db: None) -> None:
+        org = _mk_org("Org")
+        admin = _mk_user("admin", org, role="admin")
+        service = _mk_user("agent", org)
+        client = _ui_client(admin)
+
+        disabled, _ = _mk_credential(org, service, "disabled")
+        disabled.disabled_at = timezone.now()
+        disabled.save(update_fields=["disabled_at"])
+        revoked, _ = _mk_credential(org, service, "revoked")
+        revoked.revoked_at = timezone.now()
+        revoked.save(update_fields=["revoked_at"])
+        expired, _ = McpCredential.mint(
+            organisation=org,
+            user=service,
+            name="expired",
+            created_by=admin,
+            expires_at=timezone.now() - timedelta(days=1),
+        )
+
+        for credential in (disabled, revoked, expired):
+            response = client.post(
+                reverse("ui-settings-agent-access-delete", kwargs={"credential_id": credential.id})
+            )
+            assert response.status_code == 302
+            assert not McpCredential.objects.filter(pk=credential.id).exists()
+            audits = AuditLog.objects.filter(
+                action="mcp_credential.deleted", target_id=str(credential.id)
+            )
+            assert audits.count() == 1
+            assert audits.get().actor_id == admin.id
+
+    def test_cross_org_lifecycle_mutations_return_404(self, db: None) -> None:
+        org_a = _mk_org("Org A")
+        org_b = _mk_org("Org B")
+        admin = _mk_user("admin", org_a, role="admin")
+        other, _ = _mk_credential(org_b, _mk_user("agent-b", org_b), "other")
+        client = _ui_client(admin)
+
+        for action in ("disable", "enable", "delete"):
+            response = client.post(
+                reverse(f"ui-settings-agent-access-{action}", kwargs={"credential_id": other.id})
+            )
+            assert response.status_code == 404
+
+        other.refresh_from_db()
+        assert other.disabled_at is None
+        other.refresh_from_db()
+        assert other.revoked_at is None
+        assert McpCredential.objects.filter(pk=other.id).exists()
+
+    @pytest.mark.parametrize("role", ["analyst", "viewer"])
+    def test_non_admin_roles_are_denied_lifecycle_routes(self, db: None, role: str) -> None:
+        org = _mk_org("Org")
+        user = _mk_user(f"user-{role}", org, role=role)
+        credential, _ = _mk_credential(org, _mk_user("agent", org), "existing")
+        client = _ui_client(user)
+
+        for action in ("disable", "enable", "delete"):
+            response = client.post(
+                reverse(
+                    f"ui-settings-agent-access-{action}", kwargs={"credential_id": credential.id}
+                )
+            )
+            assert response.status_code == 404
+
+        credential.refresh_from_db()
+        assert credential.disabled_at is None
+        assert McpCredential.objects.filter(pk=credential.id).exists()

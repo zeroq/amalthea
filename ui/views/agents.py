@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime
 
 from django.conf import settings
@@ -16,7 +17,7 @@ from django.views.decorators.http import require_POST
 
 from identity.audit import record_mcp_credential_change, record_mcp_oauth_binding_change
 from identity.models import Organisation, User
-from mcp_server.credentials import mint, revoke
+from mcp_server.credentials import delete, disable, enable, mint, revoke
 from mcp_server.models import (
     PHASE1_SCOPES,
     PHASE2_SCOPES,
@@ -52,6 +53,30 @@ def _settings_agents_context(request: HttpRequest) -> dict:
     users = User.objects.filter(is_active=True).select_related("org")
     if not is_superadmin:
         users = users.filter(org_id=request.user.org_id)
+    # Build users_by_org for the create modal: groups of org name + users,
+    # ordered by org name then login, cap 500 total users.
+    if is_superadmin:
+        users_by_org = (
+            User.objects.filter(is_active=True)
+            .select_related("org")
+            .order_by("org__name", "login")[:500]
+        )
+        # Group by org_name for template friendliness
+        grouped: list[dict] = []
+        last_org = None
+        for u in users_by_org:
+            if u.org != last_org:
+                grouped.append({"org_name": u.org.name, "users": [u]})
+                last_org = u.org
+            else:
+                grouped[-1]["users"].append(u)
+    else:
+        # Admin sees one group for their own org
+        own_org_users = users.filter(org_id=request.user.org_id).order_by("login")[:500]
+        grouped = []
+        if own_org_users:
+            grouped.append({"org_name": own_org_users[0].org.name, "users": list(own_org_users)})
+
     configured_issuer = str(getattr(settings, "MCP_OAUTH_ISSUER", "") or "").strip()
     return {
         "page_obj": page_obj,
@@ -63,6 +88,7 @@ def _settings_agents_context(request: HttpRequest) -> dict:
         "is_superadmin": is_superadmin,
         "organisations": Organisation.objects.order_by("name") if is_superadmin else None,
         "users": users.order_by("login")[:500],
+        "users_by_org": grouped,
         "mcp_url": request.build_absolute_uri("/mcp"),
         "allowed_scopes": list(PHASE1_SCOPES) + list(PHASE2_SCOPES),
         "phase1_scopes": list(PHASE1_SCOPES),
@@ -233,6 +259,93 @@ def settings_agent_revoke(request: HttpRequest, credential_id: str) -> HttpRespo
     return redirect("ui-settings-agent-access")
 
 
+@not_viewer
+@login_required
+@require_POST
+def settings_agent_disable(request: HttpRequest, credential_id: uuid.UUID) -> HttpResponse:
+    """Disable one MCP credential. No-op if already disabled; audit on mutation."""
+    guard = _require_admin_ui(request)
+    if guard:
+        return guard
+
+    credential = _scoped_credential(request, str(credential_id))
+    if credential is None:
+        return render(request, "ui/404.html", status=404)
+    if not disable(credential_id=str(credential_id)):
+        messages.info(request, "That credential is already disabled.")
+        return redirect("ui-settings-agent-access")
+
+    record_mcp_credential_change(
+        request,
+        actor=request.user,
+        action="mcp_credential.disabled",
+        credential=credential,
+    )
+    logger.info("mcp credential disabled id=%s actor=%s", credential.id, request.user.pk)
+    messages.success(request, f"Disabled agent credential '{credential.name}'.")
+    return redirect("ui-settings-agent-access")
+
+
+@not_viewer
+@login_required
+@require_POST
+def settings_agent_enable(request: HttpRequest, credential_id: uuid.UUID) -> HttpResponse:
+    """Enable one MCP credential. No-op if not disabled; audit on mutation."""
+    guard = _require_admin_ui(request)
+    if guard:
+        return guard
+
+    credential = _scoped_credential(request, str(credential_id))
+    if credential is None:
+        return render(request, "ui/404.html", status=404)
+    if not enable(credential_id=str(credential_id)):
+        messages.info(request, "That credential is not disabled.")
+        return redirect("ui-settings-agent-access")
+
+    record_mcp_credential_change(
+        request,
+        actor=request.user,
+        action="mcp_credential.enabled",
+        credential=credential,
+    )
+    logger.info("mcp credential enabled id=%s actor=%s", credential.id, request.user.pk)
+    messages.success(request, f"Enabled agent credential '{credential.name}'.")
+    return redirect("ui-settings-agent-access")
+
+
+@not_viewer
+@login_required
+@require_POST
+def settings_agent_delete(request: HttpRequest, credential_id: uuid.UUID) -> HttpResponse:
+    """Delete one MCP credential.
+
+    Refuses if the credential is active (not revoked, not expired, not disabled).
+    Deletes inactive credentials only; audit in same transaction.
+    """
+    guard = _require_admin_ui(request)
+    if guard:
+        return guard
+
+    credential = _scoped_credential(request, str(credential_id))
+    if credential is None:
+        return render(request, "ui/404.html", status=404)
+    if not delete(credential_id=str(credential_id)):
+        messages.error(
+            request, "Cannot delete an active credential; it is not revoked, expired, or disabled."
+        )
+        return redirect("ui-settings-agent-access")
+
+    record_mcp_credential_change(
+        request,
+        actor=request.user,
+        action="mcp_credential.deleted",
+        credential=credential,
+    )
+    logger.info("mcp credential deleted id=%s actor=%s", credential.id, request.user.pk)
+    messages.success(request, f"Deleted agent credential '{credential.name}'.")
+    return redirect("ui-settings-agent-access")
+
+
 def _parse_oauth_scopes(request: HttpRequest) -> list[str]:
     values = request.POST.getlist("scopes") or request.POST.getlist("allowed_scopes")
     if not values and request.POST.get("scopes"):
@@ -383,4 +496,38 @@ def settings_oauth_binding_disable(request: HttpRequest, binding_id: str) -> Htt
     )
     logger.info("mcp oauth binding disabled id=%s actor=%s", binding.id, request.user.pk)
     messages.success(request, f"Disabled OAuth binding '{binding.name}'.")
+    return redirect("ui-settings-agent-access")
+
+
+@not_viewer
+@login_required
+@require_POST
+def settings_oauth_binding_delete(request: HttpRequest, binding_id: str) -> HttpResponse:
+    """Delete one MCP OAuth binding.
+
+    Refuses if the binding is active; deletes inactive binding only.
+    Writes audit ``mcp_oauth_binding.deleted`` in the same transaction.
+    No client secret/token material is logged.
+    """
+    guard = _require_admin_ui(request)
+    if guard:
+        return guard
+
+    binding = _scoped_oauth_binding(request, binding_id)
+    if binding is None:
+        return render(request, "ui/404.html", status=404)
+    if binding.is_active:
+        messages.error(request, "Cannot delete an active OAuth binding.")
+        return redirect("ui-settings-agent-access")
+
+    # Record audit before deleting the row (binding.id is still available)
+    record_mcp_oauth_binding_change(
+        request,
+        actor=request.user,
+        action="mcp_oauth_binding.deleted",
+        binding=binding,
+    )
+    logger.info("mcp oauth binding deleted id=%s actor=%s", binding.id, request.user.pk)
+    binding.delete()
+    messages.success(request, f"Deleted OAuth binding '{binding.name}'.")
     return redirect("ui-settings-agent-access")

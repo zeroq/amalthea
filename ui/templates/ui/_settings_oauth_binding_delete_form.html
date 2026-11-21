@@ -1,0 +1,11 @@
+{% comment %}
+Modal body for deleting an OAuth binding. Rendered inside ui/_modal.html via body_template.
+No token/client-secret values are included.
+{% endcomment %}
+<p class="modal-body-text">
+  Delete OAuth binding <strong>{{ binding.name }}</strong>?
+</p>
+<p class="modal-body-text">
+  This permanently removes the binding. History records will retain the binding ID, but the binding
+  itself cannot be restored.
+</p>

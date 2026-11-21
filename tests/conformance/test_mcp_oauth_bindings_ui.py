@@ -197,3 +197,61 @@ class TestOAuthBindingUI:
         assert "access_token" not in body
         assert "jwt" not in body
         assert 'name="client_secret"' not in body
+
+    def test_active_binding_cannot_be_deleted(self) -> None:
+        org = _org("Org")
+        admin = _user("admin", org, role="admin")
+        binding = _binding(org, _user("service", org), "active-delete")
+
+        response = _client(admin).post(
+            reverse("ui-settings-oauth-binding-delete", kwargs={"binding_id": binding.id})
+        )
+
+        assert response.status_code == 302
+        assert McpOAuthBinding.objects.filter(pk=binding.id).exists()
+        assert not AuditLog.objects.filter(
+            action="mcp_oauth_binding.deleted", target_id=str(binding.id)
+        ).exists()
+
+    def test_inactive_binding_is_deleted_and_audited_once(self) -> None:
+        org = _org("Org")
+        admin = _user("admin", org, role="admin")
+        binding = _binding(org, _user("service", org), "inactive-delete")
+        binding.is_active = False
+        binding.save(update_fields=["is_active"])
+
+        response = _client(admin).post(
+            reverse("ui-settings-oauth-binding-delete", kwargs={"binding_id": binding.id})
+        )
+
+        assert response.status_code == 302
+        assert not McpOAuthBinding.objects.filter(pk=binding.id).exists()
+        audit = AuditLog.objects.get(action="mcp_oauth_binding.deleted", target_id=str(binding.id))
+        assert audit.actor_id == admin.id
+        assert audit.target_org_id == org.id
+
+    def test_cross_org_binding_delete_returns_404(self) -> None:
+        org_a = _org("Org A")
+        org_b = _org("Org B")
+        admin = _user("admin", org_a, role="admin")
+        binding = _binding(org_b, _user("service-b", org_b), "foreign-delete")
+
+        response = _client(admin).post(
+            reverse("ui-settings-oauth-binding-delete", kwargs={"binding_id": binding.id})
+        )
+
+        assert response.status_code == 404
+        assert McpOAuthBinding.objects.filter(pk=binding.id).exists()
+
+    @pytest.mark.parametrize("role", ["analyst", "viewer"])
+    def test_non_admin_binding_delete_denied(self, role: str) -> None:
+        org = _org("Org")
+        user = _user(role, org, role=role)
+        binding = _binding(org, _user("service", org), "role-delete")
+
+        response = _client(user).post(
+            reverse("ui-settings-oauth-binding-delete", kwargs={"binding_id": binding.id})
+        )
+
+        assert response.status_code == 404
+        assert McpOAuthBinding.objects.filter(pk=binding.id).exists()

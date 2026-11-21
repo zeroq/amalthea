@@ -22,12 +22,16 @@ POST succeeds.
 
 <div class="meta-inline">
   <label for="agent-create-user">Service user login <span class="required">*</span></label>
-  <input type="text" id="agent-create-user" name="user_login" required form="{{ form_id }}" list="agent-create-users" placeholder="e.g. agent-crewai" autocomplete="off">
-  <datalist id="agent-create-users">
-    {% for service_user in users %}
-    <option value="{{ service_user.login }}">{{ service_user.org.name }}</option>
+  <select id="agent-create-user" name="user_login" required form="{{ form_id }}">
+    <option value="">— select a service user —</option>
+    {% for group in users_by_org %}
+    <optgroup label="{{ group.org_name }}">
+      {% for user in group.users %}
+      <option value="{{ user.login }}">{{ user.login }}</option>
+      {% endfor %}
+    </optgroup>
     {% endfor %}
-  </datalist>
+  </select>
   <p class="dim">The credential is organisation-bound and carries only the scopes selected below, regardless of this user's role.</p>
 </div>
 

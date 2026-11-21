@@ -334,6 +334,21 @@ urlpatterns = [
         views.settings_agent_revoke,
         name="ui-settings-agent-access-revoke",
     ),
+    path(
+        "settings/agent-access/<uuid:credential_id>/disable",
+        views.settings_agent_disable,
+        name="ui-settings-agent-access-disable",
+    ),
+    path(
+        "settings/agent-access/<uuid:credential_id>/enable",
+        views.settings_agent_enable,
+        name="ui-settings-agent-access-enable",
+    ),
+    path(
+        "settings/agent-access/<uuid:credential_id>/delete",
+        views.settings_agent_delete,
+        name="ui-settings-agent-access-delete",
+    ),
     # MCP Phase 3: external-IdP OAuth bindings.
     path(
         "settings/agent-access/oauth-bindings",
@@ -349,6 +364,11 @@ urlpatterns = [
         "settings/agent-access/oauth-bindings/<uuid:binding_id>/disable",
         views.settings_oauth_binding_disable,
         name="ui-settings-oauth-binding-disable",
+    ),
+    path(
+        "settings/agent-access/oauth-bindings/<uuid:binding_id>/delete",
+        views.settings_oauth_binding_delete,
+        name="ui-settings-oauth-binding-delete",
     ),
     path("settings/sources", views.settings_sources, name="ui-settings-sources"),
     path("settings/sources/token", views.settings_token_create, name="ui-settings-token-create"),
