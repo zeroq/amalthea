@@ -206,6 +206,42 @@
       <p class="empty">This observable is not linked to any case.</p>
       {% endif %}
     </div>
+
+    <div class="card">
+      <h3>Linked Alerts ({{ linked_alerts|length }})</h3>
+      {% if linked_alerts and alerts_total is not None and alerts_total > linked_alerts|length %}
+        <p class="list-summary dim">Showing latest {{ linked_alerts|length }} of {{ alerts_total }} linked alerts</p>
+      {% endif %}
+      {% if linked_alerts %}
+      <div class="table-wrap">
+      <table class="data-table">
+        <caption class="sr-only">Linked alerts</caption>
+        <thead>
+          <tr>
+            <th scope="col">Alert</th>
+            <th scope="col">Title</th>
+            <th scope="col">Status</th>
+            <th scope="col">Severity</th>
+            <th scope="col">Seen</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for link in linked_alerts %}
+          <tr data-linked-alert-id="{{ link.alert.id }}">
+            <td class="mono"><a href="{% url 'ui-alert-detail' link.alert.id %}">{{ link.alert.id|stringformat:"s"|truncatechars:8 }}</a></td>
+            <td><a href="{% url 'ui-alert-detail' link.alert.id %}">{{ link.alert.title|truncatechars:50 }}</a></td>
+            <td><span class="pill sev-{{ link.alert.severity }}">{{ link.alert.status.value }}</span></td>
+            <td><span class="sev sev-{{ link.alert.severity }}">{{ link.alert.get_severity_display }}</span></td>
+            <td>{{ link.alert.date|date:"Y-m-d H:i" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <p class="empty">This observable is not linked to any alert.</p>
+      {% endif %}
+    </div>
   </div>
 {% endif %}
 

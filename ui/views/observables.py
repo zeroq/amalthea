@@ -170,6 +170,15 @@ def observable_detail(request: HttpRequest, observable_id: str) -> HttpResponse:
     cases_total = cases_qs.count()
     cases = list(cases_qs[:RAIL_CAP])
 
+    # Linked alerts rail (R surface) — direct AlertObservable links only, capped like cases.
+    alerts_qs = observable.alert_observables.select_related("alert__status").order_by(
+        "-alert__date", "-alert__created_at"
+    )
+    if request.user.role != "superAdmin":
+        alerts_qs = alerts_qs.filter(alert__owner_org_id=request.user.org_id)
+    alerts_total = alerts_qs.count()
+    linked_alerts = list(alerts_qs[:RAIL_CAP])
+
     return render(
         request,
         "ui/observable_detail.html",
@@ -178,6 +187,8 @@ def observable_detail(request: HttpRequest, observable_id: str) -> HttpResponse:
             observable=observable,
             cases=cases,
             cases_total=cases_total,
+            linked_alerts=linked_alerts,
+            alerts_total=alerts_total,
             affected_cases=affected_cases,
             is_owner=is_cross_org is False,  # owner org can manage
             is_cross_org=is_cross_org,
