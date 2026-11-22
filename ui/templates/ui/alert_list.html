@@ -80,7 +80,7 @@
       <button type="button" class="btn btn-primary" data-modal-open="alert-bulk-confirm-modal" data-bulk-requires-selection="alert-bulk-form">Apply</button>
     </div>
     <div class="table-wrap">
-    <table class="data-table">
+    <table class="data-table alert-table table-has-select">
       <caption class="sr-only">Alerts, newest first</caption>
       <colgroup>
         <col class="alert-col-select">
@@ -139,7 +139,7 @@
   {% include "ui/_modal.html" with modal_id="alert-bulk-confirm-modal" title="Apply bulk action?" body_template="ui/_alert_bulk_modal_body.html" confirm_form="alert-bulk-form" confirm_text="Apply" confirm_class="btn-primary" size="sm" %}
   {% else %}
     <div class="table-wrap">
-    <table class="data-table">
+    <table class="data-table alert-table">
       <caption class="sr-only">Alerts, newest first</caption>
       <colgroup>
         <col class="alert-col-severity">
