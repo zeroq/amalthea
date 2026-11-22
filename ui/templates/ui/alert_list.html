@@ -61,23 +61,25 @@
         <input type="checkbox" data-bulk-select-all="alert-bulk-form" aria-label="Select all alerts on this page">
         <span class="dim">Page</span>
       </label>
-      <span class="dim bulk-count" data-bulk-count="alert-bulk-form">0 selected</span>
-      <label class="sr-only" for="bulk-alert-status">Status</label>
-      <select id="bulk-alert-status" name="status" class="filter-type bulk-field">
-        <option value="">Status…</option>
-        {% for s in alert_status_options %}
-        <option value="{{ s.value }}">{{ s.value }}</option>
-        {% endfor %}
-      </select>
-      <label class="sr-only" for="bulk-alert-assignee">Assignee</label>
-      <select id="bulk-alert-assignee" name="assignee" class="filter-type bulk-field">
-        <option value="">Assignee…</option>
-        <option value="__unassigned__">Unassigned</option>
-        {% for u in alert_assignees %}
-        <option value="{{ u.login }}">{{ u.login }}</option>
-        {% endfor %}
-      </select>
-      <button type="button" class="btn btn-primary" data-modal-open="alert-bulk-confirm-modal" data-bulk-requires-selection="alert-bulk-form">Apply</button>
+      <div class="bulk-controls" data-bulk-controls="alert-bulk-form" hidden>
+        <span class="dim bulk-count" data-bulk-count="alert-bulk-form">0 selected</span>
+        <label class="sr-only" for="bulk-alert-status">Status</label>
+        <select id="bulk-alert-status" name="status" class="filter-type bulk-field">
+          <option value="">Status…</option>
+          {% for s in alert_status_options %}
+          <option value="{{ s.value }}">{{ s.value }}</option>
+          {% endfor %}
+        </select>
+        <label class="sr-only" for="bulk-alert-assignee">Assignee</label>
+        <select id="bulk-alert-assignee" name="assignee" class="filter-type bulk-field">
+          <option value="">Assignee…</option>
+          <option value="__unassigned__">Unassigned</option>
+          {% for u in alert_assignees %}
+          <option value="{{ u.login }}">{{ u.login }}</option>
+          {% endfor %}
+        </select>
+        <button type="button" class="btn btn-primary" data-modal-open="alert-bulk-confirm-modal" data-bulk-requires-selection="alert-bulk-form">Apply</button>
+      </div>
     </div>
     <div class="table-wrap">
     <table class="data-table alert-table table-has-select">

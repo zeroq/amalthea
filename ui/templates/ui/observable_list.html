@@ -30,34 +30,36 @@
           <input type="checkbox" data-bulk-select-all="observable-bulk-form" aria-label="Select all observables on this page">
           <span class="dim">Page</span>
         </label>
-        <span class="dim bulk-count" data-bulk-count="observable-bulk-form">0 selected</span>
-        <label class="sr-only" for="bulk-obs-tlp">TLP</label>
-        <select id="bulk-obs-tlp" name="tlp" class="filter-type bulk-field">
-          <option value="">TLP…</option>
-          {% for value, label in tlp_choices %}
-          <option value="{{ value }}">{{ label }}</option>
-          {% endfor %}
-        </select>
-        <label class="sr-only" for="bulk-obs-pap">PAP</label>
-        <select id="bulk-obs-pap" name="pap" class="filter-type bulk-field">
-          <option value="">PAP…</option>
-          {% for value, label in pap_choices %}
-          <option value="{{ value }}">{{ label }}</option>
-          {% endfor %}
-        </select>
-        <label class="sr-only" for="bulk-obs-ioc">IOC</label>
-        <select id="bulk-obs-ioc" name="ioc" class="filter-type bulk-field">
-          <option value="">IOC…</option>
-          <option value="true">IOC: Yes</option>
-          <option value="false">IOC: No</option>
-        </select>
-        <label class="sr-only" for="bulk-obs-sighted">Sighted</label>
-        <select id="bulk-obs-sighted" name="sighted" class="filter-type bulk-field">
-          <option value="">Sighted…</option>
-          <option value="true">Sighted: Yes</option>
-          <option value="false">Sighted: No</option>
-        </select>
-        <button type="button" class="btn btn-primary" data-modal-open="observable-bulk-confirm-modal" data-bulk-requires-selection="observable-bulk-form">Apply</button>
+        <div class="bulk-controls" data-bulk-controls="observable-bulk-form" hidden>
+          <span class="dim bulk-count" data-bulk-count="observable-bulk-form">0 selected</span>
+          <label class="sr-only" for="bulk-obs-tlp">TLP</label>
+          <select id="bulk-obs-tlp" name="tlp" class="filter-type bulk-field">
+            <option value="">TLP…</option>
+            {% for value, label in tlp_choices %}
+            <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+          <label class="sr-only" for="bulk-obs-pap">PAP</label>
+          <select id="bulk-obs-pap" name="pap" class="filter-type bulk-field">
+            <option value="">PAP…</option>
+            {% for value, label in pap_choices %}
+            <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+          <label class="sr-only" for="bulk-obs-ioc">IOC</label>
+          <select id="bulk-obs-ioc" name="ioc" class="filter-type bulk-field">
+            <option value="">IOC…</option>
+            <option value="true">IOC: Yes</option>
+            <option value="false">IOC: No</option>
+          </select>
+          <label class="sr-only" for="bulk-obs-sighted">Sighted</label>
+          <select id="bulk-obs-sighted" name="sighted" class="filter-type bulk-field">
+            <option value="">Sighted…</option>
+            <option value="true">Sighted: Yes</option>
+            <option value="false">Sighted: No</option>
+          </select>
+          <button type="button" class="btn btn-primary" data-modal-open="observable-bulk-confirm-modal" data-bulk-requires-selection="observable-bulk-form">Apply</button>
+        </div>
       </div>
       <div class="table-wrap">
       <table class="data-table">

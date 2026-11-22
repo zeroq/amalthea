@@ -275,6 +275,11 @@
       applyButtons[b].disabled = checked === 0;
       applyButtons[b].setAttribute("aria-disabled", checked === 0 ? "true" : "false");
     }
+    var controls = document.querySelectorAll('[data-bulk-controls="' + formId + '"]');
+    for (var c = 0; c < controls.length; c++) {
+      if (checked === 0) controls[c].setAttribute("hidden", "");
+      else controls[c].removeAttribute("hidden");
+    }
   }
 
   document.addEventListener("click", function (event) {

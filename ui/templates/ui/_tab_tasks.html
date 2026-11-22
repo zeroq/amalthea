@@ -35,23 +35,25 @@
         <input type="checkbox" data-bulk-select-all="task-bulk-form" aria-label="Select all tasks on this page">
         <span class="dim">Page</span>
       </label>
-      <span class="dim bulk-count" data-bulk-count="task-bulk-form">0 selected</span>
-      <label class="sr-only" for="bulk-task-status">Status</label>
-      <select id="bulk-task-status" name="status" class="filter-type bulk-field">
-        <option value="">Status…</option>
-        {% for value, label in task_status_options %}
-        <option value="{{ value }}">{{ label }}</option>
-        {% endfor %}
-      </select>
-      <label class="sr-only" for="bulk-task-assignee">Assignee</label>
-      <select id="bulk-task-assignee" name="assignee" class="filter-type bulk-field">
-        <option value="">Assignee…</option>
-        <option value="__unassigned__">Unassigned</option>
-        {% for u in task_assignees %}
-        <option value="{{ u.login }}">{{ u.login }}</option>
-        {% endfor %}
-      </select>
-      <button type="button" class="btn btn-primary" data-modal-open="task-bulk-confirm-modal" data-bulk-requires-selection="task-bulk-form">Apply</button>
+      <div class="bulk-controls" data-bulk-controls="task-bulk-form" hidden>
+        <span class="dim bulk-count" data-bulk-count="task-bulk-form">0 selected</span>
+        <label class="sr-only" for="bulk-task-status">Status</label>
+        <select id="bulk-task-status" name="status" class="filter-type bulk-field">
+          <option value="">Status…</option>
+          {% for value, label in task_status_options %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+        <label class="sr-only" for="bulk-task-assignee">Assignee</label>
+        <select id="bulk-task-assignee" name="assignee" class="filter-type bulk-field">
+          <option value="">Assignee…</option>
+          <option value="__unassigned__">Unassigned</option>
+          {% for u in task_assignees %}
+          <option value="{{ u.login }}">{{ u.login }}</option>
+          {% endfor %}
+        </select>
+        <button type="button" class="btn btn-primary" data-modal-open="task-bulk-confirm-modal" data-bulk-requires-selection="task-bulk-form">Apply</button>
+      </div>
     </div>
   {% endif %}
   <ul class="tasks">
