@@ -16,15 +16,26 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
 from django.utils import timezone
 
 from mcp_server.auth import Principal
-from mcp_server.models import McpActionProposal
+from mcp_server.models import McpActionProposal, McpOrgPolicy, McpPolicyDecision
 from mcp_server.schemas import tool_result
+from mcp_server.services.autonomy import evaluate_proposal_autonomy
 from mcp_server.tools.base import ToolFailureError, run_write
+
+
+@dataclass(frozen=True)
+class _AutonomyPrincipal:
+    organisation_id: Any
+    actor_id: Any
+    credential_id: Any
+    oauth_binding_id: Any = None
+
 
 # ---------------------------------------------------------------------------
 # Helper: deterministic idempotency key
@@ -374,6 +385,111 @@ def propose_case_comment(*, arguments: dict[str, Any], principal: Principal) -> 
     proposal.arguments_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     proposal.save(update_fields=["arguments_hash"])
 
+    # ---- Run autonomy hook immediately after new proposal creation ----
+    # Idempotency returns (existing is not None) skip this hook entirely.
+    from django.db import transaction as db_transaction
+
+    principal_actor_id = getattr(principal, "actor_id", None) or getattr(principal, "id", None)
+    principal_credential_id = getattr(principal, "credential_id", None)
+    principal_oauth_binding_id = getattr(principal, "oauth_binding_id", None)
+
+    principal_obj = _AutonomyPrincipal(
+        organisation_id=proposal.organisation_id,
+        actor_id=principal_actor_id,
+        credential_id=principal_credential_id,
+        oauth_binding_id=principal_oauth_binding_id,
+    )
+
+    # Build a minimal target reference (the case object)
+    from cases.models import Case
+
+    target = None
+    if hasattr(proposal, "target_id") and proposal.target_id:
+        try:
+            target = Case.objects.get(pk=proposal.target_id, owner_org_id=proposal.organisation_id)
+        except Exception:
+            target = None
+
+    # Compute daily count for cap checking (enforce pre_execution executed count)
+    # We need the policy; load it lazily
+
+    with db_transaction.atomic():
+        policy = (
+            McpOrgPolicy.objects.select_for_update()
+            .filter(organisation_id=proposal.organisation_id)
+            .first()
+        )
+        if policy is None:
+            # Lazy creation: policy defaults (autonomy_enabled=False, shadow_mode=True)
+            # mean autonomy is effectively off; still write a decision row.
+            policy = McpOrgPolicy(organisation_id=proposal.organisation_id)
+            policy.full_clean()
+            policy.save()
+
+        now = timezone.now()
+        daily_count = McpPolicyDecision.objects.filter(
+            organisation_id=proposal.organisation_id,
+            mode="enforce",
+            decision="allow",
+            execution_outcome="executed",
+            stage="pre_execution",
+            created_at__date=now.date(),
+        ).count()
+
+        decision = evaluate_proposal_autonomy(
+            policy=policy,
+            principal=principal_obj,
+            proposal=proposal,
+            target=target,
+            now=now,
+            daily_count=daily_count,
+            stage="proposal_created",
+        )
+
+        # Write the proposal_created decision row (stage=proposal_created)
+        McpPolicyDecision.objects.create(
+            organisation_id=proposal.organisation_id,
+            policy=policy,
+            proposal=proposal,
+            tool_name=proposal.tool_name,
+            action=proposal.action,
+            target_type=proposal.target_type,
+            target_id=proposal.target_id,
+            risk=proposal.risk,
+            mode=decision.mode,
+            decision=decision.decision,
+            reason_code=decision.reason_code,
+            evidence=decision.evidence,
+            policy_snapshot=decision.policy_snapshot,
+            credential_id=principal_credential_id or None,
+            actor_id=principal_actor_id or None,
+            stage="proposal_created",
+            oauth_binding_id=principal_oauth_binding_id or None,
+            execution_outcome="not_applicable" if decision.mode == "shadow" else "pending",
+        )
+
+        # ---- Mode handling ----
+        if decision.mode == "shadow":
+            # Shadow: leave proposal pending; execute nothing; return normal handle
+            # The proposal status remains PENDING; no domain writes occur.
+            pass  # proposal stays pending; handle returned unchanged
+        elif decision.mode == "enforce" and decision.decision == "allow":
+            # Enforce + allow: atomically approve without setting decided_by to human/service user
+            # then call dedicated execute_proposal_autonomous()
+            from mcp_server.services.proposals import execute_proposal_autonomous
+
+            # Approve the proposal atomically (no decided_by)
+            proposal.status = "approved"
+            # deliberately do NOT set proposal.decided_by or proposal.decided_at
+            proposal.save(update_fields=["status", "updated_at"])
+
+            # Call the autonomous executor; this re-evaluates with stage=pre_execution
+            # under policy row lock, calls domain services, and writes bounded results.
+            execute_proposal_autonomous(proposal=proposal)
+        else:
+            # deny or defer: leave proposal pending, no further action
+            pass
+
     expires_at = proposal.expires_at
     return {
         "proposalId": str(proposal.id),
@@ -585,6 +701,111 @@ def propose_task_create(*, arguments: dict[str, Any], principal: Principal) -> d
     canonical = _canonicalise_args(clean_args)
     proposal.arguments_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     proposal.save(update_fields=["arguments_hash"])
+
+    # ---- Run autonomy hook immediately after new proposal creation ----
+    # Idempotency returns (existing is not None) skip this hook entirely.
+    from django.db import transaction as db_transaction
+
+    principal_actor_id = getattr(principal, "actor_id", None) or getattr(principal, "id", None)
+    principal_credential_id = getattr(principal, "credential_id", None)
+    principal_oauth_binding_id = getattr(principal, "oauth_binding_id", None)
+
+    principal_obj = _AutonomyPrincipal(
+        organisation_id=proposal.organisation_id,
+        actor_id=principal_actor_id,
+        credential_id=principal_credential_id,
+        oauth_binding_id=principal_oauth_binding_id,
+    )
+
+    # Build a minimal target reference (the case object)
+    from cases.models import Case
+
+    target = None
+    if hasattr(proposal, "target_id") and proposal.target_id:
+        try:
+            target = Case.objects.get(pk=proposal.target_id, owner_org_id=proposal.organisation_id)
+        except Exception:
+            target = None
+
+    # Compute daily count for cap checking (enforce pre_execution executed count)
+    # We need the policy; load it lazily
+
+    with db_transaction.atomic():
+        policy = (
+            McpOrgPolicy.objects.select_for_update()
+            .filter(organisation_id=proposal.organisation_id)
+            .first()
+        )
+        if policy is None:
+            # Lazy creation: policy defaults (autonomy_enabled=False, shadow_mode=True)
+            # mean autonomy is effectively off; still write a decision row.
+            policy = McpOrgPolicy(organisation_id=proposal.organisation_id)
+            policy.full_clean()
+            policy.save()
+
+        now = timezone.now()
+        daily_count = McpPolicyDecision.objects.filter(
+            organisation_id=proposal.organisation_id,
+            mode="enforce",
+            decision="allow",
+            execution_outcome="executed",
+            stage="pre_execution",
+            created_at__date=now.date(),
+        ).count()
+
+        decision = evaluate_proposal_autonomy(
+            policy=policy,
+            principal=principal_obj,
+            proposal=proposal,
+            target=target,
+            now=now,
+            daily_count=daily_count,
+            stage="proposal_created",
+        )
+
+        # Write the proposal_created decision row (stage=proposal_created)
+        McpPolicyDecision.objects.create(
+            organisation_id=proposal.organisation_id,
+            policy=policy,
+            proposal=proposal,
+            tool_name=proposal.tool_name,
+            action=proposal.action,
+            target_type=proposal.target_type,
+            target_id=proposal.target_id,
+            risk=proposal.risk,
+            mode=decision.mode,
+            decision=decision.decision,
+            reason_code=decision.reason_code,
+            evidence=decision.evidence,
+            policy_snapshot=decision.policy_snapshot,
+            credential_id=principal_credential_id or None,
+            actor_id=principal_actor_id or None,
+            oauth_binding_id=principal_oauth_binding_id or None,
+            stage="proposal_created",
+            execution_outcome="not_applicable" if decision.mode == "shadow" else "pending",
+        )
+
+        # ---- Mode handling ----
+        if decision.mode == "shadow":
+            # Shadow: leave proposal pending; execute nothing; return normal handle
+            # The proposal status remains PENDING; no domain writes occur.
+            pass  # proposal stays pending; handle returned unchanged
+        elif decision.mode == "enforce" and decision.decision == "allow":
+            # Enforce + allow: atomically approve without setting decided_by to human/service user
+            # then call dedicated execute_proposal_autonomous()
+            from mcp_server.services.proposals import execute_proposal_autonomous
+
+            # Approve the proposal atomically (no decided_by)
+            proposal.status = "approved"
+            # deliberately do NOT set proposal.decided_by or proposal.decided_at
+            proposal.save(update_fields=["status", "updated_at"])
+
+            # Call the autonomous executor; this re-evaluates with stage=pre_execution
+            # under policy row lock, calls domain services, and writes bounded results.
+            execute_proposal_autonomous(proposal=proposal)
+        else:
+            # deny or defer: leave proposal pending, no further action
+            pass
 
     expires_at = proposal.expires_at
     return {

@@ -1,7 +1,7 @@
 # TODO — Amalthea
 
 Open work only. Shipped work and closed-item history live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-11-19 — **MCP Phase 0/1/2 complete and verified READY; Phase 3 next** (§22): read-only
+Last updated: 2026-11-22 — **MCP Phase 4 policy-bounded autonomy implemented and verified PASS** (§22.6). Also **§25 source mapping submappings decisions recorded** and **§24 alert detail Similar tab plan decisions recorded**. MCP Phase 0/1/2/3 complete and verified READY: read-only
 `/mcp`, static-bearer credentials, org-bound scopes, audit/rate limits, read tools/resources/prompts,
 and Settings → Agent access are in place. A live Daphne smoke exposed that Daphne sends no ASGI
 lifespan; `McpLifecycleApp` now starts the session manager lazily on the first `/mcp` request, and
@@ -60,8 +60,10 @@ to its narrow follow-up on 2026-11-13 (see `COMPLETED.md`).
 | **16** | **§12.9 — UI layout/style standardization** | Input/button heights, compact action columns, table/filter convention; codify guidelines. Includes the new alert/case severity rows (`.severity-filter-row`, `.severity-filter--N`) as the canonical filter pattern. | **Low.** |
 | **17** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. | **None** — hygiene. |
 | **18** | **§6.16 P6-fu1 — Postgres search measurement** | Search shipped (`6427beeb`); verification and T6 security review are complete (PASS). Remaining: run `EXPLAIN` on seeded Postgres before deciding on a trigram index. | **Medium** — closes the last evidence gap; no user-facing feature is missing. |
-| **19** | **§22 — MCP server for AI agents (Phases 1–2 implemented)** | CrewAI first; read-only context, proposal-first state changes, and direct auto-posted AI summaries. Phase 1 and Phase 2 are implemented and verified READY (full suite clean, security PASS, independent verification PASS). Phase 3 OAuth + external-client hardening is next. | **Medium** — agent-assisted triage; Phase 3 unlocks untrusted clients. |
+| **19** | **§22 — MCP server for AI agents (Phases 1–4 implemented)** | CrewAI first; read-only context, proposal-first state changes, direct auto-posted AI summaries, OAuth 2.1 resource-server hardening, and shadow-first policy-bounded autonomy. All phases implemented and verified PASS (security PASS, independent verification PASS). | **Medium** — agent-assisted triage; Phase 4 adds narrow opt-in autonomy. |
 | **20** | **§23 — Rejected Observables Management** | Standalone rejection records linked to alerts, suppression in extraction, admin review/promotion, org isolation, confirmation modal. | **Medium** — false-positive suppression; upstream plan still needs acceptance criteria. |
+| **21** | **§24 — Alert detail Similar tab** | Decisions recorded: lazy Similar tab on alert detail, up to 20 recently closed similar alerts via adapted SSDEEP/title gate plus shared observables, count badge. | **Medium** — analyst discovery of prior closed alerts. |
+| **22** | **§25 — Source mapping submappings** | Decisions recorded: master mapping plus v2 `submappings` keyed by raw alert JSON `type`, full replacement, master fallback, JSON-first UI. | **Medium-High** — correct multi-type feed ingestion. |
 ---
 
 ## 2. Quality gates not yet met
@@ -790,8 +792,14 @@ retention 90 days; agent credentials managed in Settings UI only; no stdio bridg
     `manage.py check`, `makemigrations --check --dry-run`, tracked and changed-file secret scans clean.
   - [x] Final independent verification: **READY — PASS** (55 ACs evaluated, 0 Not Met, 5 documented
     deviations, 0 blockers) (`docs/planning/VERIFY-2026-11-20-mcp-phase3.md`).
-- [ ] **22.6 — Phase 4 policy-bounded autonomy.** `McpOrgPolicy`, shadow-mode evaluation, low-risk
-  allowlist, kill switch, autonomy UI; no autonomous closure.
+- [x] **22.6 — Phase 4 policy-bounded autonomy.** `McpOrgPolicy`, shadow-mode evaluation, low-risk
+  allowlist, kill switch, autonomy UI; no autonomous closure. Defaults accepted 2026-11-21. Plan:
+  [`PLAN-2026-11-21-mcp-phase4-autonomy.md`](docs/planning/PLAN-2026-11-21-mcp-phase4-autonomy.md);
+  implementation brief:
+  [`IMPL-2026-11-21-mcp-phase4-autonomy.md`](docs/planning/IMPL-2026-11-21-mcp-phase4-autonomy.md).
+  Focused suite: **284 passed**. Security review: **PASS**
+  (`docs/reviews/MCP-PHASE4-SECURITY-REVIEW-2026-11-22.md`). Independent verification: **PASS**
+  (42/42 ACs met, 0 deviations) (`docs/planning/VERIFICATION-2026-11-22-mcp-phase4-autonomy-144831.md`).
 
 **Dependencies/constraints.** Phase 1 depends on 22.2 and on a first-class agent-credential UI.
 Phase 2 depends on extracting write logic out of views without changing REST/UI behaviour. Phase 3
@@ -825,3 +833,707 @@ secrets never enter the repo.
   SuperAdmins can see all records across all organizations.
 - [ ] **23.5 — Promotion Confirmation.**
   Ensure the "Promote" action triggers a confirmation modal to prevent accidental promotion of large sets of data.
+
+---
+
+## 24. Alert detail — Similar tab (plan draft, 2026-11-21)
+
+Status: **Decisions recorded 2026-11-21 — ready for implementation brief.**
+Plan location: this section (per user request; no separate `docs/planning/PLAN-…` file for this item).
+
+### 24.0 Summary
+
+Add a **Similar** tab to the alert detail page. Activating it shows a bounded list of up to **20 closed alerts**
+considered similar to the alert being viewed. Each row exposes a clickable **title** linking to that alert's detail
+page, the alert's **verdict**, the **closed** timestamp, and a **similarity** indicator. The tab shows a count badge.
+The list is ordered by `updated_at` descending, then `date` / `pk` as tie-breakers.
+
+Similarity is computed from two bounded signals, unioned together:
+
+1. Adapted fuzzy matching from the case Similar implementation: `payload_ssdeep` via `ppdeep.compare` plus a
+   normalized-title Jaccard gate and the existing configured thresholds.
+2. Shared stored observables via `AlertObservable`, excluding observables with `ignore_similarity=True`.
+
+### 24.1 Goals
+
+- Add a `Similar` tab to `ui/alert_detail.html` using the existing server-rendered tab/lazy-fragment pattern,
+  placed **after Observables and before Raw data**.
+- Reuse and adapt the existing fuzzy similarity stack (`payload_ssdeep`, `ppdeep.compare`, normalized title Jaccard,
+  configured thresholds).
+- Also identify closed alerts sharing one or more stored observables with the source alert.
+- Show only alerts with `Alert.status.stage == "Closed"`, regardless of verdict value.
+- Show a tab count badge using the bounded match total.
+- Limit displayed results to 20, with an honest “Showing 20 of N” disclosure when more matches exist in the
+  bounded candidate pool.
+- Keep the feature read-only, tenant-scoped, keyboard-accessible, and consistent with the case Similar tab.
+
+### 24.2 Non-goals
+
+- No alert merge/attach/link actions from this tab in this iteration.
+- No REST/API endpoint; this is a UI fragment only.
+- No new similarity model, no persisted similarity scores, no Celery job, no WebSocket event.
+- No new `closed_at` field or migration; `updated_at` ordering is accepted for this feature.
+- No cross-organisation comparison, even for superAdmins.
+- No show of raw payloads or raw JSON in the fragment.
+
+### 24.3 Current-state findings
+
+- Alert detail view: `ui/views/alerts.py::alert_detail()`.
+  - Current tabs are built at `ui/views/alerts.py:218-225`: `general`, `observables`, `raw-data`.
+  - `active_tab` is allow-listed against those slugs.
+  - Context already includes `alert` and `alert_verdict`.
+- Alert detail template: `ui/templates/ui/alert_detail.html`.
+  - Tab list at `ui/templates/ui/alert_detail.html:25-44`.
+  - Panels: general, observables, raw-data; `tabs.js` is already loaded.
+- Case Similar lazy pattern:
+  - `ui/views/case_detail.py::case_similar_fragment()` (`ui/views/case_detail.py:462-490`).
+  - Route `ui-case-similar` in `ui/urls.py:84`.
+  - Fragment root `ui/templates/ui/_similar_tab_fragment.html` carries `data-similar-count` / `data-similar-*`.
+  - `ui/static/ui/tabs.js:66-97` lazy-loads `data-lazy-src` panels and updates count badges.
+- Similarity primitives:
+  - `cases/correlation.py::alerts_fuzzy_similar_to_case()` (`cases/correlation.py:350-462`).
+  - SSDEEP canonicalization/hash: `alerts/hashing.py::compute_payload_ssdeep()`.
+  - Title normalization/Jaccard: `alerts/title_similarity.py::normalize_title_tokens()` / `jaccard_similarity()`.
+  - Thresholds/settings:
+    - `ALERT_FUZZY_SIMILARITY_THRESHOLD` default 60.
+    - `ALERT_FUZZY_TITLE_SIMILARITY_THRESHOLD` default 70.
+    - `ALERT_FUZZY_TITLE_GATE_ENABLED` default True.
+    - Env overrides documented in `docs/runbook.md`.
+- Stored alert observables:
+  - `alerts/models.py::AlertObservable` links alerts to deduped `Observable` rows.
+  - `observables/models.py:110` has `ignore_similarity`; case correlation already excludes it in
+    `cases/correlation.py` (`ignore_similarity=True` must be excluded here too).
+- Alert closure/verdict:
+  - `Alert.verdict` exists (`alerts/models.py:88-90`) but is a plain string, not choices.
+  - Closing verdicts are `true_positive` / `false_positive` (`core/enums.py:190-208`).
+  - Direct close sets `verdict` and `updated_at` (`ui/views/alerts.py::alert_close()` area).
+  - Case-close propagation updates linked alerts with `QuerySet.update(status=..., verdict=...)` and does **not**
+    update `updated_at` (`cases/update.py::close_case()` area).
+  - There is **no** `Alert.closed_at` field.
+
+### 24.4 Architecture / implementation shape
+
+#### 24.4.1 Similarity helper
+
+Add an alert-to-alert helper beside the existing fuzzy helper, preferably in `cases/correlation.py` to reuse
+constants and imports:
+
+```python
+SIMILAR_CLOSED_ALERTS_LIMIT = 20
+
+
+@dataclass(frozen=True)
+class SimilarAlertMatch:
+    alert: Alert
+    similarity: int | None  # fuzzy score 0-100, or None when only observables matched
+    shared_observable_count: int  # 0 when only fuzzy matched
+
+
+def alerts_similar_to_alert(
+    source: Alert,
+    *,
+    user: User,
+    limit: int = SIMILAR_CLOSED_ALERTS_LIMIT,
+) -> tuple[list[SimilarAlertMatch], int]: ...
+```
+
+Shared base scope for both channels:
+
+- `Alert.objects.filter(status__stage="Closed")`.
+- `.exclude(pk=source.pk)`.
+- `.filter(org_q("owner_org", user))`.
+- Add `owner_org_id=source.owner_org_id` so a superAdmin viewing a cross-org source alert cannot compare against
+  another tenant's alerts.
+- `select_related("status", "owner_org")`.
+- Order by `("-updated_at", "-date", "-pk")`; this is the accepted “most recently closed” proxy.
+
+Fuzzy channel:
+
+1. If `source.payload_ssdeep` is empty, produce no fuzzy candidates.
+2. Otherwise, take the base scope ordered by recency and slice to `MAX_FUZZY_COMPARISONS` before scoring.
+3. For each candidate with non-empty `payload_ssdeep`:
+   - `score = ppdeep.compare(candidate.payload_ssdeep, source.payload_ssdeep)`.
+   - When the title gate is enabled, require
+     `jaccard_similarity(normalize_title_tokens(candidate.title), normalize_title_tokens(source.title)) >= threshold`.
+   - Use the same settings/env thresholds as the case Similar helper.
+   - Treat `ppdeep` import failure or comparison exceptions as score 0, matching existing behaviour.
+4. Keep qualifying candidates with `similarity=score`.
+
+Shared-observable channel:
+
+1. Read source `AlertObservable` rows and collect `observable_id` values, excluding
+   `observable__ignore_similarity=True`; cap source observable IDs at `MAX_CORRELATION_OBS`.
+2. If there are no source observable IDs, produce no observable candidates.
+3. Query `AlertObservable` rows whose `observable_id` is in that set, excluding
+   `observable__ignore_similarity=True`, joined to the shared base scope, annotating
+   `shared_observable_count=Count("observable_id", distinct=True)`.
+4. Cap candidate alert rows at `MAX_FUZZY_COMPARISONS` after ordering by recency.
+5. Keep candidates with `shared_observable_count > 0`.
+
+Union and result contract:
+
+- Merge fuzzy and observable candidates by `alert.id`.
+- If a candidate matched both channels, keep the maximum fuzzy score and the shared observable count.
+- `total_matching` is the size of the union after both bounded channels, before the final 20-row slice.
+- Final rows are sorted by `("-updated_at", "-date", "-pk")`, not by similarity score.
+- Return `(rows[:limit], total_matching)`.
+- Similarity display rules:
+  - fuzzy only: `NN%`
+  - observables only: `N shared obs`
+  - both: `NN% · N shared obs`
+
+#### 24.4.2 View and route
+
+- `ui/views/alerts.py`:
+  - Import `alerts_similar_to_alert`, `SIMILAR_CLOSED_ALERTS_LIMIT`, and `SimilarAlertMatch`.
+  - Add `{"slug": "similar", "label": "Similar", "count": similar_total}` after `observables` and before
+    `raw-data`; the count is the bounded union total.
+  - In `alert_detail()`, call `alerts_similar_to_alert(alert, user=request.user)` once to populate the badge.
+    This cost is accepted by decision Q24-4.
+  - Add `alert_similar_fragment(request, alert_id)`:
+    - `@login_required`, `@require_GET`, viewer-allowed (read-only).
+    - `resolve_alert(request.user, alert_id, write=False)`; unknown/cross-org → 404.
+    - Call the helper with `limit=SIMILAR_CLOSED_ALERTS_LIMIT`.
+    - Render `ui/_alert_similar_tab_fragment.html`.
+- `ui/urls.py`: add `alerts/<uuid:alert_id>/similar` → `ui-alert-similar`.
+- `ui/views/__init__.py`: export the new fragment view if the package re-exports alert views.
+
+#### 24.4.3 Templates / UI
+
+- `ui/templates/ui/alert_detail.html`:
+  - Add the `similar` tab entry **after Observables and before Raw data**, using the existing tab badge rendering
+    (`{{ tab.count }}`) and icon branch style; use `fa-diagram-project`.
+  - Add `panel-similar` with `data-lazy-src="{% url 'ui-alert-similar' alert.id %}"` when inactive.
+  - If active via `?tab=similar`, server-render the fragment into the panel and mark it `data-loaded`.
+- New `ui/templates/ui/_alert_similar_tab_fragment.html`:
+  - Root carries `data-similar-count="{{ similar_total }}"` and `data-similar-alerts` for `tabs.js` parity.
+  - Includes `ui/_alert_similar_alerts_card.html`.
+- New `ui/templates/ui/_alert_similar_alerts_card.html`:
+  - `.card` with `<h2>Similar alerts</h2>`.
+  - `.table-wrap` + `<table class="data-table data-table-tight">`.
+  - `<caption class="sr-only">Closed alerts similar to this alert</caption>`.
+  - Columns: **Title**, **Verdict**, **Closed**, **Similarity**.
+  - Title is a link to `ui-alert-detail` for the candidate alert.
+  - Verdict is human-readable via `core.taxonomy_read` helper; raw token fallback only if no label exists.
+  - Closed uses `updated_at` and visible format `Y-m-d H:i`.
+  - Similarity uses a template helper/context string:
+    - fuzzy only: `NN%`
+    - observables only: `N shared obs`
+    - both: `NN% · N shared obs`
+  - Honest truncation: `Showing {{ rows|length }} of {{ similar_total }} similar alerts` only when truncated.
+  - Empty state: `No closed alerts are similar enough right now.`
+
+### 24.5 Data model
+
+No schema change and no migration. Use existing `Alert.status`, `Alert.verdict`, `Alert.updated_at`, `Alert.date`,
+`Alert.payload_ssdeep`, `Alert.title`, `Alert.owner_org`, `AlertObservable`, and `Observable.ignore_similarity`.
+Ordering by `updated_at` is an accepted approximation for closure time; do not add `closed_at` in this feature.
+
+### 24.6 Phases and acceptance criteria
+
+#### Phase 1 — Similarity helper
+
+- **T1.1 — Add `alerts_similar_to_alert()`, `SimilarAlertMatch`, and cap constant.**
+  - AC1.1a: Helper lives in `cases/correlation.py` and reuses existing SSDEEP/title settings/thresholds.
+  - AC1.1b: Base candidate set is closed-only, excludes the source alert, and is scoped to the caller's org and the
+    source alert's org; superAdmin cannot cross tenants.
+  - AC1.1c: Fuzzy channel requires non-empty source and candidate `payload_ssdeep`, applies the normalized-title
+    Jaccard gate when enabled, and caps comparisons at `MAX_FUZZY_COMPARISONS`.
+  - AC1.1d: Observable channel uses source `AlertObservable` IDs, excludes `ignore_similarity=True`, caps both
+    source observables and candidate alerts, and counts distinct shared observables.
+  - AC1.1e: Fuzzy and observable candidates are unioned by alert ID; dual matches preserve both score and shared
+    observable count.
+  - AC1.1f: Return value is `(rows, total_before_final_limit)` and `rows` are ordered by `-updated_at`, `-date`,
+    `-pk`.
+  - AC1.1g: Source with neither SSDEEP nor usable observables returns `([], 0)` without raising.
+  - AC1.1h: A result row carries the candidate alert, optional fuzzy score, and shared observable count.
+
+#### Phase 2 — UI route and rendering
+
+- **T2.1 — Add route and fragment view.**
+  - AC2.1a: `ui-alert-similar` resolves to a GET-only view.
+  - AC2.1b: Unauthenticated requests redirect to login; viewer reads are allowed; no mutation occurs.
+  - AC2.1c: Unknown/cross-org alert IDs return 404.
+  - AC2.1d: Fragment context includes `similar_alerts`, `similar_total`, and `alert`.
+- **T2.2 — Add tab, badge, and lazy panel.**
+  - AC2.2a: `alert_detail()` accepts `?tab=similar` and marks the Similar tab active.
+  - AC2.2b: Default tab remains `general`; invalid tab values still fall back to `general`.
+  - AC2.2c: The Similar tab is after Observables and before Raw data and renders the bounded similarity count badge.
+  - AC2.2d: Inactive Similar panel has `data-lazy-src` pointing at `ui-alert-similar`.
+  - AC2.2e: Active Similar panel is server-rendered and marked loaded.
+  - AC2.2f: Tab icon and label follow the existing dark-theme/accessibility conventions.
+- **T2.3 — Add result table.**
+  - AC2.3a: Table uses `.data-table data-table-tight`, has `sr-only` caption, and all headers use `scope="col"`.
+  - AC2.3b: Each row has a clickable title linking to the candidate alert detail.
+  - AC2.3c: Each row shows a human-readable verdict.
+  - AC2.3d: Each row shows Closed as `updated_at` in `Y-m-d H:i`.
+  - AC2.3e: Each row shows Similarity as `NN%`, `N shared obs`, or `NN% · N shared obs` as applicable.
+  - AC2.3f: At most 20 rows render.
+  - AC2.3g: Truncation disclosure appears only when `similar_total > rows|length`.
+  - AC2.3h: Empty state renders when no matches exist.
+  - AC2.3i: No native `confirm()`/`alert()`/`prompt()` or mutation controls are introduced.
+
+#### Phase 3 — Tests and verification
+
+- **T3.1 — Add `tests/conformance/test_alert_similar_tab.py`.**
+  - AC3.1a: Helper tests cover closed-only, exclude-source, org scoping, superAdmin cross-org source,
+    SSDEEP/title thresholds, empty SSDEEP, and bounded honest total for the fuzzy channel.
+  - AC3.1b: Helper tests cover shared-observable matches, `ignore_similarity=True` exclusion, dual-channel union,
+    and observable-only matches when SSDEEP is empty.
+  - AC3.1c: Ordering test proves results are newest-by-`updated_at` first even when similarity scores differ.
+  - AC3.1d: Limit test proves 20-row cap and honest total.
+  - AC3.1e: Fragment tests cover login, viewer read, 404s, rendered title link, verdict label, Closed, Similarity,
+    and empty state.
+  - AC3.1f: Alert detail tests cover tab position, badge count, `?tab=similar` activation, invalid-tab fallback,
+    and lazy `data-lazy-src`.
+  - AC3.1g: Table markup guard passes (`.data-table`, caption, `scope="col"`).
+  - AC3.1h: No font/icon/table/keyboard conformance regressions.
+- **T3.2 — Verification.**
+  - AC3.2a: Targeted suites green.
+  - AC3.2b: `make check` / full static gate green.
+  - AC3.2c: Full pytest green per the standing DoD rule.
+  - AC3.2d: Secret scan clean.
+  - AC3.2e: Verification report records any deviation from Q answers.
+
+### 24.7 Security
+
+- The fragment is read-only and uses the same `resolve_alert(..., write=False)` contract as case Similar.
+- Candidate queries are tenant-scoped twice: caller org and source-alert org.
+- No raw `raw_payload`, no mapping warnings, and no secret material are rendered.
+- Similarity computation remains bounded: fuzzy comparisons by `MAX_FUZZY_COMPARISONS`, source observable IDs by
+  `MAX_CORRELATION_OBS`, and observable candidate alerts by `MAX_FUZZY_COMPARISONS`; do not remove the caps.
+- Observables marked `ignore_similarity=True` are excluded from the shared-observable channel.
+- Title/verdict values are escaped by Django templates.
+- No cross-org superAdmin comparison path.
+- No write audit events are needed because the tab performs no mutation.
+
+### 24.8 Testing plan
+
+Primary new suite: `tests/conformance/test_alert_similar_tab.py`.
+
+Existing suites to rerun:
+
+- `tests/conformance/test_alert_fuzzy_similarity.py`
+- `tests/conformance/test_ui_similar_tab_lazy.py`
+- `tests/conformance/test_alert_observables_tab.py`
+- `tests/conformance/test_ui_table_markup.py`
+- `tests/conformance/test_ui_icons.py`
+- `tests/conformance/test_ui_icon_font.py`
+- `tests/conformance/test_ui_alert_detail_tags.py`
+- `tests/conformance/test_ui_urls_smoke.py`
+- `tests/conformance/test_tenant_scoping.py`
+
+Verification gates:
+
+- `.venv/bin/pytest <targeted suites> -q`
+- `make check`
+- secret scan
+- full pytest
+
+### 24.9 Risks
+
+- **R1 — Approximate closure time.** Ordering uses `updated_at`; case-propagated closure does not update it, so
+  “most recently closed” is approximate by accepted decision Q24-2.
+- **R2 — False positives/negatives.** SSDEEP plus title gate is heuristic; vendor-specific volatile fields may
+  suppress fuzzy matches (already tracked in §12.12-fu3). Shared observables mitigate but do not eliminate this.
+- **R3 — Missing SSDEEP.** Historic alerts or degraded payloads may have empty `payload_ssdeep`; they can still
+  match via shared observables, but fuzzy-only matches are impossible.
+- **R4 — CPU/database cost.** Both channels are bounded, but `ppdeep.compare` is CPU-bound and observable fan-out
+  can be large; do not raise caps without measurement.
+- **R5 — Candidate cap honesty.** `similar_total` is honest for the bounded candidate pools, not necessarily the
+  whole database. UI copy must not imply exhaustive search.
+- **R6 — Tab-badge cost.** Computing similarity on every alert detail load for the badge is accepted by Q24-4; if
+  it proves slow, cache or lazy-load the badge as a follow-up rather than silently changing this decision.
+
+### 24.10 Decisions (answered 2026-11-21)
+
+- **Q24-1 — Similarity signals:** both adapted SSDEEP + normalized-title gate **and** shared stored observables.
+  `correlation_key` is not included as a separate signal.
+- **Q24-2 — “Most recently closed”:** order by `updated_at` descending; no `closed_at` field or migration.
+- **Q24-3 — Candidate definition:** every alert with `status.stage == "Closed"`, regardless of verdict.
+- **Q24-4 — Count badge:** show a badge with the bounded similarity total.
+- **Q24-5 — Columns:** include Title, Verdict, Closed, and Similarity.
+- **Q24-6 — Tab position:** after Observables, before Raw data.
+
+### 24.11 Next action
+
+- Produce an implementation brief for `django-backend` / `django-frontend` / `qa-tester`.
+- Implement T1→T3 in order, recording any deviation from the decisions above in this section before merge.
+
+---
+
+## 25. Source mapping — per-type submappings (plan draft, 2026-11-21)
+
+Status: **Decisions recorded 2026-11-21 — ready for implementation brief.**
+Plan location: this section (per user request; no separate `docs/planning/PLAN-…` file for this item).
+
+### 25.0 Summary
+
+Today each `IngestionSource` has exactly one `mapping_config` object. This plan adds optional **type submappings**
+inside that same source mapping config. For alerts whose raw JSON has a top-level `type` field, the ingest pipeline
+selects a submapping by that raw type. A matching submapping becomes the effective mapping for that alert and
+**fully replaces** the source's master mapping. If `type` is absent, non-string, or no submapping matches, the
+master mapping is used.
+
+No database migration is required; this is an extension of the mapping config language plus runtime resolution.
+
+### 25.1 Goals
+
+- Support a master mapping per ingestion source plus named submappings keyed by alert JSON `type`.
+- Select the submapping from the **raw payload** before field mapping, correlation-key extraction, and observable
+  extraction.
+- Preserve the existing webhook contract: source/org still come from the ingestion token (ADR-008).
+- Keep `apply_mapping()` pure and unchanged; add a small pure resolver before it.
+- Validate submappings recursively with the existing v2 rule/transform/JSONPath limits.
+- Ensure remap, preview, and observable apply use the same per-alert effective mapping as live ingest.
+- Keep first iteration UI work small unless Q25-7 chooses a first-class per-type editor.
+
+### 25.2 Non-goals
+
+- No new mapping model/table, no DB migration, no per-type records in the database.
+- No configurable JSONPath for the submapping selector in v1; selector is raw top-level `payload["type"]`.
+- No partial/merge semantics: submappings fully replace the master config.
+- No nested submappings inside submappings.
+- No change to webhook authentication, routing, throttling, or alert token model.
+- No change to alert import/direct API creation paths; those already require explicit mapped fields.
+- No automatic reclassification of existing alerts when a submapping changes mapped `type` during remap, unless
+  Q25-9 overrides the current MAP-9 rule.
+
+### 25.3 Current-state findings
+
+- Source/mapping storage:
+  - `ingest/models.py`: `IngestionSource.mapping_config = JSONField(blank=True, default=dict)`.
+  - Source is org-owned; `slug` unique per organisation; ADR-009 confirms mapping config is tenant data.
+- Webhook routing and initial mapping:
+  - `ingest/views.py::webhook_alerts()` (`~164-288`) authenticates via token, then applies the source mapping.
+  - Token identifies both source and organisation; no source in URL (ADR-008).
+  - Parsing guards: body-size, content type, token verification, throttle, body re-check, JSON object check, depth check.
+- Mapping engine:
+  - `ingest/mapping.py`
+    - `apply_mapping()` (`~587-696`)
+    - `config_shape()` (`~715-731`)
+    - `read_rules()` (`~734-756`)
+    - `validate_config()` (`~759-851`)
+    - `extract_correlation_key()` (`~857-884`)
+  - v2 config sections include `version`, `fields`, `value_maps`, `observables`, `correlation_key`, `on_missing`.
+  - `fields` targets include `title`, `description`, `summary`, `severity`, `date`, `type`, `source_ref`.
+  - Existing caps: `MAX_FIELDS = 20`, `MAX_PATHS_PER_FIELD = 8`, `MAX_PATH_LEN = 200`, compiled JSONPath cache cap `512`.
+- Persistence re-reads mapping:
+  - `ingest/pipeline.py::store_ingested_alert()` calls `extract_correlation_key(source.mapping_config, payload)` and
+    later observable sync.
+  - If only `apply_mapping()` is changed, correlation/observables would still use the master config, producing a split
+    interpretation of one alert.
+- Remap / preview:
+  - `ingest/remap.py::remap_alerts()`, `preview_alerts()`, and `_evaluate()` apply one config to every alert.
+  - With submappings, resolution must happen per alert because one source can receive several raw types.
+- Observable apply:
+  - `ingest/observable_apply.py` and `observables/alert_sync.py::sync_alert_observables()` also use the source config.
+  - `ui/views/ingestion_sources.py::_observables_only_change()` currently rejects changes outside `observables`.
+- Editor:
+  - `ui/templates/ui/source_detail.html` has Mapping and Raw data tabs, field table, observable rules, mapping health,
+    advanced JSON, apply dialogs.
+  - `ingest/editor.py` parses/validates JSON, canonicalizes configs, computes changed keys, and preserves unknown
+    top-level keys on table saves.
+- Existing type examples:
+  - `tests/conformance/test_mapping_engine.py` CrowdStrike payload has raw top-level `"type": "ldt"`.
+  - `tests/conformance/test_webhook_hardening.py` phishing payload has no top-level `type`.
+- Audit:
+  - `record_ingestion_source_updated()` stores nested dot paths such as `submappings.ldt.fields.title.paths`; no values.
+
+### 25.4 Architecture / implementation shape
+
+#### 25.4.1 Pure resolver
+
+Add to `ingest/mapping.py`:
+
+```python
+@dataclass(frozen=True)
+class MappingResolution:
+    config: dict[str, Any]
+    matched_type: str | None = None
+    used_submapping: bool = False
+
+
+def resolve_mapping_config(
+    mapping_config: dict[str, Any] | None,
+    payload: Any,
+) -> MappingResolution: ...
+```
+
+Behaviour:
+
+1. Return the master config unchanged if:
+   - config is empty/`None`,
+   - config has no `submappings`,
+   - payload is not a mapping,
+   - payload has no top-level `type`,
+   - `type` is not a string,
+   - no submapping key exactly matches the raw type.
+2. On exact match:
+   - use the submapping object as `resolution.config`,
+   - set `matched_type` and `used_submapping=True`.
+3. Do not mutate `mapping_config` or `payload`.
+4. Do not recurse into nested submappings; validation rejects them.
+5. Keep `apply_mapping()` unchanged. Callers resolve first, then apply:
+
+```python
+resolution = resolve_mapping_config(source.mapping_config, payload)
+draft = apply_mapping(resolution.config, payload, default_severity=source.default_severity)
+```
+
+#### 25.4.2 Config language
+
+Default config shape:
+
+```json
+{
+  "version": 2,
+  "fields": {
+    "title": {"paths": ["$.title"], "transform": "str"}
+  },
+  "observables": [
+    {"type": "IP", "paths": ["$.src_ip"]}
+  ],
+  "correlation_key": "$.sourceRef",
+  "submappings": {
+    "ldt": {
+      "version": 2,
+      "fields": {
+        "title": {"paths": ["$.display_name"], "transform": "str"},
+        "severity": {"paths": ["$.severity"], "transform": "severity_int"},
+        "type": {"paths": ["$.type"], "transform": "str"},
+        "source_ref": {"paths": ["$.id"], "transform": "str"}
+      },
+      "observables": [
+        {"type": "Hash", "paths": ["$.sha256"]}
+      ],
+      "correlation_key": "$.id"
+    }
+  }
+}
+```
+
+Rules:
+
+- `submappings` is a v2-only top-level object.
+- Keys are raw alert type strings; default max 50 submappings and 100-char keys.
+- Each submapping value is a complete v2 config with `version: 2`.
+- A matching submapping fully replaces the master config. There is no field-by-field merge.
+- Submappings may contain all normal v2 sections, including `observables`, `value_maps`, `correlation_key`, and
+  `on_missing`, subject to Q25-6.
+- Nested `submappings` inside a submapping are rejected.
+- Legacy flat configs with `submappings` are rejected by validation.
+- Exact, case-sensitive string match; no trimming/normalisation unless Q25-4 changes this.
+
+#### 25.4.3 Validation and editor helpers
+
+Extend `ingest/mapping.py::validate_config()`:
+
+- Validate `submappings` type, count, key length/emptiness, and version marker.
+- Recursively validate each submapping with the same v2 rules as the master.
+- Reject nested submappings.
+- Ensure `config_shape()` / `read_rules()` either remain master-only or gain an explicit “type overrides” summary;
+  source list must not silently hide submappings.
+
+`ingest/editor.py` should mostly inherit this via `parse_json_config()`:
+
+- `changed_keys()` should produce nested paths such as `submappings.ldt.fields.title.paths`.
+- Canonicalization/no-op detection should compare nested submappings.
+- Table/observable writers must preserve `submappings` through `_preserved()`.
+
+#### 25.4.4 Runtime threading
+
+The resolved config must be passed everywhere an alert payload is interpreted.
+
+- Live webhook (`ingest/views.py`):
+  - Resolve once after JSON parsing and before mapping.
+  - Pass effective config into `store_ingested_alert(...)`.
+- `ingest/pipeline.py`:
+  - Accept optional `mapping_config`/`effective_mapping_config`.
+  - Use it for `extract_correlation_key(...)` and observable sync.
+  - Keep backwards-compatible default to source mapping for non-webhook callers, if any.
+- `ingest/remap.py`:
+  - `_evaluate()` resolves per alert via `resolve_mapping_config(config, alert.raw_payload)`.
+  - Use resolved config for `apply_mapping()` and `sync_alert_observables()`.
+  - `preview_alerts()` inherits the fix.
+- `ingest/observable_apply.py` / `observables/alert_sync.py`:
+  - Extend preview/apply to resolve per alert.
+- `ui/views/ingestion_sources.py::_observables_only_change()`:
+  - Update or bypass so top-level `observables`-only saves do not discard submappings.
+  - If Q25-7 chooses JSON-only editing, simply preserving submappings is enough.
+
+#### 25.4.5 UI
+
+Default (Q25-7 default): **advanced JSON only** in v1.
+
+- `ui/templates/ui/source_detail.html`:
+  - Add help text under Advanced JSON documenting `submappings`, exact raw type match, full replacement, and master fallback.
+  - Show submapping count near mapping health/source list.
+  - Show raw payload `type` in Raw data tab so analysts can see the selector value.
+  - Keep existing mapping table editing master-only; table saves must preserve submappings.
+- No new per-type editor, no scope selector, no raw-click-map scope changes in default scope.
+
+If Q25-7 chooses first-class editing:
+
+- Add a scope selector (`Master` + one option per submapping key) to mapping/observable editor forms.
+- Extend `_source_mapping_rows()`, `_source_mapping_post()`, `build_table_config()`, `editor_rows()`,
+  `build_observable_config()`, and raw-click-map prefill to carry the scope.
+- Add forms for adding/renaming/deleting submapping keys.
+
+#### 25.4.6 Audit / warnings
+
+- Config edits continue to be audited through existing `changed_keys` nested paths.
+- Default: do **not** write an ingestion warning merely because a submapping was selected or because type was absent/unknown.
+- If Q25-8 chooses observability, add either:
+  - a free-text warning such as `submapping_selected: ldt`, or
+  - a structured `FieldWarning.reason` extension plus template labels.
+
+### 25.5 Data model
+
+No new model and no migration. `IngestionSource.mapping_config` continues to store the whole object. All submapping data is tenant data by virtue of belonging to the org-owned source.
+
+### 25.6 API contracts
+
+- Webhook request/response contract unchanged.
+- Mapping config JSON shape gains optional `submappings`; API/serializer fields that expose it remain JSONField values.
+- Preview/apply endpoints do not change names; their behaviour becomes per-alert-type aware.
+- Docs to update:
+  - `docs/spec/api.md` ingest mapping and mapping editor sections.
+  - `docs/spec/data-model.md` `mapping_config` description.
+  - `docs/spec/identity-auth.md` mapping editor description.
+  - `docs/spec/deviations.md`: add MAP-10 documenting submapping semantics and MAP-9 interaction.
+
+### 25.7 Phases and acceptance criteria
+
+#### Phase 1 — Resolver + validation
+
+- **T1.1 — Add `resolve_mapping_config()` and `MappingResolution`.**
+  - AC1.1a: Missing/empty config, missing `type`, non-string `type`, and unknown type return master.
+  - AC1.1b: Exact raw type match returns the submapping config with `used_submapping=True`.
+  - AC1.1c: Resolver does not mutate config or payload.
+  - AC1.1d: Nested submappings are not resolved recursively.
+- **T1.2 — Validate submappings.**
+  - AC1.2a: `submappings` must be an object with bounded count/key length.
+  - AC1.2b: Each submapping is a complete valid v2 config.
+  - AC1.2c: Nested submappings are rejected.
+  - AC1.2d: Legacy flat config with `submappings` is rejected.
+  - AC1.2e: Existing nested editor helpers produce dotted changed-key paths and preserve submappings.
+
+#### Phase 2 — Runtime consistency
+
+- **T2.1 — Webhook/pipeline.**
+  - AC2.1a: Webhook resolves before `apply_mapping()`.
+  - AC2.1b: Correlation key extraction uses the effective resolved config.
+  - AC2.1c: Observable extraction/sync uses the effective resolved config.
+  - AC2.1d: Typeless/unknown-type payloads continue to use master exactly as today.
+- **T2.2 — Remap/preview/observable apply.**
+  - AC2.2a: Remap resolves mapping per alert from raw payload type.
+  - AC2.2b: Preview and confirmed apply agree on the effective config.
+  - AC2.2c: Observable preview/apply resolves per alert.
+  - AC2.2d: Existing `type` and `source_ref` remain unchanged during remap unless Q25-9 changes the rule.
+
+#### Phase 3 — UI/docs
+
+- **T3.1 — JSON-first editor updates.**
+  - AC3.1a: Advanced JSON accepts valid submappings and rejects invalid nested configs with readable errors.
+  - AC3.1b: Source list/detail show submapping count without hiding master rules.
+  - AC3.1c: Raw data tab shows raw `type` used for selection.
+  - AC3.1d: Table/observable-only saves preserve submappings.
+- **T3.2 — Docs/deviations.**
+  - AC3.2a: API/data-model/identity docs updated.
+  - AC3.2b: MAP-10 deviation recorded.
+  - AC3.2c: README example either remains labelled legacy or gains a v2 submapping example.
+
+#### Phase 4 — Tests and verification
+
+- **T4.1 — Conformance coverage.**
+  - AC4.1a: Pure resolver tests cover match/fallback/non-string/unknown/no-mutation/nested rejection.
+  - AC4.1b: Webhook end-to-end test with CrowdStrike `type: "ldt"` proves submapping affects title, severity,
+    correlation key, and observables.
+  - AC4.1c: Typeless phishing payload still uses master.
+  - AC4.1d: Remap/preview/apply use per-alert resolution.
+  - AC4.1e: Editor validation/no-op/preservation/audit tests cover nested submapping paths.
+  - AC4.1f: Tenant isolation unchanged.
+- **T4.2 — Gates.**
+  - AC4.2a: Targeted suites green.
+  - AC4.2b: `make check` / full static gate green.
+  - AC4.2c: Full pytest per standing DoD rule.
+  - AC4.2d: Secret scan clean.
+  - AC4.2e: Verification report records any deviation from answered questions.
+
+### 25.8 Security
+
+- No change to ADR-008 token routing; source and org still come from verified token.
+- Submapping config remains tenant-owned through `IngestionSource`.
+- Validation must apply existing JSONPath/path/transform caps to every submapping independently.
+- Bound submapping count/key length to prevent oversized configs and surprising editor/audit cost.
+- Do not log payload contents or submapping values in warnings/audit; audit only dotted changed keys.
+- Raw type strings are used only as object keys; no query construction or code execution from type values.
+- Reject nested submappings to avoid unbounded recursive resolution/validation.
+
+### 25.9 Testing plan
+
+Primary suites:
+
+- `tests/conformance/test_mapping_engine.py`
+- `tests/conformance/test_webhook_hardening.py`
+- `tests/conformance/test_mapping_editor.py`
+- `tests/conformance/test_settings_source_mapping.py`
+- `tests/conformance/test_mapping_remap.py`
+- `tests/conformance/test_ingest_alert_observables.py`
+- `tests/conformance/test_ingest_observable_remap.py`
+- `tests/conformance/test_source_observable_editor.py`
+- `tests/conformance/test_source_observable_apply.py`
+- `tests/conformance/test_observable_apply.py`
+- `tests/conformance/test_raw_click_map.py` (only if Q25-7 chooses first-class editor)
+- `tests/conformance/test_source_detail_raw_data.py`
+- `tests/conformance/test_tenant_scoping.py`
+
+Verification gates:
+
+- `.venv/bin/pytest <targeted suites> -q`
+- `make check`
+- secret scan
+- full pytest
+
+### 25.10 Risks
+
+- **R1 — Split config interpretation.** If correlation/observable paths keep using master while field mapping uses a
+  submapping, alerts become internally inconsistent. T2.1/T2.2 are mandatory.
+- **R2 — Config complexity.** Full replacement is easier to reason about but duplicates common fields across submappings.
+- **R3 — Silent fallback.** Missing/unknown type uses master; without warnings, misspelled submapping keys can go unseen.
+  Q25-8 decides whether to surface this.
+- **R4 — Remap identity fields.** MAP-9 keeps `type`/`source_ref` stable on existing alerts; submapping changes to those
+  targets affect only newly ingested alerts unless Q25-9 changes policy.
+- **R5 — Audit size.** Nested changed-key paths are safe (no values), but large configs still increase audit row counts.
+- **R6 — Editor affordance.** JSON-only editing is cheaper but less discoverable; Q25-7 decides.
+
+### 25.11 Decisions (answered 2026-11-21 — all defaults accepted)
+
+- **Q25-1 — Config key:** `submappings`.
+- **Q25-2 — Legacy compatibility:** submappings are v2-only; reject them on legacy flat configs.
+- **Q25-3 — Selector source:** raw top-level `payload["type"]` only.
+- **Q25-4 — Matching:** exact case-sensitive string match; no trim/casefold/normalisation.
+- **Q25-5 — Override semantics:** full config replacement; no field/section merge with master.
+- **Q25-6 — Submapping sections:** submappings may contain all normal v2 sections except nested `submappings`.
+- **Q25-7 — UI scope:** advanced JSON only for v1, with help text and validation; no first-class per-type editor yet.
+- **Q25-8 — Observability:** no new ingestion warning for selected/unknown type; existing config-change audit only.
+- **Q25-9 — Remap type:** keep MAP-9; do not rewrite existing alert `type` / `source_ref` during remap.
+- **Q25-10 — Caps:** max 50 submappings and 100-character keys.
+
+### 25.12 Deferred improvement ideas (explicitly later, not in this implementation)
+
+- First-class per-type mapping editor: scope selector (`Master` / submapping key), add/rename/delete submapping keys,
+  and raw-click-map target selection inside a submapping.
+- Configurable submapping selector JSONPath instead of raw top-level `payload["type"]`.
+- Case-insensitive / trimmed / normalised type matching for noisy feeds.
+- Partial override semantics with explicit per-section merge rules.
+- Ingestion warnings or mapping-health output showing selected submapping and unknown/missing type counts.
+- Revisit MAP-9 if remap should be allowed to rewrite mapped `type` / `source_ref` on existing alerts.
+- Higher cap configuration and source-list total-rule counts across master + submappings if real configs justify it.
+- ADR for the submapping config language if the shape proves stable and needs formal cross-project documentation.
+
+### 25.13 Next action
+
+- Implementation brief: `docs/planning/IMPL-2026-11-21-source-mapping-submappings.md`.
+- Implement T1→T4 in order, recording any deviation from the decisions above in this section before merge.

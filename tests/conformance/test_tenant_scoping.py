@@ -1702,6 +1702,7 @@ class TestUIRouteEnumerationConformance:
         # `test_settings_source_mapping.py`.
         admin_only_routes = {
             "ui-settings-agent-access",
+            "ui-settings-agent-autonomy",
             "ui-settings-oauth-binding-list",
             "ui-settings-source-detail",
             "ui-playbook-scripts",
@@ -1802,6 +1803,9 @@ class TestUIRouteEnumerationConformance:
             "ui-approvals-detail": {"proposal_id": str(self.proposal1.id)},
             "ui-sources-list": {},
             "ui-settings-source-detail": {"source_id": str(self.source1.id)},
+            # Phase 4 uses a UUID organisation path segment; point it at org1 so
+            # superAdmin cross-org reads resolve instead of hitting /dummy.
+            "ui-settings-agent-autonomy": {"organisation_id": str(self.org1.id)},
             "ui-search": {},
         }
         return base

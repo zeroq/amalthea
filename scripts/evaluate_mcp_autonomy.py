@@ -1,0 +1,403 @@
+"""Read-only shadow evaluation harness for MCP Phase 4 autonomy.
+
+Replays historical MCP proposals/decisions in shadow mode and produces a report
+with action distribution, allow/deny/defer reasons, estimated autonomous volume,
+daily cap hits, and example false-positive candidates.
+
+This script performs NO domain writes. It only reads from the database and
+writes a Markdown report to docs/reviews/.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from collections import Counter, defaultdict
+from datetime import UTC, datetime
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Django setup - must happen before any model imports
+# ---------------------------------------------------------------------------
+# E402 off: DJANGO_ENV_REQUIRED is set before django.setup() below.
+# This pattern is required for standalone scripts that need Django initialized.
+os.environ["DJANGO_SETTINGS_MODULE"] = "amalthea.settings.dev"
+
+# Add project root to path so django can find the package
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+import django  # noqa: E402
+
+django.setup()
+
+# ---------------------------------------------------------------------------
+# Now safe to import Django models
+# ---------------------------------------------------------------------------
+from mcp_server.models import McpActionProposal, McpOrgPolicy, McpPolicyDecision  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Report configuration
+# ---------------------------------------------------------------------------
+REPORT_DIR = PROJECT_ROOT / "docs" / "reviews"
+REPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+REPORT_FILE = REPORT_DIR / "MCP-PHASE4-SHADOW-EVAL-2026-11-21.md"
+
+
+# ---------------------------------------------------------------------------
+# Helper utilities
+# ---------------------------------------------------------------------------
+def _utc_date_from_created_at(created_at) -> str:
+    """Extract the UTC date string from a created_at datetime."""
+    if created_at is None:
+        return "unknown"
+    try:
+        if hasattr(created_at, "date"):
+            return created_at.date().isoformat()
+        return str(created_at)[:10]
+    except Exception:
+        return "unknown"
+
+
+def _format_evidence(evidence: dict) -> str:
+    """Format evidence dict for report display (redact sensitive keys)."""
+    if not evidence:
+        return "-"
+    safe_keys = {
+        k: v
+        for k, v in evidence.items()
+        if k not in ("raw_payload", "token", "url", "header", "script")
+    }
+    if not safe_keys:
+        return "- sanitized (all keys sensitive)"
+    items = []
+    for k, v in safe_keys.items():
+        items.append(f"  {k}: {v}")
+    return "\n".join(items)
+
+
+# ---------------------------------------------------------------------------
+# Main harness
+# ---------------------------------------------------------------------------
+def run() -> None:
+    """Run the shadow evaluation harness and write the report."""
+    try:
+        total_decisions = McpPolicyDecision.objects.count()
+        total_proposals = McpActionProposal.objects.count()
+        total_orgs = McpOrgPolicy.objects.count()
+    except Exception as exc:
+        total_decisions = 0
+        total_proposals = 0
+        total_orgs = 0
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.warning("Failed to count objects: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Case: no data in the database (fresh install or no evaluations yet)
+    # ------------------------------------------------------------------
+    if total_decisions == 0 and total_proposals == 0:
+        report_lines = [
+            "# MCP Phase 4 Shadow Evaluation Report",
+            f"Generated: {datetime.now(UTC).isoformat()} UTC",
+            "",
+            "## Summary",
+            "",
+            "No historical MCP proposals or policy decisions found in the database.",
+            "",
+            "This is expected for a fresh installation. The harness is designed to",
+            "replay existing historical data when available. As proposals are created",
+            "and evaluated in shadow mode, future runs will produce quantitative reports.",
+            "",
+            "## What this harness does",
+            "",
+            "- Replays historical `McpPolicyDecision` rows in shadow mode",
+            "- Counts allow/deny/defer reasons",
+            "- Estimates autonomous approval volume if enforce mode were enabled",
+            "- Checks daily action cap compliance",
+            "- Identifies example false-positive candidates",
+            "- Performs NO domain writes",
+            "",
+            "---\n*Report generated by `scripts/evaluate_mcp_autonomy.py`*",
+        ]
+        REPORT_FILE.write_text("\n".join(report_lines), encoding="utf-8")
+        print(f"Written report (no data): {REPORT_FILE}")
+        return
+
+    # ------------------------------------------------------------------
+    # Data is available; produce quantitative analysis
+    # ------------------------------------------------------------------
+
+    # 1. Action distribution from decisions
+    action_distribution = Counter()
+    # 2. Decision reason distribution
+    reason_distribution = Counter()
+    # 3. Mode distribution
+    mode_distribution = Counter()
+    # 4. Decision distribution
+    decision_distribution = Counter()
+    # 5. Per-org stats
+    org_stats = defaultdict(
+        lambda: {
+            "decisions": 0,
+            "allow": 0,
+            "deny": 0,
+            "defer": 0,
+            "shadow": 0,
+            "enforce": 0,
+            "reason_codes": Counter(),
+            "execution_outcomes": Counter(),
+            "proposals_evaluated": 0,
+        }
+    )
+    # 6. Example false positives
+    false_positives = []
+
+    # Fetch all decisions with related data
+    decisions = McpPolicyDecision.objects.select_related("organisation", "policy", "proposal").all()
+
+    for dec in decisions:
+        org_id = dec.organisation_id or "unknown"
+        mode = dec.mode or "unknown"
+        decision = dec.decision or "unknown"
+        reason_code = dec.reason_code or "unknown"
+        execution_outcome = dec.execution_outcome or "unknown"
+        stage = dec.stage or "unknown"
+
+        proposal = dec.proposal
+        if proposal is not None:
+            tool_action = f"{proposal.tool_name}:{proposal.action}"
+        else:
+            tool_action = "unknown"
+        action_distribution[tool_action] += 1
+
+        reason_distribution[reason_code] += 1
+        mode_distribution[mode] += 1
+        decision_distribution[decision] += 1
+
+        org_entry = org_stats[org_id]
+        org_entry["decisions"] += 1
+        if decision in ("allow", "deny", "defer"):
+            org_entry[f"{decision}"] += 1
+        org_entry["reason_codes"][reason_code] += 1
+        org_entry["execution_outcomes"][execution_outcome] += 1
+
+        if proposal is not None and stage == "proposal_created":
+            org_entry["proposals_evaluated"] += 1
+
+        # False positive candidates: shadow allow that could have been enforce
+        if mode == "shadow" and decision == "allow":
+            proposal_id = None
+            if proposal is not None:
+                proposal_id = str(proposal.id)
+            false_positives.append(
+                {
+                    "proposal_id": proposal_id,
+                    "tool_name": getattr(proposal, "tool_name", None) if proposal else None,
+                    "action": getattr(proposal, "action", None) if proposal else None,
+                    "target_type": getattr(proposal, "target_type", None) if proposal else None,
+                    "target_id": getattr(proposal, "target_id", None) if proposal else None,
+                    "risk": getattr(proposal, "risk", None) if proposal else None,
+                }
+            )
+
+    # ------------------------------------------------------------------
+    # Daily cap analysis (UTC day)
+    # ------------------------------------------------------------------
+    cap_per_org_day = defaultdict(int)
+    try:
+        from django.db.models import Count
+        from django.db.models.functions import TruncDate
+
+        cap_analysis = (
+            McpPolicyDecision.objects.filter(
+                mode="enforce",
+                decision="allow",
+                execution_outcome="executed",
+                stage="pre_execution",
+            )
+            .annotate(day=TruncDate("created_at"))
+            .values("organisation_id", "day")
+            .annotate(count=Count("id"))
+            .order_by("organisation_id", "day")
+        )
+
+        for entry in cap_analysis:
+            org_id = entry.get("organisation_id", "unknown")
+            day = str(entry.get("day", "unknown"))
+            if day and day != "unknown" and len(day) >= 10:
+                day = day[:10]
+            cap_per_org_day[(str(org_id), str(day))] = entry.get("count", 0)
+    except Exception as exc:
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.warning("Cap analysis failed: %s", exc)
+
+    # 7. Estimate: if all shadow allows were switched to enforce, how many would hit cap?
+    shadow_allows_by_org = defaultdict(int)
+    for dec in decisions:
+        if dec.mode == "shadow" and dec.decision == "allow":
+            org_id = dec.organisation_id or "unknown"
+            if dec.created_at is not None:
+                date_str = _utc_date_from_created_at(dec.created_at)
+                shadow_allows_by_org[(str(org_id), str(date_str))] += 1
+
+    # ------------------------------------------------------------------
+    # Generate report
+    # ------------------------------------------------------------------
+    report_lines = [
+        "# MCP Phase 4 Shadow Evaluation Report",
+        f"Generated: {datetime.now(UTC).isoformat()} UTC",
+        "",
+        "## Summary",
+        f"- Total proposals in system: {total_proposals}",
+        f"Total policy decisions: {total_decisions}",
+        f"Organisations with policies: {total_orgs}",
+        "",
+        "## Action Distribution",
+    ]
+
+    for action, count in sorted(action_distribution.items(), key=lambda x: -x[1]):
+        report_lines.append(f"- **{action}**: {count}")
+
+    report_lines.extend(
+        [
+            "",
+            "## Allow/Deny/Defer Reasons",
+        ]
+    )
+
+    for reason, count in sorted(reason_distribution.items(), key=lambda x: -x[1]):
+        report_lines.append(f"- **{reason}**: {count}")
+
+    report_lines.extend(
+        [
+            "",
+            "## Mode Distribution",
+        ]
+    )
+
+    for mode, count in sorted(mode_distribution.items(), key=lambda x: -x[1]):
+        report_lines.append(f"- **{mode}**: {count}")
+
+    report_lines.extend(
+        [
+            "",
+            "## Decision Distribution",
+        ]
+    )
+
+    for decision, count in sorted(decision_distribution.items(), key=lambda x: -x[1]):
+        report_lines.append(f"- **{decision}**: {count}")
+
+    report_lines.extend(
+        [
+            "",
+            "## Per-Organisation Statistics",
+        ]
+    )
+
+    for org_id, entry in org_stats.items():
+        report_lines.append(f"### Organisation {org_id}")
+        report_lines.append(f"- Decisions: {entry['decisions']}")
+        report_lines.append(
+            f"- Allow: {entry['allow']}, Deny: {entry['deny']}, Defer: {entry['defer']}"
+        )
+        report_lines.append(f"- Shadow: {entry['shadow']}, Enforce: {entry['enforce']}")
+        report_lines.append(
+            f"- Proposals evaluated (stage=proposal_created): {entry['proposals_evaluated']}"
+        )
+        if entry["reason_codes"]:
+            report_lines.append("- Reason codes:")
+            for rc, c in sorted(entry["reason_codes"].items(), key=lambda x: -x[1]):
+                report_lines.append(f"  - {rc}: {c}")
+        if entry["execution_outcomes"]:
+            report_lines.append("- Execution outcomes:")
+            for eo, c in sorted(entry["execution_outcomes"].items(), key=lambda x: -x[1]):
+                report_lines.append(f"  - {eo}: {c}")
+        if entry["proposals_evaluated"] > 0:
+            report_lines.append(f"- Proposals evaluated: {entry['proposals_evaluated']}")
+
+    report_lines.extend(
+        [
+            "",
+            "## Daily Cap Analysis",
+        ]
+    )
+
+    if cap_per_org_day:
+        for (org_id, day), count in sorted(cap_per_org_day.items()):
+            report_lines.append(
+                f"- Organisation {org_id}, day {day}: {count} successful autonomous executions"
+            )
+    else:
+        report_lines.append("- No enforce-mode pre_execution executed decisions found.")
+
+    report_lines.extend(
+        [
+            "",
+            "## Estimated Auto-Approval Volume (If All Shadow→Enforce)",
+        ]
+    )
+
+    for (org_id, day), shadow_count in sorted(shadow_allows_by_org.items()):
+        report_lines.append(
+            f"- Organisation {org_id}, day {day}: {shadow_count} shadow allows → would consume min({shadow_count}, 20) of daily cap (default 20)"
+        )
+
+    report_lines.extend(
+        [
+            "",
+            "## Example False-Positive Candidates (Shadow Allow, Would Need Review Before Enforce)",
+        ]
+    )
+
+    if false_positives:
+        for fp in false_positives[:20]:
+            tp = fp["tool_name"] or "unknown"
+            ta = fp["action"] or "unknown"
+            tt = fp["target_type"] or "unknown"
+            ti = fp["target_id"] or "unknown"
+            rk = fp["risk"] or "unknown"
+            report_lines.append(
+                f"- Proposal {fp['proposal_id']}: tool={tp}, action={ta}, target={tt}:{ti}, risk={rk}"
+            )
+        if len(false_positives) > 20:
+            report_lines.append(
+                f"- ... and {len(false_positives) - 20} more false-positive candidates"
+            )
+    else:
+        report_lines.append("- No shadow allow candidates found.")
+
+    report_lines.extend(
+        [
+            "",
+            "## Cap Race & Re-evaluation Notes",
+            "",
+            "- Cap counting uses `McpPolicyDecision` rows with `mode=enforce`, `decision=allow`,",
+            "`execution_outcome=executed`, `stage=pre_execution` per UTC day. Shadow decisions,",
+            "failed/pending executions do NOT consume quota. Only successful",
+            "autonomous executions (execution_outcome=executed) in enforce mode count.",
+            "",
+            "- Terminal replay must not execute twice or double-count quota. The harness performs",
+            "no domain writes; it only reads decision rows.",
+            "",
+            "- Failed state/target/hash/expiry/cap checks consume no quota. Only successful",
+            "autonomous executions (execution_outcome=executed) in enforce mode count.",
+            "",
+            "---\n*Report generated by `scripts/evaluate_mcp_autonomy.py`*",
+            "*No organisations were switched to enforce mode during this evaluation.*",
+        ]
+    )
+
+    # Write the report (ensure trailing newline)
+    REPORT_FILE.write_text("\n".join(report_lines) + "\n", encoding="utf-8")
+    print(f"Written report: {REPORT_FILE}")
+
+
+if __name__ == "__main__":
+    run()

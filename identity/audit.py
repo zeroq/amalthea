@@ -485,6 +485,48 @@ def record_mcp_credential_change(
     )
 
 
+def record_mcp_org_policy_change(
+    request: HttpRequest,
+    *,
+    actor: User,
+    action: str,
+    target_org: Organisation,
+    target_id: str,
+    old_snapshot: dict[str, object],
+    new_snapshot: dict[str, object],
+) -> None:
+    """Record an MCP organisation policy change.
+
+    Args:
+        request: The HTTP request (for IP extraction).
+        actor: The user performing the action.
+        action: One of "mcp_org_policy.created", "mcp_org_policy.updated",
+            "mcp_org_policy.enabled", "mcp_org_policy.disabled",
+            "mcp_org_policy.shadow_exited".
+        target_org: The organisation whose policy is changing.
+        target_id: The UUID of the policy row (as string).
+        old_snapshot: Bounded snapshot of the policy before the change.
+            Only allowlisted fields may be included; no raw payloads, secrets,
+            URLs, headers, scripts, or unbounded case text.
+        new_snapshot: Bounded snapshot of the policy after the change.
+            Only allowlisted fields may be included; no raw payloads, secrets,
+            URLs, headers, scripts, or unbounded case text.
+    """
+    from identity.models import AuditLog
+
+    ip = _get_client_ip(request)
+    AuditLog.objects.create(
+        actor=actor,
+        actor_org=getattr(actor, "org", None),
+        target_org=target_org,
+        action=action,
+        target_type="McpOrgPolicy",
+        target_id=str(target_id),
+        details={"old": old_snapshot, "new": new_snapshot},
+        ip=ip,
+    )
+
+
 def record_mcp_oauth_binding_change(
     request: HttpRequest,
     *,

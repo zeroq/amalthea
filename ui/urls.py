@@ -10,6 +10,10 @@ from django.urls import path, reverse_lazy
 from . import taxonomy_views, views
 from .search import global_search
 from .views import approvals as approvals_views
+from .views.autonomy import (
+    settings_agent_autonomy,  # noqa: F401 - used in urlpatterns below
+    update_agent_autonomy,  # noqa: F401 - used in urlpatterns below
+)
 
 urlpatterns = [
     path("", views.dashboard, name="ui-dashboard"),
@@ -369,6 +373,17 @@ urlpatterns = [
         "settings/agent-access/oauth-bindings/<uuid:binding_id>/delete",
         views.settings_oauth_binding_delete,
         name="ui-settings-oauth-binding-delete",
+    ),
+    # MCP Phase 4: autonomy policy settings
+    path(
+        "settings/agent-access/autonomy/<uuid:organisation_id>",
+        views.settings_agent_autonomy,
+        name="ui-settings-agent-autonomy",
+    ),
+    path(
+        "settings/agent-access/autonomy/<uuid:organisation_id>/update",
+        views.update_agent_autonomy,
+        name="ui-settings-agent-autonomy-update",
     ),
     path("settings/sources", views.settings_sources, name="ui-settings-sources"),
     path("settings/sources/token", views.settings_token_create, name="ui-settings-token-create"),

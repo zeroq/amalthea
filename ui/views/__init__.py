@@ -59,6 +59,10 @@ from .automation import (
     playbook_run,
     playbook_scripts,
 )
+from .autonomy import (
+    settings_agent_autonomy,
+    update_agent_autonomy,  # noqa: F401 - used in url patterns and __all__
+)
 from .case_artifacts import (
     case_attachment_delete,
     case_attachment_detail,
@@ -357,6 +361,7 @@ __all__ = [
     "playbook_scripts",
     "rejected_observable_promote",
     "rejected_observables",
+    "settings_agent_autonomy",
     "settings_agent_create",
     "settings_agent_delete",
     "settings_agent_disable",

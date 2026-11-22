@@ -1,0 +1,2 @@
+{% load static %}
+{% include "ui/_modal.html" with modal_id="shadow-exit-confirmation" title="Exit shadow mode?" body="Enabling autonomy with shadow disabled will allow autonomous execution of allowlisted actions. This is a powerful mode. Ensure you have reviewed shadow evidence first. Are you sure you want to exit shadow mode?" confirm_text="Exit shadow mode" confirm_class="btn-err" cancel_text="Cancel" form_action=form_action size="lg" show_cancel=True form_method="post" extra_fields=shadow_exit_confirm_fields %}

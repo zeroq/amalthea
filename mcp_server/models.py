@@ -3,6 +3,9 @@
 Plaintext tokens are returned exactly once by :func:`mcp_server.credentials.mint`;
 only the Argon2 hash is persisted. Phase 2 adds scoped propose/summary tools and
 an explicit human approval model. Phase 3 adds OAuth 2.1 resource-server binding.
+Phase 4 adds org-scoped policy-bounded autonomy.
+
+Phase 4 imports
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
-from core.enums import in_values
+from core.enums import SEVERITY_CHOICES, in_values
 from identity.models import AuditLog, Organisation, User
 
 PHASE1_SCOPES: tuple[str, ...] = ("mcp:read",)
@@ -492,6 +495,297 @@ class McpActionProposal(models.Model):
             self.StatusChoices.EXECUTED,
             self.StatusChoices.FAILED,
         )
+
+
+class McpOrgPolicy(models.Model):
+    """Organisation-scoped policy that controls MCP autonomy behaviour.
+
+    Defaults: autonomy_enabled=False, shadow_mode=True, low severity cap,
+    daily cap of 20, four-eyes required.  Autonomy is off by default; no
+    organisation starts in enforce mode.  Policy is created lazily on first
+    admin view or first evaluation.
+    """
+
+    organisation = models.OneToOneField(
+        Organisation,
+        on_delete=models.PROTECT,
+        related_name="mcp_policy",
+        help_text="Organisation this policy belongs to. One policy per org.",
+    )
+    autonomy_enabled = models.BooleanField(
+        default=False,
+        help_text="Master kill switch: when False, autonomy is disabled regardless of shadow_mode.",
+    )
+    shadow_mode = models.BooleanField(
+        default=True,
+        help_text="When True, decisions are recorded but nothing is executed. "
+        "Always True at org start; switched to False only via explicit admin UI "
+        "confirmation after shadow evaluation.",
+    )
+    allowed_actions = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Exact allowlist entries from server-side schema registry. "
+        "No wildcards, prefixes, unknown, reserved, destructive, or duplicate entries. "
+        "Validated on save and on every policy update.  Empty list is valid (autonomy "
+        "will be effectively disabled until admin sets allowed actions).",
+    )
+    max_auto_severity = models.SmallIntegerField(
+        default=1,
+        help_text="Maximum target severity eligible for autonomy. Must be within "
+        "SEVERITY_MIN..SEVERITY_MAX (1=Low, 4=Critical). Default 1.",
+    )
+    daily_action_cap = models.PositiveIntegerField(
+        default=20,
+        help_text="CAP per org per UTC day. Only enforce-mode pre_execution decisions "
+        "with execution_outcome=executed consume quota. Default 20.",
+    )
+    require_four_eyes = models.BooleanField(
+        default=True,
+        help_text="When True, autonomy returns defer; the proposal stays pending for a human. "
+        "Agent self-approval does not satisfy four-eyes. Default True.",
+    )
+    updated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="mcp_policy_editor",
+        help_text="Last human editor of this policy. When set, must belong to the policy organisation.",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "MCP organisation policy"
+        verbose_name_plural = "MCP organisation policies"
+
+    def __str__(self) -> str:
+        return f"McpOrgPolicy(org={self.organisation_id})"
+
+    def clean(self) -> None:
+        super().clean()
+        # One policy per org is enforced by OneToOne, but validate allowed_actions content
+        if not isinstance(self.allowed_actions, list):
+            raise ValidationError({"allowed_actions": "allowed_actions must be a list."})
+        # Reject wildcards, duplicates, unknown, reserved, or destructive entries
+        # Allow empty list (blank=True) - autonomy will be effectively disabled until admin sets actions
+        if self.allowed_actions:
+            reserved = {
+                "close_case",
+                "run_playbook",
+                "escalate_alert",
+                "apply_case_update",
+                "add_observable_with_status",
+                "apply_alert_triage",
+            }
+            known_safe = {"propose_case_comment", "propose_task_create"}
+            seen = set()
+            for entry in self.allowed_actions:
+                if not isinstance(entry, str):
+                    raise ValidationError(
+                        {
+                            "allowed_actions": f"All allowed_actions entries must be strings. Found non-string: {entry}"
+                        }
+                    )
+                if entry in reserved:
+                    raise ValidationError(
+                        {
+                            "allowed_actions": f"Reserved action '{entry}' cannot be in allowed_actions."
+                        }
+                    )
+                if entry in seen:
+                    raise ValidationError(
+                        {"allowed_actions": f"Duplicate entry '{entry}' in allowed_actions."}
+                    )
+                seen.add(entry)
+                # Only known safe entries are allowed; reject unknown/reserved
+                if entry not in known_safe:
+                    raise ValidationError(
+                        {
+                            "allowed_actions": f"Unknown action '{entry}' in allowed_actions. "
+                            f"Allowed: {', '.join(sorted(known_safe))}"
+                        }
+                    )
+        # Validate daily_action_cap >= 1
+        if self.daily_action_cap < 1:
+            raise ValidationError({"daily_action_cap": "daily_action_cap must be >= 1."})
+
+        # Validate max_auto_severity within range
+        severity_values = {s[0] for s in SEVERITY_CHOICES}
+        if self.max_auto_severity not in severity_values:
+            raise ValidationError(
+                {
+                    "max_auto_severity": f"max_auto_severity must be one of {', '.join(str(s[0]) for s in SEVERITY_CHOICES)}."
+                }
+            )
+
+        # When updated_by is set, must belong to the policy organisation
+        if self.updated_by_id is not None:
+            updated_by = self.updated_by
+            if updated_by is None or updated_by.org_id != self.organisation_id:
+                raise ValidationError(
+                    {"updated_by": "The updated_by user must belong to the policy organisation."}
+                )
+
+
+class McpPolicyDecision(models.Model):
+    """Append-only decision log for MCP autonomy evaluation.
+
+    One row per evaluation. Never deleted. execution_outcome may transition
+    once from pending to terminal (executed/failed). Shadow rows are
+    not_applicable. Used for shadow evidence and UTC-day cap counting.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organisation = models.ForeignKey(
+        Organisation,
+        on_delete=models.PROTECT,
+        related_name="mcp_policy_decisions",
+        help_text="Tenant this decision belongs to.",
+    )
+    policy = models.ForeignKey(
+        McpOrgPolicy,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Policy in force at the time of this decision. May be null if policy was deleted.",
+    )
+    proposal = models.ForeignKey(
+        "McpActionProposal",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Source proposal that was evaluated.",
+    )
+    tool_name = models.CharField(
+        max_length=100,
+        help_text="Canonical tool name, e.g. propose_case_comment.",
+    )
+    action = models.CharField(
+        max_length=100,
+        help_text="Canonical service action name, e.g. append_timeline_event.",
+    )
+    target_type = models.CharField(
+        max_length=32,
+        help_text="Case, alert, observable or task.",
+    )
+    target_id = models.CharField(
+        max_length=64,
+        help_text="UUID of the target record.",
+    )
+    risk = models.CharField(
+        max_length=10,
+        help_text="low / medium / high. Proposals with medium/high are always denied/deferred.",
+    )
+    mode = models.CharField(
+        max_length=16,
+        help_text="shadow or enforce.",
+    )
+    decision = models.CharField(
+        max_length=16,
+        help_text="allow, deny, or defer.",
+    )
+    reason_code = models.CharField(
+        max_length=32,
+        help_text="Stable machine-readable reason for the decision.",
+    )
+    evidence = models.JSONField(
+        default=dict,
+        help_text="Bounded, non-secret facts only. Never raw payloads, tokens, URLs, headers, scripts.",
+    )
+    policy_snapshot = models.JSONField(
+        default=dict,
+        help_text="Exact policy fields used for this decision at evaluation time. Bounded.",
+    )
+    credential_id = models.CharField(  # noqa: DJ001 - optional attribution, null means not attributable
+        max_length=128,
+        null=True,
+        blank=True,
+        help_text="Attribution: credential that created the proposal.",
+    )
+    oauth_binding_id = models.CharField(  # noqa: DJ001 - optional attribution, null means not applicable
+        max_length=128,
+        null=True,
+        blank=True,
+        help_text="Attribution: OAuth binding ID.",
+    )
+    actor_id = models.CharField(  # noqa: DJ001 - optional attribution, null means system actor
+        max_length=128,
+        null=True,
+        blank=True,
+        help_text="Attribution: actor user ID who triggered the proposal.",
+    )
+    stage = models.CharField(
+        max_length=32,
+        help_text="proposal_created or pre_execution. Distinguishes creation-time decision from executor re-check.",
+    )
+    execution_outcome = models.CharField(
+        max_length=16,
+        help_text="not_applicable | pending | executed | failed. Shadow rows are not_applicable. "
+        "May transition once from pending to terminal.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "MCP policy decision"
+        verbose_name_plural = "MCP policy decisions"
+        ordering = ["-created_at"]
+        # Append-only: no custom delete; use administrative purge only with justification.
+        indexes = [
+            models.Index(fields=["organisation", "-created_at"], name="mcp_pol_org_cre_idx"),
+            models.Index(
+                fields=["organisation", "mode", "decision", "execution_outcome", "-created_at"],
+                name="mcp_pol_org_mode_exec_idx",
+            ),
+            models.Index(
+                fields=["decision", "mode", "-created_at"],
+                name="mcp_pol_decision_mode_idx",
+            ),
+            models.Index(
+                fields=["proposal", "-created_at"],
+                name="mcp_pol_proposal_cre_idx",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"McpPolicyDecision(id={str(self.id)[:8]} org={self.organisation_id} "
+            f"proposal={self.proposal_id} mode={self.mode} decision={self.decision} "
+            f"stage={self.stage} outcome={self.execution_outcome})"
+        )
+
+    def clean(self) -> None:
+        super().clean()
+        # Enforce append-only: no deletes at model level; this constraint is
+        # reinforced by the admin and migrations.
+        # execution_outcome may transition once from pending to terminal;
+        # no decision row is ever deleted.
+        valid_outcomes = {"not_applicable", "pending", "executed", "failed"}
+        if self.execution_outcome not in valid_outcomes:
+            raise ValidationError(
+                {
+                    "execution_outcome": f"execution_outcome must be one of {', '.join(valid_outcomes)}."
+                }
+            )
+        valid_modes = {"shadow", "enforce"}
+        if self.mode not in valid_modes:
+            raise ValidationError({"mode": f"mode must be one of {', '.join(valid_modes)}."})
+        valid_decisions = {"allow", "deny", "defer"}
+        if self.decision not in valid_decisions:
+            raise ValidationError(
+                {"decision": f"decision must be one of {', '.join(valid_decisions)}."}
+            )
+        valid_stages = {"proposal_created", "pre_execution"}
+        if self.stage not in valid_stages:
+            raise ValidationError({"stage": f"stage must be one of {', '.join(valid_stages)}."})
+
+    def save(self, *args: Any, **kwargs: Any) -> None:  # noqa: DJ012
+        # Append-only is enforced by refusing model-level deletion, not by
+        # disabling ORM saves. Callers must be able to persist decisions.
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        raise PermissionError("McpPolicyDecision rows are append-only and cannot be deleted.")
 
 
 class McpOAuthBinding(models.Model):

@@ -1,0 +1,71 @@
+{% load static %}
+<fieldset>
+  <legend>Policy controls</legend>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label for="id_autonomy_enabled">Autonomy enabled</label>
+      <input type="checkbox" name="autonomy_enabled" id="id_autonomy_enabled"
+             {% if policy.autonomy_enabled %}checked{% endif %}>
+      <small>Master kill switch: when disabled, autonomy is off regardless of other settings.</small>
+    </div>
+
+    <div class="form-group">
+      <label for="id_shadow_mode">Shadow mode</label>
+      <input type="checkbox" name="shadow_mode" id="id_shadow_mode"
+             {% if policy.shadow_mode %}checked{% endif %}>
+      <small>When enabled, decisions are recorded but no autonomous execution occurs.</small>
+    </div>
+  </div>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label for="id_allowed_actions">Allowlisted actions</label>
+      <p class="dim">Exact action names from the server-side registry.</p>
+      <select name="allowed_actions" id="id_allowed_actions" multiple size="10"
+              class="w-full">
+        {% for action in allowlist_choices %}
+        <option value="{{ action }}"
+                {% if action in policy.allowed_actions %}selected{% endif %}>
+          {{ action }}
+        </option>
+        {% endfor %}
+      </select>
+      <p class="dim">Current allowlist: {% if policy.allowed_actions %}{{ policy.allowed_actions|join:", " }}{% else %}—{% endif %}</p>
+    </div>
+
+    <div class="form-group">
+      <label for="id_max_auto_severity">Max auto severity</label>
+      <select name="max_auto_severity" id="id_max_auto_severity">
+        {% for value, label in severity_choices %}
+        <option value="{{ value }}"
+                {% if value == policy.max_auto_severity %}selected{% endif %}>
+          {{ label }} (severity {{ value }})
+        </option>
+        {% endfor %}
+      </select>
+      <small>Only targets with severity <= this value are eligible for autonomy.</small>
+    </div>
+
+    <div class="form-group">
+      <label for="id_daily_action_cap">Daily action cap</label>
+      <input type="number" name="daily_action_cap" id="id_daily_action_cap"
+             min="1" value="{{ policy.daily_action_cap }}">
+      <small>Maximum autonomous executions per org per UTC day. Default: 20.</small>
+    </div>
+  </div>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label for="id_require_four_eyes">Require four-eyes</label>
+      <input type="checkbox" name="require_four_eyes" id="id_require_four_eyes"
+             {% if policy.require_four_eyes %}checked{% endif %}>
+      <small>When enabled, autonomy defers proposals for human approval.</small>
+    </div>
+  </div>
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary">Save</button>
+    <a href="{% url 'ui-settings-agent-autonomy' organisation.id %}" class="btn btn-secondary">Cancel</a>
+  </div>
+</fieldset>

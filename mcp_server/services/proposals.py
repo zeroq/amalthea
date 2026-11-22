@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -278,11 +279,12 @@ def _resolve_target(target_type: str, target_id: str, org: Organisation) -> Any:
 
 
 def _check_org_target_match(target: Any, org: Organisation) -> bool:
-    if hasattr(target, "owner_org_id"):
-        return target.owner_org_id == org.id
+    owner_org_id = getattr(target, "owner_org_id", None)
+    if owner_org_id is not None:
+        return bool(owner_org_id == org.id)
     case = getattr(target, "case", None)
     if case is not None:
-        return case.owner_org_id == org.id
+        return bool(getattr(case, "owner_org_id", None) == org.id)
     return False
 
 
@@ -300,12 +302,11 @@ def _check_target_state(proposal: McpActionProposal, target: Any) -> bool:
 def _resolve_user(identifier: Any, org: Organisation) -> User | None:
     if not identifier:
         return None
-    return (
-        User.objects.filter(org=org, is_active=True)
-        .filter(pk=identifier if _is_uuid(identifier) else None)
-        .first()
-        or User.objects.filter(org=org, is_active=True, login=str(identifier)).first()
-    )
+    if _is_uuid(identifier):
+        user = User.objects.filter(org=org, is_active=True, pk=str(identifier)).first()
+        if user is not None:
+            return user
+    return User.objects.filter(org=org, is_active=True, login=str(identifier)).first()
 
 
 def _is_uuid(value: Any) -> bool:
@@ -316,6 +317,14 @@ def _is_uuid(value: Any) -> bool:
     except (TypeError, ValueError):
         return False
     return True
+
+
+@dataclass(frozen=True)
+class _AutonomyPrincipal:
+    organisation_id: Any
+    actor_id: Any
+    credential_id: Any
+    oauth_binding_id: Any = None
 
 
 def _parse_datetime(value: Any) -> datetime | None:
@@ -464,3 +473,274 @@ def _emit_case_execution_event(
             "result": _bounded_result(result),
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Autonomous execution (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+def execute_proposal_autonomous(*, proposal: McpActionProposal) -> dict[str, Any]:
+    """Execute a proposal autonomously under policy control.
+
+    Called after an enforce-mode autonomy decision of 'allow'. Re-evaluates policy
+    immediately before execution (stage=pre_execution under policy row lock),
+    re-resolves the target under org scoping, re-checks expiry/hash/state/severity
+    /cap/allowlist, calls the same domain service adapters as the human executor,
+    sets execution_outcome executed|failed once, writes bounded result/ledger/audit
+    records, and keeps decided_by=None.
+
+    Distinct from human approval semantics: no decided_by is set, and audit actions
+    are labelled autonomous rather than human.
+    """
+    from django.db import transaction as db_transaction
+    from django.utils import timezone
+
+    from mcp_server.models import McpOrgPolicy, McpPolicyDecision
+
+    now = timezone.now()
+
+    with db_transaction.atomic():
+        # Re-evaluate policy immediately before execution under policy row lock
+        policy = (
+            McpOrgPolicy.objects.select_for_update()
+            .filter(organisation_id=proposal.organisation_id)
+            .first()
+        )
+        if policy is None:
+            return _mark_autonomous_failed(proposal, "no_policy")
+
+        principal_obj = _AutonomyPrincipal(
+            organisation_id=proposal.organisation_id,
+            actor_id=getattr(proposal, "requested_by_id", None) or None,
+            credential_id=getattr(proposal, "credential_id", None) or None,
+        )
+
+        # Build a minimal target reference
+        target = _resolve_target(proposal.target_type, proposal.target_id, proposal.organisation)
+
+        # Compute daily count for cap checking (enforce pre_execution executed count)
+        # Django timezone now() UTC date consistently (Bug 9)
+        daily_count = McpPolicyDecision.objects.filter(
+            organisation_id=proposal.organisation_id,
+            mode="enforce",
+            decision="allow",
+            execution_outcome="executed",
+            stage="pre_execution",
+            created_at__date=timezone.now().date(),
+        ).count()
+
+        # Re-resolve target severity
+        if target is not None and hasattr(target, "severity"):
+            try:
+                _ = int(target.severity)
+            except (ValueError, TypeError):
+                pass
+
+        from mcp_server.services.autonomy import evaluate_proposal_autonomy
+
+        decision = evaluate_proposal_autonomy(
+            policy=policy,
+            principal=principal_obj,
+            proposal=proposal,
+            target=target,
+            now=now,
+            daily_count=daily_count,
+            stage="pre_execution",
+        )
+
+        # Check: if the re-evaluation returns deny/defer, fail closed
+        if decision.decision != "allow":
+            return _mark_autonomous_failed(proposal, decision.reason_code)
+
+        # Resolve target and check org match (tenant scoping)
+        if target is None:
+            return _mark_autonomous_failed(proposal, "target_not_resolved")
+
+        # Re-check target state valid
+        if not _check_target_state(proposal, target):
+            return _mark_autonomous_failed(proposal, "target_state")
+
+        # Resolve the user actor for domain services
+        # requested_by_id is a UUID; resolve it to a User instance; fail closed if missing/inactive/wrong org
+        resolved_user = _resolve_user(
+            getattr(proposal, "requested_by_id", None), proposal.organisation
+        )
+        if resolved_user is None:
+            return _mark_autonomous_failed(proposal, "actor_not_resolved")
+
+        # --- Create the pre_execution decision row before domain execution ---
+        # This is what makes cap counting work (Bug 4)
+        # Derive oauth_binding_id from the proposal_created decision row
+        # (hooks persist principal.oauth_binding_id there; proposal row has no such field)
+        try:
+            _decision_row = McpPolicyDecision.objects.filter(
+                proposal=proposal,
+                stage="proposal_created",
+            ).latest("created_at")
+        except McpPolicyDecision.DoesNotExist:
+            return _mark_autonomous_failed(proposal, "proposal_decision_missing")
+
+        McpPolicyDecision.objects.create(
+            organisation_id=proposal.organisation_id,
+            policy=policy,
+            proposal=proposal,
+            tool_name=proposal.tool_name,
+            action=proposal.action,
+            target_type=proposal.target_type,
+            target_id=proposal.target_id,
+            risk=proposal.risk,
+            mode=decision.mode,
+            decision=decision.decision,
+            reason_code=decision.reason_code,
+            evidence=decision.evidence,
+            policy_snapshot=decision.policy_snapshot,
+            credential_id=getattr(proposal, "credential_id", None) or None,
+            oauth_binding_id=_decision_row.oauth_binding_id or None,
+            actor_id=getattr(proposal, "requested_by_id", None) or None,
+            stage="pre_execution",
+            execution_outcome="pending",  # will be updated to executed|failed
+        )
+
+        # Execute the domain service action (same as human executor)
+        # Pass the resolved User actor for domain services (Bug 6)
+        # but never set proposal.decided_by or proposal.decided_at (autonomy provenance)
+        try:
+            result = _execute_service_action(proposal, target, by_user=resolved_user)
+        except Exception:
+            logger.exception("Autonomous execution domain service failed id=%s", proposal.id)
+            return _mark_autonomous_failed(proposal, "execution_failed")
+
+        # Bounded result
+        bounded = _bounded_result(result)
+
+        # Set execution_outcome = executed (write once)
+        # Bug 5: Set status to EXECUTED using the enum
+        from mcp_server.models import McpActionProposal as ProposalModel
+
+        proposal.status = ProposalModel.StatusChoices.EXECUTED
+        proposal.executed_at = now
+        proposal.result = bounded
+        proposal.save(update_fields=["status", "executed_at", "result", "updated_at"])
+
+        # Update the pre_execution decision row to executed (Bug 4)
+        _decision_row.execution_outcome = "executed"
+        _decision_row.save(update_fields=["execution_outcome"])
+
+        # Emit case execution event if target is a case
+        if proposal.target_type == "case":
+            from cases.ledger import append_timeline_event as _append_timeline_event
+
+            _append_timeline_event(
+                target,
+                title="MCP autonomous execution",
+                kind="autonomous",
+                description=f"Autonomous {proposal.tool_name} execution completed.",
+                actor=None,  # no human actor; provenance on decision row
+                metadata={
+                    "proposalId": str(proposal.id),
+                    "toolName": proposal.tool_name,
+                    "action": proposal.action,
+                    "result": bounded,
+                },
+            )
+
+        # Write autonomous audit action (distinct from human approval audit) (Bug 7)
+        # Use dedicated autonomous action logging, not the policy-change helper
+        from identity.models import AuditLog
+
+        try:
+            AuditLog.objects.create(
+                actor=resolved_user,
+                actor_org=proposal.organisation,
+                target_org=proposal.organisation,
+                target_type="McpActionProposal",
+                target_id=str(proposal.id),
+                action="mcp_autonomous.executed",
+                details={
+                    "proposalId": str(proposal.id),
+                    "toolName": proposal.tool_name,
+                    "action": proposal.action,
+                    "result": bounded,
+                    "mode": decision.mode,
+                    "reason_code": decision.reason_code,
+                },
+            )
+        except Exception:
+            logger.warning(
+                "Best-effort audit failed, continuing without audit record", exc_info=True
+            )
+            pass  # best-effort audit; do not roll back execution
+
+        # Return bounded result summary
+        return {
+            "status": "executed",
+            "result": bounded,
+            "target_id": str(target.id) if target else None,
+        }
+
+
+def _mark_autonomous_failed(proposal: McpActionProposal, reason_code: str) -> dict[str, Any]:
+    """Mark an autonomous execution as failed once.
+
+    Sets execution_outcome=failed on the associated McpPolicyDecision if it exists,
+    and marks the proposal status as failed.  Idempotent: safe to call multiple times.
+    """
+    import logging
+
+    from django.utils import timezone
+
+    from mcp_server.models import McpPolicyDecision
+
+    logger = logging.getLogger(__name__)
+    now = timezone.now()
+
+    # Idempotency (Bug 10): if proposal is already terminal, return existing result
+    if proposal.status in ("executed", "failed"):
+        return {
+            "status": proposal.status,
+            "result": proposal.result or {"error": reason_code},
+            "target_id": proposal.target_id,
+        }
+
+    # Attempt to find and update the associated policy decision
+    try:
+        decision_row = McpPolicyDecision.objects.filter(
+            proposal=proposal,
+            stage="pre_execution",
+        ).latest("created_at")
+        # Transition execution_outcome from pending to failed once
+        if decision_row.execution_outcome in ("not_applicable", "pending"):
+            decision_row.execution_outcome = "failed"
+            decision_row.save(update_fields=["execution_outcome"])
+            logger.info(
+                "Autonomous decision %s marked failed: %s", str(decision_row.id)[:8], reason_code
+            )
+    except McpPolicyDecision.DoesNotExist:
+        pass  # no decision row yet; execution will still record failed state
+
+    # Mark the proposal as failed
+    proposal.status = "failed"
+    proposal.executed_at = now
+    # Do NOT set proposal.result to avoid leaking args; keep it bounded empty
+    proposal.result = {"error": reason_code}
+    proposal.save(update_fields=["status", "executed_at", "result", "updated_at"])
+
+    # Emit failed autonomous audit action
+    from identity.models import AuditLog
+
+    try:
+        AuditLog.objects.create(
+            actor=None,
+            actor_org=proposal.organisation,
+            target_org=proposal.organisation,
+            target_type="McpActionProposal",
+            target_id=str(proposal.id),
+            action="mcp_autonomous.failed",
+            details={"reason": reason_code, "proposalId": str(proposal.id)},
+        )
+    except Exception:
+        logger.warning("Best-effort audit failed, continuing without audit record", exc_info=True)
+        pass  # best-effort
+
+    return {"status": "failed", "result": {"error": reason_code}, "target_id": proposal.target_id}
