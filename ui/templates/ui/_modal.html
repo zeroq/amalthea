@@ -96,6 +96,8 @@ Parameters:
         {% endif %}
         <button type="submit" class="btn {{ confirm_class|default:'btn-primary' }}"{% if confirm_disabled %} disabled{% endif %}>{{ confirm_text|default:"Confirm" }}</button>
       </form>
+      {% elif confirm_form %}
+      <button type="submit" form="{{ confirm_form }}" class="btn {{ confirm_class|default:'btn-primary' }}"{% if confirm_disabled %} disabled{% endif %}>{{ confirm_text|default:"Confirm" }}</button>
       {% elif close_url %}
       <a class="btn {{ confirm_class|default:'btn-primary' }}" href="{{ close_url }}" data-modal-close="{{ modal_id }}">{{ confirm_text|default:"Close" }}</a>
       {% else %}

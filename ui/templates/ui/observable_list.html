@@ -21,6 +21,78 @@
 <div class="card">
   {% if page_obj.paginator %}
     {% include "ui/_list_summary.html" with entity_name="observable" entity_name_plural="observables" %}
+    {% if can_mutate and page_obj.object_list %}
+    <form method="post" id="observable-bulk-form" action="{% url 'ui-observable-bulk' %}" class="bulk-form" aria-label="Bulk observable actions">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <div class="bulk-action-bar" role="group" aria-label="Bulk actions">
+        <label class="bulk-select-all">
+          <input type="checkbox" data-bulk-select-all="observable-bulk-form" aria-label="Select all observables on this page">
+          <span class="dim">Select page</span>
+        </label>
+        <span class="dim bulk-count" data-bulk-count="observable-bulk-form">0 selected</span>
+        <label class="sr-only" for="bulk-obs-tlp">TLP</label>
+        <select id="bulk-obs-tlp" name="tlp" class="filter-type">
+          <option value="">Set TLP…</option>
+          {% for value, label in tlp_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+        <label class="sr-only" for="bulk-obs-pap">PAP</label>
+        <select id="bulk-obs-pap" name="pap" class="filter-type">
+          <option value="">Set PAP…</option>
+          {% for value, label in pap_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+        <label class="sr-only" for="bulk-obs-ioc">IOC</label>
+        <select id="bulk-obs-ioc" name="ioc" class="filter-type">
+          <option value="">IOC…</option>
+          <option value="true">IOC: Yes</option>
+          <option value="false">IOC: No</option>
+        </select>
+        <label class="sr-only" for="bulk-obs-sighted">Sighted</label>
+        <select id="bulk-obs-sighted" name="sighted" class="filter-type">
+          <option value="">Sighted…</option>
+          <option value="true">Sighted: Yes</option>
+          <option value="false">Sighted: No</option>
+        </select>
+        <button type="button" class="btn btn-primary" data-modal-open="observable-bulk-confirm-modal" data-bulk-requires-selection="observable-bulk-form">Apply</button>
+      </div>
+      <div class="table-wrap">
+      <table class="data-table">
+        <caption class="sr-only">Observables</caption>
+        <thead>
+          <tr>
+            <th scope="col"><span class="sr-only">Select</span></th>
+            <th scope="col">Type</th>
+            <th scope="col">Value</th>
+            <th scope="col">Cases</th>
+            <th scope="col">First seen</th>
+            <th scope="col">Last seen</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for obs in page_obj.object_list %}
+          <tr>
+            <td><input type="checkbox" name="ids" value="{{ obs.id }}" aria-label="Select observable {{ obs.data }}" data-bulk-item="observable-bulk-form"></td>
+            <td>{{ obs.data_type.name }}</td>
+            <td class="mono break">
+              <a href="{% url 'ui-observable-detail' obs.id %}">{{ obs.data }}</a>
+            </td>
+            <td>{{ obs.case_observables.count }}</td>
+            <td>{{ obs.created_at|date:"Y-m-d H:i" }}</td>
+            <td>{{ obs.updated_at|default:obs.created_at|date:"Y-m-d H:i" }}</td>
+            <td><a class="icon-link" href="{% url 'ui-observable-detail' obs.id %}" aria-label="View observable {{ obs.data }}"><i class="fa-regular fa-eye" aria-hidden="true"></i></a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </form>
+    {% include "ui/_modal.html" with modal_id="observable-bulk-confirm-modal" title="Apply bulk action?" body_template="ui/_observable_bulk_modal_body.html" confirm_form="observable-bulk-form" confirm_text="Apply" confirm_class="btn-primary" size="sm" %}
+    {% else %}
     <div class="table-wrap">
     <table class="data-table">
       <caption class="sr-only">Observables</caption>
@@ -50,6 +122,7 @@
       </tbody>
     </table>
     </div>
+    {% endif %}
 
     {% if page_obj.paginator.count == 0 %}
       {# Honest empty state for paginated path #}

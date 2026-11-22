@@ -44,6 +44,11 @@
     for (var i = 0; i < autoOpenModals.length; i++) {
       open(autoOpenModals[i]);
     }
+    var bulkForms = document.querySelectorAll("[data-bulk-select-all]");
+    for (var j = 0; j < bulkForms.length; j++) {
+      var formId = bulkForms[j].getAttribute("data-bulk-select-all");
+      if (formId) updateBulkCount(formId);
+    }
   });
 
   // HTMX treats 4xx as "do not swap" by default. A modal form's 422 carries the bound field
@@ -217,16 +222,69 @@
   // Select all checkboxes in suggestions tables
   document.addEventListener("change", function (event) {
     var target = event.target;
-    if (!target.matches("#suggestions-select-all-proposed, #suggestions-select-all-filtered")) {
+    if (target.matches("#suggestions-select-all-proposed, #suggestions-select-all-filtered")) {
+      var table = target.closest("table");
+      if (!table) {
+        return;
+      }
+      var checkboxes = table.querySelectorAll('input[name="suggestion_ids"]');
+      for (var i = 0; i < checkboxes.length; i++) {
+        checkboxes[i].checked = target.checked;
+      }
       return;
     }
-    var table = target.closest("table");
-    if (!table) {
+
+    var selectAll = target.closest("[data-bulk-select-all]");
+    if (selectAll) {
+      var formId = selectAll.getAttribute("data-bulk-select-all");
+      var form = document.getElementById(formId);
+      if (!form) return;
+      var items = form.querySelectorAll('[data-bulk-item="' + formId + '"]');
+      for (var j = 0; j < items.length; j++) {
+        items[j].checked = selectAll.checked;
+      }
+      updateBulkCount(formId);
       return;
     }
-    var checkboxes = table.querySelectorAll('input[name="suggestion_ids"]');
-    for (var i = 0; i < checkboxes.length; i++) {
-      checkboxes[i].checked = target.checked;
+
+    var item = target.closest("[data-bulk-item]");
+    if (item) {
+      updateBulkCount(item.getAttribute("data-bulk-item"));
     }
   });
+
+  function updateBulkCount(formId) {
+    var form = document.getElementById(formId);
+    if (!form) return;
+    var items = form.querySelectorAll('[data-bulk-item="' + formId + '"]');
+    var checked = 0;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].checked) checked++;
+    }
+    var labels = document.querySelectorAll('[data-bulk-count="' + formId + '"]');
+    for (var k = 0; k < labels.length; k++) {
+      labels[k].textContent = checked + " selected";
+    }
+    var selectAll = form.querySelector('[data-bulk-select-all="' + formId + '"]');
+    if (selectAll) {
+      selectAll.checked = items.length > 0 && checked === items.length;
+      selectAll.indeterminate = checked > 0 && checked < items.length;
+    }
+  }
+
+  document.addEventListener("click", function (event) {
+    var opener = event.target.closest("[data-bulk-requires-selection]");
+    if (!opener) return;
+    var formId = opener.getAttribute("data-bulk-requires-selection");
+    var form = document.getElementById(formId);
+    if (!form) return;
+    var checked = form.querySelectorAll('[data-bulk-item="' + formId + '"]:checked');
+    if (checked.length === 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      var modalId = opener.getAttribute("data-modal-open");
+      var modal = modalId ? document.getElementById(modalId) : null;
+      if (modal && modal.open) modal.close();
+    }
+  }, true);
 })();

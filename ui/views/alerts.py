@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -17,6 +18,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from alerts.escalation import (
     import_alert_to_case,
     merge_alert_into_case,
+    resolve_alert_status,
 )
 from alerts.models import Alert, AlertStatus, AlertTagLink
 from cases.correlation import (
@@ -110,6 +112,17 @@ def alert_list(request: HttpRequest) -> HttpResponse:
     # Build the severity filter toggle links for the UI.
     severity_filter_links = build_severity_filter_links(request, selected_severities)
 
+    alert_status_options = (
+        AlertStatus.objects.filter(stage__in=ALERT_STAGES)
+        .exclude(stage="Imported")
+        .exclude(stage="Closed")
+        .order_by("order", "value")
+    )
+    from identity.models import User
+
+    alert_assignees = User.objects.filter(org_q("org", request.user), is_active=True).order_by(
+        "login"
+    )[:200]
     return render(
         request,
         "ui/alert_list.html",
@@ -123,6 +136,8 @@ def alert_list(request: HttpRequest) -> HttpResponse:
             selected_severities=selected_severities,
             severity_filter_links=severity_filter_links,
             can_delete_alerts=is_admin(request.user),
+            alert_status_options=alert_status_options,
+            alert_assignees=alert_assignees,
         ),
     )
 
@@ -476,6 +491,122 @@ def alert_close(request: HttpRequest, alert_id: str) -> HttpResponse:
 
     messages.success(request, f"Alert closed as {verdict}.")
     return redirect("ui-alert-detail", alert_id=alert.id)
+
+
+def _alert_bulk_redirect(request: HttpRequest) -> HttpResponse:
+    """Redirect bulk actions back to the alert list, preserving the current filter query."""
+    next_url = (request.POST.get("next") or "").strip()
+    if next_url.startswith("/") and not next_url.startswith("//"):
+        return redirect(next_url)
+    return redirect("ui-alert-list")
+
+
+def _resolve_alert_for_bulk_ui(user: Any, raw: str) -> Alert | None:
+    return resolve_alert(user, raw, write=True)
+
+
+@not_viewer
+@login_required
+@require_POST
+def alert_bulk(request: HttpRequest) -> HttpResponse:
+    """Bulk triage for alerts: status and/or assignee, per-item isolation."""
+    ids = request.POST.getlist("ids")
+    payload: dict[str, Any] = {"ids": ids}
+    status_val = (request.POST.get("status") or "").strip()
+    assignee_val = (request.POST.get("assignee") or "").strip()
+
+    if status_val:
+        valid_status = (
+            AlertStatus.objects.filter(stage__in=ALERT_STAGES)
+            .exclude(stage="Imported")
+            .exclude(stage="Closed")
+            .filter(value=status_val)
+            .first()
+        )
+        if not valid_status:
+            messages.error(request, f"Invalid status: {status_val}")
+            return _alert_bulk_redirect(request)
+        payload["status"] = valid_status.value
+
+    if assignee_val:
+        if assignee_val == "__unassigned__":
+            payload["assignee"] = None
+        else:
+            from identity.models import User
+
+            assignee = User.objects.filter(
+                org_q("org", request.user), login=assignee_val, is_active=True
+            ).first()
+            if assignee is None:
+                messages.error(request, f"Invalid assignee: {assignee_val}")
+                return _alert_bulk_redirect(request)
+            payload["assignee"] = assignee.login
+
+    if "status" not in payload and "assignee" not in payload:
+        messages.error(request, "Select a status or assignee to apply.")
+        return _alert_bulk_redirect(request)
+
+    if not ids:
+        messages.error(request, "No alerts selected.")
+        return _alert_bulk_redirect(request)
+
+    from rest_framework.request import Request as DRFRequest
+    from rest_framework.test import APIRequestFactory
+
+    factory = APIRequestFactory()
+    drf_req = DRFRequest(factory.patch("/api/v1/alert/_bulk", payload, format="json"))
+    drf_req.user = request.user
+    drf_req._full_data = payload
+
+    results = []
+    updated = 0
+    for raw in ids:
+        alert = _resolve_alert_for_bulk_ui(request.user, str(raw))
+        if alert is None:
+            results.append({"id": str(raw), "status": 404, "message": "not found"})
+            continue
+        try:
+            with transaction.atomic():
+                fields: list[str] = []
+                if "status" in payload:
+                    warnings: list[str] = []
+                    alert.status = resolve_alert_status(str(payload["status"]), warnings=warnings)
+                    fields.append("status")
+                if "assignee" in payload:
+                    from identity.models import User
+
+                    raw_assignee = payload.get("assignee")
+                    if raw_assignee in (None, ""):
+                        alert.assignee = None
+                    else:
+                        alert.assignee = User.objects.filter(
+                            org_q("org", request.user), login=str(raw_assignee), is_active=True
+                        ).first()
+                    fields.append("assignee")
+                if not fields:
+                    results.append(
+                        {
+                            "id": str(alert.id),
+                            "status": 400,
+                            "message": "No updatable field supplied",
+                        }
+                    )
+                    continue
+                alert.save(update_fields=[*fields, "updated_at"])
+        except Exception as exc:
+            results.append({"id": str(raw), "status": 400, "message": str(exc)[:200]})
+            continue
+        results.append({"id": str(alert.id), "status": 200})
+        updated += 1
+
+    failed = len(results) - updated
+    if failed:
+        first = next((r for r in results if r.get("status") != 200), None)
+        detail = f" First failure: {first.get('message')}" if first else ""
+        messages.warning(request, f"Bulk update: {updated} updated, {failed} failed.{detail}")
+    else:
+        messages.success(request, f"Updated {updated} alert(s).")
+    return _alert_bulk_redirect(request)
 
 
 @not_viewer

@@ -52,6 +52,92 @@
 
 <div class="card">
   {% include "ui/_list_summary.html" with entity_name="alert" entity_name_plural="alerts" %}
+  {% if can_mutate and page_obj.object_list %}
+  <form method="post" id="alert-bulk-form" action="{% url 'ui-alert-bulk' %}" class="bulk-form" aria-label="Bulk alert actions">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <div class="bulk-action-bar" role="group" aria-label="Bulk actions">
+      <label class="bulk-select-all">
+        <input type="checkbox" data-bulk-select-all="alert-bulk-form" aria-label="Select all alerts on this page">
+        <span class="dim">Select page</span>
+      </label>
+      <span class="dim bulk-count" data-bulk-count="alert-bulk-form">0 selected</span>
+      <label class="sr-only" for="bulk-alert-status">Status</label>
+      <select id="bulk-alert-status" name="status" class="filter-type">
+        <option value="">Set status…</option>
+        {% for s in alert_status_options %}
+        <option value="{{ s.value }}">{{ s.value }}</option>
+        {% endfor %}
+      </select>
+      <label class="sr-only" for="bulk-alert-assignee">Assignee</label>
+      <select id="bulk-alert-assignee" name="assignee" class="filter-type">
+        <option value="">Set assignee…</option>
+        <option value="__unassigned__">Unassigned</option>
+        {% for u in alert_assignees %}
+        <option value="{{ u.login }}">{{ u.login }}</option>
+        {% endfor %}
+      </select>
+      <button type="button" class="btn btn-primary" data-modal-open="alert-bulk-confirm-modal" data-bulk-requires-selection="alert-bulk-form">Apply</button>
+    </div>
+    <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Alerts, newest first</caption>
+      <colgroup>
+        <col class="alert-col-select">
+        <col class="alert-col-severity">
+        <col class="alert-col-title">
+        <col class="alert-col-type">
+        <col class="alert-col-source">
+        <col class="alert-col-seen">
+        <col class="alert-col-state">
+        {% if can_delete_alerts %}
+        <col class="alert-col-actions">
+        {% endif %}
+      </colgroup>
+      <thead>
+        <tr>
+          <th scope="col"><span class="sr-only">Select</span></th>
+          <th scope="col">Severity</th><th scope="col">Title</th><th scope="col">Type</th>
+          <th scope="col">Source</th><th scope="col">Seen</th>
+          <th scope="col">State</th>
+          {% if can_delete_alerts %}
+            <th scope="col">Actions</th>
+          {% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for alert in page_obj.object_list %}
+          <tr>
+            <td><input type="checkbox" name="ids" value="{{ alert.id }}" aria-label="Select alert {{ alert.title }}" data-bulk-item="alert-bulk-form"></td>
+            <td><span class="sev sev-{{ alert.severity|sev_class }}">{{ alert.severity|sev_label }}</span></td>
+            <td><a href="{% url 'ui-alert-detail' alert.id %}">{{ alert.title }}</a></td>
+            <td class="mono">{{ alert.type }}</td>
+            <td class="mono">{{ alert.source }}{% if alert.ingestion_source %} <span class="dim">({{ alert.ingestion_source.slug }})</span>{% endif %}</td>
+            <td class="mono dim">{{ alert.date|date:"Y-m-d H:i" }}</td>
+            <td>
+              {% if alert.case %}
+                <a href="{% url 'ui-case-detail' alert.case.number %}">#{{ alert.case.number }}</a>
+              {% else %}{{ alert.status.value }}{% endif %}
+            </td>
+            {% if can_delete_alerts %}
+            <td>
+              <button type="button" class="btn btn-ghost btn-sm" data-modal-open="delete-alert-{{ alert.id }}" aria-label="Delete alert {{ alert.title }}">
+                <i class="fa-solid fa-trash" aria-hidden="true"></i>
+              </button>
+              {% url 'ui-alert-delete' alert.id as alert_delete_url %}
+              {% with alert_oid=alert.id|stringformat:"s" %}
+              {% include "ui/_modal.html" with modal_id="delete-alert-"|add:alert_oid title="Delete alert?" body="This will permanently delete the alert. This action cannot be undone." confirm_text="Delete" confirm_class="btn-err" form_action=alert_delete_url size="sm" %}
+              {% endwith %}
+            </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </form>
+  {% include "ui/_modal.html" with modal_id="alert-bulk-confirm-modal" title="Apply bulk action?" body_template="ui/_alert_bulk_modal_body.html" confirm_form="alert-bulk-form" confirm_text="Apply" confirm_class="btn-primary" size="sm" %}
+  {% else %}
     <div class="table-wrap">
     <table class="data-table">
       <caption class="sr-only">Alerts, newest first</caption>
@@ -62,7 +148,7 @@
         <col class="alert-col-source">
         <col class="alert-col-seen">
         <col class="alert-col-state">
-        {% if request.user.role == "admin" or request.user.role == "superAdmin" %}
+        {% if can_delete_alerts %}
         <col class="alert-col-actions">
         {% endif %}
       </colgroup>
@@ -105,6 +191,7 @@
       </tbody>
     </table>
     </div>
+  {% endif %}
 
     {% if page_obj.paginator.count == 0 %}
       {# Honest empty state #}

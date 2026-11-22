@@ -26,10 +26,39 @@
   </div>
 
   {% if tasks %}
+  {% if can_mutate %}
+  <form method="post" id="task-bulk-form" action="{% url 'ui-task-bulk' %}" class="bulk-form" aria-label="Bulk task actions">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <div class="bulk-action-bar" role="group" aria-label="Bulk task actions">
+      <label class="bulk-select-all">
+        <input type="checkbox" data-bulk-select-all="task-bulk-form" aria-label="Select all tasks on this page">
+        <span class="dim">Select page</span>
+      </label>
+      <span class="dim bulk-count" data-bulk-count="task-bulk-form">0 selected</span>
+      <label class="sr-only" for="bulk-task-status">Status</label>
+      <select id="bulk-task-status" name="status" class="filter-type">
+        <option value="">Set status…</option>
+        {% for value, label in task_status_options %}
+        <option value="{{ value }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+      <label class="sr-only" for="bulk-task-assignee">Assignee</label>
+      <select id="bulk-task-assignee" name="assignee" class="filter-type">
+        <option value="">Set assignee…</option>
+        <option value="__unassigned__">Unassigned</option>
+        {% for u in task_assignees %}
+        <option value="{{ u.login }}">{{ u.login }}</option>
+        {% endfor %}
+      </select>
+      <button type="button" class="btn btn-primary" data-modal-open="task-bulk-confirm-modal" data-bulk-requires-selection="task-bulk-form">Apply</button>
+    </div>
+  {% endif %}
   <ul class="tasks">
     {% for task in tasks %}
     <li class="task {% if task.status == 'Completed' %}task-done{% endif %}">
       {% if can_mutate %}
+      <input type="checkbox" name="ids" value="{{ task.id }}" form="task-bulk-form" aria-label="Select task {{ task.title }}" data-bulk-item="task-bulk-form">
       <form method="post" action="{% url 'ui-case-task-toggle' case.number task.id %}">{% csrf_token %}
         <input type="hidden" name="tab" value="tasks">
         <button type="submit" class="tick"
@@ -75,6 +104,10 @@
     </li>
     {% endfor %}
   </ul>
+  {% if can_mutate %}
+  </form>
+  {% include "ui/_modal.html" with modal_id="task-bulk-confirm-modal" title="Apply bulk action?" body_template="ui/_task_bulk_modal_body.html" confirm_form="task-bulk-form" confirm_text="Apply" confirm_class="btn-primary" size="sm" %}
+  {% endif %}
   {% else %}
   <p class="empty">No tasks.</p>
   {% endif %}

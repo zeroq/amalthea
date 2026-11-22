@@ -12,7 +12,9 @@ from django.db import transaction
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
+from rest_framework.request import Request as DRFRequest
 from rest_framework.response import Response
+from rest_framework.test import APIRequestFactory
 
 from cases.ledger import append_timeline_event
 from cases.models import (
@@ -23,6 +25,7 @@ from cases.views import (
     _observable_cross_case_guard,
     _set_observable_fields,
 )
+from compat.bulk import bulk_patch
 from core.enums import (
     PAP_CHOICES,
     TLP_CHOICES,
@@ -46,6 +49,76 @@ from .common import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _observable_bulk_redirect(request: HttpRequest) -> HttpResponse:
+    next_url = (request.POST.get("next") or "").strip()
+    if next_url.startswith("/") and not next_url.startswith("//"):
+        return redirect(next_url)
+    return redirect("ui-observable-list")
+
+
+@not_viewer
+@login_required
+@require_POST
+def observable_bulk(request: HttpRequest) -> HttpResponse:
+    """Bulk observable updates (TLP/PAP/IOC/Sighted) with per-item isolation."""
+    ids = request.POST.getlist("ids")
+    if not ids:
+        messages.error(request, "No observables selected.")
+        return _observable_bulk_redirect(request)
+
+    payload: dict[str, Any] = {"ids": ids}
+    for key in ("tlp", "pap"):
+        raw = (request.POST.get(key) or "").strip()
+        if raw:
+            try:
+                payload[key] = int(raw)
+            except (TypeError, ValueError):
+                messages.error(request, f"Invalid {key.upper()} value.")
+                return _observable_bulk_redirect(request)
+    for key in ("ioc", "sighted"):
+        raw = (request.POST.get(key) or "").strip().lower()
+        if raw in ("true", "false"):
+            payload[key] = raw == "true"
+        elif raw:
+            messages.error(request, f"Invalid {key} value.")
+            return _observable_bulk_redirect(request)
+
+    if len(payload.keys()) == 1:
+        messages.error(request, "Select at least one field to apply.")
+        return _observable_bulk_redirect(request)
+
+    factory = APIRequestFactory()
+    drf_req = DRFRequest(factory.patch("/api/v1/observable/_bulk", payload, format="json"))
+    drf_req.user = request.user
+    drf_req._full_data = payload
+
+    response = bulk_patch(
+        drf_req,
+        ids_key="ids",
+        resolve=lambda req, raw: resolve_observable(request.user, raw, write=True),
+        apply=_set_observable_fields,
+    )
+    if response.status_code == 409:
+        data = response.data or {}
+        affected = len(data.get("affected_cases", []))
+        messages.error(
+            request,
+            f"Bulk update blocked: shared observable affects {affected} case(s). Use individual observable edits with force.",
+        )
+        return _observable_bulk_redirect(request)
+
+    data = response.data or {}
+    updated = data.get("updated", 0)
+    failed = data.get("failed", 0)
+    if failed:
+        first = next((r for r in data.get("results", []) if r.get("status") != 200), None)
+        detail = f" First failure: {first.get('message')}" if first else ""
+        messages.warning(request, f"Bulk update: {updated} updated, {failed} failed.{detail}")
+    else:
+        messages.success(request, f"Updated {updated} observable(s).")
+    return _observable_bulk_redirect(request)
 
 
 @not_viewer
@@ -145,6 +218,8 @@ def observable_list(request: HttpRequest) -> HttpResponse:
             observable_types=ObservableType.objects.order_by("name"),
             query=query,
             type_filter=type_filter,
+            tlp_choices=TLP_CHOICES,
+            pap_choices=PAP_CHOICES,
         ),
     )
 

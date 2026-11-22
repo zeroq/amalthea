@@ -10,6 +10,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
+from django.db import transaction as db_transaction
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -74,6 +75,102 @@ from .common import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _case_bulk_redirect(request: HttpRequest) -> HttpResponse:
+    next_url = (request.POST.get("next") or "").strip()
+    if next_url.startswith("/") and not next_url.startswith("//"):
+        return redirect(next_url)
+    return redirect("ui-case-list")
+
+
+@not_viewer
+@login_required
+@require_POST
+def case_bulk(request: HttpRequest) -> HttpResponse:
+    """Bulk case triage: status and/or assignee, per-item isolation."""
+    ids = request.POST.getlist("ids")
+    status_val = (request.POST.get("status") or "").strip()
+    assignee_val = (request.POST.get("assignee") or "").strip()
+
+    if not ids:
+        messages.error(request, "No cases selected.")
+        return _case_bulk_redirect(request)
+
+    payload: dict[str, Any] = {}
+    if status_val:
+        status_obj = CaseStatus.objects.filter(value=status_val).first()
+        if status_obj is None:
+            messages.error(request, f"Invalid status: {status_val}")
+            return _case_bulk_redirect(request)
+        if status_obj.stage == "Closed":
+            messages.error(
+                request, "Closing cases in bulk requires a verdict; use case detail close."
+            )
+            return _case_bulk_redirect(request)
+        payload["status"] = status_obj.value
+    if assignee_val:
+        if assignee_val == "__unassigned__":
+            payload["assignee"] = None
+        else:
+            assignee = User.objects.filter(
+                org=request.user.org, login=assignee_val, is_active=True
+            ).first()
+            if assignee is None:
+                messages.error(request, f"Invalid assignee: {assignee_val}")
+                return _case_bulk_redirect(request)
+            payload["assignee"] = assignee.login
+
+    if not payload:
+        messages.error(request, "Select a status or assignee to apply.")
+        return _case_bulk_redirect(request)
+
+    results = []
+    updated = 0
+    for raw in ids:
+        case = resolve_case(request.user, str(raw), write=True)
+        if case is None:
+            results.append({"id": str(raw), "status": 404, "message": "not found"})
+            continue
+        try:
+            with db_transaction.atomic():
+                fields: list[str] = []
+                if "status" in payload:
+                    case.status = CaseStatus.objects.get(value=payload["status"])
+                    fields.append("status")
+                if "assignee" in payload:
+                    raw_assignee = payload.get("assignee")
+                    if raw_assignee in (None, ""):
+                        case.assignee = None
+                    else:
+                        case.assignee = User.objects.filter(
+                            org=request.user.org, login=str(raw_assignee), is_active=True
+                        ).first()
+                    fields.append("assignee")
+                if not fields:
+                    results.append(
+                        {
+                            "id": str(case.id),
+                            "status": 400,
+                            "message": "No updatable field supplied",
+                        }
+                    )
+                    continue
+                case.save(update_fields=[*fields, "updated_at"])
+        except Exception as exc:
+            results.append({"id": str(raw), "status": 400, "message": str(exc)[:200]})
+            continue
+        results.append({"id": str(case.id), "status": 200})
+        updated += 1
+
+    failed = len(results) - updated
+    if failed:
+        first = next((r for r in results if r.get("status") != 200), None)
+        detail = f" First failure: {first.get('message')}" if first else ""
+        messages.warning(request, f"Bulk update: {updated} updated, {failed} failed.{detail}")
+    else:
+        messages.success(request, f"Updated {updated} case(s).")
+    return _case_bulk_redirect(request)
 
 
 @not_viewer
@@ -288,6 +385,12 @@ def _render_case_list(
         ("closed", True): "My closed cases",
     }[(scope, mine)]
 
+    case_status_options = CaseStatus.objects.all().order_by("order", "value")
+    case_assignees = (
+        User.objects.filter(org=request.user.org, is_active=True)
+        .select_related("org")
+        .order_by("login")[:PICKER_PAGE_SIZE]
+    )
     context = {
         "page_obj": page_obj,
         "filtered_from": filtered_from,
@@ -299,6 +402,8 @@ def _render_case_list(
         "severity_filter_links": build_severity_filter_links(request, selected_severities),
         "can_delete_cases": is_admin(request.user),
         "can_delete_any_case": request.user.role == SUPER_ADMIN_ROLE,
+        "case_status_options": case_status_options,
+        "case_assignees": case_assignees,
     }
 
     # Only include form context for users who can actually create cases.

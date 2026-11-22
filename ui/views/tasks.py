@@ -53,6 +53,88 @@ from .common import (
 logger = logging.getLogger(__name__)
 
 
+def _task_bulk_redirect(request: HttpRequest) -> HttpResponse:
+    next_url = (request.POST.get("next") or "").strip()
+    if next_url.startswith("/") and not next_url.startswith("//"):
+        return redirect(next_url)
+    return redirect("ui-dashboard")
+
+
+@not_viewer
+@login_required
+@require_POST
+def task_bulk(request: HttpRequest) -> HttpResponse:
+    """Bulk task status/assignee updates with per-item isolation."""
+    ids = request.POST.getlist("ids")
+    status_val = (request.POST.get("status") or "").strip()
+    assignee_val = (request.POST.get("assignee") or "").strip()
+    if not ids:
+        messages.error(request, "No tasks selected.")
+        return _task_bulk_redirect(request)
+
+    valid_statuses = {s for s, _ in TASK_STATUS_CHOICES}
+    if status_val and status_val not in valid_statuses:
+        messages.error(request, f"Invalid status: {status_val}")
+        return _task_bulk_redirect(request)
+    if assignee_val and assignee_val != "__unassigned__":
+        assignee = User.objects.filter(
+            org_q("org", request.user), login=assignee_val, is_active=True
+        ).first()
+        if assignee is None:
+            messages.error(request, f"Invalid assignee: {assignee_val}")
+            return _task_bulk_redirect(request)
+
+    if not status_val and not assignee_val:
+        messages.error(request, "Select a status or assignee to apply.")
+        return _task_bulk_redirect(request)
+
+    results = []
+    updated = 0
+    for raw in ids:
+        task = resolve_task(request.user, str(raw), write=True)
+        if task is None:
+            results.append({"id": str(raw), "status": 404, "message": "not found"})
+            continue
+        try:
+            with transaction.atomic():
+                fields = []
+                if status_val:
+                    task.status = status_val
+                    fields.append("status")
+                if assignee_val:
+                    if assignee_val == "__unassigned__":
+                        task.assignee = None
+                    else:
+                        task.assignee = User.objects.filter(
+                            org_q("org", request.user), login=assignee_val, is_active=True
+                        ).first()
+                    fields.append("assignee")
+                if not fields:
+                    results.append(
+                        {
+                            "id": str(task.id),
+                            "status": 400,
+                            "message": "No updatable field supplied",
+                        }
+                    )
+                    continue
+                task.save(update_fields=[*fields, "updated_at"])
+        except Exception as exc:
+            results.append({"id": str(raw), "status": 400, "message": str(exc)[:200]})
+            continue
+        results.append({"id": str(task.id), "status": 200})
+        updated += 1
+
+    failed = len(results) - updated
+    if failed:
+        first = next((r for r in results if r.get("status") != 200), None)
+        detail = f" First failure: {first.get('message')}" if first else ""
+        messages.warning(request, f"Bulk update: {updated} updated, {failed} failed.{detail}")
+    else:
+        messages.success(request, f"Updated {updated} task(s).")
+    return _task_bulk_redirect(request)
+
+
 @not_viewer
 @login_required
 @require_POST

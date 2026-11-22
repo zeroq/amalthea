@@ -41,6 +41,7 @@ urlpatterns = [
     path("alerts/<uuid:alert_id>", views.alert_detail, name="ui-alert-detail"),
     path("alerts/<uuid:alert_id>/escalate", views.alert_escalate, name="ui-alert-escalate"),
     path("alerts/<uuid:alert_id>/merge", views.alert_merge, name="ui-alert-merge"),
+    path("alerts/bulk", views.alert_bulk, name="ui-alert-bulk"),
     path("alerts/<uuid:alert_id>/delete", views.alert_delete_ui, name="ui-alert-delete"),
     # P2/C1 — Alert status change
     path("alerts/<uuid:alert_id>/status", views.alert_status, name="ui-alert-status"),
@@ -48,6 +49,7 @@ urlpatterns = [
     path("alerts/<uuid:alert_id>/tag/add", views.alert_tag_add, name="ui-alert-tag-add"),
     path("alerts/<uuid:alert_id>/tag/remove", views.alert_tag_remove, name="ui-alert-tag-remove"),
     path("cases", views.case_list, name="ui-case-list"),
+    path("cases/bulk", views.case_bulk, name="ui-case-bulk"),
     # §10.2 — must precede `cases/<str:case_id>` (a literal is otherwise swallowed as a case id).
     path("cases/new", views.case_create, name="ui-case-create"),
     # §18 — Case JSON import (must precede `cases/<str:case_id>` so the literal "import" is not
@@ -81,6 +83,7 @@ urlpatterns = [
     ),
     path("tasks/<uuid:task_id>/edit", views.case_task_edit, name="ui-case-task-edit"),
     path("tasks/<uuid:task_id>/delete", views.case_task_delete, name="ui-case-task-delete"),
+    path("tasks/bulk", views.task_bulk, name="ui-task-bulk"),
     path("tasks/<uuid:task_id>/note", views.task_note, name="ui-task-note"),
     # P2/C2 — Case edit
     path("cases/<str:case_id>/edit", views.case_edit, name="ui-case-edit"),
@@ -227,6 +230,7 @@ urlpatterns = [
     path("tags/<str:tag_id>/delete", views.tag_delete, name="ui-tag-delete"),
     # Observables
     path("observables", views.observable_list, name="ui-observable-list"),
+    path("observables/bulk", views.observable_bulk, name="ui-observable-bulk"),
     path("observables/<str:observable_id>", views.observable_detail, name="ui-observable-detail"),
     # P2/C3 — Observable edit/delete
     path("observables/<str:observable_id>/edit", views.observable_edit, name="ui-observable-edit"),

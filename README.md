@@ -1,45 +1,41 @@
 # Amalthea
 
-Open-source, developer-friendly **Security Case Management and Orchestration** platform. Amalthea
-bridges the gap between pure documentation/case-logging tools (like [TheHive](https://github.com/TheHive-Project/TheHive))
-and heavy automation workflows (like Tines) by treating **Alerts, Cases, Observables, and Automated
-Playbook Triggers as deeply interconnected, first-class objects**.
+Open-source **Security Case Management and Orchestration** platform. Amalthea treats **Alerts, Cases, Observables, and automated playbook triggers** as first-class, connected objects.
 
-- **Schema-agnostic ingestion** — receive raw JSON from any security tool (SIEM, EDR, CloudTrail,
-  phishing boxes) at `POST /api/v1/alerts/webhook/`, authenticated with a per-org ingestion
-  token (`X-Webhook-Secret`) and normalised into a standard `Alert` by a JSON-path mapping layer that
-  keeps the raw context.
-- **Incident lifecycle** — triage alerts, escalate or merge them into `Case`s, correlate on
-  `correlation_key`, collaborate on a live Markdown ledger with tasks and status transitions.
-- **Forensic observables** — every artifact (IP, domain, hash, mail, user) is a standalone, globally
-  deduplicated entity. When the same observable appears across several cases, Amalthea links those
-  cases to surface advanced persistent patterns.
-- **Orchestration gateway** — domain events (`observable.created`, `case.status_changed`, …) fire
-  playbooks asynchronously via Celery; results are appended back to the case timeline as structured
-  entries.
+- **Ingestion:** schema-agnostic webhook `POST /api/v1/alerts/webhook/`, authenticated by per-feed `X-Webhook-Secret`, mapped into normalized alerts.
+- **Case management:** triage alerts, escalate to cases, track tasks/timeline, correlate observables across cases.
+- **Automation:** domain events trigger Celery playbooks; results are written back to the case timeline.
+- **Compatibility:** TheHive-shaped wire API for integration endpoints (not TheHive UI parity). See `docs/decisions/ADR-002-thehive-api-compatibility.md`.
 
-## Quickstart
+## Stack
 
-Requires Python 3.12+ and a virtualenv. SQLite + in-process Celery are the zero-infrastructure dev
-path; Postgres 15+ and Redis are used in production (see below).
+- Django 5.x + DRF + Django Channels (ASGI/Daphne)
+- PostgreSQL + Redis in production; SQLite + eager Celery/in-memory channels for local dev
+- Django templates + HTMX + Tailwind CSS + WebSockets
 
-```bash
-make setup            # create .venv, install pinned requirements, apply migrations
-make dev              # run the dev server (Django runserver)
-```
+## Quickstart (local dev)
 
-Alternatively, by hand:
+Requires Python 3.12+.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements/dev.txt
-cp .env.example .env        # dev settings default to SQLite + eager Celery; edit if needed
-python manage.py migrate    # defaults to amalthea.settings.dev
-python manage.py runserver  # http://127.0.0.1:8000/
+cp .env.example .env
+python manage.py migrate
+python manage.py runserver
 ```
 
-Create an analyst account plus a **per-org ingestion token**:
+Open `http://127.0.0.1:8000/`.
+
+Optional backing services (Postgres/Redis) are defined in `docker-compose.yml`:
+
+```bash
+docker compose up -d
+# then set DATABASE_URL / REDIS_URL / CELERY_* in .env and migrate
+```
+
+## Create initial data
 
 ```bash
 python manage.py shell -c "
@@ -47,129 +43,48 @@ from identity.models import IngestionToken, Organisation, User
 from ingest.models import IngestionSource
 org = Organisation.objects.create(name='Acme')
 User.objects.create_user(username='analyst', password='change-me', org=org)
-source = IngestionSource.objects.create(slug='o365', name='M365',
-    mapping_config={'title': '\$.title', 'severity': '\$.severity',
-                    'correlation_key': '\$.sourceRef'})
-token, secret = IngestionToken.create_token(source=source, organisation=org, name='M365 webhook')
+User.objects.create_user(username='admin', password='change-me', org=org, role='superAdmin')
+source = IngestionSource.objects.create(slug='demo', name='Demo',
+    mapping_config={'title': '$.title', 'severity': '$.severity', 'correlation_key': '$.sourceRef'})
+token, secret = IngestionToken.create_token(source=source, organisation=org, name='Demo webhook')
 print('X-Webhook-Secret:', secret)
 "
 ```
 
-> The secret is printed **once** and stored only as an Argon2 hash — copy it now. Under tenant
-> isolation (ADR-004) a token binds a feed to **one** organisation, and that org is what stamps the
-> ingested alert's `owner_org`. The same feed can fan out to several tenants by issuing one token
-> each. Tokens can be minted (and the feed named) in the UI under **Settings → Sources**, which is
-> accessible to `admin` and `superAdmin` roles — an `admin` for their own organisation, a
-> `superAdmin` for any. Typing an existing feed name reuses that profile; a new name provisions one.
+The webhook secret is shown once; store it securely.
 
-For tenant administration, also create a `superAdmin` (only a `superAdmin` can open **Settings**):
-
-```bash
-python manage.py shell -c "
-from identity.models import Organisation, User
-org = Organisation.objects.get(name='Acme')
-User.objects.create_user(username='admin', password='change-me', org=org, role='superAdmin')
-"
-```
-
-Log in at <http://127.0.0.1:8000/> and fire a mock alert (pass the token printed above):
+## Send a test alert
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/alerts/webhook/ \
   -H "Content-Type: application/json" \
   -H "X-Webhook-Secret: $TOKEN" \
-  -d '{"title":"Suspicious inbox rule","severity":3,"sourceRef":"demo-1",
-       "event":"mailbox.rule.created","actor":{"email":"attacker@example.net"}}'
+  -d '{"title":"Suspicious inbox rule","severity":3,"sourceRef":"demo-1"}'
 ```
 
-`X-Webhook-Secret` is the canonical header; `X-Api-Key: <token>` and `Authorization: Bearer <token>`
-are accepted as aliases. Ingestion is **tenant-scoped and strict**: a missing, unknown, or revoked
-token is rejected with **401** and an unknown source slug with **404** — no valid token means no alert
-(this closed the pre-ADR-004 open-ingest hole). Tokens are stored as Argon2 hashes and looked up by a
-12-char prefix; the legacy plaintext `IngestionSource.webhook_secret_hash` is still accepted so an
-existing deployment can migrate without a flag day.
+## Development checks
 
-Escalate the alert from the UI — Amalthea extracts the `attacker@example.net` observable, fires any
-playbook bound to `observable.created`, and appends the result to the case timeline.
-
-## TheHive compatibility
-
-Amalthea serves a **TheHive-shaped wire API** (`_id` strings, epoch-millisecond timestamps, severity
-1–4 / TLP 0–4 / PAP 0–3, TheHive error envelope) from a Django-clean internal model, so existing
-TheHive integrations can point at Amalthea with minimal changes. The compatibility contract applies to
-the external integration endpoints and their accepted data formats — **not** to TheHive's UI behaviour.
-See [`docs/decisions/ADR-002-thehive-api-compatibility.md`](docs/decisions/ADR-002-thehive-api-compatibility.md)
-for the precise scope, and the plan for the full endpoint inventory.
-
-## Architecture
-
-- **Backend:** Django 5.x + DRF + Django Channels (ASGI/Daphne), Celery + Redis for async automation.
-- **Database:** PostgreSQL (core state, relations, audit) + Redis (Celery broker, Channels layer).
-  Dev defaults to SQLite + in-memory Channels + eager Celery so the MVP loop runs with no external
-  services.
-- **Frontend:** server-rendered Django templates + HTMX, Tailwind CSS, dark keyboard-driven theme,
-  WebSockets for the collaborative live ledger.
-- **Tests:** `make check` is the single Definition of Done — ruff, mypy (strict, pinned scope),
-  `manage.py check`, migration sync, and pytest. Mutations-prove-the-guard conformance tests enforce
-  that schema/contract assertions actually fail when the schema breaks.
-
-## Repository map
-
-```
-amalthea/       Django project (settings, ASGI, Celery)
-alerts/         Alert lifecycle, webhook ingestion pipeline
-cases/          Case/task/timeline/observable-link ledger
-observables/    Global artifact extraction, normalisation, hashing
-automation/     Playbooks: domain-event dispatch → Celery → timeline feedback
-ingest/         IngestionSource config, JSON-path mapping, webhook hardening
-core/           Shared enums, time models, domain events
-compat/         TheHive wire compatibility (mappers, auth, error envelope)
-ui/             Server-rendered analyst UI (templates, HTMX, keys.js)
-realtime/       WebSocket consumers (Phase 7 — in progress)
+```bash
+make hooks      # install pre-commit/pre-push hooks (includes secret scan)
+make check      # ruff, mypy, django check, migrations, css, playbook scripts
+make check-fast # lint/format only
+make secrets    # scan tracked files for secrets
 ```
 
-## Documentation
+`make check` is the static DoD gate; run pytest separately when needed.
 
-- **Plan & phases** — [`docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md`](docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md)
-- **Specification** — [`AGENTS.md`](./AGENTS.md) (project spec: modules, schema, MVP criteria)
-- **Implemented-system spec** — [`docs/spec/`](docs/spec/) (data model, API, realtime, automation,
-  query DSL, auth — derived from the shipped code, with a deviation register)
-- **Architecture decisions** — [`docs/decisions/`](docs/decisions/) (ADR-001 framework, ADR-002
-  TheHive compatibility)
-- **Open work / completed work** — [`TODO.md`](./TODO.md), [`COMPLETED.md`](./COMPLETED.md)
-- **Review reports** — [`docs/reviews/`](docs/reviews/) (independent expert gates with reproduction
-  evidence)
-- **Security policy** — [`SECURITY.md`](./SECURITY.md) (vulnerability reporting + the enforced
-  "never commit secrets" rule)
+## Security & production
 
-## Security
+- **Never commit secrets.** Use `.env` locally (`.env.example` has placeholders). Hooks/CI enforce secret scanning; see `SECURITY.md`.
+- **Production** uses `amalthea.settings.prod`, which fails closed without a strong `DJANGO_SECRET_KEY` and non-empty `DJANGO_ALLOWED_HOSTS`. Configure Postgres/Redis and `AMALTHEA_*` settings as needed.
 
-This is a **public** repository, so secrets must never reach git history. That rule is enforced by
-[`scripts/secret-scan.sh`](scripts/secret-scan.sh), which runs on every commit (staged files, even
-docs-only), every push (the tracked tree), and in CI (full history, plus gitleaks pinned by SHA):
+## Docs
 
-```
-make hooks      # install the pre-commit + pre-push hooks once per clone
-make secrets    # run the scanner manually over the tracked tree
-```
-
-If a credential ever lands in history, **rotate it** — deleting the file does not remove the blob.
-See [`SECURITY.md`](./SECURITY.md) for the policy and remediation steps.
-
-## Production notes
-
-- Postgres 15+ is required in production (JSONB, GIN indexes, partial indexes, real sequences). See
-  `docs/reviews/` for the Postgres-only verification backlog (TODO §3.1) — SQLite dev cannot validate
-  those features.
-- `DJANGO_SETTINGS_MODULE=amalthea.settings.prod` **fails closed**: it refuses to start unless
-  `DJANGO_SECRET_KEY` is set to a strong value (≥50 chars — generate one with
-  `python -c 'import secrets; print(secrets.token_urlsafe(64))'`) and `DJANGO_ALLOWED_HOSTS` is
-  non-empty, and it forces secure cookies + HSTS. It expects Postgres and Redis; the webhook
-  rate/size limits are configurable via `AMALTHEA_*` environment variables (see
-  `amalthea/settings/base.py`).
-- Celery runs **eager** in dev so no broker is needed; production workers consume from Redis and
-  `transaction.on_commit` guarantees a playbook never runs against a rolled-back case.
+- `AGENTS.md` — project specification
+- `docs/planning/` — plans and implementation briefs
+- `docs/decisions/` — ADRs
+- `TODO.md` / `COMPLETED.md` — work tracking
 
 ## License
 
-AGPL-3.0-or-later (declared in `pyproject.toml`; a `LICENSE` file is pending — TODO §4.5).
+AGPL-3.0-or-later (see `pyproject.toml`).
