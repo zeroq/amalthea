@@ -256,6 +256,7 @@ def extract_observable_candidates(
                         owner_org=alert.owner_org,
                         data_type__name=rule.type_name,
                         normalized_data=normalized,
+                        is_promoted=False,
                     ).exists():
                         skipped += 1
                         # Do NOT set truncated=True merely because a value was suppressed/rejected;

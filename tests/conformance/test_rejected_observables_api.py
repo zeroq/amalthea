@@ -295,6 +295,34 @@ class TestRejectedObservablesTenantScoping:
         rej.refresh_from_db()
         assert rej.is_promoted is True
 
+    def test_promoted_rejected_observable_is_not_suppressed_on_ingest(
+        self, db, org, user, api_client
+    ):
+        """Promoted rows are re-enabled for review and must not suppress ingest extraction."""
+        from alerts.models import Alert, AlertStatus
+        from ingest.observable_rules import extract_observable_candidates
+
+        _mk_rejected_observable(org, data_type_name="ip", value="1.2.3.4", reason="other")
+        promoted = RejectedObservable.objects.get(owner_org=org, normalized_data="1.2.3.4")
+        promoted.is_promoted = True
+        promoted.save(update_fields=["is_promoted"])
+
+        status, _ = AlertStatus.objects.get_or_create(
+            value="New", defaults={"stage": "New", "order": 1}
+        )
+        alert = Alert.objects.create(
+            title="Promoted suppression test",
+            source="test-source",
+            source_ref="promoted-suppression",
+            severity=2,
+            status=status,
+            owner_org=org,
+        )
+        config = {"observables": [{"type": "ip", "paths": ["$.ip"]}]}
+        extraction = extract_observable_candidates(config, {"ip": "1.2.3.4"}, alert=alert)
+        assert [c.raw_value for c in extraction.candidates] == ["1.2.3.4"]
+        assert extraction.skipped_values == 0
+
     def test_promotion_404_if_not_scoped(self, db, org, user, api_client):
         """Promotion returns 404 if the rejected observable is not visible to the user."""
         org2 = Organisation.objects.create(name="Org2")

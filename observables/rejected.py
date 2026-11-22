@@ -85,6 +85,10 @@ def promote_rejected_observable(
 ) -> tuple[RejectedObservable, bool]:
     """Promote a rejected observable idempotently within the caller's scope.
 
+    Promotion clears suppression (``is_promoted=True``) so future ingest/extraction can
+    re-surface the value for manual review (typically as an ObservableSuggestion). It does
+    not auto-create an Observable or CaseObservable.
+
     Raises ``RejectedObservable.DoesNotExist`` when the row is not visible to the
     caller. Returns ``(obj, False)`` when already promoted, otherwise saves the
     row and returns ``(obj, True)``.

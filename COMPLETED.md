@@ -2040,3 +2040,33 @@ Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
 - Evidence: CI run `44158684927` on `f8abbf9f` — **success** in **2m24s**; Fast verify **2m20s**,
   secret scan **1m07s**. Local: `make check-ci` 52s / 50 passed, history scan 111s, lock check 105s,
   `tests/unit/test_secret_scan.py` 20 passed.
+
+## 23. Rejected Observables Management (2026-11-22)
+
+> Imported from upstream `992f316d` (2026-11-14). Plan:
+> [`PLAN-2026-11-14-rejected-observables.md`](docs/planning/PLAN-2026-11-14-rejected-observables.md).
+
+- [x] **23.1 — Implement a standalone `RejectedObservable` model.**
+  `observables/models.py` defines `RejectedObservable` (UUID/timestamps, `owner_org`, `data_type`,
+  `normalized_data`, nullable `alert`, reason enum/token, `is_promoted`) with tenant constraints/indexes.
+  Entity is audit/suppression-oriented and not part of cross-case observable correlation.
+
+- [x] **23.2 — Integrated Suppression Check.**
+  `ingest/observable_rules.py` suppresses extracted candidates when a matching
+  `RejectedObservable` exists for the same org/type/normalized value **and** `is_promoted=False`.
+  Promoted rows do not suppress extraction, allowing re-surfacing for manual review.
+
+- [x] **23.3 — Administrative Review & Promotion.**
+  Rejected-observables list/UI and API promotion endpoints exist. Promotion is idempotent, does not
+  auto-create an `Observable`, and marks the row promoted so future ingest can re-surface it.
+
+- [x] **23.4 — Organization-specific visibility.**
+  Scoping uses `identity.scoping.org_q`; own-org users see own-org rows, superAdmin can see cross-org.
+  Viewer access is denied by API/UI permission checks.
+
+- [x] **23.5 — Promotion Confirmation.**
+  UI promotion uses a `<dialog>` confirmation modal (`ui/templates/ui/_rejected_promote_modal_body.html`
+  via `ui/_modal.html`), no native browser confirm.
+
+**Verification:** `tests/conformance/test_rejected_observables_api.py` and
+`tests/conformance/test_rejected_observables_ui.py` pass (30 passed after promoted-not-suppressed regression).

@@ -812,27 +812,10 @@ secrets never enter the repo.
 
 ## 23. Rejected Observables Management
 
-> Imported from upstream `992f316d` (2026-11-14). Upstream `TODO.md` replaced the open backlog with
-> this section only; preserved here as §23 so the existing open-work ledger is not lost and §16
-> numbering stays intact. Plan:
-> [`PLAN-2026-11-14-rejected-observables.md`](docs/planning/PLAN-2026-11-14-rejected-observables.md).
-
-- [ ] **23.1 — Implement a standalone `RejectedObservable` model.**
-  Create a record for observables rejected during analysis (not yet promoted to full `Observable` entities).
-  Each must link to its source `Alert`, an optional "Reason" (dropdown/Enum), and a timestamp.
-  The entity is for audit and suppression, not for cross-case correlation.
-- [ ] **23.2 — Integrated Suppression Check.**
-  Inject logic into the Extraction Engine to filter out values that exist in the `RejectedObservable`
-  table for the same organization/source. This prevents rejected items from reappearing in analyst queues.
-- [ ] **23.3 — Administrative Review & Promotion.**
-  Allow admins to view a list of rejected records and "Promote" them.
-  Promotion should not auto-create an `Observable` but re-enable the record for manual review
-  (i.e., move it from the rejection list back to an "ignored" or "flagged" state).
-- [ ] **23.4 — Organization-specific visibility.**
-  Ensure that rejected items are only visible/actionable within their own organization (except for SuperAdmins).
-  SuperAdmins can see all records across all organizations.
-- [ ] **23.5 — Promotion Confirmation.**
-  Ensure the "Promote" action triggers a confirmation modal to prevent accidental promotion of large sets of data.
+Status: **COMPLETE (2026-11-22).** Moved to `COMPLETED.md` (§23). Implementation exists in
+`observables/models.py` (`RejectedObservable`), `observables/rejected.py`, `ingest/observable_rules.py`,
+rejected-observables UI/API/templates, and conformance tests (`test_rejected_observables_api.py`,
+`test_rejected_observables_ui.py`). Promotion sets `is_promoted=True`; ingest suppression ignores promoted rows so values can be re-surfaced for review.
 
 ---
 
