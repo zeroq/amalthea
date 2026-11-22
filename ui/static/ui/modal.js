@@ -270,6 +270,11 @@
       selectAll.checked = items.length > 0 && checked === items.length;
       selectAll.indeterminate = checked > 0 && checked < items.length;
     }
+    var applyButtons = document.querySelectorAll('[data-bulk-requires-selection="' + formId + '"]');
+    for (var b = 0; b < applyButtons.length; b++) {
+      applyButtons[b].disabled = checked === 0;
+      applyButtons[b].setAttribute("aria-disabled", checked === 0 ? "true" : "false");
+    }
   }
 
   document.addEventListener("click", function (event) {

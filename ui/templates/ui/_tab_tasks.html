@@ -30,22 +30,22 @@
   <form method="post" id="task-bulk-form" action="{% url 'ui-task-bulk' %}" class="bulk-form" aria-label="Bulk task actions">
     {% csrf_token %}
     <input type="hidden" name="next" value="{{ request.get_full_path }}">
-    <div class="bulk-action-bar" role="group" aria-label="Bulk task actions">
+    <div class="control-row bulk-action-bar" role="group" aria-label="Bulk task actions">
       <label class="bulk-select-all">
         <input type="checkbox" data-bulk-select-all="task-bulk-form" aria-label="Select all tasks on this page">
-        <span class="dim">Select page</span>
+        <span class="dim">Page</span>
       </label>
       <span class="dim bulk-count" data-bulk-count="task-bulk-form">0 selected</span>
       <label class="sr-only" for="bulk-task-status">Status</label>
-      <select id="bulk-task-status" name="status" class="filter-type">
-        <option value="">Set status…</option>
+      <select id="bulk-task-status" name="status" class="filter-type bulk-field">
+        <option value="">Status…</option>
         {% for value, label in task_status_options %}
         <option value="{{ value }}">{{ label }}</option>
         {% endfor %}
       </select>
       <label class="sr-only" for="bulk-task-assignee">Assignee</label>
-      <select id="bulk-task-assignee" name="assignee" class="filter-type">
-        <option value="">Set assignee…</option>
+      <select id="bulk-task-assignee" name="assignee" class="filter-type bulk-field">
+        <option value="">Assignee…</option>
         <option value="__unassigned__">Unassigned</option>
         {% for u in task_assignees %}
         <option value="{{ u.login }}">{{ u.login }}</option>

@@ -55,22 +55,22 @@
     <form method="post" id="case-bulk-form" action="{% url 'ui-case-bulk' %}" class="bulk-form" aria-label="Bulk case actions">
       {% csrf_token %}
       <input type="hidden" name="next" value="{{ request.get_full_path }}">
-      <div class="bulk-action-bar" role="group" aria-label="Bulk actions">
+      <div class="control-row bulk-action-bar" role="group" aria-label="Bulk actions">
         <label class="bulk-select-all">
           <input type="checkbox" data-bulk-select-all="case-bulk-form" aria-label="Select all cases on this page">
-          <span class="dim">Select page</span>
+          <span class="dim">Page</span>
         </label>
         <span class="dim bulk-count" data-bulk-count="case-bulk-form">0 selected</span>
         <label class="sr-only" for="bulk-case-status">Status</label>
-        <select id="bulk-case-status" name="status" class="filter-type">
-          <option value="">Set status…</option>
+        <select id="bulk-case-status" name="status" class="filter-type bulk-field">
+          <option value="">Status…</option>
           {% for s in case_status_options %}
           <option value="{{ s.value }}">{{ s.value }}</option>
           {% endfor %}
         </select>
         <label class="sr-only" for="bulk-case-assignee">Assignee</label>
-        <select id="bulk-case-assignee" name="assignee" class="filter-type">
-          <option value="">Set assignee…</option>
+        <select id="bulk-case-assignee" name="assignee" class="filter-type bulk-field">
+          <option value="">Assignee…</option>
           <option value="__unassigned__">Unassigned</option>
           {% for u in case_assignees %}
           <option value="{{ u.login }}">{{ u.login }}</option>
