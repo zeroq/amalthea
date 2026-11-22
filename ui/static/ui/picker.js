@@ -24,6 +24,7 @@
 
   function initPicker(select) {
     if (select.dataset.pickerInitialized) return;
+    if (select.closest(".bulk-action-bar")) return;
     select.dataset.pickerInitialized = "true";
 
     var wrapper = document.createElement("div");
