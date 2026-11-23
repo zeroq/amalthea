@@ -120,6 +120,29 @@ def _create_token_via_ui(
     data: dict[str, str] = {"source_name": source.name, "name": name}
     if organisation is not None:
         data["organisation"] = str(organisation.id)
+    data["token_create_nonce"] = _token_create_nonce_from(client)
+    return client.post(reverse("ui-settings-token-create"), data)
+
+
+def _token_create_nonce_from(client: Client) -> str:
+    body = client.get(reverse("ui-settings-sources")).content.decode()
+    match = re.search(r'name="token_create_nonce" value="([^"]+)" form="token-create-form"', body)
+    assert match, "token create form did not render a nonce"
+    return match.group(1)
+
+
+def _create_token_via_ui_with_nonce(
+    client: Client,
+    *,
+    source: IngestionSource,
+    name: str,
+    organisation: Organisation | None = None,
+    nonce: str | None = None,
+):
+    data: dict[str, str] = {"source_name": source.name, "name": name}
+    if organisation is not None:
+        data["organisation"] = str(organisation.id)
+    data["token_create_nonce"] = nonce or _token_create_nonce_from(client)
     return client.post(reverse("ui-settings-token-create"), data)
 
 
@@ -831,6 +854,24 @@ class TestSourceProvisioning:
         assert not IngestionToken.objects.exists()
 
 
+class TestTokenCreateNonce:
+    def test_reload_repost_does_not_mint_second_token(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client = _ui_client(admin)
+        source = _mk_source(organisation=org)
+        nonce = _token_create_nonce_from(client)
+
+        first = _create_token_via_ui_with_nonce(client, source=source, name="prod", nonce=nonce)
+        assert first.status_code == 200
+        assert IngestionToken.objects.filter(name="prod").count() == 1
+
+        replay = _create_token_via_ui_with_nonce(client, source=source, name="prod", nonce=nonce)
+        assert replay.status_code == 409
+        assert IngestionToken.objects.filter(name="prod").count() == 1
+        assert "already been used or expired" in replay.content.decode()
+
+
 class TestModalShowOnce:
     """AC1-AC7: the show-once token is rendered in a modal on the full Sources page."""
 
@@ -853,6 +894,7 @@ class TestModalShowOnce:
         # Page-specific content: the token list's create modal and heading.
         assert 'id="token-create-modal"' in body
         assert "<h1>Sources</h1>" in body
+        assert 'name="token_create_nonce"' in body
 
     def test_modal_dialog_has_expected_attributes(self, db: None) -> None:
         org = _mk_org("Org1")

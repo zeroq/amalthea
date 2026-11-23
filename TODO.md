@@ -219,14 +219,11 @@ backlog once the analyst-visible classification fields (10.3–10.6) are designe
   `resolve_case_status`), or a `*_LABELS` mapping keyed by token, or fix `TASK_STATUS_CHOICES` labels.
   **Deferred**: purely cosmetic today, and touching `CaseStatus` risks the automation triggers that key on
   `stage` (see §10.6/Q-D2) — which is exactly why it is its own item, not a rider on 10.3–10.6.
-- [ ] **10.11 — Reloading the "create ingestion token" POST mints a second live token.** Success is a
-  200 body, not a redirect — deliberately, because a PRG would have to park the plaintext somewhere
-  server-side (session, cache, signed URL) to re-render it, and the whole point is that the secret
-  exists in exactly one response. The side effect: a browser reload of that response re-submits the
-  form and creates *another* token, invisible until someone looks at Settings → Sources. Fix options:
-  a one-shot nonce in a hidden field (server-cached; the reload returns the same 200 without
-  re-creating), or an explicit "create another token?" nudge. Exposure is low (authenticated admin,
-   their own org, the token is listed) — hence deferred rather than fixed blind.
+- [x] **10.11 — Reloading the "create ingestion token" POST mints a second live token.** Fixed 2026-11-23:
+  `settings_token_create` requires a one-shot per-user cache nonce (`ui:token-create-nonce:{user}:{nonce}`,
+  15 min TTL). The nonce is rendered as a hidden field in `_settings_token_create_form.html`; the POST claims
+  it atomically via `cache.delete()`. A reload/replay with the used/expired nonce returns 409 with the Sources
+  page and does not mint a token. Regression: `tests/conformance/test_settings_ingestion_tokens.py::TestTokenCreateNonce`.
 - [ ] **10.12-fu1 — (Medium, real, Postgres-only) the last-token reap can delete a token created concurrently.**
   `settings_token_delete` does `source_reaped = not source.tokens.exists()` → `source.delete()`. A concurrent
   `settings_token_create` targeting the same feed is **not** serialised: `exists()` can miss the `get_or_create`

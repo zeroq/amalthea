@@ -35,3 +35,4 @@ a new name provisions one. The <datalist> lists the existing profiles so reuse i
   <label for="token-create-name">Name <span class="required">*</span></label>
   <input type="text" id="token-create-name" name="name" maxlength="200" required form="{{ form_id }}" placeholder="e.g. CrowdStrike EDR production">
 </div>
+<input type="hidden" name="token_create_nonce" value="{{ token_create_nonce }}" form="{{ form_id }}">

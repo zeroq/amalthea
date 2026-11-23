@@ -29,6 +29,14 @@ from .common import (
 logger = logging.getLogger(__name__)
 
 
+TOKEN_CREATE_NONCE_TTL_SECONDS = 900
+
+
+def _token_create_nonce_key(user, nonce: str) -> str:
+    user_id = getattr(user, "pk", "anon")
+    return f"ui:token-create-nonce:{user_id}:{nonce}"
+
+
 def _settings_sources_context(request: HttpRequest) -> dict:
     """Page context for Sources: the token list plus the create-modal lookups.
 
@@ -63,6 +71,13 @@ def _settings_sources_context(request: HttpRequest) -> dict:
     filtered_from = None  # No filters on this list
     tokens = list(page_obj.object_list)
 
+    import secrets
+
+    from django.core.cache import cache
+
+    nonce = secrets.token_urlsafe(16)
+    cache.set(_token_create_nonce_key(request.user, nonce), "1", timeout=900)
+
     return {
         "page_obj": page_obj,
         "filtered_from": filtered_from,
@@ -77,6 +92,7 @@ def _settings_sources_context(request: HttpRequest) -> dict:
         "is_superadmin": is_superadmin,
         # The endpoint is source-less: every feed posts to the same URL and the token does the routing.
         "webhook_path": "/api/v1/alerts/webhook/",
+        "token_create_nonce": nonce,
     }
 
 
@@ -110,6 +126,21 @@ def settings_token_create(request: HttpRequest) -> HttpResponse:
         return guard
 
     is_superadmin = request.user.role == "superAdmin"
+
+    from django.core.cache import cache
+
+    nonce = (request.POST.get("token_create_nonce") or "").strip()
+    nonce_key = _token_create_nonce_key(request.user, nonce) if nonce else ""
+    nonce_claimed = bool(nonce and cache.delete(nonce_key))
+    if not nonce_claimed:
+        messages.error(
+            request,
+            "This token-create form has already been used or expired. Please try again.",
+        )
+        context = _settings_sources_context(request)
+        return render(
+            request, "ui/settings_sources.html", _base_context(request, **context), status=409
+        )
 
     # Resolve organisation first: the purely-request fields are validated before anything is
     # provisioned, so a rejected submission cannot leave a stray global `IngestionSource` behind.
