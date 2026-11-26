@@ -2303,6 +2303,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
   `/tmp/amalthea-full-pytest.log` is green: **4444 passed, 3 skipped, 15 warnings, 2 subtests passed
   in 681.75s**.
 - Deviations **D-13.1-1 through D-13.1-5** are recorded in the approved plan; no new deviation.
+- Implementation commit: `14e108b8`, which supplies the plan’s commit-hash evidence.
 
 ### Stale priority rows removed
 - §10.1 role-scoped user management (record already in the 2026-10-20 COMPLETED entry), §12.1-fu1,
