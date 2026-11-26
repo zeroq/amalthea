@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID
 
 from django.conf import settings
@@ -58,6 +58,12 @@ class SimilarAlertMatch:
     alert: Alert
     similarity: int | None  # fuzzy score 0-100, or None when only observables matched
     shared_observable_count: int  # 0 when only fuzzy matched
+
+
+class _SimilarUnionEntry(TypedDict):
+    alert: Alert
+    similarity: int | None
+    shared_observable_count: int
 
 
 @dataclass(frozen=True)
@@ -627,7 +633,7 @@ def alerts_similar_to_alert(
     from identity.scoping import org_q
 
     try:
-        import ppdeep  # type: ignore[import-untyped]
+        import ppdeep
     except ImportError:
         ppdeep = None
 
@@ -650,9 +656,10 @@ def alerts_similar_to_alert(
     title_threshold = getattr(settings, "ALERT_FUZZY_TITLE_SIMILARITY_THRESHOLD", 70)
     title_gate_enabled = getattr(settings, "ALERT_FUZZY_TITLE_GATE_ENABLED", True)
 
+    fuzzy_results: list[tuple[Alert, int | None]] = []
     if not source.payload_ssdeep:
         # No SSDEEP hash on source → fuzzy channel yields no matches
-        fuzzy_results: list[tuple[Alert, int | None]] = []
+        pass
     else:
         # Collect candidate alerts: closed, same-org, non-empty ssdeep, capped
         candidates_qs = base_qs.exclude(payload_ssdeep="")[:MAX_FUZZY_COMPARISONS]
@@ -661,7 +668,6 @@ def alerts_similar_to_alert(
         source_tokens = normalize_title_tokens(source.title or "")
 
         # Score each candidate
-        fuzzy_results: list[tuple[Alert, int | None]] = []  # (alert, fuzzy_score)
         for candidate in candidates_qs:
             try:
                 score = ppdeep.compare(candidate.payload_ssdeep, source.payload_ssdeep)
@@ -720,29 +726,29 @@ def alerts_similar_to_alert(
             .order_by("-updated_at", "-date", "-pk")[:MAX_FUZZY_COMPARISONS]
         )
 
-        for alert in obs_alerts:
+        for obs_alert in obs_alerts:
             # Observable-only match: similarity is None
-            obs_results.append((alert, None, alert.shared_observable_count or 0))
+            obs_results.append((obs_alert, None, obs_alert.shared_observable_count or 0))
 
     # -------------------------------------------------------------------------
     # Union by alert.id, preserve both signals
     # -------------------------------------------------------------------------
     # Build a dict keyed by alert.pk, keeping the best signal per alert
-    union_by_id: dict[UUID, dict] = {}  # alert_id -> {alert, similarity, shared_observable_count}
+    union_by_id: dict[UUID, _SimilarUnionEntry] = {}
 
     # Add fuzzy results first
-    for alert, score in fuzzy_results:
-        aid = alert.pk
+    for fuzzy_alert, score in fuzzy_results:
+        aid = fuzzy_alert.pk
         if aid not in union_by_id:
             union_by_id[aid] = {
-                "alert": alert,
+                "alert": fuzzy_alert,
                 "similarity": score,
                 "shared_observable_count": 0,
             }
 
     # Add observable results; dual matches keep max fuzzy score and observable count
-    for _alert, _similarity, shared_count in obs_results:
-        aid = _alert.pk
+    for candidate_alert, _similarity, shared_count in obs_results:
+        aid = candidate_alert.pk
         if aid in union_by_id:
             # Dual match: keep the existing fuzzy similarity, update obs count if larger
             existing = union_by_id[aid]
@@ -752,7 +758,7 @@ def alerts_similar_to_alert(
         else:
             # Observable-only match: similarity is None
             union_by_id[aid] = {
-                "alert": _alert,
+                "alert": candidate_alert,
                 "similarity": None,
                 "shared_observable_count": shared_count,
             }

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import cast
 
 
 class SanitizeRequestPathFilter(logging.Filter):
@@ -25,7 +27,12 @@ class SanitizeRequestPathFilter(logging.Filter):
         elif isinstance(record.args, dict):
             record.args = {k: self._sanitize(v) for k, v in record.args.items()}
         elif record.args is not None:
-            record.args = self._sanitize(record.args)
+            # django-stubs narrows args to tuple/mapping/None; other runtime shapes are
+            # still sanitized, but the cast keeps the assignment type-checkable.
+            record.args = cast(
+                "tuple[object, ...] | Mapping[str, object] | None",
+                self._sanitize(record.args),
+            )
 
         record.msg = self._sanitize(record.msg)
         return True

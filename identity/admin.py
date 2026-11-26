@@ -18,7 +18,7 @@ def _admin_has_permission(request: HttpRequest) -> bool:
     return bool(_original_admin_has_permission(request))
 
 
-admin.site.has_permission = _admin_has_permission
+admin.site.has_permission = _admin_has_permission  # type: ignore[method-assign]
 
 
 # django-stubs models `UserAdmin` as generic over the user model, but Django's runtime class is not
