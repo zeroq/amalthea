@@ -209,7 +209,27 @@ def test_case_merge_is_idempotent_on_replay(
     )
 
 
-# --- AC6.1-P4-c — templates apply their defaults ---------------------------
+def test_case_merge_moves_children_and_keeps_source_rows_absent(
+    api: APIClient, analyst: User, case_status: CaseStatus
+) -> None:
+    """Merge matrix hardening: children move to target and source case is removed."""
+    from cases.models import Comment
+
+    target = _case(case_status, "Target", analyst=analyst)
+    source = _case(case_status, "Source", analyst=analyst)
+    task = Task.objects.create(case=source, title="Collect logs")
+    obs = _observable("198.51.100.7", org=analyst.org)
+    CaseObservable.objects.create(case=source, observable=obs)
+    Comment.objects.create(case=source, message="source comment", created_by=analyst)
+
+    response = api.post(f"/api/v1/case/_merge/{target.id},{source.id}", {}, format="json")
+    assert response.status_code == 200, response.content
+
+    task.refresh_from_db()
+    assert task.case_id == target.id
+    assert CaseObservable.objects.filter(case=target, observable=obs).exists()
+    assert not Case.objects.filter(pk=source.id).exists()
+    assert [e.kind for e in events_after(target, None) if e.kind == "case-merged"]
 
 
 def test_applying_a_template_copies_tasks_tags_and_scalars(

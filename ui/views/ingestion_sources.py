@@ -62,7 +62,7 @@ def sources_list(request: HttpRequest) -> HttpResponse:
         deactivated_at__isnull=False,
     )
 
-    from ingest.mapping import read_rules
+    from ingest.mapping import read_rules, submapping_count
 
     queryset = (
         # ADR-009: org-owned, so the list is scoped like every other tenant row (superAdmin: all).
@@ -85,6 +85,7 @@ def sources_list(request: HttpRequest) -> HttpResponse:
         # "how much is configured", and the severity rule is the one an analyst checks first.
         rules = read_rules(source.mapping_config)
         source.rule_count = len(rules)  # type: ignore[attr-defined]
+        source.submapping_count = submapping_count(source.mapping_config)
         severity_rule = rules.get("severity") or {}
         source.severity_rule = (
             severity_rule.get("transform")
@@ -156,12 +157,23 @@ def settings_source_detail(request: HttpRequest, source_id) -> HttpResponse:
 
     latest_alert: Alert | None = None
     latest_raw_payload: str | None = None
+    raw_type: str | None = None
     if active_tab == "raw-data":
         latest_alert = (
             Alert.objects.filter(ingestion_source=source).order_by("-date", "-created_at").first()
         )
         if latest_alert is not None:
             latest_raw_payload = json.dumps(latest_alert.raw_payload, indent=2, sort_keys=True)
+            # Extract raw top-level type for submapping selection display
+            try:
+                payload = latest_alert.raw_payload
+                if isinstance(payload, dict):
+                    raw_type = payload.get("type")
+                elif isinstance(payload, str):
+                    payload = json.loads(payload)
+                    raw_type = payload.get("type")
+            except Exception:
+                raw_type = None
 
     return render(
         request,
@@ -174,6 +186,7 @@ def settings_source_detail(request: HttpRequest, source_id) -> HttpResponse:
                 active_tab=active_tab,
                 latest_alert=latest_alert,
                 latest_raw_payload=latest_raw_payload,
+                raw_type=raw_type,
             ),
         ),
     )
@@ -196,6 +209,7 @@ def _source_detail_context(
     active_tab: str = "mapping",
     latest_alert: Alert | None = None,
     latest_raw_payload: str | None = None,
+    raw_type: str | None = None,
 ) -> dict:
     """Everything the source page renders, for both the GET and a rejected POST.
 
@@ -208,7 +222,7 @@ def _source_detail_context(
     reached by GET can never show a confirm control for a write nobody asked for.
     """
     from ingest.editor import TARGET_LABELS, editor_rows, transforms_for_editor
-    from ingest.mapping import TARGETS, config_shape, read_rules
+    from ingest.mapping import TARGETS, config_shape, read_rules, submapping_count
     from ingest.observable_editor import observable_editor_rows
     from ingest.remap import MAX_REMAP_ALERTS, REMAP_FIELDS, mapping_health
     from observables.models import ObservableType
@@ -297,6 +311,7 @@ def _source_detail_context(
         ),
         "transforms": transforms_for_editor(),
         "rule_count": len(read_rules(source.mapping_config)),
+        "submapping_count": submapping_count(source.mapping_config),
         "tokens": tokens,
         "tokens_total": tokens_total,
         "alert_count": Alert.objects.filter(ingestion_source=source).count(),
@@ -333,6 +348,7 @@ def _source_detail_context(
         "active_tab": active_tab,
         "latest_alert": latest_alert,
         "latest_raw_payload": latest_raw_payload,
+        "raw_type": raw_type,
         # Raw-data click-to-map (TODO §17): the parsed payload feeds the JSON tree; the
         # raw `<pre>` above stays as the no-JS fallback.
         "latest_raw_data": latest_alert.raw_payload if latest_alert is not None else None,

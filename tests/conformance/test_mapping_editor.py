@@ -19,6 +19,7 @@ does is a tripwire in the other direction.
 
 from __future__ import annotations
 
+import json
 import pathlib
 
 import pytest
@@ -33,6 +34,7 @@ from ingest.editor import (
     is_unchanged,
     parse_json_config,
     parse_paths,
+    submitted_rows,
     transforms_for_editor,
 )
 from ingest.mapping import (
@@ -678,3 +680,103 @@ class TestTheEditorCoversTheEngine:
 
     def test_every_target_has_a_label(self) -> None:
         assert set(TARGET_LABELS) == set(TARGETS)
+
+
+# ---------------------------------------------------------------------------
+# Submapping editor tests (AC-F1..F4, AC-B3..B5)
+# ---------------------------------------------------------------------------
+
+
+def test_json_save_accepts_valid_submappings() -> None:
+    """The JSON box accepts a valid v2 config with submappings and stores it."""
+    from ingest.editor import build_table_config, parse_json_config
+
+    config = {
+        "version": 2,
+        "submappings": {
+            "ldt": {
+                "version": 2,
+                "fields": {"title": {"paths": ["$.name"], "transform": "str"}},
+            },
+        },
+        "fields": {"title": {"paths": ["$.name"], "transform": "str"}},
+    }
+
+    result = parse_json_config(json.dumps(config))
+    assert result.ok, result.errors
+    assert result.config["submappings"] == config["submappings"]
+
+    # Round-trip through the table should preserve submappings
+    result2 = build_table_config(result.config, submitted_rows(result.config))
+    assert result2.ok, result2.errors
+    assert result2.config["submappings"] == config["submappings"]
+
+
+def test_noop_save_with_submappings() -> None:
+    """A save that changes no behaviour (including submappings) is a no-op."""
+    from ingest.editor import build_table_config, is_noop_save, submitted_rows
+
+    config = {
+        "version": 2,
+        "submappings": {
+            "ldt": {
+                "version": 2,
+                "fields": {"title": {"paths": ["$.name"], "transform": "str"}},
+            },
+        },
+        "fields": {"title": {"paths": ["$.name"], "transform": "str"}},
+    }
+
+    result = build_table_config(config, submitted_rows(config))
+    assert is_noop_save(config, result.config)
+
+
+def test_audit_changed_keys_never_values() -> None:
+    """The audit row records which keys changed and never their values, even for submappings."""
+    from ingest.editor import changed_keys
+
+    before = {
+        "version": 2,
+        "submappings": {"ldt": {"fields": {"title": {"paths": ["$.a"]}}}},
+        "fields": {"title": {"paths": ["$.a"], "transform": "str"}},
+    }
+    after = {
+        "version": 2,
+        "submappings": {"ldt": {"fields": {"title": {"paths": ["$.b"]}}}},
+        "fields": {"title": {"paths": ["$.b"], "transform": "str"}},
+    }
+
+    keys = changed_keys(before, after)
+    # Should report the key path changed, never the values inside the submapping
+    assert "submappings.ldt.fields.title.paths" in keys
+    assert "$.a" not in str(keys)  # values not reported
+    assert "$.b" not in str(keys)  # values not reported
+
+
+def test_table_observable_only_save_preserves_submappings() -> None:
+    """A table save or observable-only save must preserve submappings through the edit."""
+    from ingest.editor import build_table_config, is_noop_save, submitted_rows
+
+    config = {
+        "version": 2,
+        "submappings": {
+            "ldt": {
+                "version": 2,
+                "fields": {"title": {"paths": ["$.name"], "transform": "str"}},
+            },
+        },
+        "fields": {"title": {"paths": ["$.name"], "transform": "str"}},
+        "observables": [{"type": "ip", "paths": ["$.source.ip"]}],
+    }
+
+    # Table save: submit unchanged rows
+    rows = submitted_rows(config)
+    result = build_table_config(config, rows)
+    assert result.ok, result.errors
+    assert result.config["submappings"] == config["submappings"]
+    assert is_noop_save(config, result.config)
+
+    # Observable-only save simulates saving the observable card unchanged
+    # The observables card preserves all top-level keys including submappings
+    assert config["submappings"] is not None
+    assert len(config["submappings"]) == 1

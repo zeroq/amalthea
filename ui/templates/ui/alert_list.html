@@ -119,7 +119,7 @@
             <td>
               {% if alert.case %}
                 <a href="{% url 'ui-case-detail' alert.case.number %}">#{{ alert.case.number }}</a>
-              {% else %}{{ alert.status.value }}{% endif %}
+              {% else %}{{ alert.status.display_label }}{% endif %}
             </td>
             {% if can_delete_alerts %}
             <td>
@@ -175,7 +175,7 @@
             <td>
               {% if alert.case %}
                 <a href="{% url 'ui-case-detail' alert.case.number %}">#{{ alert.case.number }}</a>
-              {% else %}{{ alert.status.value }}{% endif %}
+              {% else %}{{ alert.status.display_label }}{% endif %}
             </td>
             {% if can_delete_alerts %}
             <td>

@@ -654,12 +654,14 @@ def _status_json(status: CaseStatus | AlertStatus, type_name: str) -> dict[str, 
 
     `colour` is a documented `InputCreate*` field with no column on either model, so it is
     accepted-and-ignored rather than echoed back as a value nothing stored (ADR D11).
+    `label` is an Amalthea extension (human display name); TheHive status shape has no label.
     """
     return {
         "_id": str(status.id),
         "id": str(status.id),
         "_type": type_name,
         "value": status.value,
+        "label": status.display_label,
         "stage": status.stage,
         "order": status.order,
         "description": status.description,

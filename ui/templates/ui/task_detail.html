@@ -3,7 +3,7 @@
 
 {% block heading %}
 {{ task.title }}
-<span class="pill pill-{{ task.status|lower }}">{{ task.status }}</span>
+<span class="pill pill-{{ task.status|lower }}">{{ task.get_status_display }}</span>
 {% if task.flag %}
 <span class="pill pill-important" title="Important">
   <i class="fa-solid fa-flag" aria-hidden="true"></i> Important

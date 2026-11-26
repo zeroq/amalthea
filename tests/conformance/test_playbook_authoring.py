@@ -502,6 +502,43 @@ def test_task_completed_emits_on_transition_into_completed_only(analyst: User) -
 # --- DELETE with runs refused -----------------------------------------------
 
 
+def test_playbook_config_timeout_30_is_accepted(analyst: User) -> None:
+    c, _ = _api_key_client(analyst, scope="readwrite")
+    code, body = _post(
+        c,
+        "/api/v1/playbook",
+        {
+            "name": "timeout-30",
+            "triggerEvent": "observable.created",
+            "config": {
+                "action": "http",
+                "url": "https://example.invalid/hook",
+                "timeoutSeconds": 30,
+            },
+        },
+    )
+    assert code == 201, body
+
+
+def test_playbook_config_timeout_31_is_rejected(analyst: User) -> None:
+    c, _ = _api_key_client(analyst, scope="readwrite")
+    code, body = _post(
+        c,
+        "/api/v1/playbook",
+        {
+            "name": "timeout-31",
+            "triggerEvent": "observable.created",
+            "config": {
+                "action": "http",
+                "url": "https://example.invalid/hook",
+                "timeoutSeconds": 31,
+            },
+        },
+    )
+    assert code == 400, body
+    assert "timeoutSeconds" in str(body)
+
+
 def test_delete_playbook_with_runs_refused_400(analyst: User) -> None:
     c, _ = _api_key_client(analyst, scope="readwrite")
     code, body = _post(

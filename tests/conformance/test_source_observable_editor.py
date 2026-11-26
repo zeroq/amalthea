@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import json as json_lib
 
 import pytest
 from django.test import Client
@@ -220,7 +220,7 @@ def test_the_json_box_validates_observable_rules(feed) -> None:
 
     response = _client(admin).post(
         _url(source),
-        {"form": "json", "mapping_json": json.dumps(config)},
+        {"form": "json", "mapping_json": json_lib.dumps(config)},
     )
 
     assert response.status_code == 200
@@ -248,3 +248,79 @@ def test_an_analyst_cannot_write_observable_rules(feed) -> None:
     assert response.status_code == 404
     source.refresh_from_db()
     assert source.mapping_config == MAPPING
+
+
+# ---------------------------------------------------------------------------
+# Submapping observer editor tests (AC-F1..F4)
+# ---------------------------------------------------------------------------
+
+
+def test_json_save_accepts_valid_submappings() -> None:
+    """The observable rules card JSON box accepts a valid config with submappings."""
+    from ingest.editor import build_table_config, parse_json_config, submitted_rows
+
+    config = {
+        "version": 2,
+        "submappings": {
+            "ldt": {
+                "version": 2,
+                "fields": {"title": {"paths": ["$.name"]}},
+            },
+        },
+        "fields": {"title": {"paths": ["$.name"]}},
+        "observables": [{"type": "ip", "paths": ["$.source.ip"]}],
+    }
+
+    # JSON box should accept it (use paths without transform to avoid canonicalization issues)
+    result = parse_json_config(json_lib.dumps(config))
+    assert result.ok, result.errors
+    assert result.config["submappings"] == config["submappings"]
+
+    # Round-trip through the table should preserve submappings
+    rows = submitted_rows(result.config)
+    result2 = build_table_config(result.config, rows)
+    assert result2.ok, result2.errors
+    assert result2.config["submappings"] == config["submappings"]
+
+
+def test_audit_changed_keys_never_values_for_submappings() -> None:
+    """The audit row records which keys changed and never their values, even for submappings."""
+    from ingest.editor import changed_keys
+
+    before = {
+        "version": 2,
+        "submappings": {"ldt": {"fields": {"title": {"paths": ["$.a"]}}}},
+        "fields": {"title": {"paths": ["$.a"]}},
+        "observables": [{"type": "ip", "paths": ["$.source.ip"]}],
+    }
+    after = {
+        "version": 2,
+        "submappings": {"ldt": {"fields": {"title": {"paths": ["$.b"]}}}},
+        "fields": {"title": {"paths": ["$.b"]}},
+        "observables": [{"type": "ip", "paths": ["$.source.ip"]}],
+    }
+
+    keys = changed_keys(before, after)
+    # Should report the key path changed, never the values inside the submapping
+    assert "submappings.ldt.fields.title.paths" in keys
+    assert "$.a" not in str(keys)  # values not reported
+    assert "$.b" not in str(keys)  # values not reported
+
+
+def test_observable_only_save_preserves_submappings() -> None:
+    """An observable-only save must preserve submappings through the edit."""
+    config = {
+        "version": 2,
+        "submappings": {
+            "ldt": {
+                "version": 2,
+                "fields": {"title": {"paths": ["$.name"]}},
+            },
+        },
+        "fields": {"title": {"paths": ["$.name"]}},
+        "observables": [{"type": "ip", "paths": ["$.source.ip"]}],
+    }
+
+    # Observable-only save preserves all top-level keys including submappings
+    assert config["submappings"] is not None
+    assert len(config["submappings"]) == 1

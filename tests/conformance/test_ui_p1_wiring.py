@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 from django.test import Client, RequestFactory, override_settings
-from django.urls import NoReverseMatch, reverse
+from django.urls import reverse
 
 from cases.models import Attachment, Case, CaseStatus, CaseTemplate
 from core.enums import VIEWER_ROLE
@@ -593,24 +593,22 @@ def test_error_templates_have_no_inline_assets() -> None:
 
 
 # --------------------------------------------------------------------------
-# T5 — ui-case-bulk is gone
+# T5 / §12.4 — case bulk UI is implemented (collection route, not per-case)
 # --------------------------------------------------------------------------
 
 
-def test_ui_case_bulk_route_removed() -> None:
-    """T5: ui-case-bulk URL name no longer resolves."""
-    with pytest.raises(NoReverseMatch):
-        reverse("ui-case-bulk", kwargs={"case_id": "123"})
+def test_ui_case_bulk_route_exists() -> None:
+    """§12.4: ui-case-bulk is a collection POST route."""
+    assert reverse("ui-case-bulk") == "/cases/bulk"
 
 
-def test_ui_case_bulk_returns_404(browser: Client, case: Case) -> None:
-    """T5: accessing the old bulk URL returns 404."""
-    # The old URL pattern was /cases/<case_id>/bulk
-    url = f"/cases/{case.number}/bulk"
-    response = browser.post(url)
-    # Should be 404 (no route) or 405 (route exists but wrong method)
-    # Since we removed the route, it should 404
-    assert response.status_code == 404
+@pytest.mark.django_db
+def test_ui_case_bulk_requires_auth() -> None:
+    """§12.4: anonymous bulk POST redirects to login."""
+    response = Client().post(reverse("ui-case-bulk"), {"ids": ["1"], "status": "New"})
+    assert response.status_code in (302, 403)
+    if response.status_code == 302:
+        assert "/login" in response["Location"]
 
 
 # --------------------------------------------------------------------------

@@ -45,7 +45,7 @@ def resolve_alert_status(value: str, *, warnings: list[str]) -> AlertStatus:
     """
     status, created = AlertStatus.objects.get_or_create(
         value=value,
-        defaults={"stage": value, "order": 0},
+        defaults={"stage": value, "label": value, "order": 0},
     )
     if created:
         warnings.append(f"alert_status_created: auto-created alert status {value!r}")
@@ -55,7 +55,7 @@ def resolve_alert_status(value: str, *, warnings: list[str]) -> AlertStatus:
 def resolve_case_status(value: str, *, warnings: list[str]) -> CaseStatus:
     status, created = CaseStatus.objects.get_or_create(
         value=value,
-        defaults={"stage": value, "order": 1},
+        defaults={"stage": value, "label": value, "order": 1},
     )
     if created:
         warnings.append(f"case_status_created: auto-created case status {value!r}")

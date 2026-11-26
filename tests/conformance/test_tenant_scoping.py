@@ -1703,6 +1703,7 @@ class TestUIRouteEnumerationConformance:
         admin_only_routes = {
             "ui-settings-agent-access",
             "ui-settings-agent-autonomy",
+            "ui-settings-audit-log",
             "ui-settings-oauth-binding-list",
             "ui-settings-source-detail",
             "ui-playbook-scripts",
@@ -1772,6 +1773,7 @@ class TestUIRouteEnumerationConformance:
             "ui-alert-list": {},
             "ui-alert-detail": {"alert_id": str(self.alert1.id)},
             "ui-alert-export": {"alert_id": str(self.alert1.id)},
+            "ui-alert-similar": {"alert_id": str(self.alert1.id)},
             "ui-case-list": {},
             "ui-case-create": {},
             "ui-case-detail": {"case_id": str(self.case1.number)},

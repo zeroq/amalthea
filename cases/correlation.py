@@ -38,6 +38,9 @@ MAX_CORRELATION_OBS = 1000
 # Comparison cost: len(case_hashes) * len(candidates) ppdeep.compare calls.
 MAX_FUZZY_COMPARISONS = 500
 
+# Maximum number of similar alerts to return from the helper.
+SIMILAR_CLOSED_ALERTS_LIMIT = 20
+
 
 @dataclass(frozen=True)
 class SimilarCase:
@@ -46,6 +49,15 @@ class SimilarCase:
     case: Case
     shared_count: int
     shared: list[tuple[str, str]]  # ordered by data_type then data
+
+
+@dataclass(frozen=True)
+class SimilarAlertMatch:
+    """An alert matched via the similar-alerts helper."""
+
+    alert: Alert
+    similarity: int | None  # fuzzy score 0-100, or None when only observables matched
+    shared_observable_count: int  # 0 when only fuzzy matched
 
 
 @dataclass(frozen=True)
@@ -550,3 +562,222 @@ def record_alert_bundled(
     )
 
     return event
+
+
+def alerts_similar_to_alert(
+    source: Alert,
+    *,
+    user: User,
+    limit: int = SIMILAR_CLOSED_ALERTS_LIMIT,
+) -> tuple[list[SimilarAlertMatch], int]:
+    """
+    Return up to `limit` closed alerts similar to `source`, scoped to the caller's
+    organisation and the source's organisation.
+
+    Two similarity channels are fused via union by alert.id:
+
+    - Fuzzy (SSDEEP + title gate) channel: when source has a non-empty
+      ``payload_ssdeep``, candidates are same-org closed alerts with non-empty
+      ssdeep, scored with ``ppdeep.compare`` and a Jaccard title gate.
+    - Observable channel: when source has AlertObservables, closed alerts that
+      share those observables (excluding ``observable__ignore_similarity=True``)
+      get a ``shared_observable_count`` annotation; ``similarity`` is ``None``
+      for observable-only matches.
+
+    Returns:
+        (rows, total_matching) — total is computed BEFORE the final slice for
+        honest truncation reporting.
+
+    Scope (both channels):
+        - ``status__stage="Closed"``, exclude ``source.pk``.
+        - ``org_q("owner_org", user)`` AND ``owner_org_id=source.owner_org_id``.
+        - ``select_related("status", "owner_org")``.
+        - ``order_by("-updated_at", "-date", "-pk")``.
+
+    Fuzzy channel:
+        - Skip if source ``payload_ssdeep`` is empty.
+        - Cap candidates at ``MAX_FUZZY_COMPARISONS`` before scoring.
+        - Require candidate non-empty ``payload_ssdeep``.
+        - ``ppdeep.compare(candidate.payload_ssdeep, source.payload_ssdeep)``.
+        - Title gate: ``normalize_title_tokens()`` + ``jaccard_similarity()``
+          from ``alerts.title_similarity``, same pairwise semantics as the case
+          Similar helper.
+        - Import/comparison failures degrade to score ``0``.
+
+    Observable channel:
+        - Read source ``AlertObservable`` rows, excluding
+          ``observable__ignore_similarity=True``, cap at ``MAX_CORRELATION_OBS``.
+        - Query closed alerts through shared observable IDs, excluding
+          ``observable__ignore_similarity=True``.
+        - Annotate ``Count("observable_id", distinct=True)`` as
+          ``shared_observable_count``.
+        - Cap candidate alert rows at ``MAX_FUZZY_COMPARISONS`` after applying
+          base ordering.
+
+    Union:
+        - Merge by ``alert.id``; dual matches retain max fuzzy score and shared
+          observable count.
+        - ``total_matching = len(union)`` before final slice.
+        - Return ``(sorted(union.values(), key=base_order)[:limit], total_matching)``.
+    """
+    from django.db.models import Count
+
+    from alerts.models import Alert
+    from alerts.title_similarity import jaccard_similarity, normalize_title_tokens
+    from identity.scoping import org_q
+
+    try:
+        import ppdeep  # type: ignore[import-untyped]
+    except ImportError:
+        ppdeep = None
+
+    # -------------------------------------------------------------------------
+    # Base scope: closed-only, same org as source + caller, exclude source
+    # -------------------------------------------------------------------------
+    base_qs = (
+        Alert.objects.filter(status__stage="Closed")
+        .exclude(pk=source.pk)
+        .filter(org_q("owner_org", user))
+        .filter(owner_org_id=source.owner_org_id)
+        .select_related("status", "owner_org")
+        .order_by("-updated_at", "-date", "-pk")
+    )
+
+    # -------------------------------------------------------------------------
+    # Fuzzy channel (SSDEEP + title gate)
+    # -------------------------------------------------------------------------
+    payload_threshold = getattr(settings, "ALERT_FUZZY_SIMILARITY_THRESHOLD", 60)
+    title_threshold = getattr(settings, "ALERT_FUZZY_TITLE_SIMILARITY_THRESHOLD", 70)
+    title_gate_enabled = getattr(settings, "ALERT_FUZZY_TITLE_GATE_ENABLED", True)
+
+    if not source.payload_ssdeep:
+        # No SSDEEP hash on source → fuzzy channel yields no matches
+        fuzzy_results: list[tuple[Alert, int | None]] = []
+    else:
+        # Collect candidate alerts: closed, same-org, non-empty ssdeep, capped
+        candidates_qs = base_qs.exclude(payload_ssdeep="")[:MAX_FUZZY_COMPARISONS]
+
+        # Pre-compute source tokens for title gate
+        source_tokens = normalize_title_tokens(source.title or "")
+
+        # Score each candidate
+        fuzzy_results: list[tuple[Alert, int | None]] = []  # (alert, fuzzy_score)
+        for candidate in candidates_qs:
+            try:
+                score = ppdeep.compare(candidate.payload_ssdeep, source.payload_ssdeep)
+            except (Exception, RecursionError, MemoryError):
+                score = 0
+
+            # Title gate: Jaccard on normalized tokens
+            candidate_tokens = normalize_title_tokens(candidate.title or "")
+            title_score = None
+            if candidate_tokens and source_tokens:
+                try:
+                    title_score = jaccard_similarity(candidate_tokens, source_tokens)
+                except Exception:
+                    title_score = None
+
+            # Apply title gate + payload threshold qualification
+            qualifying = True
+            if title_gate_enabled and title_score is not None:
+                if score < payload_threshold or title_score < title_threshold:
+                    qualifying = False
+            elif title_gate_enabled and score < payload_threshold:
+                qualifying = False
+
+            if qualifying and score >= payload_threshold:
+                fuzzy_results.append((candidate, score))
+
+    # -------------------------------------------------------------------------
+    # Observable channel (shared stored observables)
+    # -------------------------------------------------------------------------
+    from alerts.models import AlertObservable
+
+    # Read source AlertObservable rows, excluding observable__ignore_similarity=True
+    source_obs = (
+        AlertObservable.objects.filter(alert=source)
+        .exclude(observable__ignore_similarity=True)
+        .values_list("observable_id", flat=True)
+        .distinct()[:MAX_CORRELATION_OBS]
+    )
+
+    obs_results: list[tuple[Alert, int | None, int]] = []  # (alert, similarity, shared_count)
+    if source_obs:
+        # Query closed alerts through shared observable IDs, excluding ignore_similarity
+        obs_alerts = (
+            Alert.objects.filter(status__stage="Closed")
+            .filter(
+                alert_observables__observable_id__in=source_obs,
+                alert_observables__observable__ignore_similarity=False,
+            )
+            .filter(org_q("owner_org", user))
+            .filter(owner_org_id=source.owner_org_id)
+            .exclude(pk=source.pk)
+            .annotate(
+                shared_observable_count=Count("alert_observables__observable_id", distinct=True),
+            )
+            .select_related("status", "owner_org")
+            .order_by("-updated_at", "-date", "-pk")[:MAX_FUZZY_COMPARISONS]
+        )
+
+        for alert in obs_alerts:
+            # Observable-only match: similarity is None
+            obs_results.append((alert, None, alert.shared_observable_count or 0))
+
+    # -------------------------------------------------------------------------
+    # Union by alert.id, preserve both signals
+    # -------------------------------------------------------------------------
+    # Build a dict keyed by alert.pk, keeping the best signal per alert
+    union_by_id: dict[UUID, dict] = {}  # alert_id -> {alert, similarity, shared_observable_count}
+
+    # Add fuzzy results first
+    for alert, score in fuzzy_results:
+        aid = alert.pk
+        if aid not in union_by_id:
+            union_by_id[aid] = {
+                "alert": alert,
+                "similarity": score,
+                "shared_observable_count": 0,
+            }
+
+    # Add observable results; dual matches keep max fuzzy score and observable count
+    for _alert, _similarity, shared_count in obs_results:
+        aid = _alert.pk
+        if aid in union_by_id:
+            # Dual match: keep the existing fuzzy similarity, update obs count if larger
+            existing = union_by_id[aid]
+            if shared_count > existing["shared_observable_count"]:
+                existing["shared_observable_count"] = shared_count
+            # Keep existing similarity (fuzzy score is preserved)
+        else:
+            # Observable-only match: similarity is None
+            union_by_id[aid] = {
+                "alert": _alert,
+                "similarity": None,
+                "shared_observable_count": shared_count,
+            }
+
+    # -------------------------------------------------------------------------
+    # Sort by base order and slice
+    # -------------------------------------------------------------------------
+    # Build order index from base_qs
+    order_pks = base_qs.values_list("pk", flat=True)
+    order_index = {pk: i for i, pk in enumerate(order_pks)}
+
+    sorted_union = sorted(
+        union_by_id.values(), key=lambda item: order_index.get(item["alert"].pk, 999999)
+    )
+
+    total_matching = len(union_by_id)  # pre-slice union size
+
+    result: list[SimilarAlertMatch] = []
+    for item in sorted_union[:limit]:
+        result.append(
+            SimilarAlertMatch(
+                alert=item["alert"],
+                similarity=item["similarity"],
+                shared_observable_count=item["shared_observable_count"],
+            )
+        )
+
+    return result, total_matching

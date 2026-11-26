@@ -215,7 +215,7 @@ covering indexes for large queues. These cannot be expressed portably — `GinIn
 | Base path | `/api/v1/` |
 | Auth | `Authorization: Bearer <api_key>`, HTTP Basic, or session cookie |
 | Entity envelope | `_id` (string UUID), `_type`, `_createdBy`, `_createdAt`, `_updatedBy`, `_updatedAt` |
-| Timestamps | **Unix epoch milliseconds (integer)** on input *and* output |
+| Timestamps | **Unix epoch milliseconds (integer)** on input. Output: entity JSON uses ISO-8601; timeline/event wire uses epoch-ms integers (P10-2 post-closure boundary, 2026-10-07). |
 | Severity | integer `1..4` → Low/Medium/High/Critical, plus `severityLabel` |
 | TLP / PAP | `tlp` `0..4`, `pap` `0..3`, plus `tlpLabel`/`papLabel` |
 | Case status | string name of an existing `CaseStatus`; response adds derived `stage` |

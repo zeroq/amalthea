@@ -81,6 +81,7 @@ def store_ingested_alert(
     owner_org: Organisation,
     extra_warnings: tuple[str, ...] = (),
     mapping_warnings: tuple[FieldWarning, ...] = (),
+    mapping_config: dict[str, Any] | None = None,
 ) -> StoredAlert:
     """Persist one alert, or recognise `payload` as a replay of one already stored.
 
@@ -90,6 +91,9 @@ def store_ingested_alert(
 
     `owner_org` is the organisation derived from the `IngestionToken` (ADR-004 P2). Every
     ingested alert is stamped with it; there is no tokenless/ownerless ingestion path.
+
+    When `mapping_config` is supplied (as from the webhook path), it takes precedence over
+    `ingestion_source.mapping_config` for correlation key and observable sync.
     """
     warnings: list[str] = list(extra_warnings)
 
@@ -97,14 +101,21 @@ def store_ingested_alert(
         severity = default_severity
         warnings.append(f"severity_defaulted: no severity mapping; defaulted to {default_severity}")
 
+    # Determine the effective mapping config: explicit argument overrides source config
+    effective_config = (
+        mapping_config
+        if mapping_config is not None
+        else (ingestion_source.mapping_config if ingestion_source else None)
+    )
+
     source_ref, ref_warning = resolve_source_ref(mapped_source_ref, payload)
     if ref_warning:
         warnings.append(ref_warning)
 
-    # Derive correlation_key from ingestion_source mapping if not explicitly provided
+    # Derive correlation_key from effective mapping config if not explicitly provided
     if ingestion_source is not None and not correlation_key:
         try:
-            derived = extract_correlation_key(ingestion_source.mapping_config, payload)
+            derived = extract_correlation_key(effective_config, payload)
             if derived:
                 correlation_key = derived
         except Exception:
@@ -149,7 +160,7 @@ def store_ingested_alert(
         if alert.ingestion_source_id is not None:
             from observables.alert_sync import sync_alert_observables
 
-            sync = sync_alert_observables(alert)
+            sync = sync_alert_observables(alert, config=effective_config)
             if created and sync.warnings:
                 warnings.extend(sync.warnings)
                 stored_warnings = dict(alert.ingestion_warnings or {})

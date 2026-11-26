@@ -33,11 +33,14 @@
        tabindex="{% if tab.slug == active_tab %}0{% else %}-1{% endif %}"
        aria-keyshortcuts="{{ forloop.counter }}">
       {% if tab.slug == "general" %}<i class="fa-solid fa-circle-info" aria-hidden="true"></i> {% endif %}
-      {% if tab.slug == "observables" %}<i class="fa-solid fa-cube" aria-hidden="true"></i> {% endif %}
+      {% if tab.slug == "observables" %}<i class="fa-solid fa-cube" aria-hidden="true"></i> {% endif %}{% if tab.slug == "similar" %}<i class="fa-solid fa-diagram-project" aria-hidden="true"></i> {% endif %}
       {% if tab.slug == "raw-data" %}<i class="fa-solid fa-code" aria-hidden="true"></i> {% endif %}
       {{ tab.label }}
       {% if tab.slug == "observables" %}
         <span class="badge">{{ alert_observables|length }}</span>
+      {% endif %}
+      {% if tab.slug == "similar" %}
+        <span class="badge">{{ tab.count }}</span>
       {% endif %}
     </a>
   {% endfor %}
@@ -76,7 +79,7 @@
           <h2 id="h-meta">Alert</h2>
           <dl class="meta">
             <dt>Severity</dt><dd>{{ alert.severity|sev_label }} ({{ alert.severity }})</dd>
-            <dt>Status</dt><dd>{{ alert.status.value }}</dd>
+            <dt>Status</dt><dd>{{ alert.status.display_label }}</dd>
             <dt>Verdict</dt><dd>{{ alert_verdict|default:"undefined" }}</dd>
             <dt>Type</dt><dd class="mono">{{ alert.type }}</dd>
             <dt>Source</dt><dd class="mono">{{ alert.source }}</dd>
@@ -186,7 +189,7 @@
           <section class="card" aria-labelledby="h-add-tags">
             <h2 id="h-add-tags">Add tags</h2>
             <p class="hint">
-              Select existing tags from your org or create new ones to assign to this alert.
+              Select existing tags or create new ones to assign to this alert.
             </p>
             <button type="button" class="btn" data-modal-open="alert-tag-add-modal">
               <i class="fa-solid fa-tag" aria-hidden="true"></i>
@@ -245,6 +248,15 @@
     </section>
   </section>
 
+  <section class="tabpanel" role="tabpanel" id="panel-similar" aria-labelledby="tab-similar" tabindex="0"
+    {% if active_tab != "similar" %}data-lazy-src="{% url 'ui-alert-similar' alert.id %}"{% else %}data-loaded{% endif %}
+    {% if active_tab != "similar" %}hidden{% endif %}>
+    {% if active_tab == "similar" %}
+      {% include "ui/_alert_similar_tab_fragment.html" %}
+    {% endif %}
+
+  </section>
+
   <section class="tabpanel" role="tabpanel" id="panel-raw-data" aria-labelledby="tab-raw-data" tabindex="0" {% if active_tab != "raw-data" %}hidden{% endif %}>
     <section class="card" aria-labelledby="h-raw">
       <h2 id="h-raw">Raw payload</h2>
@@ -259,7 +271,7 @@
 {% endif %}
 
 {% if can_mutate %}
-  {% include "ui/_modal.html" with modal_id="alert-tag-add-modal" form_id="alert-tag-add-form" body_template="ui/_alert_tag_add_modal_body.html" title="Add tags to this alert" confirm_text="Add tags" confirm_class="btn-primary" form_action=alert_tag_add_url size="sm" %}
+  {% include "ui/_modal.html" with modal_id="alert-tag-add-modal" form_id="alert-tag-add-form" body_template="ui/_alert_tag_add_modal_body.html" title="Add tags to this alert" confirm_text="Add tags" confirm_class="btn-primary" form_action=alert_tag_add_url size="md" %}
 {% endif %}
 
 <script src="{% static 'ui/tabs.js' %}" defer></script>

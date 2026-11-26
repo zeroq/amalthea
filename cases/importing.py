@@ -223,7 +223,9 @@ def _resolve_status(value: Any, warnings: list[str]) -> CaseStatus:
     warnings.append(f"status: unknown {wanted!r}; using 'InProgress'")
     fallback = CaseStatus.objects.filter(value="InProgress").first()
     if fallback is None:
-        fallback = CaseStatus.objects.create(value="InProgress", stage="InProgress", order=2)
+        fallback = CaseStatus.objects.create(
+            value="InProgress", label="In Progress", stage="InProgress", order=2
+        )
     return fallback
 
 

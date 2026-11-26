@@ -587,6 +587,7 @@ def _create_alert_status(request: Request) -> Response:
         with transaction.atomic():
             status_obj, result = create_alert_status(
                 value=str(payload.get("value") or ""),
+                label=str(payload.get("label") or ""),
                 stage=str(payload.get("stage") or ""),
                 order=order,
                 description=str(payload.get("description") or ""),
@@ -667,6 +668,7 @@ def _update_alert_status(status_obj: AlertStatus, request: Request) -> Response:
 
     # Extract only the fields we allow to be updated
     value = payload.get("value")
+    label = payload.get("label")
     order = payload.get("order")
     description = payload.get("description")
     hidden = payload.get("hidden")
@@ -683,6 +685,7 @@ def _update_alert_status(status_obj: AlertStatus, request: Request) -> Response:
             result = update_alert_status(
                 status_obj,
                 value=str(value) if value is not None else None,
+                label=str(label) if label is not None else None,
                 order=order,
                 description=str(description) if description is not None else None,
                 hidden=bool(hidden) if hidden is not None else None,
@@ -756,6 +759,11 @@ def alert_tag_add(request: Request, alert_id: str) -> Response:
             status=status.HTTP_404_NOT_FOUND,
         )
 
+    if not isinstance(request.data, dict):
+        return Response(
+            {"type": "BadRequest", "message": "Request body must be a JSON object"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     names = tag_names_from_payload(request.data)
     if names is None:
         return Response(

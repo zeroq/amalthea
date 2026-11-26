@@ -1,0 +1,40 @@
+{% load ui_tags %}
+{# Similar alerts card for alert detail — mirrors _alert_observables table structure #}
+<section class="card" aria-labelledby="h-similar-alerts">
+    <h2 id="h-similar-alerts">Similar alerts</h2>
+
+    {% if similar_alerts %}
+    <div class="table-wrap">
+      <table class="data-table data-table-tight">
+        <caption class="sr-only">Closed alerts similar to this alert</caption>
+        <thead>
+          <tr>
+            <th scope="col">Title</th>
+            <th scope="col">Verdict</th>
+            <th scope="col">Closed</th>
+            <th scope="col">Similarity</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in similar_alerts %}
+          <tr>
+            <td><a href="{% url 'ui-alert-detail' row.alert.id %}">{{ row.alert.title }}</a></td>
+            <td>{{ row.verdict_label|default:"—" }}</td>
+            <td>{{ row.closed_at|date:"Y-m-d H:i"|default:"—" }}</td>
+            <td>{{ row.similarity_display|default:"—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {# Honest truncation line #}
+    {% if similar_total > similar_alerts|length %}
+      <p class="list-summary dim">
+        Showing <strong>{{ similar_alerts|length }}</strong> of <strong>{{ similar_total }}</strong> similar alerts
+      </p>
+    {% endif %}
+    {% else %}
+    <p class="empty">No closed alerts are similar enough right now.</p>
+    {% endif %}
+  </section>

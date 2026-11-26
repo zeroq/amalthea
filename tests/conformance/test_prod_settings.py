@@ -37,9 +37,9 @@ PLACEHOLDER_KEY = "dev-only-insecure-change-me"
 PROBE = (
     "import amalthea.settings.prod as s; "
     "print(s.SECRET_KEY[:1], s.SESSION_COOKIE_SECURE, s.CSRF_COOKIE_SECURE, "
-    "s.SECURE_SSL_REDIRECT, s.SECURE_HSTS_SECONDS, s.SECURE_HSTS_INCLUDE_SUBDOMAINS, "
-    "s.SECURE_HSTS_PRELOAD, s.SECURE_CONTENT_TYPE_NOSNIFF, s.SECURE_REFERRER_POLICY, "
-    "s.X_FRAME_OPTIONS)"
+    "s.SECURE_SSL_REDIRECT, s.SESSION_COOKIE_HTTPONLY, s.SECURE_HSTS_SECONDS, "
+    "s.SECURE_HSTS_INCLUDE_SUBDOMAINS, s.SECURE_HSTS_PRELOAD, "
+    "s.SECURE_CONTENT_TYPE_NOSNIFF, s.SECURE_REFERRER_POLICY, s.X_FRAME_OPTIONS)"
 )
 
 
@@ -151,6 +151,7 @@ def test_hardening_flags_are_forced_in_production() -> None:
         session_cookie_secure,
         csrf_cookie_secure,
         secure_ssl_redirect,
+        session_cookie_httponly,
         hsts_seconds,
         hsts_include_subdomains,
         hsts_preload,
@@ -163,6 +164,7 @@ def test_hardening_flags_are_forced_in_production() -> None:
     assert session_cookie_secure == "True", "SESSION_COOKIE_SECURE is not forced"
     assert csrf_cookie_secure == "True", "CSRF_COOKIE_SECURE is not forced"
     assert secure_ssl_redirect == "True", "SECURE_SSL_REDIRECT is not forced"
+    assert session_cookie_httponly == "True", "SESSION_COOKIE_HTTPONLY is not forced"
     assert hsts_seconds == "31536000", "SECURE_HSTS_SECONDS is not one year"
     assert hsts_include_subdomains == "True", "SECURE_HSTS_INCLUDE_SUBDOMAINS is not forced"
     assert hsts_preload == "True", "SECURE_HSTS_PRELOAD is not forced"

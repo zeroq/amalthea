@@ -20,7 +20,6 @@
 {% endif %}
 
 <div class="card">
-  {% if page_obj.paginator %}
     {% include "ui/_list_summary.html" with entity_name="run" entity_name_plural="runs" %}
     <div class="table-wrap">
     <table class="data-table">
@@ -58,6 +57,5 @@
     {% else %}
       {% include "ui/_pager.html" with entity_name="Automation" %}
     {% endif %}
-  {% endif %}
 </div>
 {% endblock %}

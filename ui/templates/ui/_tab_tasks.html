@@ -75,7 +75,7 @@
 
       <a href="{% url 'ui-task-detail' task.id %}" class="task-title">{{ task.title }}</a>
 
-      <span class="pill pill-{{ task.status|lower }}">{{ task.status }}</span>
+      <span class="pill pill-{{ task.status|lower }}">{{ task.get_status_display }}</span>
 
       {% if task.assignee %}
       <span class="task-assignee">{{ task.assignee.login }}</span>

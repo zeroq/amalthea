@@ -70,6 +70,11 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
   DB-enforced half; the refusal is what makes it *explicable*).
 - `slug` — **unique per organisation** (`ingestion_source_org_slug_uniq (organisation, slug)`) ·
   `name` · `mapping_config` — JSONB (the JSON-path mapping table, v1 flat or v2 `fields`).
+  The config may contain an optional `submappings` key (v2-only) whose value is a JSON object
+  keyed by the raw top-level `type` string from each alert payload. Exact case-sensitive match
+  selects one submapping, which fully replaces the master config for that alert type. Missing
+  or non-string type falls back to the master config. Nested `submappings` are rejected at
+  validation. Max 50 submappings, keys ≤100 chars. Requires `"version": 2` on the config.
 - The slug left the webhook URL on 2026-10-15 (ADR-008): the route is `/api/v1/alerts/webhook/`
   and the token does the routing. `slug` is what a name typed in Settings → Sources resolves to
   (`slugify`, get-or-create **within the token's organisation**, ADR-009), and `webhook_secret_hash`

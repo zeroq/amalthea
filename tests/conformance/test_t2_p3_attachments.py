@@ -87,6 +87,50 @@ def test_an_oversize_upload_is_413_and_writes_nothing(
     )
 
 
+def test_upload_at_exact_cap_is_accepted(api: APIClient, analyst: User, settings: Any) -> None:
+    settings.ATTACHMENT_MAX_BYTES = 8
+    case = _owned_case(analyst.org)
+
+    response = _upload(api, case, "exact.txt", b"01234567", "text/plain")
+
+    assert response.status_code == 201, response.content
+    att = Attachment.objects.get(case=case)
+    assert att.size == 8
+
+
+def test_empty_upload_is_rejected_and_writes_nothing(api: APIClient, analyst: User) -> None:
+    case = _owned_case(analyst.org)
+
+    response = api.post(f"/api/v1/case/{case.id}/attachments", {}, format="multipart")
+
+    assert response.status_code in (400, 415), response.content
+    assert not Attachment.objects.filter(case=case).exists()
+
+
+def test_batch_upload_is_partial_when_one_file_is_invalid(api: APIClient, analyst: User) -> None:
+    """Batch boundary: a bad file must not poison a valid file in same request."""
+    case = _owned_case(analyst.org)
+    response = api.post(
+        f"/api/v1/case/{case.id}/attachments",
+        {
+            "attachments": [
+                SimpleUploadedFile("ok.txt", b"good", content_type="text/plain"),
+                SimpleUploadedFile(
+                    "bad.bin", b"MZ\x90\x00", content_type="application/x-msdownload"
+                ),
+            ]
+        },
+        format="multipart",
+    )
+
+    assert response.status_code in (201, 207, 415), response.content
+    assert not Attachment.objects.filter(case=case, name="bad.bin").exists()
+    if response.status_code == 201:
+        names = {a["name"] for a in response.json().get("attachments", [])}
+        assert "ok.txt" in names
+        assert Attachment.objects.filter(case=case, name="ok.txt").exists()
+
+
 def test_a_disallowed_content_type_is_415(api: APIClient, analyst: User) -> None:
     case = _owned_case(analyst.org)
 

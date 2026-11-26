@@ -218,6 +218,8 @@ MAX_PATH_LEN: Final[int] = 200
 MAX_PATHS_PER_FIELD: Final[int] = 8
 MAX_FIELDS: Final[int] = 20
 DEFAULT_MAX_LENGTH: Final[int] = 200
+MAX_SUBMAPPINGS: Final[int] = 50
+MAX_SUBMAPPING_KEY_LEN: Final[int] = 100
 
 _WHITESPACE = re.compile(r"\s+")
 #: Fractional seconds are optional and may be long: CrowdStrike sends
@@ -776,6 +778,51 @@ def validate_config(mapping_config: Any) -> list[str]:
 
     errors.extend(validate_observables(mapping_config))
 
+    # --- Validate submappings (v2-only) ------------------------------------
+    submappings = mapping_config.get("submappings")
+
+    if mapping_config.get("version") == 2:
+        # v2 config: submappings are v2-only and optional
+        if submappings is not None:
+            if not isinstance(submappings, dict):
+                errors.append("submappings: must be a JSON object")
+            else:
+                # Max 50 keys
+                if len(submappings) > MAX_SUBMAPPINGS:
+                    errors.append(
+                        f"submappings: at most {MAX_SUBMAPPINGS} keys may be configured "
+                        f"(got {len(submappings)})"
+                    )
+                # Validate each key and value using validate_config recursively
+                for key, value in submappings.items():
+                    # Key must be non-empty string <= 100 chars
+                    if not isinstance(key, str) or not key.strip():
+                        errors.append(f"submappings.{key}: key must be a non-empty string")
+                    elif len(key) > MAX_SUBMAPPING_KEY_LEN:
+                        errors.append(
+                            f"submappings.{key}: key exceeds {MAX_SUBMAPPING_KEY_LEN} characters"
+                        )
+                    else:
+                        # Value must be a complete valid v2 config; reject nested submappings
+                        if not isinstance(value, dict):
+                            errors.append(f"submappings.{key}: value must be a JSON object")
+                        elif value.get("version") != 2:
+                            errors.append(f"submappings.{key}: value must have version 2")
+                        elif value.get("submappings") is not None:
+                            # Nested submappings are not supported
+                            errors.append(
+                                f"submappings.{key}: nested submappings are not supported"
+                            )
+                        else:
+                            # Recursively validate as a v2 config; prefix errors with submapping key
+                            nested_errors = validate_config(value)
+                            for e in nested_errors:
+                                errors.append(f"submappings.{key}.{e}")
+    else:
+        # Legacy config: submappings are not available
+        if submappings is not None:
+            errors.append("submappings: only available in v2 mapping configs (version 2)")
+
     fields = mapping_config.get("fields")
     # The branch is `_normalize`'s branch. Branching on `fields is None` alone would validate
     # `{"version": 2}` as *legacy* while `_normalize` reads it as v2 (no rules) — a config that passes
@@ -882,3 +929,85 @@ def extract_correlation_key(mapping_config: dict[str, Any] | None, payload: Any)
                 return result.strip() if isinstance(result, str) else str(result)
 
     return ""
+
+
+# --- Mapping resolution for v2 submappings --------------------------------
+
+
+@dataclass(frozen=True)
+class MappingResolution:
+    """Result of resolving a mapping config against an alert payload.
+
+    `config` is the effective v2 config to use (master or matched submapping).
+    `matched_type` is the raw payload `type` value that triggered a submapping match,
+    or `None` if no submapping was matched.
+    `used_submapping` is True exactly when a raw-type match replaced the master config.
+    """
+
+    config: dict[str, Any]
+    matched_type: str | None = None
+    used_submapping: bool = False
+
+
+def submapping_count(config: dict[str, Any] | None) -> int:
+    """Return the number of submappings in a v2 config, for UI display.
+
+    Returns 0 when config is None, empty, or has no submappings key.
+    """
+    if not isinstance(config, dict):
+        return 0
+    submappings = config.get("submappings")
+    if not isinstance(submappings, dict):
+        return 0
+    return len(submappings)
+
+
+def resolve_mapping_config(
+    mapping_config: dict[str, Any] | None,
+    payload: Any,
+) -> MappingResolution:
+    """Resolve the effective v2 config for a payload, supporting per-type submappings.
+
+    Behaviour:
+    - Return master unchanged for empty config, no submappings, non-mapping payload,
+      missing/non-string `type`, or no exact case-sensitive key match.
+    - On exact match return the submapping object as `config`, set `matched_type`
+      and `used_submapping=True`.
+    - Never mutate `mapping_config` or `payload`.
+    - Do not recurse into nested submappings.
+
+    The payload `type` is read as a raw top-level value (exact case-sensitive match).
+    If the payload is not a dict, or has no `type` key, or the `type` value is not a
+    string, the master config is returned unchanged.
+    """
+    # Baseline: no config or no payload dict → master unchanged
+    if not isinstance(mapping_config, dict):
+        # Non-dict master config: fall back to empty (prevents .get() crash on non-dict)
+        return MappingResolution(config={}, matched_type=None, used_submapping=False)
+    if not isinstance(payload, dict):
+        return MappingResolution(config=mapping_config, matched_type=None, used_submapping=False)
+
+    # Read the payload's raw type; missing/non-string → master fallback
+    payload_type = payload.get("type")
+    if not isinstance(payload_type, str):
+        return MappingResolution(config=mapping_config, matched_type=None, used_submapping=False)
+
+    # No submappings in master → master unchanged
+    submappings = mapping_config.get("submappings")
+    if not isinstance(submappings, dict) or not submappings:
+        return MappingResolution(config=mapping_config, matched_type=None, used_submapping=False)
+
+    # Exact case-sensitive key match
+    if payload_type in submappings:
+        # Return the matched submapping as the effective config
+        # Do not recurse into nested submappings within the submapping itself
+        config = dict(submappings[payload_type])  # shallow copy
+        config.pop("submappings", None)  # strip nested submappings
+        return MappingResolution(
+            config=config,
+            matched_type=payload_type,
+            used_submapping=True,
+        )
+
+    # No match → master unchanged
+    return MappingResolution(config=mapping_config, matched_type=None, used_submapping=False)

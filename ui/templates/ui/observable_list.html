@@ -19,12 +19,11 @@
 </div>
 
 <div class="card">
-  {% if page_obj.paginator %}
     {% include "ui/_list_summary.html" with entity_name="observable" entity_name_plural="observables" %}
     {% if can_mutate and page_obj.object_list %}
     <form method="post" id="observable-bulk-form" action="{% url 'ui-observable-bulk' %}" class="bulk-form" aria-label="Bulk observable actions">
       {% csrf_token %}
-      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <input type="hidden" name="next" value="{{ next_url }}">
       <div class="control-row bulk-action-bar" role="group" aria-label="Bulk actions">
         <label class="bulk-select-all">
           <input type="checkbox" data-bulk-select-all="observable-bulk-form" aria-label="Select all observables on this page">
@@ -136,6 +135,5 @@
     {% else %}
       {% include "ui/_pager.html" with entity_name="Observable" %}
     {% endif %}
-  {% endif %}
 </div>
 {% endblock %}

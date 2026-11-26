@@ -8,10 +8,30 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from django.conf import settings
 from django.core.cache import cache
 from django.http import HttpRequest
 
-# Configuration
+
+# Configuration (settings override for tests/ops)
+def _login_max_attempts() -> int:
+    return int(
+        getattr(settings, "LOGIN_RATE_LIMIT_ATTEMPTS", getattr(settings, "LOGIN_MAX_ATTEMPTS", 5))
+    )
+
+
+def _login_window() -> int:
+    return int(getattr(settings, "LOGIN_RATE_LIMIT_WINDOW", getattr(settings, "LOGIN_WINDOW", 900)))
+
+
+def _login_lockout_window() -> int:
+    return int(
+        getattr(
+            settings, "LOGIN_RATE_LIMIT_LOCKOUT", getattr(settings, "LOGIN_LOCKOUT_WINDOW", 300)
+        )
+    )
+
+
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_LOCKOUT_WINDOW = 300  # 5 minutes
 LOGIN_WINDOW = 900  # 15 minutes
@@ -42,7 +62,7 @@ def _increment_attempts(key: str) -> int:
     """Increment and return failed attempt count for a key."""
     current = int(cache.get(key, 0))
     new_count = current + 1
-    cache.set(key, new_count, LOGIN_WINDOW)
+    cache.set(key, new_count, _login_window())
     return new_count
 
 
@@ -60,14 +80,14 @@ def _is_locked_out(request: HttpRequest, username: str | None = None) -> tuple[b
 
     # Check IP lockout
     ip_attempts = _get_attempts(ip_key)
-    if ip_attempts >= LOGIN_MAX_ATTEMPTS:
+    if ip_attempts >= _login_max_attempts():
         ttl = _get_cache_ttl(ip_key)
         return True, max(ttl, 1)
 
     # Check username lockout
     if user_key:
         user_attempts = _get_attempts(user_key)
-        if user_attempts >= LOGIN_MAX_ATTEMPTS:
+        if user_attempts >= _login_max_attempts():
             ttl = _get_cache_ttl(user_key)
             return True, max(ttl, 1)
 
@@ -80,7 +100,7 @@ def _get_cache_ttl(key: str) -> int:
         return int(cast("Any", cache).ttl(key))
     except AttributeError:
         # LocMemCache doesn't support ttl(), fall back to window duration
-        return LOGIN_WINDOW
+        return _login_window()
 
 
 def record_failed_login(request: HttpRequest, username: str | None = None) -> None:

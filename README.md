@@ -46,6 +46,7 @@ User.objects.create_user(username='analyst', password='change-me', org=org)
 User.objects.create_user(username='admin', password='change-me', org=org, role='superAdmin')
 source = IngestionSource.objects.create(slug='demo', name='Demo',
     mapping_config={'title': '$.title', 'severity': '$.severity', 'correlation_key': '$.sourceRef'})
+# legacy flat config example: does not support submappings (v2-only key)
 token, secret = IngestionToken.create_token(source=source, organisation=org, name='Demo webhook')
 print('X-Webhook-Secret:', secret)
 "

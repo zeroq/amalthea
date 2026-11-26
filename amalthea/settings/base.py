@@ -227,6 +227,21 @@ CACHES = {
     }
 }
 
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "sanitize_request_path": {
+            "()": "amalthea.logging.SanitizeRequestPathFilter",
+        },
+    },
+    "loggers": {
+        "django.request": {
+            "filters": ["sanitize_request_path"],
+        },
+    },
+}
+
 # --- Playbook Scripts Folder (ADR-011) -------------------------------------
 # Directory containing playbook script files (*.py). Each script declares
 # NAME, DESCRIPTION, TRIGGER_HINT and a run(**values) -> str entry point.

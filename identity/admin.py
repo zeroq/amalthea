@@ -7,6 +7,19 @@ from django.http import HttpRequest
 
 from .models import AuditLog, IngestionToken, Organisation, User
 
+_original_admin_has_permission = admin.site.has_permission
+
+
+def _admin_has_permission(request: HttpRequest) -> bool:
+    """L2: viewer role must not access Django admin, even if is_staff is set."""
+    user = getattr(request, "user", None)
+    if getattr(user, "is_authenticated", False) and getattr(user, "role", "") == "viewer":
+        return False
+    return bool(_original_admin_has_permission(request))
+
+
+admin.site.has_permission = _admin_has_permission
+
 
 # django-stubs models `UserAdmin` as generic over the user model, but Django's runtime class is not
 # subscriptable (`TypeError: type 'UserAdmin' is not subscriptable`), so the parameterisation cannot
@@ -58,15 +71,23 @@ class IngestionTokenAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
     `revoked_at` is the only field an operator is expected to touch.
     """
 
-    list_display = ("name", "organisation", "source", "prefix", "revoked_at", "last_used_at")
-    list_filter = ("organisation", "source")
+    list_display = (
+        "name",
+        "organisation",
+        "source",
+        "prefix",
+        "deactivated_at",
+        "revoked_at",
+        "last_used_at",
+    )
+    list_filter = ("organisation", "source", "deactivated_at", "revoked_at")
     search_fields = ("name", "prefix")
     # `secret_hash` must be *excluded*, not merely read-only (F9): removing it from
     # `readonly_fields` alone would have made the Argon2 hash an editable widget. The
     # hash is non-null, so the add form (which omits read-only fields) can never be
     # valid anyway — tokens are minted by `IngestionToken.create_token`, not the admin.
     exclude = ("secret_hash",)
-    readonly_fields = ("prefix", "last_used_at")
+    readonly_fields = ("prefix", "deactivated_at", "revoked_at", "last_used_at")
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False

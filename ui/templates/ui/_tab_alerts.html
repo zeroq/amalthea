@@ -23,7 +23,7 @@
               <td>{{ alert.ingestion_source.name|default:alert.source }}</td>
               <td><a class="linkish" href="{% url 'ui-alert-detail' alert.id %}">{{ alert.title }}</a></td>
               <td><span class="sev sev-{{ alert.severity|sev_class }}">{{ alert.severity|sev_label }}</span></td>
-              <td><span class="pill pill-{{ alert.status.stage|lower }}">{{ alert.status.value }}</span></td>
+              <td><span class="pill pill-{{ alert.status.stage|lower }}">{{ alert.status.display_label }}</span></td>
               <td class="mono dim">{{ alert.date|date:"Y-m-d H:i" }}</td>
             </tr>
           {% endfor %}

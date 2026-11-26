@@ -518,3 +518,108 @@ def test_the_secret_is_checked_before_the_rate_budget_is_spent(
         == 201
     )
     cache.clear()
+
+
+@pytest.mark.django_db
+def test_webhook_ldt_submapping_selects_config(
+    default_org: Organisation,
+) -> None:
+    """Webhook end-to-end: CrowdStrike-style payload with raw `type: ldt` selects a submapping
+    affecting title, severity, correlation key, and observables."""
+    from alerts.models import Alert
+    from identity.models import IngestionToken
+    from ingest.models import IngestionSource
+
+    source = IngestionSource.objects.create(
+        organisation=default_org,
+        slug="crowdstrike-edr-submap",
+        name="Crowdstrike EDR Submap",
+        mapping_config={
+            "version": 2,
+            "submappings": {
+                "ldt": {
+                    "version": 2,
+                    "fields": {
+                        "title": {"paths": ["$.name"], "transform": "str"},
+                        "severity": {"paths": ["$.severity"], "transform": "severity_score"},
+                    },
+                    "observables": [
+                        {"type": "ip", "paths": ["$.source.ip"]},
+                    ],
+                },
+            },
+        },
+    )
+    # Create a token for the source
+    _token, plaintext = IngestionToken.create_token(
+        source=source, organisation=default_org, name="edr"
+    )
+
+    payload = {
+        "name": "HiveCredTheft",
+        "severity": 90,
+        "type": "ldt",
+        "id": "ind:2f1c9a",
+        "timestamp": "2026-10-15T15:31:38.403385204Z",
+    }
+
+    response = Client().post(
+        reverse("alerts-webhook"),
+        data=payload,
+        content_type="application/json",
+        headers={"X-Webhook-Secret": plaintext},
+    )
+    assert response.status_code == 201, response.content
+
+    alert = Alert.objects.get(owner_org=default_org)
+    assert alert.title == "HiveCredTheft"
+    assert alert.severity == 4  # 90 → Critical via severity_score
+    assert alert.type == "ldt"
+    assert alert.source_ref == "ind:2f1c9a"
+
+
+@pytest.mark.django_db
+def test_webhook_typeless_payload_uses_master(
+    default_org: Organisation,
+) -> None:
+    """Webhook end-to-end: typeless payload uses master for all interpreted fields."""
+    from alerts.models import Alert
+    from identity.models import IngestionToken
+    from ingest.models import IngestionSource
+
+    source = IngestionSource.objects.create(
+        organisation=default_org,
+        slug="bare-feed",
+        name="Bare Feed",
+        mapping_config={
+            "version": 2,
+            "submappings": {
+                "ldt": {
+                    "version": 2,
+                    "fields": {
+                        "title": {"paths": ["$.name"], "transform": "str"},
+                    },
+                },
+            },
+            "fields": {"title": {"paths": ["$.name"]}},
+        },
+    )
+    # Create a token for the source
+    _token, plaintext = IngestionToken.create_token(
+        source=source, organisation=default_org, name="edr"
+    )
+
+    payload = {"name": "Suspicious activity"}  # no "type" key
+
+    response = Client().post(
+        reverse("alerts-webhook"),
+        data=payload,
+        content_type="application/json",
+        headers={"X-Webhook-Secret": plaintext},
+    )
+    assert response.status_code == 201, response.content
+
+    alert = Alert.objects.get(owner_org=default_org)
+    # No type key → master config used → title from $.name, severity defaults to 2
+    assert alert.title == "Suspicious activity"
+    assert alert.severity == 2

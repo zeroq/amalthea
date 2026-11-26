@@ -17,14 +17,27 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import ProtectedError
 
+from core.enums import USER_ROLE_VALUES
 from identity.audit import record_organisation_change, record_user_change
 from identity.models import Organisation, User
 
 if TYPE_CHECKING:
     pass
 
-# Sentinel to distinguish "field not provided" from "field explicitly set to None"
+    # Sentinel to distinguish "field not provided" from "field explicitly set to None"
 _UNSET: Any = object()
+
+
+def _reject_viewer_privilege_escalation(
+    role: str | None, is_staff: Any = _UNSET, is_superuser: Any = _UNSET
+) -> dict[str, list[str]]:
+    """L2: viewer role must not carry Django admin privileges."""
+    errors: dict[str, list[str]] = {}
+    if role == "viewer" and (is_staff is True or is_superuser is True):
+        errors.setdefault("role", []).append(
+            "viewer role cannot be combined with is_staff/is_superuser"
+        )
+    return errors
 
 
 def as_uuid(value: object) -> UUID | None:
@@ -281,6 +294,8 @@ def create_user(
     org: Organisation,
     role: str,
     is_active: bool = True,
+    is_staff: bool = False,
+    is_superuser: bool = False,
     actor: User,
     request: Any,
 ) -> User:
@@ -289,8 +304,6 @@ def create_user(
 
     Mirrors the API's POST /user behaviour.
     """
-    from core.enums import USER_ROLE_VALUES
-
     errors: dict[str, list[str]] = {}
     if not username:
         errors.setdefault("username", []).append("required")
@@ -302,6 +315,7 @@ def create_user(
         errors.setdefault("role", []).append(f"must be one of {', '.join(USER_ROLE_VALUES)}")
     if not org:
         errors.setdefault("org", []).append("required")
+    errors.update(_reject_viewer_privilege_escalation(role, is_staff, is_superuser))
 
     if User.objects.filter(username=username).exists():
         errors.setdefault("username", []).append("already exists")
@@ -319,6 +333,8 @@ def create_user(
         role=role,
         org=org,
         is_active=is_active,
+        is_staff=is_staff,
+        is_superuser=is_superuser,
     )
     try:
         validate_password(password, user=user)
@@ -342,6 +358,8 @@ def update_user(
     role: str | None = None,
     org: Organisation | None = _UNSET,
     is_active: bool | None = None,
+    is_staff: bool | None = _UNSET,
+    is_superuser: bool | None = _UNSET,
     password: str | None = None,
     actor: User,
     request: Any,
@@ -356,8 +374,6 @@ def update_user(
     An explicit attempt to null an org must produce a validation error (not be silently ignored).
     Other parameters use `None` as default and are checked with `is not None`.
     """
-    from core.enums import USER_ROLE_VALUES
-
     errors: dict[str, list[str]] = {}
     changed: list[str] = []
 
@@ -366,6 +382,15 @@ def update_user(
         if user.email != email:
             user.email = email
             changed.append("email")
+
+    effective_role = role if role is not None else user.role
+    effective_is_staff = user.is_staff if is_staff is _UNSET else bool(is_staff)
+    effective_is_superuser = user.is_superuser if is_superuser is _UNSET else bool(is_superuser)
+    errors.update(
+        _reject_viewer_privilege_escalation(
+            effective_role, effective_is_staff, effective_is_superuser
+        )
+    )
 
     if role is not None:
         if role not in USER_ROLE_VALUES:
@@ -390,6 +415,13 @@ def update_user(
         elif user.org_id != org.id:
             user.org = org
             changed.append("org")
+
+    if is_staff is not _UNSET and user.is_staff != effective_is_staff:
+        user.is_staff = effective_is_staff
+        changed.append("is_staff")
+    if is_superuser is not _UNSET and user.is_superuser != effective_is_superuser:
+        user.is_superuser = effective_is_superuser
+        changed.append("is_superuser")
 
     if is_active is not None:
         # Guard: cannot deactivate yourself as superAdmin
@@ -424,7 +456,15 @@ def update_user(
     user.save(
         update_fields=[
             f
-            for f in ["email", "role", "org", "is_active", "password"]
+            for f in [
+                "email",
+                "role",
+                "org",
+                "is_active",
+                "is_staff",
+                "is_superuser",
+                "password",
+            ]
             if f in changed or f == "password"
         ]
     )

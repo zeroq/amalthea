@@ -15,6 +15,7 @@
       </select>
       <button class="btn btn-primary" type="submit">Filter</button>
       <a class="btn" href="{% url 'ui-case-list' %}">Clear</a>
+      <a class="btn" href="{% url 'ui-taxonomy' %}">Taxonomy</a>
       {% if mine %}
         <input type="hidden" name="mine" value="1">
         <a class="btn btn-primary" href="{% querystring mine=None page=1 %}" aria-current="true" aria-label="Remove Mine filter — showing only cases assigned to you">Mine</a>
@@ -49,7 +50,6 @@
   <div class="card-header">
     <h2>{{ heading }}</h2>
   </div>
-  {% if page_obj.paginator %}
     {% include "ui/_list_summary.html" with entity_name="case" entity_name_plural="cases" %}
     {% if can_mutate and page_obj.object_list %}
     <form method="post" id="case-bulk-form" action="{% url 'ui-case-bulk' %}" class="bulk-form" aria-label="Bulk case actions">
@@ -66,7 +66,7 @@
           <select id="bulk-case-status" name="status" class="filter-type bulk-field">
             <option value="">Status…</option>
             {% for s in case_status_options %}
-            <option value="{{ s.value }}">{{ s.value }}</option>
+            <option value="{{ s.value }}">{{ s.display_label }}</option>
             {% endfor %}
           </select>
           <label class="sr-only" for="bulk-case-assignee">Assignee</label>
@@ -99,7 +99,7 @@
               <td><input type="checkbox" name="ids" value="{{ case.id }}" aria-label="Select case {{ case.title }}" data-bulk-item="case-bulk-form"></td>
               <td><a class="mono" href="{% url 'ui-case-detail' case.number %}">#{{ case.number }}</a></td>
               <td><span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span></td>
-              <td>{{ case.status.value }}</td>
+              <td>{{ case.status.display_label }}</td>
               <td><a href="{% url 'ui-case-detail' case.number %}">{{ case.title }}</a></td>
               <td>{{ case.assignee.login|default:"—" }}</td>
               <td class="mono dim">{{ case.start_date|date:"Y-m-d H:i" }}</td>
@@ -140,7 +140,7 @@
           <tr>
             <td><a class="mono" href="{% url 'ui-case-detail' case.number %}">#{{ case.number }}</a></td>
             <td><span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span></td>
-            <td>{{ case.status.value }}</td>
+            <td>{{ case.status.display_label }}</td>
             <td><a href="{% url 'ui-case-detail' case.number %}">{{ case.title }}</a></td>
             <td>{{ case.assignee.login|default:"—" }}</td>
             <td class="mono dim">{{ case.start_date|date:"Y-m-d H:i" }}</td>
@@ -173,7 +173,6 @@
     {% else %}
       {% include "ui/_pager.html" with entity_name="Case" %}
     {% endif %}
-  {% endif %}
 </div>
 
 {% if can_mutate %}

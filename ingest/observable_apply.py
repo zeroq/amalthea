@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from alerts.models import Alert, AlertObservable
+from ingest.mapping import resolve_mapping_config
 from ingest.models import IngestionSource
 from ingest.observable_rules import extract_observable_candidates
 from ingest.remap import MAX_REMAP_ALERTS, candidate_alerts, summarise_candidates
@@ -97,7 +98,10 @@ def preview_observable_rules(
     truncated_alerts = 0
 
     for alert in candidate_alerts(source)[:limit].iterator(chunk_size=200):
-        extraction = extract_observable_candidates(config, alert.raw_payload, alert=alert)
+        resolution = resolve_mapping_config(config, alert.raw_payload)
+        extraction = extract_observable_candidates(
+            resolution.config, alert.raw_payload, alert=alert
+        )
         existing = _existing_keys(alert)
         seen: set[tuple[str, str]] = set()
         had_known = False
@@ -166,7 +170,8 @@ def apply_observable_rules(
 
     for alert in candidate_alerts(source)[:limit].iterator(chunk_size=200):
         candidates += 1
-        result = sync_alert_observables(alert, config=config, actor=actor)
+        resolution = resolve_mapping_config(config, alert.raw_payload)
+        result = sync_alert_observables(alert, config=resolution.config, actor=actor)
         created += result.created
         existing += result.existing
         skipped_unknown += result.skipped_unknown_type

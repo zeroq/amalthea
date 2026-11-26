@@ -9,7 +9,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -22,6 +22,8 @@ from alerts.escalation import (
 )
 from alerts.models import Alert, AlertStatus, AlertTagLink
 from cases.correlation import (
+    SIMILAR_CLOSED_ALERTS_LIMIT,
+    alerts_similar_to_alert,
     candidate_cases_for_alert,
     record_alert_bundled,
 )
@@ -142,6 +144,39 @@ def alert_list(request: HttpRequest) -> HttpResponse:
     )
 
 
+def _similar_display_rows(matches: list[Any]) -> list[dict[str, Any]]:
+    """Convert similarity matches into template rows for the alert Similar panel."""
+    display_rows: list[dict[str, Any]] = []
+    for match in matches:
+        token = match.alert.verdict or ""
+        verdict_label = ""
+        if token:
+            verdict_label = taxonomy_read.label(taxonomy_read.CATEGORY_CASE_VERDICT, token) or token
+        if not verdict_label and token and token.lower() != "undefined":
+            verdict_label = token.title()
+
+        similarity = match.similarity
+        shared_obs = match.shared_observable_count
+        if similarity is not None and similarity > 0 and shared_obs > 0:
+            similarity_display = f"{similarity}% · {shared_obs} shared obs"
+        elif similarity is not None and similarity > 0:
+            similarity_display = f"{similarity}%"
+        elif shared_obs > 0:
+            similarity_display = f"{shared_obs} shared obs"
+        else:
+            similarity_display = ""
+
+        display_rows.append(
+            {
+                "alert": match.alert,
+                "verdict_label": verdict_label,
+                "closed_at": match.alert.updated_at,
+                "similarity_display": similarity_display,
+            }
+        )
+    return display_rows
+
+
 @login_required
 @require_GET
 def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
@@ -207,32 +242,25 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
     )
     alert_tags = Tag.objects.filter(id__in=existing_tag_ids).order_by("name")
 
-    # Available tags: all tags in the system, excluding those already on the alert.
-    # Note: Tags are organization-scoped at the link level (AlertTagLink), so we filter by
-    # the alert's organization to ensure cross-org tags aren't shown here.
+    # Similar alerts tab helper
+    similar_matches, similar_total = alerts_similar_to_alert(alert, user=request.user)
+    similar_alerts = _similar_display_rows(similar_matches)
+
+    # Available tags: global Tag catalog, excluding those already on the alert,
+    # ordered by name, capped at PICKER_PAGE_SIZE with truncation flag.
+    # Mirrors case detail picker parity (Q1 resolved: global catalog, no org scoping).
     from ui.pagination import PICKER_PAGE_SIZE
 
-    available_tags_qs = (
-        Tag.objects.annotate(
-            count=Count("alert_links__alert__owner_org"),
-            case_count=Count("case_links__case__owner_org"),
-            observable_count=Count("observable_links__observable__owner_org"),
-        )
-        .filter(
-            Q(alert_links__alert__owner_org=user_org_id)
-            | Q(case_links__case__owner_org=user_org_id)
-            | Q(observable_links__observable__owner_org=user_org_id)
-        )
-        .exclude(id__in=existing_tag_ids)
-        .order_by("name")[: PICKER_PAGE_SIZE + 1]
+    available_tag_rows = list(
+        Tag.objects.exclude(id__in=existing_tag_ids).order_by("name")[: PICKER_PAGE_SIZE + 1]
     )
-    available_tags = list(available_tags_qs)[:PICKER_PAGE_SIZE]
-    available_tags_total = available_tags_qs.count()
-    available_tags_truncated = available_tags_total > PICKER_PAGE_SIZE
+    available_tags = available_tag_rows[:PICKER_PAGE_SIZE]
+    available_tags_truncated = len(available_tag_rows) > PICKER_PAGE_SIZE
 
     tabs = [
         {"slug": "general", "label": "General"},
         {"slug": "observables", "label": "Observables"},
+        {"slug": "similar", "label": "Similar", "count": similar_total},
         {"slug": "raw-data", "label": "Raw data"},
     ]
     active_tab = request.GET.get("tab", "general")
@@ -259,10 +287,39 @@ def alert_detail(request: HttpRequest, alert_id: str) -> HttpResponse:
             active_tab=active_tab,
             alert_tag_ids=existing_tag_ids,
             alert_tags=alert_tags,
-            alert_tags_total=available_tags_total,
             available_tags=available_tags,
             available_tags_truncated=available_tags_truncated,
+            similar_alerts=similar_alerts,
+            similar_total=similar_total,
         ),
+    )
+
+
+@login_required
+@require_GET
+def alert_similar_fragment(request: HttpRequest, alert_id: str) -> HttpResponse:
+    """Fragment view for the Similar tab on alert detail.
+
+    GET-only, login-required, viewer-readable. Returns 404 for unknown or
+    cross-org alerts.
+    """
+    alert = resolve_alert(request.user, alert_id, write=False)
+    if alert is None:
+        return render(request, "ui/404.html", status=404)
+
+    similar_matches, similar_total = alerts_similar_to_alert(
+        alert, user=request.user, limit=SIMILAR_CLOSED_ALERTS_LIMIT
+    )
+    display_rows = _similar_display_rows(similar_matches)
+
+    return render(
+        request,
+        "ui/_alert_similar_tab_fragment.html",
+        {
+            "alert": alert,
+            "similar_alerts": display_rows,
+            "similar_total": similar_total,
+        },
     )
 
 
@@ -620,41 +677,49 @@ def alert_tag_add(request: HttpRequest, alert_id: str) -> HttpResponse:
         messages.error(request, "Alert not found.")
         return redirect("ui-alert-list")
 
-    # Collect tag IDs from checkboxes and new tag names from text input. The modal advertises a
-    # comma-separated list, so split it the same way the case-tag form does; clamp each name to the
-    # `Tag.name` column limit before anything is written (Postgres rejects a longer value).
-    existing_tag_ids = [tag_id for tag_id in request.POST.getlist("existing_tag_ids", []) if tag_id]
+    # Collect existing tag names from checkboxes and new tag names from text input.
+    # Mirrors case-tag-add POST contract: `tags` (repeated names) + `new_tags` (comma string).
+    # Strip, truncate to Tag.name column limit, dedupe with dict.fromkeys, reject empty.
+    selected_tag_names = request.POST.getlist("tags")
+    selected_tag_names = [
+        name.strip()[:MAX_TAG_NAME] for name in selected_tag_names if name.strip()
+    ]
+    selected_tag_names = list(dict.fromkeys(selected_tag_names))
+
     new_tag_names = list(
         dict.fromkeys(
             name.strip()[:MAX_TAG_NAME]
-            for name in (request.POST.get("new_tag_names") or "").split(",")
+            for name in (request.POST.get("new_tags") or "").split(",")
             if name.strip()
         )
     )
 
+    all_new_tag_names = selected_tag_names + new_tag_names
+
     # Validate: at least one tag provided
-    if not existing_tag_ids and not new_tag_names:
+    if not all_new_tag_names:
         messages.error(request, "Please select or type at least one tag.")
         return redirect("ui-alert-detail", alert_id=alert.id)
 
     with transaction.atomic():
-        # Collect all tag IDs that will be on the alert (existing + new)
+        # Resolve existing tags by name (get_or_create) and collect their IDs
+        tag_id_map: dict[str, int] = {}
+        for tag_name in all_new_tag_names:
+            tag, _created = Tag.objects.get_or_create(
+                name=tag_name, defaults={"colour": "", "description": ""}
+            )
+            tag_id_map[tag_name] = tag.id
+
+        # Collect all tag IDs that will be on the alert (already-linked + newly resolved)
         existing_tag_ids_on_alert = set(
             AlertTagLink.objects.filter(alert=alert).values_list("tag_id", flat=True)
         )
         all_tag_ids = set(existing_tag_ids_on_alert)
 
-        # Add existing tag IDs (if not already on alert)
-        all_tag_ids.update(existing_tag_ids)
+        # Add newly resolved tag IDs
+        all_tag_ids.update(tag_id_map.values())
 
-        # Create and add new tags
-        for tag_name in new_tag_names:
-            tag, _created = Tag.objects.get_or_create(
-                name=tag_name, defaults={"colour": "", "description": ""}
-            )
-            all_tag_ids.add(tag.id)
-
-        # Link all tags to the alert in one operation
+        # Link any tags not already on the alert
         tags_to_link = list(
             Tag.objects.filter(id__in=all_tag_ids).exclude(id__in=existing_tag_ids_on_alert)
         )

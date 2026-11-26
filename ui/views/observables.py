@@ -208,6 +208,17 @@ def observable_list(request: HttpRequest) -> HttpResponse:
         unfiltered_count if has_filter and unfiltered_count > page_obj.paginator.count else None
     )
 
+    from urllib.parse import urlencode
+
+    next_params = {}
+    if query:
+        next_params["q"] = query
+    if type_filter:
+        next_params["type"] = type_filter
+    next_url = request.path
+    if next_params:
+        next_url = f"{request.path}?{urlencode(next_params)}"
+
     return render(
         request,
         "ui/observable_list.html",
@@ -218,6 +229,7 @@ def observable_list(request: HttpRequest) -> HttpResponse:
             observable_types=ObservableType.objects.order_by("name"),
             query=query,
             type_filter=type_filter,
+            next_url=next_url,
             tlp_choices=TLP_CHOICES,
             pap_choices=PAP_CHOICES,
         ),

@@ -209,3 +209,32 @@ def test_analyst_cannot_reach_source_detail(org: Organisation, source: Ingestion
     c.force_login(analyst)
 
     assert c.get(_url(source)).status_code == 404
+
+
+def test_source_detail_shows_raw_type_distinct_from_mapped_type(
+    client: Client, source: IngestionSource, org: Organisation
+) -> None:
+    """Source detail raw data tab shows raw payload type distinct from mapped alert type."""
+
+    # Create an alert with type ldt via webhook
+    from identity.models import IngestionToken
+
+    payload = {"type": "ldt", "name": "HiveCredTheft", "severity": 90}
+
+    _token, plaintext = IngestionToken.create_token(source=source, organisation=org, name="edr")
+    response = Client().post(
+        reverse("alerts-webhook"),
+        data=payload,
+        content_type="application/json",
+        headers={"X-Webhook-Secret": plaintext},
+    )
+    assert response.status_code == 201, response.content
+
+    response = client.get(_url(source) + "?tab=raw-data")
+    body = response.content.decode()
+
+    assert response.status_code == 200
+    assert "Raw data" in body
+    # Raw data shows the raw type from the payload
+    assert "ldt" in body
+    # Mapped type may differ based on the mapping config

@@ -24,7 +24,7 @@
             <td>{{ sa.alert.ingestion_source.name|default:sa.alert.source }}</td>
             <td><a class="linkish" href="{% url 'ui-alert-detail' sa.alert.id %}">{{ sa.alert.title }}</a></td>
             <td><span class="sev sev-{{ sa.alert.severity|sev_class }}">{{ sa.alert.severity|sev_label }}</span></td>
-            <td><span class="pill pill-{{ sa.alert.status.stage|lower }}">{{ sa.alert.status.value }}</span></td>
+            <td><span class="pill pill-{{ sa.alert.status.stage|lower }}">{{ sa.alert.status.display_label }}</span></td>
             <td class="mono dim">{{ sa.alert.date|date:"Y-m-d H:i" }}</td>
             <td class="mono dim">{{ sa.similarity }}%</td>
             <td>

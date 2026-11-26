@@ -283,3 +283,118 @@ class TestApply:
         assert result.candidates == 1
         assert list(AlertObservable.objects.values_list("alert_id", flat=True)) == [included.pk]
         assert not AlertObservable.objects.exclude(alert_id=included.pk).exists()
+
+
+# ---------------------------------------------------------------------------
+# Submapping observable apply tests (AC-B6..B9, AC-F1..F4)
+# ---------------------------------------------------------------------------
+
+
+def test_observable_apply_uses_effective_config_with_submappings() -> None:
+    """Observable apply uses the effective config (including submappings) for extraction."""
+    from ingest.models import IngestionSource
+    from ingest.observable_apply import apply_observable_rules
+    from observables.models import ObservableType
+
+    org = Organisation.objects.create(name="Observable Apply Submap Org")
+    _, _ = ObservableType.objects.get_or_create(name="mail", defaults={"name": "mail"})
+
+    # Source with submappings
+    source = IngestionSource.objects.create(
+        organisation=org,
+        slug="apply-submap-feed",
+        name="Apply Submap Feed",
+        mapping_config={
+            "version": 2,
+            "submappings": {
+                "ldt": {
+                    "version": 2,
+                    "observables": [
+                        {"type": "mail", "paths": ["$.actor.email"]},
+                    ],
+                },
+            },
+            "fields": {"title": {"paths": ["$.name"]}},
+        },
+    )
+
+    # Create alert with type ldt (triggers submapping)
+    alert = Alert.objects.create(
+        title="Test alert",
+        description="",
+        summary="",
+        severity=2,
+        date=datetime(2026, 1, 1, tzinfo=UTC),
+        type="phishing",
+        source="wire-source",
+        source_ref="ref-1",
+        status=_status("New", "New"),
+        raw_payload={"name": "Test", "actor": {"email": "user@example.test"}, "type": "ldt"},
+        ingestion_source=source,
+        correlation_key="kept-ref-1",
+        owner_org=org,
+    )
+
+    # Apply observable rules with the source's config
+    result = apply_observable_rules(source, source.mapping_config)
+
+    assert result.created == 1
+    # The observable should be extracted using the submapping config
+    link = AlertObservable.objects.get(alert=alert)
+    assert link.observable.data_type.name == "mail"
+    assert link.observable.normalized_data == "user@example.test"
+
+
+def test_observable_apply_typeless_uses_master() -> None:
+    """Typeless payload uses master config for observable extraction."""
+    from ingest.models import IngestionSource
+    from ingest.observable_apply import apply_observable_rules
+    from observables.models import ObservableType
+
+    org = Organisation.objects.create(name="Observable Apply Master Org")
+    _, _ = ObservableType.objects.get_or_create(name="mail", defaults={"name": "mail"})
+
+    # Source with submappings but typeless payload
+    source = IngestionSource.objects.create(
+        organisation=org,
+        slug="apply-master-feed",
+        name="Apply Master Feed",
+        mapping_config={
+            "version": 2,
+            "submappings": {
+                "ldt": {
+                    "version": 2,
+                    "observables": [
+                        {"type": "mail", "paths": ["$.actor.email"]},
+                    ],
+                },
+            },
+            "fields": {"title": {"paths": ["$.name"]}},
+            "observables": [{"type": "mail", "paths": ["$.actor.email"]}],
+        },
+    )
+
+    alert = Alert.objects.create(
+        title="Test alert",
+        description="",
+        summary="",
+        severity=2,
+        date=datetime(2026, 1, 1, tzinfo=UTC),
+        type="phishing",
+        source="wire-source",
+        source_ref="ref-1",
+        status=_status("New", "New"),
+        raw_payload={"actor": {"email": "user@example.test"}},  # no "type" key
+        ingestion_source=source,
+        correlation_key="kept-ref-1",
+        owner_org=org,
+    )
+
+    # Apply observable rules - should use master config (no ldt submapping matched)
+    result = apply_observable_rules(source, source.mapping_config)
+
+    assert result.created == 1
+    # The observable should be extracted from the master config, not the submapping
+    link = AlertObservable.objects.get(alert=alert)
+    assert link.observable.data_type.name == "mail"
+    assert link.observable.normalized_data == "user@example.test"

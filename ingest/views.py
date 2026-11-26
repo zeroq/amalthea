@@ -48,7 +48,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from identity.models import IngestionToken
-from ingest.mapping import apply_mapping
+from ingest.mapping import apply_mapping, resolve_mapping_config
 from ingest.models import IngestionSource
 from ingest.pipeline import store_ingested_alert
 
@@ -226,11 +226,15 @@ def webhook_alerts(request: HttpRequest) -> HttpResponse:
             fields={"body": ["nesting too deep"]},
         )
 
+    # Resolve the effective mapping config (master or per-type submapping) for this payload.
+    resolution = resolve_mapping_config(source.mapping_config, payload)
+    effective_config = resolution.config
+
     # One pass over the payload, by the source's rules. `default_severity` is the source's own floor
     # rather than the module constant, so declaring "everything from this feed is at least a High" is
     # a setting rather than a code change.
     draft = apply_mapping(
-        source.mapping_config,
+        effective_config,
         payload,
         default_severity=source.default_severity,
     )
@@ -250,6 +254,7 @@ def webhook_alerts(request: HttpRequest) -> HttpResponse:
             owner_org=token.organisation,
             extra_warnings=draft.warnings,
             mapping_warnings=draft.field_warnings,
+            mapping_config=effective_config,
         )
     except ValidationError as exc:
         detail = getattr(exc, "message_dict", None) or {"nonFieldErrors": [str(exc)]}

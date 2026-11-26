@@ -10,7 +10,6 @@
 {% block content %}
 {% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
 <div class="card">
-  {% if page_obj %}
     {% include "ui/_list_summary.html" with entity_name="organisation" entity_name_plural="organisations" %}
     <div class="table-wrap">
     <table class="data-table">
@@ -51,13 +50,12 @@
       </tbody>
     </table>
     </div>
-    {% include "ui/_pager.html" with entity_name="Organisation" %}
-  {% endif %}
 
-  {# Honest empty state for paginated path #}
-  {% if page_obj and page_obj.paginator.count == 0 %}
-    <p class="empty">No organisations yet. <a href="#" data-modal-open="org-create-modal">Create one</a>.</p>
-  {% endif %}
+    {% if page_obj.paginator.count == 0 %}
+      <p class="empty">No organisations yet. <a href="#" data-modal-open="org-create-modal">Create one</a>.</p>
+    {% else %}
+      {% include "ui/_pager.html" with entity_name="Organisation" %}
+    {% endif %}
 </div>
 
 {# Create organisation modal — fields rendered server-side (no inline JS, CSP-safe) #}

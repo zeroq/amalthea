@@ -33,6 +33,7 @@ from .alerts import (
     alert_import_ui,
     alert_list,
     alert_merge,
+    alert_similar_fragment,
     alert_status,
     alert_tag_add,
     alert_tag_remove,
@@ -43,6 +44,7 @@ from .approvals import (
     approvals_execute,
     approvals_list,
 )
+from .audit_log import settings_audit_log
 from .auth import (
     SignInView,
     sign_out,
@@ -295,6 +297,7 @@ __all__ = [
     "alert_import_ui",
     "alert_list",
     "alert_merge",
+    "alert_similar_fragment",
     "alert_status",
     "alert_tag_add",
     "alert_tag_remove",
@@ -375,6 +378,7 @@ __all__ = [
     "settings_agent_enable",
     "settings_agent_revoke",
     "settings_agents",
+    "settings_audit_log",
     "settings_home",
     "settings_oauth_binding_create",
     "settings_oauth_binding_delete",

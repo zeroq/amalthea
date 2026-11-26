@@ -16,7 +16,6 @@
 {% block content %}
 <section class="card" aria-labelledby="h-shares">
   <h2 id="h-shares">Current shares</h2>
-  {% if page_obj.paginator %}
     {% include "ui/_list_summary.html" with entity_name="share" entity_name_plural="shares" %}
     <div class="table-wrap">
     <table class="data-table data-table-tight">
@@ -56,7 +55,6 @@
     {% else %}
       {% include "ui/_pager.html" with entity_name="Share" %}
     {% endif %}
-  {% endif %}
 </section>
 
 <section class="card" aria-labelledby="h-grant">

@@ -793,9 +793,14 @@ class TestSourceProvisioning:
         client = _ui_client(_mk_user("admin", org, role="admin"))
         assert not IngestionSource.objects.exists()
 
-        resp = client.post(
-            reverse("ui-settings-token-create"),
-            {"source_name": "CrowdStrike EDR (production)", "name": "prod"},
+        resp = _create_token_via_ui_with_nonce(
+            client,
+            source=IngestionSource(
+                organisation=org,
+                name="CrowdStrike EDR (production)",
+                slug="crowdstrike-edr-production",
+            ),
+            name="prod",
         )
         assert resp.status_code == 200, resp.content
 
@@ -818,13 +823,13 @@ class TestSourceProvisioning:
         client = _ui_client(_mk_user("super", org_a, role="superAdmin"))
 
         for org in (org_a, org_b):
-            resp = client.post(
-                reverse("ui-settings-token-create"),
-                {
-                    "source_name": "Microsoft 365",
-                    "name": f"token-{org.name}",
-                    "organisation": str(org.id),
-                },
+            resp = _create_token_via_ui_with_nonce(
+                client,
+                source=IngestionSource(
+                    organisation=org, name="Microsoft 365", slug="microsoft-365"
+                ),
+                name=f"token-{org.name}",
+                organisation=org,
             )
             assert resp.status_code == 200, resp.content
 
@@ -846,8 +851,10 @@ class TestSourceProvisioning:
         org = _mk_org("Org1")
         client = _ui_client(_mk_user("admin", org, role="admin"))
 
-        resp = client.post(
-            reverse("ui-settings-token-create"), {"source_name": "!!!", "name": "prod"}
+        resp = _create_token_via_ui_with_nonce(
+            client,
+            source=IngestionSource(organisation=org, name="!!!", slug="bad"),
+            name="prod",
         )
         assert resp.status_code == 302
         assert not IngestionSource.objects.exists()

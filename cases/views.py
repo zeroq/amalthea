@@ -1253,6 +1253,7 @@ def _create_case_status(request: Request) -> Response:
         with transaction.atomic():
             status_obj, result = create_case_status(
                 value=str(payload.get("value") or ""),
+                label=str(payload.get("label") or ""),
                 stage=str(payload.get("stage") or ""),
                 order=order,
                 description=str(payload.get("description") or ""),
@@ -1326,6 +1327,7 @@ def _update_case_status(status_obj: CaseStatus, request: Request) -> Response:
 
     # Extract only the fields we allow to be updated
     value = payload.get("value")
+    label = payload.get("label")
     order = payload.get("order")
     description = payload.get("description")
     hidden = payload.get("hidden")
@@ -1342,6 +1344,7 @@ def _update_case_status(status_obj: CaseStatus, request: Request) -> Response:
             result = update_case_status(
                 status_obj,
                 value=str(value) if value is not None else None,
+                label=str(label) if label is not None else None,
                 order=order,
                 description=str(description) if description is not None else None,
                 hidden=bool(hidden) if hidden is not None else None,

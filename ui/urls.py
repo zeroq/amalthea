@@ -39,6 +39,7 @@ urlpatterns = [
     path("alerts/import", views.alert_import_ui, name="ui-alert-import"),
     path("alerts/<uuid:alert_id>/export", views.alert_export_ui, name="ui-alert-export"),
     path("alerts/<uuid:alert_id>", views.alert_detail, name="ui-alert-detail"),
+    path("alerts/<uuid:alert_id>/similar", views.alert_similar_fragment, name="ui-alert-similar"),
     path("alerts/<uuid:alert_id>/escalate", views.alert_escalate, name="ui-alert-escalate"),
     path("alerts/<uuid:alert_id>/merge", views.alert_merge, name="ui-alert-merge"),
     path("alerts/bulk", views.alert_bulk, name="ui-alert-bulk"),
@@ -391,6 +392,7 @@ urlpatterns = [
     ),
     path("settings/sources", views.settings_sources, name="ui-settings-sources"),
     path("settings/sources/token", views.settings_token_create, name="ui-settings-token-create"),
+    path("settings/audit-log", views.settings_audit_log, name="ui-settings-audit-log"),
     # ADR-009: a source is org-owned, so this route is gated by role *and* org (404, not 403).
     path(
         "settings/sources/<uuid:source_id>",

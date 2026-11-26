@@ -118,7 +118,7 @@
               <tr>
                 <td>{{ case.number }}</td>
                 <td><a href="{% url 'ui-case-detail' case.number %}">{{ case.title }}</a></td>
-                <td>{{ case.status.value }}</td>
+                <td>{{ case.status.display_label }}</td>
                 <td>{{ case.assignee.login|default:"Unassigned" }}</td>
               </tr>
               {% endfor %}

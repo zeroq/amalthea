@@ -35,6 +35,7 @@ from .numbering import (
 
 class CaseStatus(UUIDModel, TimeStampedModel):
     value = models.CharField(max_length=64, unique=True)
+    label = models.CharField(max_length=128, blank=True, default="")
     stage = models.CharField(max_length=32, choices=[(s, s) for s in CASE_STAGES])
     order = models.IntegerField(default=0)
     description = models.TextField(blank=True)
@@ -46,8 +47,12 @@ class CaseStatus(UUIDModel, TimeStampedModel):
             in_values("case_status_stage_valid", "stage", CASE_STAGES),
         ]
 
+    @property
+    def display_label(self) -> str:
+        return self.label or self.value
+
     def __str__(self) -> str:
-        return self.value
+        return self.display_label
 
 
 class Tag(UUIDModel, TimeStampedModel):

@@ -25,6 +25,7 @@ from ingest.models import IngestionSource
 
 class AlertStatus(UUIDModel, TimeStampedModel):
     value = models.CharField(max_length=64, unique=True)
+    label = models.CharField(max_length=128, blank=True, default="")
     # `choices` must be (value, label) pairs or a mapping — Django's own system check rejects a flat
     # iterable of strings. The pairs are *derived* from ALERT_STAGES rather than restated, because
     # `compat/enums.py` derives the TheHive labels from that same tuple; a hand-written copy here
@@ -43,8 +44,12 @@ class AlertStatus(UUIDModel, TimeStampedModel):
             ),
         ]
 
+    @property
+    def display_label(self) -> str:
+        return self.label or self.value
+
     def __str__(self) -> str:
-        return self.value
+        return self.display_label
 
 
 class Alert(UUIDModel, TimeStampedModel):

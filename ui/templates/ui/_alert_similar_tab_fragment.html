@@ -1,0 +1,12 @@
+{% load ui_tags %}
+{% comment %}
+  Fragment template for the Alert Similar tab (lazy-load via alert_similar_fragment).
+  Context: alert, similar_alerts, similar_total.
+  Root element carries data attributes for the combined count badge.
+{% endcomment %}
+<div
+  data-similar-count="{{ similar_total }}"
+  data-similar-alerts="{{ similar_total }}"
+>
+  {% include "ui/_alert_similar_alerts_card.html" %}
+</div>

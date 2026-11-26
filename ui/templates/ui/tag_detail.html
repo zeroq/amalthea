@@ -78,7 +78,7 @@
               <td><span class="sev sev-{{ caselnk.case.severity|sev_class }}">{{ caselnk.case.severity|sev_label }}</span></td>
               <td><a href="{% url 'ui-case-detail' caselnk.case.id %}">{{ caselnk.case.title }}</a></td>
               <td class="mono dim">{{ caselnk.case.start_date|date:"Y-m-d H:i" }}</td>
-              <td>{{ caselnk.case.status.value }}</td>
+              <td>{{ caselnk.case.status.display_label }}</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -118,7 +118,7 @@
           <td>
             {% if alert.case %}
               <a href="{% url 'ui-case-detail' alert.case.number %}">#{{ alert.case.number }}</a>
-            {% else %}{{ alert.status.value }}{% endif %}
+            {% else %}{{ alert.status.display_label }}{% endif %}
           </td>
         </tr>
         {% endfor %}

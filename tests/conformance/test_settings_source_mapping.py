@@ -263,9 +263,17 @@ class TestTokenMustMatchItsSourcesOwner:
         org_a, org_b, admin_a = two_orgs
         theirs = _mk_source(org_b, slug="shared-name", name="Shared Name")
 
-        response = _ui_client(admin_a).post(
+        client = _ui_client(admin_a)
+        nonce_resp = client.get(reverse("ui-settings-sources"))
+        import re
+
+        nonce = re.search(
+            r'name="token_create_nonce" value="([^"]+)" form="token-create-form"',
+            nonce_resp.content.decode(),
+        ).group(1)
+        response = client.post(
             reverse("ui-settings-token-create"),
-            {"source_name": theirs.name, "name": "minted-by-a"},
+            {"source_name": theirs.name, "name": "minted-by-a", "token_create_nonce": nonce},
         )
 
         assert response.status_code == 200, "the create-POST success re-renders the Sources page"
@@ -1243,3 +1251,176 @@ class TestTheMappingHealthCard(_FeedFixture):
 
         assert "No unlinked open alerts from this feed" in body
         assert "rule that produced no value" not in body
+
+
+# ---------------------------------------------------------------------------
+# Submapping validation tests (AC-B3..B5, AC-F1)
+# ---------------------------------------------------------------------------
+
+
+def test_valid_submapping_accepted() -> None:
+    """A valid v2 submapping configuration is accepted by validate_config."""
+    from ingest.mapping import validate_config
+
+    config = {
+        "version": 2,
+        "submappings": {
+            "ldt": {
+                "version": 2,
+                "fields": {"title": {"paths": ["$.name"], "transform": "str"}},
+            },
+        },
+        "fields": {"title": {"paths": ["$.name"]}},
+    }
+    errors = validate_config(config)
+    assert errors == [], f"valid submapping rejected: {errors}"
+
+
+def test_legacy_config_rejected_with_submappings() -> None:
+    """A legacy (non-v2) config with submappings is rejected."""
+    from ingest.mapping import validate_config
+
+    config = {
+        "version": 1,
+        "submappings": {"ldt": {"version": 2, "fields": {"title": {"paths": ["$.name"]}}}},
+    }
+    errors = validate_config(config)
+    assert any("only available in v2" in e for e in errors)
+
+
+def test_non_dict_submapping_value_rejected() -> None:
+    """A submapping value that is not a JSON object is rejected."""
+    from ingest.mapping import validate_config
+
+    config = {
+        "version": 2,
+        "submappings": {"ldt": "not-a-dict"},
+    }
+    errors = validate_config(config)
+    assert any("value must be a JSON object" in e for e in errors)
+
+
+def test_nested_submappings_rejected() -> None:
+    """Nested submappings within a submapping value are rejected."""
+    from ingest.mapping import validate_config
+
+    config = {
+        "version": 2,
+        "submappings": {
+            "ldt": {
+                "version": 2,
+                "submappings": {
+                    "nested": {"version": 2, "fields": {"title": {"paths": ["$.deep"]}}}
+                },
+            },
+        },
+    }
+    errors = validate_config(config)
+    assert any("nested submappings are not supported" in e for e in errors)
+
+
+def test_invalid_nested_field_path_rejected_with_prefix() -> None:
+    """Invalid fields/transforms/JSONPaths in a submapping are rejected with submappings.<key>."""
+    from ingest.mapping import validate_config
+
+    config = {
+        "version": 2,
+        "submappings": {
+            "ldt": {
+                "version": 2,
+                "fields": {
+                    "title": {"paths": ["name"], "transform": "eval"},
+                },
+            },
+        },
+    }
+    errors = validate_config(config)
+    assert any(e.startswith("submappings.ldt.") for e in errors)
+
+
+def test_submapping_key_too_long_rejected() -> None:
+    """A submapping key exceeding 100 characters is rejected."""
+    from ingest.mapping import validate_config
+
+    long_key = "a" * 101
+    config = {
+        "version": 2,
+        "submappings": {long_key: {"version": 2, "fields": {"title": {"paths": ["$.name"]}}}},
+    }
+    errors = validate_config(config)
+    assert any("key exceeds" in e for e in errors)
+
+
+def test_too_many_submappings_rejected() -> None:
+    """More than 50 submapping keys is rejected."""
+    from ingest.mapping import validate_config
+
+    many_keys = {
+        f"key-{i}": {"version": 2, "fields": {"title": {"paths": ["$.name"]}}} for i in range(51)
+    }
+    config = {"version": 2, "submappings": many_keys}
+    errors = validate_config(config)
+    assert any("at most 50" in e for e in errors)
+
+
+def test_submappings_preserved_through_source_save() -> None:
+    """Submappings are preserved when a source is saved through the Settings form."""
+    from identity.models import Organisation, User
+    from ingest.models import IngestionSource
+
+    org = Organisation.objects.create(name="Submapping Org")
+    admin = User.objects.create(
+        login="submap-admin",
+        username="submap-admin",
+        email="admin@example.net",
+        org=org,
+        role="admin",
+        is_active=True,
+    )
+    source = IngestionSource.objects.create(
+        organisation=org,
+        slug="submap-feed",
+        name="Submap Feed",
+        mapping_config={
+            "version": 2,
+            "submappings": {
+                "ldt": {
+                    "version": 2,
+                    "fields": {"title": {"paths": ["$.name"], "transform": "str"}},
+                },
+            },
+            "fields": {"title": {"paths": ["$.name"]}},
+        },
+    )
+
+    # Save the source through the UI (table save) using the admin client
+    from django.test import Client
+    from django.urls import reverse
+
+    client = Client()
+    client.force_login(admin)
+    url = reverse("ui-settings-source-detail", kwargs={"source_id": source.id})
+    client.post(
+        url,
+        _table_post(title=("$.name", "str", "")),
+        follow=True,
+    )
+    # The form may re-render on 200 if CSRF or other checks; focus on data result
+    source.refresh_from_db()
+    assert "submappings" in source.mapping_config, (
+        f"submappings lost after save, config: {source.mapping_config}"
+    )
+    assert source.mapping_config["submappings"]["ldt"]["fields"]["title"]["paths"] == ["$.name"]
+
+
+def _table_post(**rows: tuple[str, str, str]) -> dict[str, str]:
+    """A table submission — `_table_post(title=("$.name", "str", ""))`, every other row empty."""
+    from ingest.mapping import TARGETS
+
+    data = {"form": "table"}
+    for target in TARGETS:
+        paths, transform, default = rows.get(target, ("", "", ""))
+        data[f"paths__{target}"] = paths
+        data[f"transform__{target}"] = transform
+        data[f"default__{target}"] = default
+    return data

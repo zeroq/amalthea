@@ -62,9 +62,9 @@ PAP_MAX: Final[int] = 3
 #: Plan §6.1 Task: `Waiting`/`InProgress`/`Completed`/`Cancel`.
 TASK_STATUS_CHOICES: Final[tuple[tuple[str, str], ...]] = (
     ("Waiting", "Waiting"),
-    ("InProgress", "InProgress"),
+    ("InProgress", "In Progress"),
     ("Completed", "Completed"),
-    ("Cancel", "Cancel"),
+    ("Cancel", "Cancelled"),
 )
 
 #: Plan §6.1 AutomationRun: `Pending`/`Running`/`Success`/`Failed`.

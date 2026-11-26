@@ -67,6 +67,15 @@ ADR-008: the path names no source. The credential is the only routing fact — i
   reserved — `warn` is the only shipped behaviour. Configs are validated at **write** time
   (`validate_config`, via the Settings editor): an unknown target or transform, a non-compiling path
   or an oversize list is refused before storage, never at ingest.
+
+  **Per-type submappings (Q25):** `mapping_config` may contain an optional `submappings` key whose
+  value is a JSON object whose keys are raw top-level `type` strings from the alert payload. Exact
+  case-sensitive match selects one submapping, which **fully replaces** the master config for that
+  alert type — no field-level merge. Missing/non-string/unknown type falls back to the master config.
+  Submappings are v2-only: the `mapping_config` must have `"version": 2` to contain `submappings`.
+  Nested `submappings` are rejected at validation time. MAP-9 is preserved: `type` and `source_ref`
+  are never rewritten during remap. Max 50 submappings, keys ≤100 chars. See MAP-10a in
+  [`deviations.md`](./deviations.md) for full details.
 - Mapping warnings: nothing silently defaults. `Alert.ingestion_warnings["mapping"]` is a list of
   `{"field", "reason", "paths"?, "value_preview"?}` entries describing how the **current** fields
   were resolved — a later mapping pass replaces it — while `ingestion_warnings["warnings"]` is the

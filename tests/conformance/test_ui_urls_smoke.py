@@ -117,13 +117,32 @@ def _reverse_candidates(names: set[str], case: Case) -> list[tuple[str, dict[str
     return candidates
 
 
+def _python_only_ui_route_names() -> set[str]:
+    """UI route names resolvable with no args/case_id, including routes not referenced by templates."""
+    names: set[str] = set()
+    reverse_dict = get_resolver().reverse_dict
+    for name, patterns in reverse_dict.items():
+        if not isinstance(name, str) or not name.startswith("ui-"):
+            continue
+        params = patterns[0][0][1] if patterns and patterns[0] else []
+        if not params or params == ["case_id"]:
+            names.add(name)
+    return names
+
+
 def test_every_get_routable_ui_page_renders(browser: Client, case: Case) -> None:
     # The B1 pages are reached from links/redirects, not always from a template tag, so they are
-    # named explicitly as well as scanned.
-    names = _template_url_names() | {"ui-case-tags", "ui-case-attachment-list"}
+    # named explicitly as well as scanned. Include Python-only routes (N3) so unrouted/dead
+    # redirect targets and no-template pages are exercised too.
+    names = (
+        _template_url_names()
+        | _python_only_ui_route_names()
+        | {"ui-case-tags", "ui-case-attachment-list"}
+    )
 
     # SuperAdmin-only routes: these correctly return 404 for a regular analyst.
     superadmin_only = {
+        "ui-settings-audit-log",
         "ui-settings-organisations",
         "ui-settings-organisations-edit",
     }

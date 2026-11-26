@@ -426,11 +426,48 @@ class TestOrganisationsCRUD:
         superadmin = _mk_superadmin(org1)
         client = _mk_client(superadmin)
 
-        _mk_user("member", org2)
+        member = _mk_user("member", org2)
 
         resp = client.post(reverse("ui-settings-organisations-delete", kwargs={"org_id": org2.id}))
         assert resp.status_code == 302
         assert Organisation.objects.filter(pk=org2.id).exists()
+        assert User.objects.filter(pk=member.id).exists()
+
+        resp2 = client.get(reverse("ui-settings-organisations"))
+        assert "Choose reassign or delete" in resp2.content.decode()
+
+    def test_delete_organisation_delete_members_self_lockout(self, db: None) -> None:
+        _mk_org("Org1")
+        org2 = _mk_org("HasAdmin")
+        superadmin = _mk_superadmin(org2)
+        client = _mk_client(superadmin)
+
+        resp = client.post(
+            reverse("ui-settings-organisations-delete", kwargs={"org_id": org2.id}),
+            {"members": "delete"},
+        )
+        assert resp.status_code == 302
+        assert Organisation.objects.filter(pk=org2.id).exists()
+        assert User.objects.filter(pk=superadmin.id).exists()
+        resp2 = client.get(reverse("ui-settings-organisations"))
+        assert "Cannot delete your own account" in resp2.content.decode()
+
+    def test_delete_organisation_delete_members_allowed_when_other_superadmin_remains(
+        self, db: None
+    ) -> None:
+        org1 = _mk_org("Org1")
+        org2 = _mk_org("HasSuper")
+        _actor = _mk_superadmin(org1)
+        target_super = _mk_user("target-super", org2, role="superAdmin")
+        client = _mk_client(_actor)
+
+        resp = client.post(
+            reverse("ui-settings-organisations-delete", kwargs={"org_id": org2.id}),
+            {"members": "delete"},
+        )
+        assert resp.status_code == 302
+        assert not Organisation.objects.filter(pk=org2.id).exists()
+        assert not User.objects.filter(pk=target_super.id).exists()
 
 
 class TestUsersCRUD:
@@ -512,6 +549,44 @@ class TestUsersCRUD:
         assert resp.status_code == 200
         content = resp.content.decode()
         assert "already exists" in content
+
+    def test_admin_create_user_pins_org_and_restricts_role(self, db: None) -> None:
+        org1 = _mk_org("Org1")
+        org2 = _mk_org("Org2")
+        admin = _mk_user("admin", org1, role="admin")
+        client = _mk_client(admin)
+
+        # Admin cannot escalate to admin role.
+        resp = client.post(
+            reverse("ui-settings-users"),
+            {
+                "username": "escalate",
+                "email": "escalate@example.net",
+                "password": "ComplexPass123!",
+                "role": "admin",
+                "org": str(org2.id),
+                "is_active": "on",
+            },
+        )
+        assert resp.status_code == 200
+        assert "admin may only assign roles" in resp.content.decode()
+        assert not User.objects.filter(username="escalate").exists()
+
+        # Admin create pins org to own org; posted org is ignored.
+        resp = client.post(
+            reverse("ui-settings-users"),
+            {
+                "username": "analyst2",
+                "email": "analyst2@example.net",
+                "password": "ComplexPass123!",
+                "role": "analyst",
+                "org": str(org2.id),
+                "is_active": "on",
+            },
+        )
+        assert resp.status_code == 302
+        created = User.objects.get(username="analyst2")
+        assert created.org_id == org1.id
 
     def test_edit_user(self, db: None) -> None:
         org1 = _mk_org("Org1")
@@ -614,6 +689,84 @@ class TestUsersCRUD:
         # Now try to delete the last superAdmin (self)
         resp = client.post(reverse("ui-settings-users-delete", kwargs={"user_id": superadmin.id}))
         assert resp.status_code == 302
+        assert User.objects.filter(pk=superadmin.id).exists()
+
+
+class TestSettingsCrossTenantGuards:
+    """§2.6: cross-tenant and role guards for Settings UI (no-JS plain POSTs)."""
+
+    def test_admin_cannot_access_org_settings(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client = _mk_client(admin)
+
+        resp = client.get(reverse("ui-settings-organisations"))
+        assert resp.status_code == 404
+
+        resp = client.post(reverse("ui-settings-organisations"), {"name": "X"})
+        assert resp.status_code == 404
+        assert not Organisation.objects.filter(name="X").exists()
+
+    def test_admin_cannot_edit_or_delete_other_org(self, db: None) -> None:
+        org1 = _mk_org("Org1")
+        org2 = _mk_org("Org2")
+        admin = _mk_user("admin", org1, role="admin")
+        client = _mk_client(admin)
+
+        resp = client.get(reverse("ui-settings-organisations-edit", kwargs={"org_id": org2.id}))
+        assert resp.status_code == 404
+
+        resp = client.post(
+            reverse("ui-settings-organisations-edit", kwargs={"org_id": org2.id}),
+            {"name": "Renamed", "description": ""},
+        )
+        assert resp.status_code == 404
+        org2.refresh_from_db()
+        assert org2.name == "Org2"
+
+        resp = client.post(reverse("ui-settings-organisations-delete", kwargs={"org_id": org2.id}))
+        assert resp.status_code == 404
+        assert Organisation.objects.filter(pk=org2.id).exists()
+
+    def test_admin_user_edit_cross_tenant_is_404(self, db: None) -> None:
+        org1 = _mk_org("Org1")
+        org2 = _mk_org("Org2")
+        admin = _mk_user("admin", org1, role="admin")
+        target = _mk_user("target", org2)
+        client = _mk_client(admin)
+
+        resp = client.get(reverse("ui-settings-users-edit", kwargs={"user_id": target.id}))
+        assert resp.status_code == 404
+
+        resp = client.post(
+            reverse("ui-settings-users-edit", kwargs={"user_id": target.id}),
+            {"email": "pwned@example.net", "role": "analyst", "is_active": "on"},
+        )
+        assert resp.status_code == 404
+        target.refresh_from_db()
+        assert target.email == "target@example.net"
+
+    def test_admin_user_delete_cross_tenant_is_404(self, db: None) -> None:
+        org1 = _mk_org("Org1")
+        org2 = _mk_org("Org2")
+        admin = _mk_user("admin", org1, role="admin")
+        target = _mk_user("target", org2)
+        client = _mk_client(admin)
+
+        resp = client.post(reverse("ui-settings-users-delete", kwargs={"user_id": target.id}))
+        assert resp.status_code == 404
+        assert User.objects.filter(pk=target.id).exists()
+
+    def test_admin_cannot_edit_or_delete_superadmin_via_ui(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        superadmin = _mk_superadmin(org)
+        client = _mk_client(admin)
+
+        resp = client.get(reverse("ui-settings-users-edit", kwargs={"user_id": superadmin.id}))
+        assert resp.status_code == 404
+        resp = client.post(reverse("ui-settings-users-delete", kwargs={"user_id": superadmin.id}))
+        assert resp.status_code == 404
         assert User.objects.filter(pk=superadmin.id).exists()
 
 

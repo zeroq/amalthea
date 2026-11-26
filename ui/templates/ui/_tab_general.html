@@ -5,7 +5,7 @@
   <div class="case-meta">
     <div class="meta-grid" role="list">
       <div class="meta meta-col" role="listitem">
-        <div class="meta-row"><span class="meta-label">Status</span><span class="meta-value">{{ case.status.value }}</span></div>
+        <div class="meta-row"><span class="meta-label">Status</span><span class="meta-value">{{ case.status.display_label }}</span></div>
         <div class="meta-row"><span class="meta-label">Assignee</span><span class="meta-value">{{ case.assignee.login|default:"Unassigned" }}</span></div>
         <div class="meta-row"><span class="meta-label">Owner org</span><span class="meta-value">{{ case.owner_org.name }}</span></div>
         <div class="meta-row"><span class="meta-label">Started</span><span class="meta-value mono">{{ case.start_date|date:"Y-m-d H:i" }}</span></div>

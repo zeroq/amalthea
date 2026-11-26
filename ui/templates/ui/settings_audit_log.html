@@ -1,0 +1,88 @@
+{% extends "ui/base.html" %}
+
+{% block heading %}Audit log{% endblock %}
+
+{% block content %}
+{% include "ui/_settings_nav.html" with active_tab=request.resolver_match.url_name %}
+<div class="card">
+  <div class="card-header">
+    <h2>Audit log</h2>
+    <span class="dim">Read-only. SuperAdmin only.</span>
+  </div>
+
+  <form method="get" class="filter-bar" aria-label="Audit log filters">
+    <div class="control-row">
+      <label class="sr-only" for="audit-q">Search</label>
+      <input id="audit-q" type="text" name="q" value="{{ filters.q }}" placeholder="Search action, target, actor, org, IP..." class="filter-q">
+      <label class="sr-only" for="audit-action">Action</label>
+      <input id="audit-action" type="text" name="action" value="{{ filters.action }}" placeholder="Action contains..." class="filter-type" list="audit-action-list">
+      <datalist id="audit-action-list">
+        {% for a in action_choices %}<option value="{{ a }}">{% endfor %}
+      </datalist>
+      <label class="sr-only" for="audit-target-type">Target type</label>
+      <input id="audit-target-type" type="text" name="target_type" value="{{ filters.target_type }}" placeholder="Target type..." class="filter-type" list="audit-target-type-list">
+      <datalist id="audit-target-type-list">
+        {% for t in target_type_choices %}<option value="{{ t }}">{% endfor %}
+      </datalist>
+      <label class="sr-only" for="audit-actor">Actor</label>
+      <input id="audit-actor" type="text" name="actor" value="{{ filters.actor }}" placeholder="Actor..." class="filter-type">
+      <label class="sr-only" for="audit-target-org">Target org</label>
+      <input id="audit-target-org" type="text" name="target_org" value="{{ filters.target_org }}" placeholder="Target org..." class="filter-type">
+      <button class="btn btn-primary" type="submit">Filter</button>
+      <a class="btn" href="{% url 'ui-settings-audit-log' %}">Clear</a>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  {% if page_obj.paginator %}
+    {% include "ui/_list_summary.html" with entity_name="audit entry" entity_name_plural="audit entries" %}
+    <div class="table-wrap">
+      <table class="data-table">
+        <caption class="sr-only">Audit log entries, newest first</caption>
+        <thead>
+          <tr>
+            <th scope="col">Time</th>
+            <th scope="col">Actor</th>
+            <th scope="col">Actor org</th>
+            <th scope="col">Action</th>
+            <th scope="col">Target</th>
+            <th scope="col">Target org</th>
+            <th scope="col">IP</th>
+            <th scope="col">Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in page_obj.object_list %}
+          <tr>
+            <td class="mono dim">{{ entry.created_at|date:"Y-m-d H:i:s" }}</td>
+            <td>{% if entry.actor %}{{ entry.actor.login }}{% else %}<span class="dim">—</span>{% endif %}</td>
+            <td>{% if entry.actor_org %}{{ entry.actor_org.name }}{% else %}<span class="dim">—</span>{% endif %}</td>
+            <td><code>{{ entry.action }}</code></td>
+            <td class="mono"><span class="dim">{{ entry.target_type }}</span> {{ entry.target_id }}</td>
+            <td>{% if entry.target_org %}{{ entry.target_org.name }}{% else %}<span class="dim">—</span>{% endif %}</td>
+            <td class="mono dim">{{ entry.ip|default:"—" }}</td>
+            <td>
+              {% if entry.details %}
+                <details>
+                  <summary class="dim">details</summary>
+                  <pre class="body">{{ entry.details|pprint }}</pre>
+                </details>
+              {% else %}
+                <span class="dim">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if page_obj.paginator.count == 0 %}
+      <p class="empty">No audit log entries match the current filters. <a href="{% url 'ui-settings-audit-log' %}">Clear filters</a></p>
+    {% else %}
+      {% include "ui/_pager.html" with entity_name="Audit entry" %}
+    {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

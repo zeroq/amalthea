@@ -112,6 +112,7 @@ def create_case_status(
     order: int,
     description: str = "",
     hidden: bool = False,
+    label: str = "",
 ) -> tuple[CaseStatus, TaxonomyResult]:
     from cases.models import CaseStatus
 
@@ -120,11 +121,13 @@ def create_case_status(
         raise TaxonomyError(f"unknown stage {stage!r}", "stage")
     if CaseStatus.objects.filter(value=value).exists():
         raise TaxonomyError("value already exists", "value")
+    label = str(label or "").strip()[:128]
 
     try:
         with transaction.atomic():
             status_obj = CaseStatus.objects.create(
                 value=value,
+                label=label,
                 stage=stage,
                 order=order,
                 description=description or "",
@@ -137,7 +140,7 @@ def create_case_status(
         target_type="CaseStatus",
         obj=status_obj,
         identifier=status_obj.value,
-        changed=["value", "stage", "order", "description", "hidden"],
+        changed=["value", "label", "stage", "order", "description", "hidden"],
     )
     return status_obj, result
 
@@ -149,6 +152,7 @@ def update_case_status(
     order: int | None = None,
     description: str | None = None,
     hidden: bool | None = None,
+    label: str | None = None,
 ) -> TaxonomyResult:
     from cases.models import CaseStatus
 
@@ -176,6 +180,12 @@ def update_case_status(
     if hidden is not None:
         status.hidden = hidden
         changed.append("hidden")
+
+    if label is not None:
+        label = str(label or "").strip()[:128]
+        if label != status.label:
+            status.label = label
+            changed.append("label")
 
     if not changed:
         raise TaxonomyError("No updatable field supplied", "")
@@ -217,6 +227,7 @@ def create_alert_status(
     order: int,
     description: str = "",
     hidden: bool = False,
+    label: str = "",
 ) -> tuple[AlertStatus, TaxonomyResult]:
     from alerts.models import AlertStatus
 
@@ -225,11 +236,13 @@ def create_alert_status(
         raise TaxonomyError(f"unknown stage {stage!r}", "stage")
     if AlertStatus.objects.filter(value=value).exists():
         raise TaxonomyError("value already exists", "value")
+    label = str(label or "").strip()[:128]
 
     try:
         with transaction.atomic():
             status_obj = AlertStatus.objects.create(
                 value=value,
+                label=label,
                 stage=stage,
                 order=order,
                 description=description or "",
@@ -242,7 +255,7 @@ def create_alert_status(
         target_type="AlertStatus",
         obj=status_obj,
         identifier=status_obj.value,
-        changed=["value", "stage", "order", "description", "hidden"],
+        changed=["value", "label", "stage", "order", "description", "hidden"],
     )
     return status_obj, result
 
@@ -254,6 +267,7 @@ def update_alert_status(
     order: int | None = None,
     description: str | None = None,
     hidden: bool | None = None,
+    label: str | None = None,
 ) -> TaxonomyResult:
     from alerts.models import AlertStatus
 
@@ -281,6 +295,12 @@ def update_alert_status(
     if hidden is not None:
         status.hidden = hidden
         changed.append("hidden")
+
+    if label is not None:
+        label = str(label or "").strip()[:128]
+        if label != status.label:
+            status.label = label
+            changed.append("label")
 
     if not changed:
         raise TaxonomyError("No updatable field supplied", "")

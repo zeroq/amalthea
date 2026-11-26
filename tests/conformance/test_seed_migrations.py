@@ -262,28 +262,31 @@ def test_m10_a_seed_neither_overwrites_nor_deletes_a_pre_existing_row() -> None:
     """
     from observables.models import ObservableType
 
-    migrate([("observables", "0001_initial")])
-    # At 0001 the current model's reverse relations (e.g. `ObservableSuggestion.data_type`)
-    # do not exist yet, so deleting through it makes the collector query a table the
-    # historical schema has never had. Use the historical model for the pre-seed writes.
-    historical = (
-        MigrationExecutor(connection)
-        .loader.project_state([("observables", "0001_initial")])
-        .apps.get_model("observables", "ObservableType")
-    )
-    historical.objects.filter(name="hash").delete()
-    analyst_row = historical.objects.create(name="hash", is_case_sensitive=True)
+    try:
+        migrate([("observables", "0001_initial")])
+        # At 0001 the current model's reverse relations (e.g. `ObservableSuggestion.data_type`)
+        # do not exist yet, so deleting through it makes the collector query a table the
+        # historical schema has never had. Use the historical model for the pre-seed writes.
+        historical = (
+            MigrationExecutor(connection)
+            .loader.project_state([("observables", "0001_initial")])
+            .apps.get_model("observables", "ObservableType")
+        )
+        historical.objects.filter(name="hash").delete()
+        analyst_row = historical.objects.create(name="hash", is_case_sensitive=True)
 
-    migrate([("observables", "0002_seed")])
-    assert ObservableType.objects.get(pk=analyst_row.pk).is_case_sensitive is True, (
-        "the seed must not overwrite a row it did not create"
-    )
-    assert ObservableType.objects.filter(name="hash").count() == 1
+        migrate([("observables", "0002_seed")])
+        assert ObservableType.objects.get(pk=analyst_row.pk).is_case_sensitive is True, (
+            "the seed must not overwrite a row it did not create"
+        )
+        assert ObservableType.objects.filter(name="hash").count() == 1
 
-    migrate([("observables", "0001_initial")])
-    assert ObservableType.objects.filter(pk=analyst_row.pk).exists(), (
-        "M10: rolling back the seed deleted a row Amalthea did not create"
-    )
+        migrate([("observables", "0001_initial")])
+        assert ObservableType.objects.filter(pk=analyst_row.pk).exists(), (
+            "M10: rolling back the seed deleted a row Amalthea did not create"
+        )
+    finally:
+        migrate(_leaves())
 
 
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
@@ -291,13 +294,23 @@ def test_m10_a_seed_neither_overwrites_nor_deletes_a_pre_existing_row() -> None:
 def test_a_user_defined_vocabulary_entry_survives_a_rollback() -> None:
     from cases.models import CaseStatus
 
-    migrate([("cases", "0002_initial")])
-    analyst_row = CaseStatus.objects.create(value="Awaiting-Legal", stage="InProgress", order=42)
-    migrate([("cases", "0003_seed")])
-    migrate([("cases", "0002_initial")])
-    assert CaseStatus.objects.filter(pk=analyst_row.pk).exists(), (
-        "ADR-002 D4: a status an analyst added must survive a schema rollback"
-    )
+    try:
+        migrate([("cases", "0002_initial")])
+        historical = (
+            MigrationExecutor(connection)
+            .loader.project_state([("cases", "0002_initial")])
+            .apps.get_model("cases", "CaseStatus")
+        )
+        analyst_row = historical.objects.create(
+            value="Awaiting-Legal", stage="InProgress", order=42
+        )
+        migrate([("cases", "0003_seed")])
+        migrate([("cases", "0002_initial")])
+        assert CaseStatus.objects.filter(pk=analyst_row.pk).exists(), (
+            "ADR-002 D4: a status an analyst added must survive a schema rollback"
+        )
+    finally:
+        migrate(_leaves())
 
 
 @pytest.mark.django_db(transaction=True, serialized_rollback=True)
@@ -305,12 +318,15 @@ def test_a_user_defined_vocabulary_entry_survives_a_rollback() -> None:
 def test_m10_a_seed_is_idempotent_when_re_applied() -> None:
     from observables.models import ObservableType
 
-    before = dict(ObservableType.objects.values_list("name", "is_case_sensitive"))
-    migrate([("observables", "0001_initial")])
-    migrate([("observables", "0002_seed")])
-    after = dict(ObservableType.objects.values_list("name", "is_case_sensitive"))
-    assert after == before, "re-running a seed must be a no-op, not a duplication"
-    assert ObservableType.objects.filter(name="ip").count() == 1
+    try:
+        before = dict(ObservableType.objects.values_list("name", "is_case_sensitive"))
+        migrate([("observables", "0001_initial")])
+        migrate([("observables", "0002_seed")])
+        after = dict(ObservableType.objects.values_list("name", "is_case_sensitive"))
+        assert after == before, "re-running a seed must be a no-op, not a duplication"
+        assert ObservableType.objects.filter(name="ip").count() == 1
+    finally:
+        migrate(_leaves())
 
 
 @pytest.mark.django_db

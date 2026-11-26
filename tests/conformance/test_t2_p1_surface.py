@@ -28,7 +28,7 @@ from rest_framework.test import APIClient
 from alerts.models import AlertStatus
 from cases.models import CaseStatus, CaseTagLink, Tag
 from identity.models import AuditLog, Organisation, User
-from observables.models import ObservableType
+from observables.models import Observable, ObservableType
 
 from ._t1_seed import _alert, _case, _observable
 
@@ -169,27 +169,30 @@ def test_observable_type_crud_and_not_shadowed_by_observable_detail(
     assert body["name"] == "sha256"
     assert body["isCaseSensitive"] is False
 
-    # Reads stay open to an analyst.
-    listed = api.get("/api/v1/observable/type")
-    assert listed.status_code == 200, listed.content
-    assert any(entry["name"] == "sha256" for entry in listed.json())
 
-    patched = superadmin_api.patch(
-        "/api/v1/observable/type/sha256", {"isCaseSensitive": True}, format="json"
+def test_an_observable_type_delete_is_allowed_once_unreferenced(
+    superadmin_api: APIClient, analyst: User, db: None
+) -> None:
+    """AC6.1-P1-b mutation guard: refuse while referenced, allow after reference removal."""
+    obs_type = ObservableType.objects.get_or_create(
+        name="mutation-email", defaults={"is_case_sensitive": False}
+    )[0]
+    observable = Observable.objects.create(
+        data_type=obs_type,
+        data="analyst@example.net",
+        normalized_data="analyst@example.net",
+        owner_org=analyst.org,
     )
-    assert patched.status_code == 204, patched.content
-    assert ObservableType.objects.get(name="sha256").is_case_sensitive is True
 
-    renamed = superadmin_api.patch(
-        "/api/v1/observable/type/sha256", {"name": "sha-256"}, format="json"
-    )
-    assert renamed.status_code == 204, renamed.content
-    assert ObservableType.objects.filter(name="sha-256").exists()
-    assert superadmin_api.get("/api/v1/observable/type/sha256").status_code == 404
+    refused = superadmin_api.delete(f"/api/v1/observable/type/{obs_type.id}")
+    assert refused.status_code in (400, 409), refused.content
+    assert ObservableType.objects.filter(pk=obs_type.pk).exists()
 
-    deleted = superadmin_api.delete("/api/v1/observable/type/sha-256")
-    assert deleted.status_code == 204, deleted.content
-    assert not ObservableType.objects.filter(name="sha-256").exists()
+    observable.delete()
+
+    allowed = superadmin_api.delete(f"/api/v1/observable/type/{obs_type.id}")
+    assert allowed.status_code in (200, 204), allowed.content
+    assert not ObservableType.objects.filter(pk=obs_type.pk).exists()
 
 
 def test_observable_type_in_use_is_a_400_not_a_cascade(

@@ -26,6 +26,7 @@ from ingest.mapping import (
     TARGETS,
     AlertDraft,
     apply_mapping,
+    resolve_mapping_config,
     validate_config,
 )
 from ingest.models import IngestionSource
@@ -527,3 +528,329 @@ def test_the_receiver_honours_the_sources_own_severity_floor(
     assert any(w.startswith("severity_defaulted:") for w in alert.ingestion_warnings["warnings"]), (
         alert.ingestion_warnings
     )
+
+
+# ---------------------------------------------------------------------------
+# Submapping resolver tests (AC-B1..AC-B5)
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_exact_type_match_full_replacement() -> None:
+    """AC-B1: exact raw top-level `type` match selects a submapping and fully replaces the master config."""
+    source_config = {
+        "version": 2,
+        "submappings": {
+            "ldt": {
+                "version": 2,
+                "fields": {"title": {"paths": ["$.name"], "transform": "str"}},
+            },
+        },
+    }
+    payload = {"type": "ldt", "name": "HiveCredTheft", "severity": 90}
+    resolution = resolve_mapping_config(source_config, payload)
+    assert resolution.used_submapping is True
+    assert resolution.matched_type == "ldt"
+    assert resolution.config["fields"]["title"]["paths"] == ["$.name"]
+
+
+def test_resolver_missing_type_returns_master() -> None:
+    """AC-B2: payload with no `type` key returns the master config unchanged."""
+    source_config = {
+        "version": 2,
+        "submappings": {"ldt": {"version": 2, "fields": {"title": {"paths": ["$.name"]}}}},
+        "fields": {"title": {"paths": ["$.other"]}},
+    }
+    payload = {"name": "HiveCredTheft"}
+    resolution = resolve_mapping_config(source_config, payload)
+    assert resolution.used_submapping is False
+    assert resolution.matched_type is None
+    assert resolution.config["fields"]["title"]["paths"] == ["$.other"]
+
+
+def test_resolver_non_string_type_returns_master() -> None:
+    """AC-B2: payload with non-string `type` (int, bool) returns the master config unchanged."""
+    source_config = {
+        "version": 2,
+        "submappings": {"ldt": {"version": 2, "fields": {"title": {"paths": ["$.name"]}}}},
+    }
+    payload = {"type": 90, "name": "HiveCredTheft"}
+    resolution = resolve_mapping_config(source_config, payload)
+    assert resolution.used_submapping is False
+    assert resolution.matched_type is None
+    assert resolution.config is source_config
+
+
+def test_resolver_unknown_type_returns_master() -> None:
+    """AC-B2: payload with unmatched `type` value returns the master config unchanged."""
+    source_config = {
+        "version": 2,
+        "submappings": {"ldt": {"version": 2, "fields": {"title": {"paths": ["$.name"]}}}},
+        "fields": {"title": {"paths": ["$.other"]}},
+    }
+    payload = {"type": "unknown-type", "name": "HiveCredTheft"}
+    resolution = resolve_mapping_config(source_config, payload)
+    assert resolution.used_submapping is False
+    assert resolution.matched_type is None
+    assert resolution.config["fields"]["title"]["paths"] == ["$.other"]
+
+
+def test_resolver_no_submappings_returns_master() -> None:
+    """AC-B2: master config with no `submappings` key returns master unchanged."""
+    source_config = {
+        "version": 2,
+        "fields": {"title": {"paths": ["$.name"]}},
+    }
+    payload = {"type": "ldt", "name": "HiveCredTheft"}
+    resolution = resolve_mapping_config(source_config, payload)
+    assert resolution.used_submapping is False
+    assert resolution.matched_type is None
+    assert resolution.config["fields"]["title"]["paths"] == ["$.name"]
+
+
+def test_resolver_non_dict_master_returns_empty() -> None:
+    """AC-B2: non-dict master config returns empty config (no crash)."""
+    resolution = resolve_mapping_config(None, {"type": "ldt"})
+    assert resolution.config == {}
+    assert resolution.used_submapping is False
+
+
+def test_resolver_no_payload_dict_returns_master() -> None:
+    """AC-B2: non-dict payload returns master config unchanged."""
+    source_config = {
+        "version": 2,
+        "submappings": {"ldt": {"version": 2, "fields": {"title": {"paths": ["$.name"]}}}},
+    }
+    resolution = resolve_mapping_config(source_config, "not-a-dict")
+    assert resolution.used_submapping is False
+    assert resolution.matched_type is None
+    assert resolution.config is source_config
+
+
+def test_resolver_no_mutation() -> None:
+    """AC-B2: resolver never mutates mapping_config or payload."""
+    import copy
+
+    source_config = {
+        "version": 2,
+        "submappings": {"ldt": {"version": 2, "fields": {"title": {"paths": ["$.name"]}}}},
+        "fields": {"title": {"paths": ["$.other"]}},
+    }
+    payload = {"type": "ldt", "name": "HiveCredTheft"}
+
+    config_before = copy.deepcopy(source_config)
+    payload_before = copy.deepcopy(payload)
+
+    resolve_mapping_config(source_config, payload)
+
+    assert source_config == config_before, "mapping_config was mutated"
+    assert payload == payload_before, "payload was mutated"
+
+
+def test_resolver_no_nested_recursion() -> None:
+    """AC-B2: resolver does not recurse into nested submappings within a matched submapping."""
+    deep_submapping = {
+        "version": 2,
+        "submappings": {
+            "ldt": {
+                "version": 2,
+                "submappings": {
+                    "nested": {"version": 2, "fields": {"title": {"paths": ["$.deep"]}}},
+                },
+                "fields": {"title": {"paths": ["$.name"]}},
+            },
+        },
+        "fields": {"title": {"paths": ["$.other"]}},
+    }
+    payload = {"type": "ldt", "name": "HiveCredTheft"}
+    resolution = resolve_mapping_config(deep_submapping, payload)
+    # The matched submapping should be the ldt entry without nested submappings recursion
+    assert resolution.used_submapping is True
+    assert resolution.matched_type == "ldt"
+    # The config should be the ldt submapping itself (not recursively resolved)
+    assert "submappings" not in resolution.config or resolution.config.get("submappings") is None
+
+
+def test_resolver_valid_submapping_key_len() -> None:
+    """Validation: key > 100 chars is rejected."""
+    from ingest.mapping import validate_config
+
+    long_key = "a" * 101
+    config = {
+        "version": 2,
+        "submappings": {long_key: {"version": 2, "fields": {"title": {"paths": ["$.name"]}}}},
+    }
+    errors = validate_config(config)
+    assert any("key exceeds" in e for e in errors)
+
+
+def test_resolver_too_many_submappings() -> None:
+    """Validation: >50 submappings keys is rejected."""
+    from ingest.mapping import validate_config
+
+    many_keys = {
+        f"key-{i}": {"version": 2, "fields": {"title": {"paths": ["$.name"]}}} for i in range(51)
+    }
+    config = {"version": 2, "submappings": many_keys}
+    errors = validate_config(config)
+    assert any("at most 50" in e for e in errors)
+
+
+def test_resolver_legacy_config_rejected_with_submappings() -> None:
+    """Validation: legacy config (no version 2) with submappings is rejected."""
+    from ingest.mapping import validate_config
+
+    config = {
+        "version": 1,
+        "submappings": {"ldt": {"version": 2, "fields": {"title": {"paths": ["$.name"]}}}},
+    }
+    errors = validate_config(config)
+    assert any("only available in v2" in e for e in errors)
+
+
+def test_resolver_nested_submappings_rejected() -> None:
+    """Validation: nested submappings within a submapping value are rejected."""
+    from ingest.mapping import validate_config
+
+    config = {
+        "version": 2,
+        "submappings": {
+            "ldt": {
+                "version": 2,
+                "submappings": {
+                    "nested": {"version": 2, "fields": {"title": {"paths": ["$.deep"]}}}
+                },
+            },
+        },
+    }
+    errors = validate_config(config)
+    assert any("nested submappings are not supported" in e for e in errors)
+
+
+def test_resolver_non_dict_submapping_value_rejected() -> None:
+    """Validation: submapping value that is not a dict is rejected."""
+    from ingest.mapping import validate_config
+
+    config = {
+        "version": 2,
+        "submappings": {"ldt": "not-a-dict"},
+    }
+    errors = validate_config(config)
+    assert any("value must be a JSON object" in e for e in errors)
+
+
+def test_resolver_submapping_value_missing_version_rejected() -> None:
+    """Validation: submapping value without version: 2 is rejected."""
+    from ingest.mapping import validate_config
+
+    config = {
+        "version": 2,
+        "submappings": {"ldt": {"fields": {"title": {"paths": ["$.name"]}}}},
+    }
+    errors = validate_config(config)
+    assert any("value must have version 2" in e for e in errors)
+
+
+def test_resolver_invalid_nested_field_path_rejected() -> None:
+    """Validation: nested invalid fields/transforms/JSONPaths rejected with submappings.<key>."""
+    from ingest.mapping import validate_config
+
+    config = {
+        "version": 2,
+        "submappings": {
+            "ldt": {
+                "version": 2,
+                "fields": {"title": {"paths": ["name"], "transform": "eval"}},
+            },
+        },
+    }
+    errors = validate_config(config)
+    assert any(e.startswith("submappings.ldt.") for e in errors)
+
+
+def test_resolver_observables_in_submapping(db: None, default_org) -> None:
+    """Webhook end-to-end: CrowdStrike-style payload with raw `type: ldt` selects a submapping
+    affecting title, severity, correlation key, and observables."""
+    from alerts.models import Alert
+    from identity.models import IngestionToken
+    from ingest.models import IngestionSource
+
+    source = IngestionSource.objects.create(
+        organisation=default_org,
+        slug="crowdstrike-edr-submap",
+        name="Crowdstrike EDR Submap",
+        mapping_config={
+            "version": 2,
+            "submappings": {
+                "ldt": {
+                    "version": 2,
+                    "fields": {
+                        "title": {"paths": ["$.name"], "transform": "str"},
+                        "severity": {"paths": ["$.severity"], "transform": "severity_score"},
+                    },
+                    "observables": [
+                        {"type": "ip", "paths": ["$.source.ip"]},
+                    ],
+                },
+            },
+        },
+    )
+    _token, plaintext = IngestionToken.create_token(
+        source=source, organisation=default_org, name="edr"
+    )
+    payload = {"type": "ldt", "name": "HiveCredTheft", "severity": 90}
+
+    response = Client().post(
+        reverse("alerts-webhook"),
+        data=payload,
+        content_type="application/json",
+        headers={"X-Webhook-Secret": plaintext},
+    )
+    assert response.status_code == 201, response.content
+
+    alert = Alert.objects.get(owner_org=default_org)
+    assert alert.title == "HiveCredTheft"
+    assert alert.severity == 4  # 90 → Critical via severity_score
+    assert alert.type == "ldt"
+    # source_ref is auto-generated by token; verify it is set
+    assert alert.source_ref is not None
+
+
+def test_typeless_payload_uses_master(db: None, default_org) -> None:
+    """Webhook end-to-end: typeless payload uses master for all interpreted fields."""
+    from alerts.models import Alert
+    from identity.models import IngestionToken
+    from ingest.models import IngestionSource
+
+    source = IngestionSource.objects.create(
+        organisation=default_org,
+        slug="bare-feed",
+        name="Bare Feed",
+        mapping_config={
+            "version": 2,
+            "submappings": {
+                "ldt": {
+                    "version": 2,
+                    "fields": {"title": {"paths": ["$.name"]}},
+                },
+            },
+            "fields": {"title": {"paths": ["$.name"]}},
+        },
+    )
+    _token, plaintext = IngestionToken.create_token(
+        source=source, organisation=default_org, name="edr"
+    )
+
+    payload = {"name": "Suspicious activity"}  # no "type" key
+
+    response = Client().post(
+        reverse("alerts-webhook"),
+        data=payload,
+        content_type="application/json",
+        headers={"X-Webhook-Secret": plaintext},
+    )
+    assert response.status_code == 201, response.content
+
+    alert = Alert.objects.get(owner_org=default_org)
+    # No type key → master config used → title from $.name, severity defaults to 2
+    assert alert.title == "Suspicious activity"
+    assert alert.severity == 2

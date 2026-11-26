@@ -82,7 +82,6 @@
       <a class="btn btn-primary" href="#" data-modal-open="user-create-modal">New user</a>
     </div>
     <p class="dim">Users in {{ admin_org.name }}</p>
-    {% if page_obj.paginator %}
       {% include "ui/_list_summary.html" with entity_name="user" entity_name_plural="users" %}
       <div class="table-wrap">
       <table class="data-table">
@@ -138,7 +137,6 @@
       {% else %}
         {% include "ui/_pager.html" with entity_name="User" %}
       {% endif %}
-    {% endif %}
   </div>
   {# Admin create modal (org is pinned, hidden) #}
   {% url 'ui-settings-users' as user_create_url %}

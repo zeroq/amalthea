@@ -79,6 +79,12 @@
   URL with `form=table|json`; a rejected save is a **200 that echoes the input** (never a redirect that
   discards a typed JSONPath) and an unchanged save is a no-op — no write, no `updated_at` bump, no
   audit (AC12). The write is gated exactly like the read (ADR-006 role + ADR-009 org, uniform 404).
+  The config may contain an optional `submappings` key (v2-only) whose value is a JSON object
+  keyed by the raw top-level `type` string from each alert payload. Exact case-sensitive match
+  selects one submapping, which fully replaces the master config for that alert type. Missing or
+  non-string type falls back to the master config. Nested `submappings` are rejected at validation.
+  MAP-9 is preserved: `type` and `source_ref` are never rewritten during remap. See MAP-10a in
+  [`deviations.md`](./deviations.md) for full details.
 
 ## Ingestion tokens
 

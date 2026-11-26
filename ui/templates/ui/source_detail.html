@@ -120,8 +120,7 @@
       <button class="btn btn-primary" type="submit">Save mapping</button>
       <button class="btn" type="submit" name="intent" value="apply">Apply to unlinked alerts…</button>
       <span class="hint">
-        {{ rule_count }} rule{{ rule_count|pluralize }} stored. An empty row removes that rule; a
-        completely empty table clears the mapping and restores the literal-key fallback.
+        {{ rule_count }} rule{{ rule_count|pluralize }} stored{% if submapping_count %}, {{ submapping_count }} type override{{ submapping_count|pluralize }}{% endif %}. An empty row removes that rule; a completely empty table clears the mapping and restores the literal-key fallback.
       </span>
     </div>
   </form>
@@ -331,6 +330,11 @@
       <span class="hint" id="mapping-json-hint">
         Use <span class="mono">{}</span> to clear the mapping. One object, two views: saving here is the
         same store the table above writes.
+        <br>
+        The config supports optional v2‑only <code>submappings</code>: a JSON object keyed by the raw
+        top‑level <code>type</code> field of each alert. Exact case‑sensitive match selects one submapping,
+        which fully replaces the master config for that alert type. Unknown or missing types fall back to
+        the master config. Nested <code>submappings</code> are rejected at save time.
       </span>
     </div>
   </form>
@@ -366,7 +370,8 @@ a RemapPreview, this one an ObservableApplyPreview, and the view never sets both
   {% if latest_alert %}
     <dl class="meta">
       <dt>Alert</dt><dd class="mono">{{ latest_alert.id }}</dd>
-      <dt>Type</dt><dd class="mono">{{ latest_alert.type }}</dd>
+      <dt>Mapped type</dt><dd class="mono">{{ latest_alert.type }}</dd>
+      <dt>Raw type</dt><dd class="mono dim">{{ raw_type }}</dd>
       <dt>Source ref</dt><dd class="mono">{{ latest_alert.source_ref }}</dd>
       <dt>Date</dt><dd class="mono">{{ latest_alert.date|date:"Y-m-d H:i" }}</dd>
       <dt>Organisation</dt><dd>{{ latest_alert.owner_org.name }}</dd>

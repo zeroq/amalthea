@@ -125,7 +125,30 @@ def test_ttp_crud_and_the_in_use_guard(api: APIClient, analyst: User) -> None:
     assert not TTP.objects.filter(pk=ttp_id).exists()
 
 
-# --- AC6.1-P5-a: the export document ---------------------------------------------------
+def test_a_case_ttp_delete_is_allowed_once_unreferenced(api: APIClient, analyst: User) -> None:
+    """AC6.1-P1-b mutation guard for TTP: referenced delete refused, then allowed."""
+    created = api.post(
+        "/api/v1/ttp", {"name": "Credential Access", "ttpCode": "T1003"}, format="json"
+    )
+    assert created.status_code == 201, created.content
+    ttp_id = created.json()["id"]
+
+    case = _case("TTP mutation case", org=analyst.org)
+    procedure = api.post(
+        f"/api/v1/case/{case.id}/procedure",
+        {"ttpId": str(ttp_id), "patternId": "T1003"},
+        format="json",
+    )
+    assert procedure.status_code == 201, procedure.content
+
+    refused = api.delete(f"/api/v1/ttp/{ttp_id}")
+    assert refused.status_code == 400, refused.content
+    assert TTP.objects.filter(pk=ttp_id).exists()
+
+    assert api.delete(f"/api/v1/procedure/{procedure.json()['_id']}").status_code == 204
+    allowed = api.delete(f"/api/v1/ttp/{ttp_id}")
+    assert allowed.status_code == 204, allowed.content
+    assert not TTP.objects.filter(pk=ttp_id).exists()
 
 
 def test_export_carries_the_linked_alert_raw_payload_verbatim(

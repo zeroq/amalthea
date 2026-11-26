@@ -41,7 +41,7 @@ from typing import Any, Final
 from django.db.models import Count, QuerySet
 
 from alerts.models import Alert
-from ingest.mapping import UNRESOLVED_REASONS, AlertDraft, apply_mapping
+from ingest.mapping import UNRESOLVED_REASONS, AlertDraft, apply_mapping, resolve_mapping_config
 from ingest.models import IngestionSource
 from observables.alert_sync import sync_alert_observables
 
@@ -273,6 +273,7 @@ def remap_alerts(
     unresolved: dict[str, dict[str, int]] = {}
     for alert in candidate_alerts(source)[:limit].iterator(chunk_size=200):
         candidates += 1
+        resolution = resolve_mapping_config(config, alert.raw_payload)
         draft, wanted, changed, issues = _evaluate(alert, source, config)
         for target, reason in issues:
             by_reason = unresolved.setdefault(target, {})
@@ -286,7 +287,7 @@ def remap_alerts(
             refreshed += 1
         # Re-extraction is additive and idempotent. It runs even when no field changed, because a
         # mapping fix or a newly configured observable rule must be able to repair existing alerts.
-        observables_added += sync_alert_observables(alert, config=config).created
+        observables_added += sync_alert_observables(alert, config=resolution.config).created
     return RemapResult(
         candidates=candidates,
         updated=updated,
@@ -335,10 +336,15 @@ def _evaluate(
 ) -> tuple[AlertDraft, dict[str, Any], list[str], list[tuple[str, str]]]:
     """One alert against one config: the draft, what it wants written, what differs, what it refused.
 
-    The single decision point for both the writer (`remap_alerts`) and the preview (`preview_alerts`),
-    so the dialog cannot promise something the pass does not do.
+    The config is resolved per-alert from `alert.raw_payload` so that submappings keyed on the
+    payload's raw `type` are honoured. The single decision point for both the writer
+    (`remap_alerts`) and the preview (`preview_alerts`), so the dialog cannot promise something
+    the pass does not do.
     """
-    draft = apply_mapping(config, alert.raw_payload, default_severity=source.default_severity)
+    resolution = resolve_mapping_config(config, alert.raw_payload)
+    draft = apply_mapping(
+        resolution.config, alert.raw_payload, default_severity=source.default_severity
+    )
     wanted = _target_values(draft)
     changed = [target for target, value in wanted.items() if getattr(alert, target) != value]
     unresolved = [

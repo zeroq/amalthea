@@ -109,6 +109,16 @@ class User(AbstractUser, UUIDModel):
             in_values("identity_user_role_valid", "role", USER_ROLE_VALUES),
         ]
 
+    def clean(self) -> None:
+        super().clean()
+        errors: dict[str, list[str]] = {}
+        if self.role == "viewer" and (self.is_staff or self.is_superuser):
+            errors.setdefault("role", []).append(
+                "viewer role cannot be combined with is_staff/is_superuser"
+            )
+        if errors:
+            raise ValidationError(errors)
+
     def save(self, *args: Any, **kwargs: Any) -> None:
         if not self.login:
             self.login = self.username

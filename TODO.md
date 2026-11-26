@@ -62,23 +62,26 @@ to its narrow follow-up on 2026-11-13 (see `COMPLETED.md`).
 | **18** | **§6.16 P6-fu1 — Postgres search measurement** | Search shipped (`6427beeb`); verification and T6 security review are complete (PASS). Remaining: run `EXPLAIN` on seeded Postgres before deciding on a trigram index. | **Medium** — closes the last evidence gap; no user-facing feature is missing. |
 | **19** | **§22 — MCP server for AI agents (Phases 1–4 implemented)** | CrewAI first; read-only context, proposal-first state changes, direct auto-posted AI summaries, OAuth 2.1 resource-server hardening, and shadow-first policy-bounded autonomy. All phases implemented and verified PASS (security PASS, independent verification PASS). | **Medium** — agent-assisted triage; Phase 4 adds narrow opt-in autonomy. |
 | **20** | **§23 — Rejected Observables Management** | Standalone rejection records linked to alerts, suppression in extraction, admin review/promotion, org isolation, confirmation modal. | **Medium** — false-positive suppression; upstream plan still needs acceptance criteria. |
-| **21** | **§24 — Alert detail Similar tab** | Decisions recorded: lazy Similar tab on alert detail, up to 20 recently closed similar alerts via adapted SSDEEP/title gate plus shared observables, count badge. | **Medium** — analyst discovery of prior closed alerts. |
-| **22** | **§25 — Source mapping submappings** | Decisions recorded: master mapping plus v2 `submappings` keyed by raw alert JSON `type`, full replacement, master fallback, JSON-first UI. | **Medium-High** — correct multi-type feed ingestion. |
+| **21** | **§24 — Alert detail Similar tab** | **Implemented 2026-11-25; full pytest PASS 2026-11-26** — lazy Similar tab with 20 recently closed alerts from SSDEEP/title gate plus shared observables, count badge, verification/security PASS. | **Done** — analyst discovery of prior closed alerts. |
+| **22** | **§25 — Source mapping submappings** | **Implemented 2026-11-25; full pytest PASS 2026-11-26** — v2 `submappings` keyed by raw alert JSON `type`, full replacement, master fallback, JSON-first UI; verification/security PASS. Remaining: unrelated pre-existing `make check` mypy errors. | **Done** — correct multi-type feed ingestion. |
 ---
 
 ## 2. Quality gates not yet met
 
-- [ ] **2.6 — Restore coverage ≥ 80%** Open since 2026-10-11: the tenant-isolation + org-management code
-  (scoping/permissions/services, the Settings UI guards) took coverage to **79%**, below the configured
-  `fail_under = 80` (informational until now). Add conformance tests for the new identity/scoping/UI
-  surfaces (guards, cross-tenant 404s, `members=reassign|delete` matrix, the no-JS Settings CRUD).
-  Source: `make coverage` 2026-10-11.
-- [ ] **2.7 — Phase 12 / T2 test hardening (the still-open QA list).** From `VERIFY-2026-10-10-t2-and-phase12.md`
-  (3 MET / 3 DEVIATED / 10 NOT MET): delete-with-runs row survival, the merge children matrix, attachment
-  boundaries (exact cap / empty / batch-partial), the timeout cap (30 vs 31), run-now `Success` + `output_log`,
-  `SESSION_COOKIE_HTTPONLY`, the UI login throttle; **§8.5** mutation guards for blast-radius / share / TTP /
-  delete-with-runs / attachment; and extend `test_ui_urls_smoke.py` to Python-only `redirect` names
-  (verifier N3). Independent of §2.6 (coverage % vs specific assertions).
+- [x] **2.6 — Restore coverage ≥ 80%** Closed 2026-11-23. Added Settings UI conformance coverage for
+  cross-tenant/role guards, org-delete member handling (`reassign/delete`/no-action/self-lockout and
+  remaining-superadmin path), and no-JS/plain-POST admin create role/org-pinning guards in
+  `tests/conformance/test_settings_ui.py`; updated §10.11 nonce-aware token-create tests and fixed
+  observable-list `next_url` reflection sanitization. Evidence: `make check` green; targeted pytest
+  `tests/conformance/test_settings_ui.py tests/conformance/test_settings_ingestion_tokens.py tests/conformance/test_settings_source_mapping.py tests/conformance/test_ui_p2_wiring.py::test_observable_list_ignores_malformed_type` → 170 passed; full suite `/tmp/amalthea-full-pytest.log` → **4175 passed, 3 skipped, 15 warnings, 2 subtests in 950.47s**; `coverage report --fail-under=80` → **TOTAL 80%**.
+- [x] **2.7 — Phase 12 / T2 test hardening (the still-open QA list).** Closed 2026-11-23. Added/strengthened
+  conformance coverage for delete-reference-then-delete mutation guards (observable type, case TTP),
+  merge children/provenance/idempotency matrix, attachment boundaries (exact cap/empty/batch-partial invalid),
+  playbook timeout boundary validation (30 accepted / 31 rejected), run-now synchronous execution asserting
+  `Success` + `output_log`, prod `SESSION_COOKIE_HTTPONLY` assertion, UI login throttle lockout/reset behavior,
+  and extended `test_ui_urls_smoke.py` to Python-only/no-template `ui-*` routes. Evidence: `make check` green;
+  targeted pytest 71 passed; full suite `/tmp/amalthea-full-pytest.log` → **4175 passed, 3 skipped, 15 warnings,
+  2 subtests in 947.31s**.
 
 ---
 
@@ -102,16 +105,16 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
 
 ## 6. Deferred scope (committed, not yet scheduled)
 
-- [ ] **6.13 — Backlog: ingestion-token management + audit-log viewer (superAdmin Settings)** Split out of §6.12 (decision Q1/Q8). Settings → **Ingestion tokens** (per-org webhook tokens: create/revoke, show-once secret) and read-only Settings → **Audit log** (the `AuditLog` already records superAdmin cross-org reads). Not scheduled.
-- [ ] **6.16 — UI completeness wave (all 24 gaps)** Plan `PLAN-2026-10-11-ui-completeness.md`. Restores the analyst loop and
+- [x] **6.13 — Backlog: ingestion-token management + audit-log viewer (superAdmin Settings)** Split out of §6.12 (decision Q1/Q8). **Done 2026-11-23** (working tree): Settings → **Ingestion tokens** already ships under Settings → Sources (`ui/views/ingestion_tokens.py`, `ui/templates/ui/settings_sources.html`: per-org create/revoke/deactivate/activate/delete, show-once secret, org scoping, audited). Added read-only Settings → **Audit log** (`ui-settings-audit-log`, `ui/views/audit_log.py`, `ui/templates/ui/settings_audit_log.html`, superAdmin-only, filterable/paginated, no mutation/export). Conformance: `tests/conformance/test_settings_audit_log.py` + existing `test_settings_ingestion_tokens.py`; targeted 53 passed. Full suite: **4194 passed, 3 skipped, 15 warnings, 2 subtests** (`/tmp/amalthea-full-pytest.log`).
+- [~] **6.16 — UI completeness wave (all 24 gaps)** Plan `PLAN-2026-10-11-ui-completeness.md`. Restores the analyst loop and
   completes the entity surface: **P1** wire up built-but-unreachable features (attachments, merge, export,
   apply-template, taxonomy) + rail entries for Observables/Tags/Case-templates/Taxonomy + tenant indicator +
   case-template edit + password change + 500/403 pages + cheat-sheet as a server-rendered `<dialog>` + Font Awesome
   + keyboard coverage; **P2** alert triage, case edit, observable edit/delete; **P3** procedures/TTP UI; **P4**
-  Settings→Ingestion tokens + Audit log (pulls §6.13 forward); **P5** playbook action round-trip + sanitized
+  Settings→Ingestion tokens + Audit log (pulls §6.13 forward) — **token lifecycle + audit-log viewer present in working tree** (audit log at `ui-settings-audit-log`, offset pagination/filterable; plan named `ui-settings-audit`/keyset — record deviation before closing P4); **P5** playbook action round-trip + sanitized
   Markdown; **P6** global search — **SHIPPED 2026-11-02** (`6427beeb`; see §6.16-fu1 and `COMPLETED.md`);
   **P7** per-org realtime + presence + scoped HTMX adoption. Open questions Q1 (Markdown dependency) gate
-  P5 and Q2 (bulk stub) gates P1. Source: post-§6.15 UI audit (user decision "everything", 2026-10-11).
+  P5 and Q2 (bulk stub) gates P1 — **Q2 resolved**: bulk UI shipped under §12.4 (`ui-case-bulk`/`ui-alert-bulk`/`ui-observable-bulk`/`ui-task-bulk`; case/alert/task use per-item loops, observable uses `compat/bulk.py bulk_patch`). Source: post-§6.15 UI audit (user decision "everything", 2026-10-11).
 - [ ] **6.16-fu1 — Global search follow-up: Postgres measurement.**
   P6 shipped 2026-11-02 (`6427beeb`): `/search` + `GET /api/v1/search`, shared `query/search.py`, org
   scoping, highlighting, paging, and tests.
@@ -156,8 +159,8 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
 
 ## 8. Standards (added 2026-10-03)
 
-- [ ] **8.5 — Extend mutation coverage to the remaining contract assertions**
-- [ ] **8.7 — Timestamp-unit wording in plan §7.1** Verifier (2026-10-07), POST-closure note
+- [ ] **8.5 — Extend mutation coverage to the remaining contract assertions** `Low` — Postponed 2026-11-23: scope not clearly defined (which mutation tool/contracts/acceptance bar). Revisit only if a concrete contract-assertion gap or mutation-testing target is identified.
+- [x] **8.7 — Timestamp-unit wording in plan §7.1** Verifier (2026-10-07), POST-closure note. **Done 2026-11-23**: clarified `PLAN-2026-10-03-thehive-compatible-mvp.md` §7.1 to state input is epoch-ms; entity JSON output is ISO-8601, timeline/event wire output is epoch-ms (P10-2 boundary).
 
 ---
 
@@ -206,19 +209,12 @@ backlog once the analyst-visible classification fields (10.3–10.6) are designe
   per-IP limiter ahead of `_authenticate_token` (same `cache.incr` idiom, own bucket/documented limit
   so it cannot mask the post-auth 429), then confirm the budget in `docs/spec/api.md`. Consider a
   fail-closed setting under `amalthea/settings/prod.py` style (mirrors AGENTS.md §5).
-- [ ] **10.9 — Status vocabularies have no human `label`, so the UI prints raw stored tokens.** Found
-  2026-10-15 while fixing TLP/PAP display (the TLP/PAP row rendered raw integers; now uses a zero-safe
-  `choice_name` filter). Every *closed set* except statuses renders a human label
-  (`choice_label` / `choice_name`, `core/enums.py`), but `CaseStatus` exposes only `value`/`stage`/`order`/
-  `hidden` and its `__str__` is `value`, so `_tab_general.html` and `case_list.html` print
-  `{{ case.status.value }}` — and `value` is a free `CharField(64)`, so whatever an operator seeded is what
-  the analyst sees ("InProgress", not "In Progress"). The same holds for `AlertStatus.value`
-  (`alert_detail.html`, `alert_list.html`, `_tab_alerts.html`) and for `Task.status`, whose labels are
-  literally identical to their tokens (`TASK_STATUS_CHOICES`: `Waiting`/`InProgress`/`Completed`/`Cancel`).
-  Fix options: add a `label` to `CaseStatus`/`AlertStatus` (+ data migration, keeping ADR-002 §D11-tolerant
-  `resolve_case_status`), or a `*_LABELS` mapping keyed by token, or fix `TASK_STATUS_CHOICES` labels.
-  **Deferred**: purely cosmetic today, and touching `CaseStatus` risks the automation triggers that key on
-  `stage` (see §10.6/Q-D2) — which is exactly why it is its own item, not a rider on 10.3–10.6.
+- [x] **10.9 — Status vocabularies have no human `label`, so the UI prints raw stored tokens.** **Done 2026-11-23** (working tree):
+  added `label`/`display_label` to `CaseStatus`/`AlertStatus` (migrations `cases/0025_add_status_label.py`,
+  `alerts/0019_add_status_label.py`; default labels seeded, stored `value`/`stage` unchanged for automation/compat).
+  API status JSON now exposes `label`; taxonomy/API create-update accept `label`; UI renders
+  `status.display_label` / task `get_status_display()`; `TASK_STATUS_CHOICES` labels are human-readable.
+  Targeted: `test_t2_p1_surface.py -k status` (4 passed). Full suite green: **4194 passed, 3 skipped**.
 - [x] **10.11 — Reloading the "create ingestion token" POST mints a second live token.** Fixed 2026-11-23:
   `settings_token_create` requires a one-shot per-user cache nonce (`ui:token-create-nonce:{user}:{nonce}`,
   15 min TTL). The nonce is rendered as a hidden field in `_settings_token_create_form.html`; the POST claims
@@ -235,9 +231,10 @@ backlog once the analyst-visible classification fields (10.3–10.6) are designe
   and a unique lookup key — is also the webhook throttle bucket (`wh:token:{prefix}:{window}`), while creation
   retries only 3× on collision. Same collision therefore merges two rate-limit buckets. Either hash the cache key
   and widen the prefix (migration), or document the retry window as accepted. Source: security review M2 + L2.
-- [ ] **10.12-fu3 — Django admin renders a paused token as neither readable state (Low).**
-  `IngestionTokenAdmin.list_display` omits `deactivated_at`, so in the read-only admin a paused credential looks
-  like a live one. Found **independently** by both passes (security L1; verifier O6). Source: security review L1.
+- [x] **10.12-fu3 — Django admin renders a paused token as neither readable state (Low).** **Done 2026-11-23**:
+  `identity/admin.py` `IngestionTokenAdmin` now includes `deactivated_at` in `list_display`, `list_filter`, and
+  `readonly_fields`, so paused credentials are distinguishable in the read-only admin. Test:
+  `tests/conformance/test_admin_ingestion_token.py`.
 - [ ] **10.12-fu4 — Three test-quality gaps in the wave's own guards (Low; no grade depends on them).**
   (a) `TestTokenActivationLifecycle._mint` passes `slug=` into `_mk_source` for a feed the view never uses — it
   binds via `slugify(source_name)`, so every token in that class lands on one shared feed and the `slug=` row is
@@ -304,19 +301,15 @@ From `docs/reviews/REVIEW-2026-10-12-viewer-role-enforcement.md` (0 Critical / 0
 fixed in the same batch). These two are **accepted, Low/Info** — recorded here so they are tracked
 rather than only described in `docs/spec/deviations.md`.
 
-- [ ] **L2 — Django admin sits outside the role model.** `role` is orthogonal to `is_staff` /
-  `is_superuser`, and `/admin/` (`amalthea/urls.py`) is reached by none of the three enforcement
-  layers (global DRF permission, `not_viewer`, or the resolvers). A `viewer` who is also `is_staff`
-  keeps whatever the admin site grants them, so the ADR-006 guarantee must not be read as covering
-  `/admin/`. Deployment mitigation today: never grant `is_staff` to a viewer. Preferred fix (cheap,
-  structural): refuse or warn on the `role=viewer` + `is_staff` combination in
-  `identity/services.py` (the same place the other role/privilege invariants live), plus an admin
-  `has_permission` guard. Add a test asserting the combination is rejected at the service layer.
-- [ ] **I1 — `django.request` logs `request.path` verbatim.** The round-1 CWE-117 fix removed the
-  sink in `ui/views.py::not_viewer`, but Django's own 404 logger still writes the percent-decoded
-  path, so an authenticated caller can forge log lines there regardless of role. Fix with a logging
-  filter that escapes CR/LF (or log `request.resolver_match`), applied in `amalthea/settings/`.
-  Pre-existing and role-independent.
+- [x] **L2 — Django admin sits outside the role model.** **Done 2026-11-23**: hard-rejected
+  `role=viewer` + `is_staff`/`is_superuser` in `identity/services.py` (create/update) and
+  `identity/models.py` `User.clean()`; added Django admin `has_permission` guard in
+  `identity/admin.py` denying viewer-role users. Test:
+  `tests/conformance/test_viewer_admin_guard.py`.
+- [x] **I1 — `django.request` logs `request.path` verbatim.** **Done 2026-11-23**: added
+  `amalthea/logging.py` `SanitizeRequestPathFilter` and wired it to the `django.request` logger in
+  `amalthea/settings/base.py` to escape CR/LF in log messages/args. Test:
+  `tests/conformance/test_logging_sanitization.py`.
 
 ---
 
@@ -388,23 +381,18 @@ Postgres work is §6.16-fu1. §6.16 P7 (realtime) remains in its own plan.
   an `AuditLog` row — the machinery now exists as `cases/correlation.py::record_alert_bundled`); it must
   never choose a **closed** case; and the §12.1-fu1 Postgres measurement should land first, since the rule
   adds a query to the hot ingest path. Source: §12.3 decision 2026-10-18.
-- [ ] **12.4 — No bulk actions in the UI.** `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk`
+- [x] **12.4 — No bulk actions in the UI.** `case/_bulk`, `alert/_bulk`, `task/_bulk`, `observable/_bulk`
   (PATCH) exist in the API with per-item isolation + status reporting (`compat/bulk.py`,
   `test_t2_p4_surface.py`), but the UI stub was deleted under Q2 (P1) and nothing replaced it — triaging a
   200-alert morning is single-item work. Fix: selection-based bulk triage (status / assignee / dismiss) that
   calls the same service, keyboard-reachable, `<dialog>` confirmation (ADR-003: no native `confirm()`), and a
-  per-item result summary so partial failures are visible. Source: audit 2026-10-12.
-- [ ] **12.9 — UI layout/style standardization (global).** (1) **Input/button height alignment:** inputs must
-      match button height next to them (form control sizing). (2) **Action columns use fitting icons:** prefer
-      compact icon-only actions with accessible names (aria-label/title), not full text buttons in tight action
-      columns; keep text buttons for primary standalone actions. (3) **Consistent table layout:** every list
-      table lives inside a `.card`, and filtering options live in a separate card above the table (reference:
-      **Observables List View**). Capture these as reusable guidelines (e.g. `docs/spec/ui-style.md` or
-      `ui/README.md`) and apply to existing/new views (Cases, Alerts, Tasks, Users, Sources/Tokens) to avoid
-      regressions. **Note (2026-10-17):** the aligned-action-row pattern already exists as `.case-actions`
-      (`app.css`: `margin-top:0`, centred, 34px equal-height controls) and is now reused outside Case
-      templates (`source_detail.html`, and the Settings → Sources token row) — generalize/rename it as part
-      of this item rather than inventing a second utility. Source: user request 2026-10-17.
+  per-item result summary so partial failures are visible. Source: audit 2026-10-12. Implemented/pushed: bulk UI on alerts/cases/observables/case-detail tasks via `compat/bulk.py` `bulk_patch`; selection controls hidden until selection; `<dialog>` confirm via `_modal.html` `confirm_form`; no native `confirm()`; `picker.js` skips `select[name="assignee"]` in `.bulk-action-bar`; alert bulk excludes `Imported`/`Closed` stage statuses; case bulk blocks `Closed` stage.
+- [x] **12.9 — UI layout/style standardization (global).** Fixed 2026-11-23: added `docs/spec/ui-style.md`
+  with reusable guidelines (34px aligned control rows, icon-only actions in tight columns with accessible names and
+  `aria-hidden` decorative icons, list tables in `.card` with filter card above, Observables list reference, no native
+  dialogs, severity not color-only). Generalized `.action-row` as reusable alias alongside `.case-actions` in
+  `ui/static/ui/app.css` for 34px aligned controls; existing `.case-actions` usages remain compatible. Full view sweep
+  should continue applying these rules as views are touched.
 
 - [x] **12.11 — CI repaired 2026-11-16; full suite remains a local/manual gate.**
   Found 2026-10-19 while chasing §12.3-fu2. Evidence (read from the public `actions` API — `gh` is not
@@ -530,16 +518,13 @@ the full `pytest` suite green; record any deviation in the plan.
   Current: **3,649 lines**, the largest test file in the repo. Target: cases, alerts, observables, identity and
   automation tenant-scoping suites (shared fixtures in a conftest/helper). Test-maintainability only; no
   production behaviour change. Source: §13 audit 2026-11-04.
-- [ ] **13.21 — Remove redundant pagination guards from list templates (small cleanup).**
-  After the `alert_list.html` legacy fallback removal, several paginated lists still wrap their content in
-  `{% if page_obj.paginator %}` or `{% if page_obj %}` even though the view always passes a `Page`:
-  `case_list.html:33`, `observable_list.html:22`, `automation_list.html:23`, `case_share_list.html:19`,
-  `settings_users.html:85` (admin branch only), `tag_list.html:14`, `sources_list.html:13`,
-  `playbook_list.html:14`, `settings_sources.html:20`, `settings_organisations.html:13`.
-  Remove each guard only where the view unconditionally calls `paginate()`; leave the intentional
-  superAdmin per-organisation card path in `settings_users.html` untouched. No behaviour change. Verify the
-  empty-state copy and pager still render, then run the list/pagination conformance tests and `make check`.
-  Source: 2026-11-04 alert-list cleanup audit.
+- [x] **13.21 — Remove redundant pagination guards from list templates (small cleanup).** **Done 2026-11-23**:
+  removed redundant `page_obj.paginator`/`page_obj` wrappers in templates where views always pass a `Page`:
+  `case_list.html`, `observable_list.html`, `automation_list.html`, `case_share_list.html`,
+  `settings_users.html` (admin branch only), `tag_list.html`, `sources_list.html`,
+  `playbook_list.html`, `settings_sources.html`, `settings_organisations.html`. Left superAdmin
+  per-organisation card path in `settings_users.html` untouched. Tests:
+  `tests/conformance/test_case_list_severity_filter.py`, `test_case_scope_filter.py`, `test_ui_p1_wiring.py`.
 
 ### P3 — monitor; do not split for size alone
 
@@ -575,27 +560,22 @@ visible on linked alerts, and the API dedupes repeated names before inserting. R
 
 ### P2 — correctness, parity and tenant safety
 
-- [ ] **14.1 — Validate `existing_tag_ids` in the UI tag form.** `ui/views/alerts.py:473` accepts any
-  POST value, then passes it to `Tag.objects.filter(id__in=...)` at `ui/views/alerts.py:506`; a non-UUID
-  raises `ValidationError` → 500 instead of a form error. A valid UUID not shown in the picker can also
-  be attached, including one from another tenant. Parse UUIDs, drop invalid values with a message, and
-  re-resolve the surviving IDs through the same allowed-tag queryset the picker uses. Add a regression
-  test for malformed and out-of-picker IDs.
-- [ ] **14.2 — Reject a non-object JSON body on `POST /alert/{id}/tag/add` with 400, not 500.**
-  `alerts/views.py:740` calls `tag_names_from_payload(request.data)`; a JSON array makes `request.data` a
-  list, and the helper calls `.get()` on it (`cases/tagging.py:23`) → `AttributeError`. Either reject
-  non-mapping bodies in the view or make the helper accept `Mapping | list`. Test with `[]` and
-  `["tag"]`.
+- [x] **14.1 — Validate `existing_tag_ids` in the UI tag form.** RESOLVED by field-change:
+  the UI POST contract now uses `tags` (tag names) + `new_tags` (comma string), removing
+  `existing_tag_ids` and `new_tag_names` entirely. No UUID parser needed; legacy UUID submissions
+  are rejected as empty per AC2.2-a.
+- [x] **14.2 — Reject a non-object JSON body on `POST /alert/{id}/tag/add` with 400, not 500.** **Done 2026-11-23**:
+  `alerts/views.py::alert_tag_add` now rejects non-dict JSON bodies with 400
+  `{"type":"BadRequest","message":"Request body must be a JSON object"}` before tag parsing.
+  Regression: `tests/conformance/test_alert_tag_add_regressions.py::test_api_tag_add_rejects_non_object_body_with_400` (`[]`, `["tag"]`).
 - [ ] **14.3 — Reconcile the documented idempotency with the actual 400.**
   `alerts/views.py:730-731` says re-linking an existing tag is a no-op, but `alerts/views.py:751-758`
   returns 400 for an existing name. Choose one contract: return 201/the alert's tag set unchanged
   (true idempotency, matching `alert_tag_link`), or document the 400 as intentional. Add a test pinning
   the decision.
 - [ ] **14.4 — Scope the picker to the alert's organisation, not the caller's.**
-  `ui/views/alerts.py:188-192` builds `available_tags_qs` with `user_org_id`, so a superAdmin viewing a
-  cross-org alert sees their own org's tags (or none). Decide the superAdmin policy, then use
-  `alert.owner_org_id` for normal callers and validate submitted tag IDs against the exact picker
-  queryset. This also closes the arbitrary-ID gap in 14.1.
+  This item is MOOT under the approved Q1 decision: the Tag catalog is global (no owner_org column),
+  and the picker mirrors case detail exactly. See PLAN-2026-11-24-alert-tag-picker-parity.md §12.
 - [ ] **14.6 — Give alert-tag writes case-tag parity.** `ui/views/alerts.py:487-510` writes
   `AlertTagLink` directly: no `AuditLog`, no ledger entry when the alert is linked to a case, and no
   WebSocket frame. Route through a shared service (or add the audit/ledger/broadcast explicitly) so the
@@ -613,17 +593,15 @@ visible on linked alerts, and the API dedupes repeated names before inserting. R
 
 ### P3 — polish and housekeeping
 
-- [ ] **14.9 — Fix the truncation message.** `_alert_tag_add_modal_body.html:18` renders the
-  `available_tags_truncated` boolean as "Showing the first True tags". Render the shown count
-  (`available_tags|length`) like `_case_tag_add_form.html:19`, or pass a dedicated total.
-- [ ] **14.10 — Fix the picker's accessibility markup.** `_alert_tag_add_modal_body.html:9` has a
-  `<label for="alert-tag-add-existing">` that targets no element. Use a `<fieldset><legend>` around the
-  checkbox chips, matching the case form.
-- [ ] **14.11 — Simplify the picker query.** `ui/views/alerts.py:182-198` adds three `Count`
-  annotations the template never displays, slices the queryset, then calls `.count()` on the sliced
-  queryset (a capped second query) and misnames the result `alert_tags_total` (it is the available
-  count). Follow `case_detail.py:316-325`: fetch one row past `PICKER_PAGE_SIZE` to detect truncation,
-  drop unused annotations, and select/prefetch existing links for the current-tags row in 14.5.
+- [x] **14.9 — Fix the truncation message.** **Done 2026-11-23**: `_alert_tag_add_modal_body.html` now renders
+  `Showing the first {{ available_tags|length }} tags; type to add others.` when `available_tags_truncated`,
+  matching case-detail parity.
+- [x] **14.10 — Fix the picker's accessibility markup.** **Done 2026-11-23**: replaced the orphan `<label for="alert-tag-add-existing">`
+  with `<fieldset><legend>Existing tags</legend>` around alert tag checkboxes, matching the case-tag form.
+- [x] **14.11 — Simplify the picker query.** **Done 2026-11-23**: `ui/views/alerts.py` now fetches
+  `PICKER_PAGE_SIZE + 1` distinct tag rows to detect truncation, drops the unused `Count`
+  annotations and sliced `.count()`, and no longer passes the misleading `alert_tags_total` context.
+  Regression: `tests/conformance/test_alert_tag_add_regressions.py::test_alert_detail_caps_available_tags_without_second_count`.
 - [ ] **14.12 — Purge the historical editor swap file.** `*.swp` is committed in `.gitignore`
   (`8fb33229`) and no swap files are tracked, but a `.swp` blob remains in git history; purge it per
   `SECURITY.md` before the repository is mirrored or copied.
@@ -818,7 +796,7 @@ rejected-observables UI/API/templates, and conformance tests (`test_rejected_obs
 
 ## 24. Alert detail — Similar tab (plan draft, 2026-11-21)
 
-Status: **Decisions recorded 2026-11-21 — ready for implementation brief.**
+Status: **IMPLEMENTED 2026-11-25 — targeted verification green; security PASS; full pytest PASS 2026-11-26.**
 Plan location: this section (per user request; no separate `docs/planning/PLAN-…` file for this item).
 
 ### 24.0 Summary
@@ -1140,11 +1118,34 @@ Verification gates:
 - Produce an implementation brief for `django-backend` / `django-frontend` / `qa-tester`.
 - Implement T1→T3 in order, recording any deviation from the decisions above in this section before merge.
 
+### 24.12 Implementation record (2026-11-25)
+
+- Backend: `cases/correlation.py` gained `alerts_similar_to_alert()`, `SimilarAlertMatch`, and
+  `SIMILAR_CLOSED_ALERTS_LIMIT`; fuzzy and stored-observable channels are unioned, bounded, and
+  scoped to the caller's and source alert's org. `ui/views/alerts.py` computes the tab count once,
+  exposes a read-only GET fragment, and shares `_similar_display_rows()` between the inline panel
+  and fragment. Route `ui-alert-similar` added.
+- UI: `alert_detail.html` gained the Similar tab after Observables and before Raw data; the lazy
+  panel plus new fragment/card templates show Title, Verdict, Closed, and Similarity with honest
+  truncation and an empty state.
+- Tests/gates: `tests/conformance/test_alert_similar_tab.py` added (20 tests); targeted suites pass
+  214/214 including tenant scoping. `make check-fast`, Django check, makemigrations check, and
+  tracked secret scan pass. Full `make check` remains blocked by pre-existing unrelated mypy errors
+  in `amalthea/logging.py` and `identity/admin.py`.
+- Full pytest: an earlier user-run log showed 2 failures caused by the new route missing from the
+  tenant-scoping URL parameter map; that entry was added. The user reran the full suite and provided
+  `/tmp/amalthea-full-pytest.log` with `4282 passed, 3 skipped, 15 warnings, 2 subtests passed in
+  1188.41s (0:19:48)` — green.
+- Verification: `docs/planning/VERIFICATION-2026-11-25-alert-similar-tab.md` — 31 Met, 0 Not Met,
+  full pytest DoD gate satisfied on 2026-11-26, no deviations from Q24 decisions.
+- Security: `docs/security/SECURITY-2026-11-25-alert-similar-tab.md` - PASS on tenant isolation,
+  bounded work, read-only fragment, no raw payload exposure, and no new secret/network surface.
+
 ---
 
 ## 25. Source mapping — per-type submappings (plan draft, 2026-11-21)
 
-Status: **Decisions recorded 2026-11-21 — ready for implementation brief.**
+Status: **IMPLEMENTED 2026-11-25 — targeted verification green; security PASS; full pytest PASS 2026-11-26.**
 Plan location: this section (per user request; no separate `docs/planning/PLAN-…` file for this item).
 
 ### 25.0 Summary
@@ -1517,3 +1518,95 @@ Verification gates:
 
 - Implementation brief: `docs/planning/IMPL-2026-11-21-source-mapping-submappings.md`.
 - Implement T1→T4 in order, recording any deviation from the decisions above in this section before merge.
+
+### 25.14 Implementation record (2026-11-25)
+
+- Backend: `ingest/mapping.py` gained `MAX_SUBMAPPINGS`, `MAX_SUBMAPPING_KEY_LEN`,
+  `MappingResolution`, `resolve_mapping_config()`, `submapping_count()`, and v2-only recursive
+  `submappings` validation; webhook, pipeline, remap/preview, and observable apply all use the same
+  per-alert effective config. MAP-9 remains intact.
+- UI/docs: source list/detail show type-override counts, the raw-data tab shows raw `type`
+  separately from mapped `type`, JSON help documents the semantics, and docs carry MAP-10a.
+- Tests/gates: 415 targeted conformance tests green; `make check-fast` green; staged/tracked secret
+  scans clean. `make check` is currently blocked by two pre-existing unrelated mypy errors in
+  `amalthea/logging.py` and `identity/admin.py`. The user ran full pytest on 2026-11-26:
+  `4282 passed, 3 skipped, 15 warnings, 2 subtests passed in 1188.41s (0:19:48)` — green.
+- Verification: `docs/planning/VERIFICATION-2026-11-25-source-mapping-submappings.md` — final state
+  has full pytest Met; §25 deviations and the out-of-scope static-gate blocker remain recorded.
+- Security: `docs/security/SECURITY-2026-11-25-submappings.md` — PASS (7/7 checks: tenant
+  isolation, bounded validation, path-only audit errors, unchanged webhook surface, no secrets).
+- Deviations recorded: the matched submapping is returned as a shallow copy with any nested
+  `submappings` key stripped (defensive hardening; verifier accepted as conforming); the deviation
+  register id is MAP-10a because MAP-10 already exists; the full static gate remains blocked by
+  pre-existing unrelated mypy errors, while the full-suite gate passed on 2026-11-26. No Q25 decision
+  changed.
+
+---
+
+## 26. Enrichment playbook script — RDAP domain lookup (added 2026-11-24)
+
+Status: **BACKLOG — open questions below; defaults proposed, not yet confirmed.**
+Scope: one deploy-only script plus tests/docs; no schema, API, or UI change.
+
+### 26.1 Summary
+
+Add `automation/scripts/rdap_domain_lookup.py` following the ADR-011 script contract
+(`NAME` / `DESCRIPTION` / `TRIGGER_HINT`, `run(**values) -> str`). When a playbook with
+`trigger_event="observable.created"` and `config.action_path="rdap_domain_lookup"` fires for an
+observable whose `observable_type` is `domain`, the script performs an HTTPS RDAP lookup and returns
+a bounded plain-text summary — registrar, creation date, computed domain age, expiry date, and
+registration status — via the existing `AutomationRun.output_log` → case timeline feedback loop.
+
+### 26.2 Goals
+
+- Reuse the existing script loader/executor and feedback loop; no new endpoint, model, or migration.
+- Skip non-domain observables with a short explanatory line instead of failing the run.
+- Use HTTPS only, with bounded timeout/response size and no caller-supplied URLs.
+- Keep CI offline: mock the bootstrap and RDAP responses in tests.
+- No secrets in the script; any future configuration must come from environment variables.
+
+### 26.3 Non-goals
+
+- No write to `Observable.enrichment_data`; structured JSON storage is open question Q2.
+- No seeded/auto-enabled playbook unless Q1 chooses one; no UI changes.
+- No RDAP lookup for `ip`, `url`, `fqdn`, or `mail` observables unless Q4 expands the scope.
+- No new third-party dependency; prefer the standard library for HTTP and JSON.
+
+### 26.4 Tasks and acceptance criteria
+
+- **T1 — Script.** Add `automation/scripts/rdap_domain_lookup.py` with module metadata and
+  `run(**values) -> str`. Normalise the `observable` value to a lowercase hostname, gate on
+  `observable_type == "domain"`, fetch RDAP over HTTPS, and return a compact summary.
+  - **AC1.1:** `python manage.py list_playbook_scripts` discovers `rdap_domain_lookup`.
+  - **AC1.2:** A non-domain observable returns a short skip line and makes no HTTP request.
+  - **AC1.3:** A valid mocked RDAP response produces a summary with registrar, created date,
+    computed age in days, expiry date, and status, bounded well under `MAX_OUTPUT_BYTES`.
+  - **AC1.4:** Missing or malformed RDAP data produces a compact failure line, no traceback.
+- **T2 — Network safety.** Resolve the RDAP server from an HTTPS IANA DNS bootstrap document,
+  allowlist the resolved host, refuse redirects to non-allowlisted hosts, cap timeout and response
+  body, and validate the domain value so it cannot become an internal/SSRF target.
+  - **AC2.1:** No plain HTTP, arbitrary URL, or redirect outside the allowlist is followed.
+  - **AC2.2:** No secret or credential is embedded in code, tests, or docs.
+- **T3 — Tests.** Add offline conformance coverage for discovery, the type gate, normalisation,
+  success summary, malformed response, network failure, and SSRF/allowlist guards.
+  - **AC3.1:** All RDAP tests pass with mocked HTTP and no live network.
+- **T4 — Docs.** Update the `docs/spec/automation.md` runbook example to mention the new script
+  and record the resolved answers from §26.5 here.
+  - **AC4.1:** Docs describe how to configure the playbook and the no-secrets rule.
+
+### 26.5 Open questions (defaults proposed, unconfirmed)
+
+1. **Q1 — Delivery:** script only, or also add a seeded inactive playbook? Default: **script only**.
+2. **Q2 — Output:** plain-text `output_log` summary, or structured `enrichment_data` JSON?
+   Default: **plain text only**; structured storage needs a separate write path.
+3. **Q3 — RDAP discovery:** IANA DNS bootstrap + allowlisted RDAP host, or a public resolver such
+   as `rdap.org`? Default: **IANA bootstrap + allowlist**.
+4. **Q4 — Type scope:** `domain` only, or also `fqdn` / `url`? Default: **`domain` only**.
+5. **Q5 — Failure policy:** return a short failure line and keep the run `Success`, or raise
+   `ActionError` so the run is `Failed`? Default: **raise `ActionError`** for lookup/parse failure;
+   simple skip line for non-domain observables.
+
+### 26.6 Next action
+
+Confirm or correct Q1–Q5, then implement T1→T4 in order. Record any deviation from the answers in
+this section before merge.
