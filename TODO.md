@@ -273,25 +273,14 @@ follow-up was §6.16-fu1 and completed 2026-11-26. §6.16 P7 (realtime) shipped 
 ## 13. Maintainability — oversized modules (added 2026-11-04)
 
 Follow-up audit after the `ui/views.py` → `ui/views/` split (`64eef0c`). These are refactor candidates, not
-product features. Priority: **P0** next structural change; **P1** next wave; **P2** when the module is next
-touched or before adding features; **P3** monitor only — do not split purely for line count. The small
-template-hygiene cleanup from the same audit (§13.21) is complete and recorded in `COMPLETED.md`.
+product features. Priority: **P1** next wave; **P2** when the module is next touched or before adding
+features; **P3** monitor only — do not split purely for line count. The P0 item (§13.1) and the small
+template-hygiene cleanup (§13.21) are complete and recorded in `COMPLETED.md`.
 
 **Definition of done for every §13 task:** move-only where possible; preserve public imports, URL names/order,
 auth and tenant checks, status codes, request/response bodies, form field names and templates; add compatibility
 re-exports where callers/tests patch the old path; no schema changes unless separately planned; `make check` and
 the full `pytest` suite green; record any deviation in the plan.
-
-### P0 — next structural refactor
-
-- [ ] **13.1 — Split `cases/views.py` into a `cases/views/` package.**
-  Current: **2,821 lines**, 100+ handlers covering case CRUD, tasks, observables, tags, statuses, comments, pages,
-  shares, attachments, bulk operations, templates, procedures, TTPs and export — the most mixed module in the
-  repo. Target: `cases/views/` with `_common.py`, `cases.py`, `tasks.py`, `observables.py`, `tags.py`,
-  `statuses.py`, `comments.py`, `pages.py`, `shares.py`, `attachments.py`, `bulk.py`, `templates.py`,
-  `procedures.py`, `export.py`; keep `__init__.py` compatibility re-exports or update `cases/urls.py` in one
-  pass. Watch: `cases/urls.py` ordering is load-bearing (specific sub-resources must precede the bare case
-  detail route), and every handler keeps its existing auth/tenant checks. Source: §13 audit 2026-11-04.
 
 ### P1 — next wave
 

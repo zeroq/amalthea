@@ -45,7 +45,7 @@ def test_an_unhandled_error_on_a_real_endpoint_is_a_500_with_the_fixed_message(
 ) -> None:
     """End-to-end: a view-level crash (here, `parse_timestamp` raising) answers with the fixed body.
 
-    `parse_timestamp` is monkeypatched at its `cases.views` name — the module global the view
+    `parse_timestamp` is monkeypatched at its `cases.views.cases` name — the module global the view
     looks up at call time — so the exception travels the full DRF `dispatch → handle_exception
     → EXCEPTION_HANDLER` chain, which is the path the fixed envelope exists for. (The
     hostile-input paths that *used* to crash here are now 400s — FIX-4 — so a deliberately
@@ -55,7 +55,7 @@ def test_an_unhandled_error_on_a_real_endpoint_is_a_500_with_the_fixed_message(
     def boom(*args: object, **kwargs: object) -> None:
         raise ValueError("secret-dsn=hunter2-really")
 
-    monkeypatch.setattr("cases.views.parse_timestamp", boom)
+    monkeypatch.setattr("cases.views.cases.parse_timestamp", boom)
     case = _case("Unhandled error case", org=analyst.org)
     response = api.post(
         f"/api/v1/case/{case.id}/customEvent",

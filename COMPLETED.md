@@ -2286,6 +2286,24 @@ historical plans and verification reports still cite the TODO IDs recorded here.
   `docs/verification/VERIFY-2026-11-26-auto-ingest-bundling-performance.md`, and
   `docs/reviews/REVIEW-2026-11-26-auto-ingest-bundling.md`.
 
+### §13.1 — Split `cases/views.py` into a `cases/views/` package
+- Closed 2026-11-26. Plan: `docs/planning/PLAN-2026-11-26-cases-views-modularization.md`; implementation
+  brief: `docs/planning/IB-2026-11-26-cases-views-modularization.md`.
+- Converted the 2,990-line monolith into a `cases/views/` package with `_common.py` plus 13 domain
+  modules and a compatibility-only `__init__.py`. All 105 top-level definitions, 42 `@api_view`
+  handlers, 71 route names/order, and the 44-name `__all__` are preserved; `cases/urls.py` is
+  byte-identical.
+- The only test edits are the `parse_timestamp` patch target in `tests/conformance/test_errors.py`
+  and the `cases/views/` wire-boundary allowlist/matcher in
+  `tests/conformance/test_wire_boundary.py`.
+- Verification: AST comparison against `HEAD:cases/views.py` reports no missing, extra, or changed
+  definitions and no decorator drift; import smoke passed; targeted suites **634 passed**;
+  `make check` passed (ruff, format, mypy over 168 files, Django/migrations/CSS/playbook gates);
+  `scripts/secret-scan.sh --tracked` clean; `git diff --check` clean. User-provided full pytest log
+  `/tmp/amalthea-full-pytest.log` is green: **4444 passed, 3 skipped, 15 warnings, 2 subtests passed
+  in 681.75s**.
+- Deviations **D-13.1-1 through D-13.1-5** are recorded in the approved plan; no new deviation.
+
 ### Stale priority rows removed
 - §10.1 role-scoped user management (record already in the 2026-10-20 COMPLETED entry), §12.1-fu1,
   §12.4, §6.13, §10.9, §10.11, §12.9, §22, §23, §24, and §25. §10.12-fu3 and §14 subitems were closed

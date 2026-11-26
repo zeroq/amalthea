@@ -72,6 +72,9 @@ WIRE_BOUNDARY = (
     # The UI package was `ui/views.py` (matched by `*/views.py`) before the 2026-11-04 split.
     # Its browser-form field names are a presentation boundary, not internal TheHive reads.
     "ui/views/",
+    # The API case-view package was `cases/views.py` (matched by `*/views.py`) before the
+    # 2026-11-26 split. It is the same presentation boundary with a package path now.
+    "cases/views/",
     # identity/ uses Django field suffixes like `_id` which trigger false positives.
     "identity/",
 )
@@ -156,6 +159,7 @@ def test_the_boundary_matcher() -> None:
     assert is_wire_boundary("query/engine.py")
     assert is_wire_boundary("core/serializers.py")
     assert is_wire_boundary("cases/views.py")
+    assert is_wire_boundary("cases/views/cases.py")
     assert is_wire_boundary("cases/urls.py")
     assert is_wire_boundary("ui/views/observables.py")
     assert is_wire_boundary("alerts/export.py")
