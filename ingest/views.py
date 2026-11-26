@@ -47,6 +47,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+from cases.correlation import AutoBundleDecision, auto_bundle_ingested_alert
 from identity.models import IngestionToken
 from ingest.mapping import apply_mapping, resolve_mapping_config
 from ingest.models import IngestionSource
@@ -261,6 +262,24 @@ def webhook_alerts(request: HttpRequest) -> HttpResponse:
         return _error(400, "Bad request", type_="badRequest", fields=detail)
 
     alert = stored.alert
+
+    # Auto-bundle newly created alerts only (plan §7.1, P4.1)
+    decision: AutoBundleDecision | None = None
+    warnings = list(stored.warnings)
+    if stored.created:
+        decision = auto_bundle_ingested_alert(
+            alert=alert,
+            source=source,
+            org_id=token.organisation_id,
+            created=True,
+        )
+        if decision.status == "bundled":
+            warnings.append(f"auto_bundle: {decision.reason}")
+        elif decision.status == "skipped":
+            warnings.append(f"auto_bundle_skipped: {decision.reason}")
+        elif decision.status == "failed":
+            warnings.append(f"auto_bundle_failed: {decision.reason}")
+
     # The path no longer names the feed, so this line is the provenance trail for an ingest.
     logger.info(
         "ingest %s source=%s token=%s org=%s alert=%s",
@@ -287,7 +306,17 @@ def webhook_alerts(request: HttpRequest) -> HttpResponse:
             "created_at": alert.created_at.isoformat() if alert.created_at else None,
             "ingestion_source": str(source.id),
             "created": stored.created,
-            "warnings": stored.warnings,
+            "warnings": warnings,
+            "auto_bundle": {
+                "status": decision.status if decision else None,
+                "reason": decision.reason if decision else None,
+                "mode": decision.mode if decision else None,
+                "window_minutes": decision.window_minutes if decision else None,
+                "case_id": str(decision.case_id)
+                if decision is not None and decision.status == "bundled" and decision.case_id
+                else None,
+                "signal": decision.signal if decision else None,
+            },
         },
         status=201 if stored.created else 200,
     )

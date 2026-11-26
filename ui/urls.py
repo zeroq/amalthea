@@ -390,6 +390,17 @@ urlpatterns = [
         views.update_agent_autonomy,
         name="ui-settings-agent-autonomy-update",
     ),
+    path("settings/correlation", views.settings_correlation, name="ui-settings-correlation"),
+    path(
+        "settings/correlation/<uuid:organisation_id>",
+        views.settings_correlation_for_org,
+        name="ui-settings-correlation-org",
+    ),
+    path(
+        "settings/correlation/<uuid:organisation_id>/update",
+        views.update_correlation_rule,
+        name="ui-settings-correlation-update",
+    ),
     path("settings/sources", views.settings_sources, name="ui-settings-sources"),
     path("settings/sources/token", views.settings_token_create, name="ui-settings-token-create"),
     path("settings/audit-log", views.settings_audit_log, name="ui-settings-audit-log"),

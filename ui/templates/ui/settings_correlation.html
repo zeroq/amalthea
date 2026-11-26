@@ -1,0 +1,77 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Correlation settings · Amalthea{% endblock %}
+{% block heading %}Correlation settings{% endblock %}
+
+{% block content %}
+{% include "ui/_settings_nav.html" with active_tab=active_tab %}
+
+<div class="card">
+  <div class="card-header">
+    <h2>Automatic alert bundling — {{ org.name }}</h2>
+  </div>
+
+  {% if rule.enabled %}
+  <div class="banner banner--warning" role="status">
+    <p><strong>Automatic case mutation is enabled.</strong> New alerts may be attached to existing open cases when their correlation key or shared observables match.</p>
+  </div>
+  {% endif %}
+
+  <form method="post" action="{{ update_url }}" class="settings-form">
+    {% csrf_token %}
+    <fieldset>
+      <legend>Rule</legend>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="id_enabled">Enable automatic bundling</label>
+          <input type="checkbox" name="enabled" id="id_enabled"
+                 {% if submitted.enabled or rule.enabled and not form_errors %}checked{% endif %}>
+          <small>Off by default. Each ingestion source also has its own correlation kill switch.</small>
+        </div>
+
+        <div class="form-group">
+          <label for="id_match_mode">Match mode</label>
+          <select name="match_mode" id="id_match_mode">
+            <option value="correlation_key"
+                    {% if submitted.match_mode == "correlation_key" or not form_errors and rule.match_mode == "correlation_key" %}selected{% endif %}>
+              Correlation key
+            </option>
+            <option value="shared_observable"
+                    {% if submitted.match_mode == "shared_observable" or not form_errors and rule.match_mode == "shared_observable" %}selected{% endif %}>
+              Shared observable
+            </option>
+          </select>
+          <small>Correlation key is the default and uses the mapped alert correlation key.</small>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="id_window_minutes">Window (minutes)</label>
+          <input type="number" name="window_minutes" id="id_window_minutes" min="1" max="60"
+                 value="{% if form_errors %}{{ submitted.window_minutes }}{% else %}{{ rule.window_minutes }}{% endif %}">
+          <small>Must be between 1 and 60. The clock is anchored to server time.</small>
+        </div>
+      </div>
+    </fieldset>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">
+        <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+        Save correlation settings
+      </button>
+      <a class="btn btn-secondary" href="{% url 'ui-settings-sources' %}">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>How candidates are chosen</h2>
+  <p class="hint">
+    Only open cases in this organisation are considered. Closed cases, shared cases from other
+    organisations, and alerts that are already linked are skipped. A successful match writes the
+    alert link, case ledger entries, and an audit row in one transaction.
+  </p>
+</div>
+{% endblock %}

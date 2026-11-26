@@ -648,9 +648,45 @@ Per `PLAN-2026-11-26-section6-realtime-and-search.md`. Verification:
 
 **Not a deviation, recorded for clarity:** the org room is server-push only; any client frame closes `4000`. That is narrower than the case room but matches the approved protocol in the plan. Presence joins no longer broadcast a frame; only `presence_ping` and disconnect broadcast counts, which prevents a newly connected socket from receiving an unsolicited presence frame before its ledger sync.
 
+## Wave 6.3 — Auto-ingest-time bundling (2026-11-26, 12.3-fu1)
+
+Per `PLAN-2026-11-26-auto-ingest-bundling.md`. Verification: focused conformance suites.
+
+| ID | Plan said | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **W63-1** | One row per org via `OneToOneField` | `CorrelationRule.organisation` is a `OneToOneField` to `identity.Organisation` | `cases/models.py` · `migrations/0029_correlation_rule.py` |
+| **W63-2** | `enabled=False` by default | `CorrelationRule.enabled` defaults to `False` | `cases/models.py` |
+| **W63-3** | `match_mode` choices `correlation_key/shared_observable`, default `correlation_key` | `CorrelationRule.match_mode` has choices and defaults to `correlation_key` | `cases/models.py` |
+| **W63-4** | `window_minutes` constrained 1..60 | `CorrelationRule.window_minutes` has `in_range` CHECK constraint 1..60 | `cases/models.py`, `core/enums.py::in_range` |
+| **W63-5** | `updated_by` nullable User SET_NULL | `CorrelationRule.updated_by` is `ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)` | `cases/models.py` |
+| **W63-6** | `db_table = "case_correlation_rule"` | Table name is `case_correlation_rule` | `cases/models.py`, `migrations/0029_correlation_rule.py` |
+| **W63-7** | `in_values`/`in_range` constraints from `core.enums` | Constraints use `in_values("correlation_rule_match_mode_valid", ...)` and `in_range("correlation_rule_window_range", ...)` | `cases/models.py`, `core/enums.py` |
+| **W63-8** | Auto-bundle service skips before querying | `auto_bundle_ingested_alert()` skips on replay, already_linked, tenant_mismatch, rule_disabled, source_correlation_disabled, no correlation key, no observables | `cases/correlation.py` |
+| **W63-9** | Atomic bundle: transaction, re-fetch with `select_for_update()`, re-check, merge, record | `auto_bundle_ingested_alert()` wraps final re-check + merge + record in `transaction.atomic()` | `cases/correlation.py` |
+| **W63-10** | Actor is `None` | `record_alert_bundled(actor=None)` and `merge_alert_into_case(alert, case, actor=None)` | `cases/correlation.py`, `alerts/escalation.py` |
+| **W63-11** | No `TimelineEvent.objects.create` direct call | `record_alert_bundled()` uses `append_timeline_event()` — no direct ORM write | `cases/correlation.py:583` |
+| **W63-12** | Fail-soft ingest: alert stored, response explains why bundling was skipped | Ingest view adds `auto_bundle` to JSON response with generic warning lines; never exposes exception text or raw payload | `ingest/views.py` |
+| **W63-13** | Known refusal/ValidationError caught, unexpected exceptions logged and return `failed` | Service catches `PermissionDenied`, `ValidationError`, and generic `Exception`; logs without exposing secrets | `cases/correlation.py` |
+| **W63-14** | Webhook response `auto_bundle` field added | `POST /api/v1/alerts/webhook/` includes `auto_bundle` status/reason/mode/window_minutes/case_id/signal | `ingest/views.py`, `docs/spec/api.md` |
+| **W63-15** | Rule configuration changes audit config | Configuration changes write `case.correlation_rule_changed` audit rows from the settings UI | `ui/views/correlation.py`, `tests/conformance/test_auto_ingest_bundling_settings.py`, Plan §4.3 P3-D10 |
+| **W63-16** | Postgres benchmark proves index plans and p95 before enabling by default | Benchmark executed against the `.env`-backed Postgres: all p95 values are under 500 ms and all indexed-seek checks pass, but the planner chose `alert_case_id_be755fe7` and `uniq_case_observable` instead of the plan-named `alert_corrkey_date_idx` / `caseobs_obs_case_idx`; auto-bundling remains disabled by default and no new index was added. **Accepted by user 2026-11-26.** | `cases/management/commands/benchmark_auto_bundle_candidates.py`, `docs/verification/VERIFY-2026-11-26-auto-ingest-bundling-performance.md` |
+| **W63-17** | `verifier`, `qa-tester` and `security-auditor` agents independently sign off | All three agents were unavailable in this session; verification and security review were completed manually by the project lead and are labelled as such in their reports. **Accepted by user 2026-11-26.** | `docs/verification/VERIFY-2026-11-26-auto-ingest-bundling.md`, `docs/reviews/REVIEW-2026-11-26-auto-ingest-bundling.md` |
+| **W63-18** | Postgres-focused pytest suites pass with `--create-db` | Resolved in the dev environment by allowing `POSTGRES_TEST_DB_NAME` in `amalthea/settings/test_pg.py`, flushing the `.env` `amalthea` dev DB, restoring migration seed rows, and running with `--reuse-db`; result `135 passed, 1 skipped`. Server auth and `.env` values were not changed, and `--create-db` was intentionally not used because it would drop the dev DB | `amalthea/settings/test_pg.py`, `docs/verification/VERIFY-2026-11-26-auto-ingest-bundling.md` |
+| **W63-19** | AC-P7.5 closeout evidence includes a commit hash | The tracker item was closed with evidence as requested, but no commit was requested or created in this session, so the commit hash is deferred until an explicit commit/push request is made | `COMPLETED.md`, `docs/verification/VERIFY-2026-11-26-auto-ingest-bundling.md` |
+
 ## Evidence index
 
-- `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §13 — full P7/P8/P10/P11 records
-- `docs/reviews/REVIEW-2026-10-0{3,4,5}-phase3-schema-gate*.md` — M-series schema review
-- `docs/planning/VERIFY-2026-10-07-phase10.md`, `VERIFY-2026-10-07-phase11.md` — independent checks
-- `docs/decisions/ADR-002-thehive-api-compatibility.md` — the compatibility contract
+- `docs/planning/PLAN-2026-11-26-auto-ingest-bundling.md` — full plan
+- `docs/planning/IB-2026-11-26-auto-ingest-bundling.md` — implementation brief
+- `docs/spec/data-model.md` — `CorrelationRule` model
+- `docs/spec/api.md` — webhook `auto_bundle` response
+- `docs/spec/deviations.md` — this register
+- `cases/migrations/0029_correlation_rule.py` — migration
+- `cases/models.py` — `CorrelationRule` model
+- `cases/correlation.py` — auto-bundle service
+- `ingest/views.py` — ingest integration
+- `ui/views/correlation.py`, `ui/templates/ui/settings_correlation.html` — settings UI
+- `tests/conformance/test_auto_ingest_bundling.py`, `tests/conformance/test_auto_ingest_bundling_settings.py` — conformance evidence
+- `cases/management/commands/benchmark_auto_bundle_candidates.py` — Postgres benchmark command
+- `docs/verification/VERIFY-2026-11-26-auto-ingest-bundling.md` — manual verification report
+- `docs/reviews/REVIEW-2026-11-26-auto-ingest-bundling.md` — manual security review

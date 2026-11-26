@@ -1,13 +1,11 @@
 # TODO — Amalthea
 
 Open work only. Shipped work and closed-item history live in [`COMPLETED.md`](./COMPLETED.md).
-Last updated: 2026-11-26 — moved every completed item out of this tracker into
-[`COMPLETED.md`](./COMPLETED.md), pruned stale priority rows, and recorded the source mapping editor tab
-work as shipped in commit `7995b31b`. The latest full-suite log (`/tmp/amalthea-full-pytest.log`) is stale:
-it reports **1 failed, 4312 passed, 3 skipped, 15 warnings, 2 subtests passed in 988.01s**; the failure was
-the CSP inline `onchange` issue, fixed after that run. Post-fix targeted verification is green
-(**844 passed** across inline-assets/source-submapping/source-detail suites), static gates/hooks/secret scans
-pass, and a fresh full-suite run remains pending. The priority table below is the source of truth for open work.
+Last updated: 2026-11-26 — closed §12.3-fu1 into [`COMPLETED.md`](./COMPLETED.md) after the user accepted
+deviations W63-16 and W63-17. The latest full-suite log (`/tmp/amalthea-full-pytest.log`) is green:
+**4441 passed, 3 skipped, 15 warnings, 2 subtests passed in 1508.09s**. The dashboard layout regression
+introduced by `235bc004` was repaired and verified with targeted UI suites. Static gates, hooks and secret
+scans pass. The priority table below is the source of truth for open work.
 
 ---
 
@@ -19,15 +17,14 @@ to its narrow follow-up on 2026-11-13 (see `COMPLETED.md`).
 
 | Priority | Item | Description | Impact |
 |----------|------|-------------|--------|
-| **1** | **§12.3-fu1 — Automatic ingest-time bundling** | `correlation_key` is derived/indexed but only the manual Similar/attach path consumes it. Auto-bundle was deferred (Q1b). The §12.1-fu1 measurement prerequisite is complete. | **High** — the orchestration promise of Modules B+C. |
-| **2** | **S3 + S5 (+ M3 residual)** | **S3** per-account lockout on the API login + stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. M3 shipped; residual same-org cleartext secrets. | **Medium (security)** |
-| **3** | **§7.4 + §8.5 + §11.4-L1/I1 — Quality-gate remainder** | Tailwind source/artifact split; mutation coverage scope; unaudited procedure attaches; pre-existing leaky flash messages. | **None** — engineering hygiene. |
-| **4** | **§10.12-fu1 / fu2 / fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, test gaps. `fu3` (admin paused-state display) is complete. | **Low–Medium.** |
-| **5** | **§14.3 / 14.4 / 14.6 / 14.7 / 14.8 / 14.12 — Alert tag follow-ups** | Parity, update-vs-delete scope decision, query cleanup, tag-swap-file purge, and remaining polish. `14.1`, `14.2`, `14.9`–`14.11` are complete. | **Low.** |
-| **6** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
-| **7** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
-| **8** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
-| **9** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. `13.21` is complete. | **None** — hygiene. |
+| **1** | **S3 + S5 (+ M3 residual)** | **S3** per-account lockout on the API login + stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. M3 shipped; residual same-org cleartext secrets. | **Medium (security)** |
+| **2** | **§7.4 + §8.5 + §11.4-L1/I1 — Quality-gate remainder** | Tailwind source/artifact split; mutation coverage scope; unaudited procedure attaches; pre-existing leaky flash messages. | **None** — engineering hygiene. |
+| **3** | **§10.12-fu1 / fu2 / fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, test gaps. `fu3` (admin paused-state display) is complete. | **Low–Medium.** |
+| **4** | **§14.3 / 14.4 / 14.6 / 14.7 / 14.8 / 14.12 — Alert tag follow-ups** | Parity, update-vs-delete scope decision, query cleanup, tag-swap-file purge, and remaining polish. `14.1`, `14.2`, `14.9`–`14.11` are complete. | **Low.** |
+| **5** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
+| **6** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
+| **7** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
+| **8** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. `13.21` is complete. | **None** — hygiene. |
 ---
 
 ## 3. Open decisions
@@ -234,7 +231,7 @@ truncated or decorative. None of these is a regression (they shipped that way) a
 Recommended: one small plan (`PLAN-…-analyst-ergonomics`) covering **§12.1 + §12.2 + §12.4** together, since
 they share the list-view plumbing and are cheap. **§10.7/Q-D4 is now settled**: §12.3's "Similar" surface was
 re-opened and shipped 2026-10-18 as a read-only, correlation-ranked panel plus a correlation-ranked, audited
-attach path — **automatic** ingest-time bundling was deliberately deferred (see §12.3 and §12.3-fu1). §6.16 P6
+attach path — **automatic** ingest-time bundling shipped 2026-11-26 as §12.3-fu1. §6.16 P6
 (search) shipped 2026-11-02 (`6427beeb`) after the §12.1 pager fix; its verification/security/Postgres
 follow-up was §6.16-fu1 and completed 2026-11-26. §6.16 P7 (realtime) shipped and verified 2026-11-26 in
 `PLAN-2026-11-26-section6-realtime-and-search.md`.
@@ -271,20 +268,6 @@ follow-up was §6.16-fu1 and completed 2026-11-26. §6.16 P7 (realtime) shipped 
     of success when the merge is refused. Pinned by
     `test_alert_fuzzy_similarity.py::TestCrossOrgIsolation::test_superadmin_cross_org_link_is_refused_and_not_persisted`.
     **Not part of the fuzzy feature.**
-- [ ] **12.3-fu1 — Automatic ingest-time bundling was deferred by decision Q1b (the "more urgent half" of
-  Module B).** Plan: `docs/planning/PLAN-2026-10-18-correlation-similar-cases.md` §5.x (scope) and §11 (the
-  pre-settled answers, so the trigger design is **not** re-litigated when this starts).
-  Pre-settled: **Q3c** — a rule matches on `correlation_key` **or** a shared observable, configurable,
-  defaulting to `correlation_key` within a window; **Q4a** — the rule lives in a minimal per-org
-  `CorrelationRule` (`enabled=False` by default, `window_minutes=10`, capped), and it was deliberately
-  **not** built in the §12.3 wave because a model with no consumer is exactly the inert-artifact problem
-  tracked as TODO item 1; **Q5a** — evaluate synchronously in the ingest request, behind `enabled=False`,
-  with a bounded candidate set (the seek is `alert_corrkey_date_idx`, already indexed).
-  AGENTS.md's example — "identical destination IP within a 10-minute window" — is exactly this rule.
-  Hard requirements when it lands: it must **never** be silent (ledger entry naming the key + window, plus
-  an `AuditLog` row — the machinery now exists as `cases/correlation.py::record_alert_bundled`); it must
-  never choose a **closed** case; §12.1-fu1 landed 2026-11-26 and its indexed plans/timings are the
-  baseline for deciding whether the ingest-time candidate query is acceptable. Source: §12.3 decision 2026-10-18.
 ---
 
 ## 13. Maintainability — oversized modules (added 2026-11-04)

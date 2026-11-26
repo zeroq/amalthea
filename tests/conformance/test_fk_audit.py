@@ -66,6 +66,7 @@ EXPECTED_FK_COLUMNS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("owner_org_id",),
         ("source_template_id",),
     ),
+    "case_correlation_rule": (("organisation_id",), ("updated_by_id",)),
     # REVIEW M2: `source_id` was renamed to `ingestion_source_id`; the old column name is
     # asserted absent in test_phase3_schema.py.
     "alert": (
@@ -113,6 +114,11 @@ EXPECTED_ON_DELETE: dict[tuple[str, str, str], object] = {
     # must stay deletable. SET_NULL detaches the seeded cases (they keep the defaults already
     # applied) instead of refusing the delete or cascading into the cases themselves.
     ("cases", "Case", "source_template"): models.SET_NULL,
+    # ---- Automatic ingest-time bundling rule (12.3-fu1) --------------------------------
+    # The rule is owned by exactly one tenant and disappears with it; `updated_by` is audit
+    # provenance only, so deleting an analyst detaches the attribution.
+    ("cases", "CorrelationRule", "organisation"): models.CASCADE,
+    ("cases", "CorrelationRule", "updated_by"): models.SET_NULL,
     # ---- Task: AGENTS.md §3 "Case 1 —— 0..* Task" ---------------------------------------
     # A task with a NULL case is not a lower-cardinality relationship, it is an orphan.
     ("cases", "Task", "case"): models.CASCADE,
@@ -264,7 +270,7 @@ def fk_inventory() -> dict[tuple[str, str, str], object]:
         (model._meta.app_label, model.__name__, field.name): declared_on_delete(field)
         for _, model in own_models()
         for field in model._meta.fields
-        if field.many_to_one
+        if field.many_to_one or field.one_to_one
     }
 
 
@@ -291,7 +297,8 @@ def test_fk_audit_covers_the_whole_model_inventory() -> None:
     # 68 = 67 + Case.source_template (template provenance, SET_NULL).
     # 72 = 68 + CaseContainmentAction x3 (case, term, created_by).
     # 75 = 72 + RejectedObservable x3 (owner_org, data_type, alert).
-    assert len(actual) == 75, f"expected the full FK set, found only {len(actual)}"
+    # 77 = 75 + CorrelationRule.organisation + CorrelationRule.updated_by (12.3-fu1).
+    assert len(actual) == 77, f"expected the full FK set, found only {len(actual)}"
 
 
 @pytest.mark.django_db
@@ -322,7 +329,7 @@ def test_every_fk_declares_a_related_name() -> None:
         f"{model.__module__}.{model.__name__}.{field.name}"
         for _, model in own_models()
         for field in model._meta.fields
-        if field.many_to_one and field.remote_field.related_name is None
+        if (field.many_to_one or field.one_to_one) and field.remote_field.related_name is None
     ]
     assert not offenders, (
         "FK(s) without an explicit related_name; a second FK to the same target would "
@@ -342,6 +349,9 @@ def test_no_cascade_is_reachable_from_a_longer_lived_row() -> None:
     cascades = {key for key, value in EXPECTED_ON_DELETE.items() if value is models.CASCADE}
     assert cascades == {
         ("cases", "Task", "case"),
+        # A correlation rule is the tenant's own configuration row (12.3-fu1): it has no
+        # meaning without that organisation and must not survive as an orphan.
+        ("cases", "CorrelationRule", "organisation"),
         # A task note is owned by its task: deleting the task must delete its log, or the note
         # becomes an orphan no view can reach.
         ("cases", "TaskNote", "task"),
@@ -687,7 +697,7 @@ def test_database_fks_match_the_models() -> None:
         declared = {
             (f.column, f.target_field.model._meta.db_table)
             for f in model._meta.fields
-            if f.many_to_one and f.column
+            if (f.many_to_one or f.one_to_one) and f.column
         }
         actual = {(cols[0], target[0]) for cols, target in _fks_in_database(table)}
         if declared != actual:

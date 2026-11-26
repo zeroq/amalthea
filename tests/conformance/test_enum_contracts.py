@@ -34,7 +34,7 @@ from django.db import IntegrityError, transaction
 
 from alerts.models import Alert, AlertStatus
 from automation.models import AutomationRun, Playbook
-from cases.models import Case, CaseStatus, CaseTemplate, CustomField, Task
+from cases.models import Case, CaseStatus, CaseTemplate, CorrelationRule, CustomField, Task
 from identity.models import User
 from ingest.models import IngestionSource
 from observables.models import Observable, ObservableSuggestion, ObservableType, RejectedObservable
@@ -62,6 +62,7 @@ CHOICE_FIELDS: dict[tuple[str, str], str] = {
     ("case_record", "tlp"): "case_tlp_range",
     ("case_record", "pap"): "case_pap_range",
     ("case_status", "stage"): "case_status_stage_valid",
+    ("case_correlation_rule", "match_mode"): "correlation_rule_match_mode_valid",
     ("case_template", "severity"): "case_template_severity_range",
     ("case_template", "tlp"): "case_template_tlp_range",
     ("case_template", "pap"): "case_template_pap_range",
@@ -277,6 +278,9 @@ _SAMPLE_ROW_BUILDERS: dict[str, Callable[[User, Any], Any]] = {
         title="enum probe", status=_case_status(), owner_org=default_org
     ),
     "case_status": lambda *_: _case_status(),
+    "case_correlation_rule": lambda _analyst, default_org: CorrelationRule.objects.create(
+        organisation=default_org
+    ),
     "alert": lambda analyst, default_org: Alert.objects.create(
         type="t",
         source="s",
@@ -341,6 +345,7 @@ GRADED_DOMAIN: dict[str, tuple[str, str, tuple[Any, ...]]] = {
     "case_tlp_range": ("case_record", "tlp", (-1, 5, 99)),
     "case_pap_range": ("case_record", "pap", (-1, 4, 99)),
     "case_status_stage_valid": ("case_status", "stage", ("inprogres", "")),
+    "correlation_rule_match_mode_valid": ("case_correlation_rule", "match_mode", ("bogus", "")),
     "case_template_severity_range": ("case_template", "severity", (-1, 5, 99)),
     "case_template_tlp_range": ("case_template", "tlp", (-1, 5, 99)),
     "case_template_pap_range": ("case_template", "pap", (-1, 4, 99)),

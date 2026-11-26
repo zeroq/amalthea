@@ -227,6 +227,57 @@ class Case(UUIDModel, TimeStampedModel):
             self.closed_date = timezone.now()
 
 
+class CorrelationRule(UUIDModel, TimeStampedModel):
+    """Per-organisation correlation rule for automatic alert-to-case bundling.
+
+    One rule per organisation, disabled by default. The rule decides whether a newly
+    ingested alert is automatically attached to an existing open case based on
+    either a correlation_key match or shared observables.
+
+    - `enabled` defaults to False; no org auto-bundles until an admin enables the rule.
+    - `match_mode` chooses between `correlation_key` (default) and `shared_observable`.
+    - `window_minutes` is constrained 1..60 and anchors against server time.
+    - `updated_by` records who last modified the rule; nullable with SET_NULL on delete.
+    """
+
+    organisation = models.OneToOneField(
+        "identity.Organisation",
+        on_delete=models.CASCADE,
+        related_name="correlation_rule",
+    )
+    enabled = models.BooleanField(default=False)
+    match_mode = models.CharField(
+        max_length=32,
+        choices=[
+            ("correlation_key", "Correlation key"),
+            ("shared_observable", "Shared observable"),
+        ],
+        default="correlation_key",
+    )
+    window_minutes = models.PositiveSmallIntegerField(default=10)
+    updated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="correlation_rule_updates",
+    )
+
+    class Meta:
+        db_table = "case_correlation_rule"
+        constraints = [
+            in_values(
+                "correlation_rule_match_mode_valid",
+                "match_mode",
+                ("correlation_key", "shared_observable"),
+            ),
+            in_range("correlation_rule_window_range", "window_minutes", 1, 60),
+        ]
+
+    def __str__(self) -> str:
+        return f"CorrelationRule(org={self.organisation_id}, enabled={self.enabled}, mode={self.match_mode})"
+
+
 class Task(UUIDModel, TimeStampedModel):
     # No case->task composite index exists, so the implicit FK index is kept (M1).
     case = models.ForeignKey(Case, on_delete=models.CASCADE, related_name="tasks")

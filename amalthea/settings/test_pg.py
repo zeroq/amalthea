@@ -12,7 +12,9 @@ Usage:
 
 The container's bootstrap user (POSTGRES_USER=amalthea) is a superuser, so pytest-django can
 create/destroy its `test_amalthea` database. Point elsewhere with the standard POSTGRES_*
-environment variables if the container is not the target.
+environment variables if the container is not the target. `POSTGRES_TEST_DB_NAME` overrides
+pytest-django's test database name for database-scoped `pg_hba.conf` setups; do not combine
+that override with `--create-db` against a database you need to keep.
 """
 
 import os
@@ -31,7 +33,7 @@ DATABASES = {
         # The conformance suite asserts on Postgres-specific DDL (descent into indexdef,
         # partial-index predicates); keep the test DB close to what prod.py would produce.
         "CONN_MAX_AGE": 0,
-        "TEST": {"NAME": "test_amalthea"},
+        "TEST": {"NAME": os.getenv("POSTGRES_TEST_DB_NAME", "test_amalthea")},
     }
 }
 

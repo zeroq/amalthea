@@ -1,5 +1,4 @@
 {% extends "ui/base.html" %}
-{% load ui_tags %}
 {% block title %}Dashboard · Amalthea{% endblock %}
 {% block heading %}Dashboard{% endblock %}
 
@@ -12,82 +11,22 @@
 <span id="live-chip-dashboard" data-ws-url="{% if request.user.org %}{% if request.is_secure %}wss{% else %}ws{% endif %}://{{ request.get_host }}/ws/org/{{ request.user.org.id }}/{% endif %}" data-live-page="dashboard" class="live-chip" role="status" aria-live="polite">Offline</span>
 
 <div id="dashboard-stats" class="stats" aria-label="Counts">
-  <a class="stat" href="{% url 'ui-alert-list' %}">
-    <span class="stat-n">{{ counts.alerts_unlinked }}</span>
-    <span class="stat-l">Alerts waiting</span>
-  </a>
-  <a class="stat" href="{% url 'ui-case-list' %}">
-    <span class="stat-n">{{ counts.cases_open }}</span>
-    <span class="stat-l">Cases open</span>
-  </a>
-  <a class="stat" href="{% url 'ui-case-list' %}?closed=1">
-    <span class="stat-n">{{ counts.cases_total }}</span>
-    <span class="stat-l">Cases total</span>
-  </a>
-  <a class="stat {% if counts.runs_failed %}stat-alarm{% endif %}" href="{% url 'ui-automation-list' %}">
-    <span class="stat-n">{{ counts.runs_total }}</span>
-    <span class="stat-l">Automation runs</span>
-    {% if counts.runs_failed %}<span class="stat-sub">{{ counts.runs_failed }} failed</span>{% endif %}
-  </a>
-</section>
+  {% include "ui/_dashboard_stats.html" %}
+</div>
 
 <div class="cols">
-<section class="card" aria-labelledby="h-alerts">
+  <section class="card" aria-labelledby="h-alerts">
     <h2 id="h-alerts">Newest alerts awaiting triage</h2>
-    {% if recent_alerts %}
-      <div id="dashboard-recent-alerts" class="table-wrap">
-      <table class="data-table">
-        <caption class="sr-only">Recent alerts awaiting triage</caption>
-        <thead>
-          <tr>
-            <th scope="col">Severity</th><th scope="col">Title</th>
-            <th scope="col">Source</th><th scope="col">Seen</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for alert in recent_alerts %}
-            <tr>
-              <td><span class="sev sev-{{ alert.severity|sev_class }}">{{ alert.severity|sev_label }}</span></td>
-              <td><a href="{% url 'ui-alert-detail' alert.id %}">{{ alert.title }}</a></td>
-              <td class="mono">{{ alert.source }}</td>
-              <td class="mono dim">{{ alert.date|date:"Y-m-d H:i" }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      </div>
-    {% else %}
-      <p class="empty">Nothing waiting. Post to <code>/api/v1/alerts/webhook/</code> to watch an alert land here.</p>
-    {% endif %}
+    <div id="dashboard-recent-alerts" class="table-wrap">
+      {% include "ui/_dashboard_recent_alerts.html" %}
+    </div>
   </section>
 
   <section class="card" aria-labelledby="h-cases">
     <h2 id="h-cases">Open cases by severity</h2>
-    {% if open_cases %}
-      <div id="dashboard-recent-cases" class="table-wrap">
-      <table class="data-table">
-        <caption class="sr-only">Open cases by severity</caption>
-        <thead>
-          <tr>
-            <th scope="col">Case</th><th scope="col">Severity</th>
-            <th scope="col">Status</th><th scope="col">Assignee</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for case in open_cases %}
-            <tr>
-              <td><a href="{% url 'ui-case-detail' case.number %}">#{{ case.number }}</a> {{ case.title }}</td>
-              <td><span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span></td>
-              <td>{{ case.status.display_label }}</td>
-              <td>{{ case.assignee.login|default:"—" }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      </div>
-    {% else %}
-      <p class="empty">No open cases.</p>
-    {% endif %}
+    <div id="dashboard-recent-cases" class="table-wrap">
+      {% include "ui/_dashboard_recent_cases.html" %}
+    </div>
   </section>
 </div>
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import timedelta
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,79 @@ def browser(analyst: User) -> Client:
     client = Client()
     assert client.login(username="analyst", password="hunter2-correct")
     return client
+
+
+class _DomNode:
+    """Small DOM node used to assert real tag nesting in rendered pages."""
+
+    def __init__(self, tag: str, attrs: dict[str, str | None]) -> None:
+        self.tag = tag
+        self.attrs = attrs
+        self.children: list[_DomNode] = []
+        self.parent: _DomNode | None = None
+
+
+class _Dom(HTMLParser):
+    """Minimal stdlib DOM builder; no BeautifulSoup dependency for one structural guard."""
+
+    _VOID = frozenset(
+        {
+            "area",
+            "base",
+            "br",
+            "col",
+            "embed",
+            "hr",
+            "img",
+            "input",
+            "link",
+            "meta",
+            "param",
+            "source",
+            "track",
+            "wbr",
+        }
+    )
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.root = _DomNode("#root", {})
+        self._stack = [self.root]
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._add(tag, attrs, push=tag not in self._VOID)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._add(tag, attrs, push=False)
+
+    def handle_endtag(self, tag: str) -> None:
+        for index in range(len(self._stack) - 1, 0, -1):
+            if self._stack[index].tag == tag:
+                del self._stack[index:]
+                return
+
+    def _add(self, tag: str, attrs: list[tuple[str, str | None]], *, push: bool) -> None:
+        node = _DomNode(tag, dict(attrs))
+        node.parent = self._stack[-1]
+        node.parent.children.append(node)
+        if push:
+            self._stack.append(node)
+
+
+def _classes(node: _DomNode) -> set[str]:
+    return set((node.attrs.get("class") or "").split())
+
+
+def _nodes(root: _DomNode):
+    yield root
+    for child in root.children:
+        yield from _nodes(child)
+
+
+def _one(root: _DomNode, predicate) -> _DomNode:
+    matches = [node for node in _nodes(root) if predicate(node)]
+    assert len(matches) == 1, f"expected exactly one matching node, found {len(matches)}"
+    return matches[0]
 
 
 @pytest.fixture
@@ -731,6 +805,71 @@ def test_the_html_declares_the_accessibility_basics(browser: Client) -> None:
     assert 'class="skip-link"' in body
     assert 'aria-label="Primary"' in body
     assert 'id="main"' in body
+
+
+def test_dashboard_layout_keeps_stats_and_columns_as_siblings(browser: Client) -> None:
+    """The stats grid must not swallow the two-column area or the base template's tail.
+
+    Regression guard for 235bc004: an opening `<div class="stats">` was left with a
+    `</section>` close, so the browser nested the rest of the dashboard inside the stats
+    grid. This checks real tag nesting, not just the presence of class strings.
+    """
+    dom = _Dom()
+    dom.feed(browser.get(reverse("ui-dashboard")).content.decode())
+
+    main = _one(dom.root, lambda node: node.tag == "main" and node.attrs.get("id") == "main")
+    stats = _one(dom.root, lambda node: node.attrs.get("id") == "dashboard-stats")
+    cols = _one(dom.root, lambda node: "cols" in _classes(node))
+    alerts_target = _one(dom.root, lambda node: node.attrs.get("id") == "dashboard-recent-alerts")
+    cases_target = _one(dom.root, lambda node: node.attrs.get("id") == "dashboard-recent-cases")
+    dialog = _one(
+        dom.root,
+        lambda node: node.tag == "dialog" and node.attrs.get("id") == "cheatsheet-modal",
+    )
+
+    assert stats.tag == "div"
+    assert stats.parent is main
+    assert cols.parent is main
+    assert alerts_target.parent is not None and "card" in _classes(alerts_target.parent)
+    assert cases_target.parent is not None and "card" in _classes(cases_target.parent)
+    assert "table-wrap" in _classes(alerts_target)
+    assert "table-wrap" in _classes(cases_target)
+    assert not any(
+        node is not stats and ({"stats", "cols", "card"} & _classes(node)) for node in _nodes(stats)
+    ), "the stats grid swallowed dashboard surfaces"
+    assert dialog.parent is not None and dialog.parent.tag == "body"
+
+
+def test_dashboard_partials_swap_inside_their_targets(browser: Client) -> None:
+    """Partial responses own inner HTML only; the full page owns the wrapper classes/IDs."""
+    url = reverse("ui-dashboard")
+
+    def roots_for(partial: str) -> list[_DomNode]:
+        body = browser.get(
+            url + f"?partial={partial}", headers={"HX-Request": "true"}
+        ).content.decode()
+        dom = _Dom()
+        dom.feed(f'<div id="partial-root">{body}</div>')
+        root = _one(dom.root, lambda node: node.attrs.get("id") == "partial-root")
+        return root.children
+
+    stat_roots = roots_for("stats")
+    assert stat_roots
+    assert all(node.tag == "a" and "stat" in _classes(node) for node in stat_roots)
+    assert not any("stats" in _classes(node) for node in stat_roots)
+
+    for partial in ("recent-alerts", "recent-cases"):
+        roots = roots_for(partial)
+        assert roots
+        assert all(node.tag in {"table", "p"} for node in roots)
+        assert not any("table-wrap" in _classes(node) for node in roots)
+
+
+def test_dashboard_live_chip_is_styled() -> None:
+    css = (Path(__file__).resolve().parents[2] / "ui" / "static" / "ui" / "app.src.css").read_text(
+        encoding="utf-8"
+    )
+    assert ".live-chip" in css
 
 
 def test_list_surfaces_keep_tables_in_a_card(browser: Client) -> None:

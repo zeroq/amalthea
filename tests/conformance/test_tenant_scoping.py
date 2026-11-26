@@ -801,6 +801,8 @@ _UI_GLOBAL_READ_ROUTES: set[str] = {
     # otherwise fail because an admin's cross-org access returns 404 (correct) but the test expects
     # a uniform 200-with-filtered-results for list routes. A dedicated test covers their behaviour.
     "ui-settings",
+    "ui-settings-correlation",
+    "ui-settings-correlation-org",
     "ui-settings-sources",
     "ui-settings-users",
     "ui-settings-users-edit",
@@ -895,6 +897,7 @@ _UI_WRITE_ONLY_ROUTES: set[str] = {
     "ui-suggestions-bulk-reject",
     "ui-suggestions-bulk-ignore",
     "ui-settings-organisations-delete",
+    "ui-settings-correlation-update",
     "ui-settings-users-delete",
     "ui-settings-token-create",
     "ui-settings-token-revoke",

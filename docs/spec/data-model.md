@@ -223,6 +223,16 @@ boundary for all user-reachable paths.
   `case_scope_valid`, `case_type_valid`, `case_data_classification_valid`, `case_phase_valid`,
   `case_verdict_valid`.
 
+### CorrelationRule (`case_correlation_rule`)
+- `organisation` — OneToOneField to `Organisation`, `CASCADE`, `related_name="correlation_rule"`.
+- `enabled` — BooleanField, `default=False`. Organisations start with auto-bundling disabled.
+- `match_mode` — CharField(32), choices `("correlation_key", "Correlation key"), ("shared_observable", "Shared observable")`, `default="correlation_key"`.
+- `window_minutes` — PositiveSmallIntegerField, `default=10`, constrained 1..60 (`correlation_rule_window_range` CHECK).
+- `updated_by` — ForeignKey to `User`, `SET_NULL`, `null=True`, `blank=True`, `related_name="correlation_rule_updates"`.
+- `db_table` is `case_correlation_rule`.
+
+One rule per organisation; missing row means bundling is disabled for that org. Constraints enforce valid `match_mode` values and `window_minutes` range. No new index is needed beyond the OneToOne unique constraint.
+
 ### Containment actions (PLAN-2026-11-10-containment-phase-capture)
 
 - `Case.containment_actions` — M2M to `core.TaxonomyTerm`, through `CaseContainmentAction`,

@@ -87,8 +87,13 @@ ADR-008: the path names no source. The credential is the only routing fact — i
   per-org unique quad `(owner_org, source, type, source_ref)` (ADR-004);
   missing `sourceRef` ⇒ synthesised `sha256:` of the canonical payload (content-based replay dedupe).
 - Response JSON: `_id,id,_type,title,severity,source,type,status,correlation_key,source_ref,
-  sourceRef,date,created_at,ingestion_source,created,warnings` — **201 on first store, 200 on
+  sourceRef,date,created_at,ingestion_source,created,warnings,auto_bundle` — **201 on first store, 200 on
   replay**.
+
+- `auto_bundle` (plan §7.1): present on every response. When `status == "bundled"`, contains
+  `case_id` as a string; otherwise `case_id` is `null`. `warnings` gains one generic line for
+  `skipped`/`failed` decisions, e.g. `auto_bundle_skipped: rule_disabled`. Never includes raw
+  payload or exception text.
 
 ## Search — `GET /api/v1/search` (+ no-slash twin)
 

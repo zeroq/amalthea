@@ -62,6 +62,11 @@
 .global-search .inline-form { display:flex; align-items:center; }
 .global-search input[type="search"] { min-width:200px; flex:1; }
 .search-hit mark { background: color-mix(in oklab, var(--color-accent) 22%, var(--color-bg)); color: var(--color-text); padding: 0 .15em; border-radius: 3px; }
+.live-chip { background: var(--color-bg-inset); border: 1px solid var(--color-line); color: var(--color-text-dim); border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; margin: 0 0 12px; padding: 3px 10px; font: 600 11px/1.6 var(--font-mono); }
+.live-chip::before { background: currentColor; width: 6px; height: 6px; border-radius: 50%; content: ""; display: inline-block; }
+.live-chip[data-state=live] { border-color: color-mix(in oklab, var(--color-ok) 45%, var(--color-line)); color: var(--color-ok); }
+.live-chip[data-state=reconnecting] { border-color: color-mix(in oklab, var(--color-warn) 45%, var(--color-line)); color: var(--color-warn); }
+.live-chip[data-state=offline] { color: var(--color-text-faint); }
 }
 
 /* Custom component/utility rules from the pre-split artifact (originally after @property) */

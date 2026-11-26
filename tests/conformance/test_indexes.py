@@ -227,6 +227,11 @@ def test_no_index_is_left_prefix_covered_by_a_wider_one() -> None:
                 if narrow_name == wide_name:
                     continue
                 narrow, wide = found[narrow_name], found[wide_name]
+                # Postgres reports expression/GIN indexes with no plain columns. They
+                # cannot serve or be served by a btree left-prefix lookup, and an empty
+                # tuple would otherwise look like a prefix of every other index.
+                if not narrow or not wide:
+                    continue
                 if len(wide) > len(narrow) and is_prefix_of(narrow, wide):
                     redundant.append(f"{table}.{narrow_name}{narrow} covered by {wide_name}{wide}")
     assert not redundant, "redundant (prefix-covered) indexes: " + "; ".join(redundant)

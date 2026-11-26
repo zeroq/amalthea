@@ -100,6 +100,15 @@ The user then reran full pytest, overwriting `/tmp/amalthea-full-pytest.log`:
 The three skips are the existing Postgres-only planner/case-numbering guards; the warnings are the
 pre-existing naive-datetime and CSS-token warnings. No failures remain.
 
+A later review found that commit `235bc004` also left a mismatched `</section>` after converting
+`dashboard.html`'s stats wrapper to `<div id="dashboard-stats" class="stats">`, so the browser nested
+the rest of the dashboard inside the stats grid. The live chip and HTMX partial refresh were
+preserved; the wrapper close, partial-swap contract, empty-state targets, partial table markup and
+`.live-chip` styling were repaired, with DOM-structure and partial-root regression tests added in
+`tests/conformance/test_ui_loop.py`. A later user-run full suite recorded `4441 passed, 3 skipped`,
+and the post-repair targeted dashboard suites passed; the full-suite CSS-token warning still listed
+`live-chip`, likely because that run started before the CSS regeneration.
+
 ### Benchmark artifacts
 
 | Artifact | Meaning |

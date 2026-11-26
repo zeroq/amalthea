@@ -138,6 +138,11 @@ from .common import (
     _require_superadmin_ui,
     not_viewer,
 )
+from .correlation import (
+    settings_correlation,
+    settings_correlation_for_org,
+    update_correlation_rule,
+)
 from .dashboard import (
     dashboard,
 )
@@ -379,6 +384,8 @@ __all__ = [
     "settings_agent_revoke",
     "settings_agents",
     "settings_audit_log",
+    "settings_correlation",
+    "settings_correlation_for_org",
     "settings_home",
     "settings_oauth_binding_create",
     "settings_oauth_binding_delete",
@@ -415,4 +422,5 @@ __all__ = [
     "task_note",
     "task_source_payload",
     "taxonomy",
+    "update_correlation_rule",
 ]

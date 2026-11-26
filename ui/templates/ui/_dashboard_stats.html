@@ -1,4 +1,3 @@
-<div class="stats" aria-label="Counts">
   <a class="stat" href="{% url 'ui-alert-list' %}">
     <span class="stat-n">{{ counts.alerts_unlinked }}</span>
     <span class="stat-l">Alerts waiting</span>
@@ -14,6 +13,5 @@
   <a class="stat {% if counts.runs_failed %}stat-alarm{% endif %}" href="{% url 'ui-automation-list' %}">
     <span class="stat-n">{{ counts.runs_total }}</span>
     <span class="stat-l">Automation runs</span>
-    {% if counts.runs_failed %}<span class="stat-sub">{{ counts.runs_failed }} failed{% endif %}</span>
+    {% if counts.runs_failed %}<span class="stat-sub">{{ counts.runs_failed }} failed</span>{% endif %}
   </a>
-</div>

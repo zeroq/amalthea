@@ -2256,6 +2256,36 @@ historical plans and verification reports still cite the TODO IDs recorded here.
   1 skipped`; user's final full pytest run green (`4390 passed, 3 skipped, 15 warnings, 2 subtests
   passed`). The implementation agent did not run full pytest.
 
+### §12.3-fu1 — Automatic ingest-time alert bundling
+- Closed 2026-11-26 after the user accepted deviations W63-16 and W63-17. Plan:
+  `docs/planning/PLAN-2026-11-26-auto-ingest-bundling.md`; implementation brief:
+  `docs/planning/IB-2026-11-26-auto-ingest-bundling.md`.
+- Added per-org `CorrelationRule` (`cases/models.py`, `cases/migrations/0029_correlation_rule.py`) with
+  `enabled=False` default, `correlation_key`/`shared_observable` modes, 1..60 minute window, and DB
+  CHECK constraints. Added the Settings → Correlation UI with admin/superAdmin guards, break-glass
+  audit, kill-switch help on source pages, and keyboard/dark-theme-compliant markup.
+- Implemented the ingest-time service in `cases/correlation.py`: replay/already-linked/tenant/rule/source
+  skips, bounded correlation-key and shared-observable candidate queries, server-time windows, atomic
+  re-fetch with `select_for_update()`, merge, `record_alert_bundled()` ledger entry, and no partial rows
+  on refusal. `ingest/views.py` adds the fail-soft `auto_bundle` response contract; no payload or
+  exception text is exposed.
+- Verified with `test_auto_ingest_bundling.py` (25 passed), `test_auto_ingest_bundling_settings.py`
+  (16 passed), focused/regression suites, Postgres-focused suites against the `.env` dev database
+  (`135 passed, 1 skipped`), and the `.env`-backed Postgres benchmark (`accept-no-index`; p95
+  226.813/14.566/81.022 ms; all indexed-seek checks pass). Full user-run pytest is green:
+  `4441 passed, 3 skipped, 15 warnings, 2 subtests passed in 1508.09s`.
+- Accepted deviations: **W63-16** (Postgres chose equivalent indexes instead of the two plan-named
+  indexes) and **W63-17** (verifier/QA/security agents unavailable; work done manually and labelled).
+  **W63-18** is resolved via `POSTGRES_TEST_DB_NAME` + `--reuse-db` in the dev database.
+  **W63-19** records that the plan’s commit-hash evidence is deferred because no commit was requested.
+- Full-suite guard failures found during verification (enum/FK inventories, UI route inventories,
+  `fa-link` subset CSS) were remediated. The dashboard layout regression introduced by `235bc004`
+  was also repaired while preserving the live chip and HTMX partial refresh, with DOM-structure and
+  partial-root regression tests. Evidence:
+  `docs/verification/VERIFY-2026-11-26-auto-ingest-bundling.md`,
+  `docs/verification/VERIFY-2026-11-26-auto-ingest-bundling-performance.md`, and
+  `docs/reviews/REVIEW-2026-11-26-auto-ingest-bundling.md`.
+
 ### Stale priority rows removed
 - §10.1 role-scoped user management (record already in the 2026-10-20 COMPLETED entry), §12.1-fu1,
   §12.4, §6.13, §10.9, §10.11, §12.9, §22, §23, §24, and §25. §10.12-fu3 and §14 subitems were closed

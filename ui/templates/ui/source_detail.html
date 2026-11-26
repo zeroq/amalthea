@@ -51,7 +51,11 @@
       <span class="sev sev-{{ source.default_severity|sev_class }}">{{ source.default_severity|sev_label }}</span>
       <span class="mono dim">({{ source.default_severity }})</span>
     </dd>
-    <dt>Correlation</dt><dd>{{ source.correlation_enabled|yesno:"on,off" }}</dd>
+    <dt>Correlation</dt>
+    <dd>
+      {{ source.correlation_enabled|yesno:"on,off" }}
+      <small class="dim">Per-feed kill switch for automatic alert bundling.</small>
+    </dd>
     <dt>Alerts</dt><dd>{{ alert_count }}</dd>
     <dt>Tokens</dt><dd>{{ tokens|length }}</dd>
     <dt>Created</dt><dd class="mono dim">{{ source.created_at|date:"Y-m-d H:i" }}</dd>
