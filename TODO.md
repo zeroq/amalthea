@@ -238,26 +238,6 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
 (search) shipped 2026-11-02 (`6427beeb`) after the §12.1 pager fix; its remaining verification/security/
 Postgres work is §6.16-fu1. §6.16 P7 (realtime) remains in its own plan.
 
-- [x] **12.1-fu1 — Measure the filtered-list `COUNT` on Postgres before trusting it (plan §11 Q7).**
-  Closed 2026-11-26 with `docs/verification/VERIFY-2026-11-26-observable-count-performance.md`.
-  `observable_list`'s `q` filter is `data__icontains` over `Observable.data`; the original measurement
-  was deferred because SQLite cannot answer the planner question. It has now been run against a real
-  PostgreSQL endpoint with 100,000 observables.
-  - [x] Added `benchmark_observable_count` Postgres-only harness (deterministic ~100k seed, repeat timings,
-    `EXPLAIN (ANALYZE, BUFFERS)` JSON, 500 ms p95 decision rule). Default `--repeat` is 10 so p95 is not
-    just the single worst sample.
-  - [x] `observable_list` no longer computes the unfiltered `COUNT` unless a filter is active; pinned by the
-    pagination edge-case suite.
-  - [x] Baseline (`index-candidate`) and post-index plans/timings recorded. The slow page cases crossed
-    500 ms before indexing; after adding `obs_data_upper_trgm_idx` on `UPPER(data::text)` with
-    `gin_trgm_ops`, every final p95 is under threshold and the planner uses the trigram index for
-    selective `icontains` matches. Common-marker scans remain but are under threshold.
-  - [x] Fixed the JSONB GIN migrations that emitted invalid btree DDL (`gin_jsonb_ops` opclass) so
-    PostgreSQL applies actual GIN indexes while SQLite remains migration-compatible.
-  - [x] Updated `VERIFY-2026-10-18-ui-pagination.md` Q7 and `REVIEW-2026-10-18-ui-pagination.md` O1
-    from deferred/open to resolved.
-  - [ ] Full pytest remains unrun per the standing user instruction; focused gates passed
-    (`make check`; `127 passed, 1 skipped` across index + pagination suites).
 - [ ] **12.12 — Fuzzy-similarity follow-ups (security FIND-05/03/06/07/11 + one discovered bug), 2026-10-21.**
   From `docs/security/AUDIT-2026-10-20-alert-fuzzy-similarity.md` and Phase E verification:
   - [x] **12.12-fu1 (High, by design — FIND-05) — RESOLVED 2026-11-13 (Option B title gate).** Decision (A)
