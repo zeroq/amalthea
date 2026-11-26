@@ -2,9 +2,9 @@
 
 **Plan:** `docs/planning/PLAN-2026-10-18-ui-pagination.md`  
 **Verified:** 2026-10-18 20:15 UTC  
-**Status:** **Pass** (34/34 ACs met; 0 Not Met; 1 deferred)
+**Status:** **Pass** (34/34 ACs met; 0 Not Met; 0 deferred)
 
-**Revision note:** This report supersedes the previous grading (27/34 met, 4 Not Met, 3 Deviated). The implementation has been repaired in response to the prior findings and qa-tester's 5 pinned DEFECT tests. All 11 DEFECT tests in `tests/conformance/test_ui_pagination_edge_cases.py` now pass. The full conformance suite is green (2571 passed, 3 skipped), ruff/format/mypy clean, no missing migrations.
+**Revision note:** This report supersedes the previous grading (27/34 met, 4 Not Met, 3 Deviated). The implementation has been repaired in response to the prior findings and qa-tester's 5 pinned DEFECT tests. All 11 DEFECT tests in `tests/conformance/test_ui_pagination_edge_cases.py` now pass. The full conformance suite is green (2571 passed, 3 skipped), ruff/format/mypy clean, no missing migrations. The formerly deferred Q7 was resolved on 2026-11-26; see `VERIFY-2026-11-26-observable-count-performance.md`.
 
 **Working tree verified (not a commit):**
 - `git diff | shasum -a 256` → `5c8d51ddc71c87b158ae0d1b7f4d05e87efadf441f116f2298a8ac27c4f914e8`
@@ -18,9 +18,9 @@
 | Category | Count |
 |---|---|
 | Total ACs (P1+P2+P3+Decisions+Deviations) | 34 |
-| **Met** | **33** |
+| **Met** | **34** |
 | **Not Met** | **0** |
-| **Deferred (Q7)** | **1** |
+| **Deferred (Q7)** | **0** |
 
 ---
 
@@ -74,7 +74,7 @@
 | **Q4** Detail rails (`R`) | "Showing latest N of M" + View-all link only where target route exists | **Met (amended)** | Rails have count lines (e.g. `_tab_alerts.html:5`, `_tab_tasks.html:18`); **no "View all" links invented** — accepted per plan amendment |
 | **Q5** Out-of-range `?page=` | Clamp to last page (200, no redirect); junk/`0`/negative → page 1 | **Met** | `paginate():124-136`; `test_alert_list_hostile_page_clamps_to_last` asserts page 999 → last page (2) |
 | **Q6** Keyboard | Links-only this wave; no pager JS/shortcuts | **Met** | `_pager.html` has only plain `<a>` links; no HTMX/JS on pager |
-| **Q7** `COUNT` cost | **Measure at ~100k observables before P2 ships** | **Deferred** | No measurement artifact in tree (`docs/perf/`, commits, or test output). No Postgres available in this environment (SQLite cannot answer the planner question). **Deferred to Postgres wave** — TODO: record measurement when infra available. |
+| **Q7** `COUNT` cost | **Measure at ~100k observables before P2 ships** | **Met (2026-11-26)** | `VERIFY-2026-11-26-observable-count-performance.md`: real Postgres, 100k rows, baseline + post-index plans/timings; final p95 under 500 ms for all cases. |
 | **Q8** API untouched | No cursor/keyset paging on `GET /case` | **Met** | No API changes in diff; `GET /case` pagination unchanged |
 
 ### Frozen Interface (§11a)
@@ -117,7 +117,7 @@
 | **(a) `alert_list` filtered-empty state for default `scope=unlinked`** | **Fixed** | `alert_list.html:51-57` now handles `scope=unlinked` with `filtered_from`; `test_alert_default_scope_empty_no_escape_hatch_defect` passes |
 | **(b) Missing `per_page` UI** | **Fixed** | `_pager.html:27-38` adds per-page size selector (25/50/100/200) as plain links with `aria-current="true"` on active; `test_pager_hrefs_preserve_*_and_per_page` pass |
 | **(c) `case_share_list` materialises full list before paging** | **Accepted deviation** | Still uses `paginate(request, all_shares)` on a materialised `list[dict]` (views.py:3471-3486). Rationale: shares are per-case, typically <50 rows; the list-of-dicts shape is required by the template for `revoke_url`. `Paginator` accepts sequences. Documented in code comment. |
-| **(d) Q7 100k-row `COUNT` measurement** | **Deferred** | No Postgres available; SQLite cannot model JSONB `icontains` cost. Recorded as deferred-to-Postgres-wave with TODO pointer. |
+| **(d) Q7 100k-row `COUNT` measurement** | **Resolved** | `VERIFY-2026-11-26-observable-count-performance.md`: baseline flagged `index-candidate`; added `obs_data_upper_trgm_idx`; final all p95 under threshold. |
 
 ---
 
@@ -149,15 +149,15 @@
 
 | Item | Reason |
 |---|---|
-| **Q7 `COUNT` cost measurement** | No Postgres available in this environment; SQLite cannot model JSONB `icontains` + `COUNT` performance. Deferred to Postgres wave with TODO. |
+| **Q7 `COUNT` cost measurement** | Resolved 2026-11-26 in `VERIFY-2026-11-26-observable-count-performance.md`; use that report for current plans and timings. |
 | **Live WebSocket + pagination coexistence** | Pagination is server-rendered; WebSocket (`live.js`) only affects `audit-timeline` in Audit tab — not paged lists. No integration test exists. |
-| **Production Postgres query plans** | `EXPLAIN ANALYZE` on 100k-row JSONB `icontains` + `COUNT` not executed; test DB is SQLite. |
+| **Production Postgres query plans** | Representative `EXPLAIN ANALYZE` on 100k-row JSONB `icontains` + `COUNT` was executed on the user-provided PostgreSQL 14.24 endpoint; see `VERIFY-2026-11-26-observable-count-performance.md`. A PG16 run remains out of scope for this report. |
 | **Cross-tab pager interaction** | Case detail tabs have independent rails; no test for URL hash/fragment + `?page` interaction. |
 
 ---
 
 ## Verdict
 
-**ACs Met: 33 / 34** — **Not Met: 0** — **Deferred: 1 (Q7)**
+**ACs Met: 34 / 34** — **Not Met: 0** — **Deferred: 0**
 
-The implementation now fully delivers the pagination primitive, honest counts/empty states, per-page selector, and rail caps across all 12 primary lists and 7 detail rails. All 11 previously-failing DEFECT tests pass. The test suite is rigorous (98 pagination edge-case tests + 157 existing green). The sole open item is the Q7 performance measurement, honestly deferred to the Postgres wave.
+The implementation now fully delivers the pagination primitive, honest counts/empty states, per-page selector, and rail caps across all 12 primary lists and 7 detail rails. All 11 previously-failing DEFECT tests pass. The test suite is rigorous (98 pagination edge-case tests + 157 existing green). The formerly deferred Q7 performance measurement was completed on 2026-11-26 in `VERIFY-2026-11-26-observable-count-performance.md`.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.conf import settings
+from django.contrib.postgres.indexes import GinIndex
 from django.db import models
 from django.utils import timezone
 
@@ -136,19 +137,9 @@ class Alert(UUIDModel, TimeStampedModel):
             models.Index(fields=["correlation_key", "date"], name="alert_corrkey_date_idx"),
             models.Index(fields=["-created_at"], name="alert_created_at_idx"),
             # GIN index on raw_payload for efficient JSON querying (Postgres only)
-            models.Index(
-                fields=["raw_payload"],
-                name="alert_raw_payload_gin",
-                condition=None,
-                opclasses=["gin_jsonb_ops"],
-            ),
+            GinIndex(fields=["raw_payload"], name="alert_raw_payload_gin"),
             # GIN index on ingestion_warnings for efficient JSON querying (Postgres only)
-            models.Index(
-                fields=["ingestion_warnings"],
-                name="alert_ingestion_warnings_gin",
-                condition=None,
-                opclasses=["gin_jsonb_ops"],
-            ),
+            GinIndex(fields=["ingestion_warnings"], name="alert_ingestion_warnings_gin"),
         ]
         constraints = [
             models.UniqueConstraint(

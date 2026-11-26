@@ -55,7 +55,9 @@ from datetime import timedelta
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from django.db import connection
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -1072,3 +1074,52 @@ def test_observable_list_filtered_from_counts_filtered_set_defect(
         f"filtered_from={observed!r} and no disclosure rendered. "
         "Trigger: GET /observables/?q=192.0.2 with 60 matching + 40 other observables."
     )
+
+
+# --- §12.1-fu1: unfiltered_count must not be computed on the unfiltered list ---
+
+
+def _observable_count_sql(captured: CaptureQueriesContext) -> list[str]:
+    """Return COUNT statements that read the observable table."""
+    return [
+        query["sql"]
+        for query in captured.captured_queries
+        if "COUNT(" in query["sql"].upper() and 'FROM "observable"' in query["sql"]
+    ]
+
+
+@pytest.mark.django_db
+def test_unfiltered_observable_list_runs_only_paginator_count(
+    browser: Client,
+    org: Organisation,
+    observable_type: ObservableType,
+) -> None:
+    """No filter means no '(filtered from N)' disclosure and no second COUNT."""
+    _make_observables(org, observable_type, 5)
+
+    with CaptureQueriesContext(connection) as captured:
+        response = browser.get(reverse("ui-observable-list"))
+
+    assert response.status_code == 200
+    assert response.context["filtered_from"] is None
+    counts = _observable_count_sql(captured)
+    assert len(counts) == 1, counts
+
+
+@pytest.mark.django_db
+def test_filtered_observable_list_runs_unfiltered_and_filtered_counts(
+    browser: Client,
+    org: Organisation,
+    observable_type: ObservableType,
+) -> None:
+    """A filter still pays the honest-disclosure COUNT plus Paginator's COUNT."""
+    _make_observables(org, observable_type, 5)
+    _make_observables(org, observable_type, 1, prefix="needle-192.0.2.")
+
+    with CaptureQueriesContext(connection) as captured:
+        response = browser.get(reverse("ui-observable-list"), {"q": "needle"})
+
+    assert response.status_code == 200
+    assert response.context["filtered_from"] == 6
+    counts = _observable_count_sql(captured)
+    assert len(counts) == 2, counts

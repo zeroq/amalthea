@@ -22,6 +22,8 @@ dispatch), C4 (correlation key), M5 (observable fan-out), M9 (timeline keyset).
 from __future__ import annotations
 
 import pytest
+from django.apps import apps
+from django.contrib.postgres.indexes import GinIndex, OpClass
 from django.db import connection
 
 from ._schema import (
@@ -90,6 +92,38 @@ JOIN_TABLE_LEFT_COLUMN: dict[str, tuple[str, tuple[str, ...]]] = {
     "case_record_tags": ("case_id", ("case_id", "tag_id")),
     "observable_tags": ("observable_id", ("observable_id", "tag_id")),
 }
+
+
+JSONB_GIN_INDEXES: tuple[tuple[str, str, str, str], ...] = (
+    ("alerts", "Alert", "alert_raw_payload_gin", "raw_payload"),
+    ("alerts", "Alert", "alert_ingestion_warnings_gin", "ingestion_warnings"),
+    ("cases", "Case", "case_ingestion_warnings_gin", "ingestion_warnings"),
+    ("observables", "Observable", "obs_enrichment_data_gin", "enrichment_data"),
+)
+
+
+@pytest.mark.parametrize(("app_label", "model_name", "index_name", "field"), JSONB_GIN_INDEXES)
+def test_jsonb_indexes_are_real_gin_indexes(
+    app_label: str, model_name: str, index_name: str, field: str
+) -> None:
+    """A GIN opclass on a generic ``Index`` emits invalid ``USING btree`` SQL."""
+    model = apps.get_model(app_label, model_name)
+    index = next((i for i in model._meta.indexes if i.name == index_name), None)
+    assert isinstance(index, GinIndex), f"{index_name} must be a Postgres GinIndex"
+    assert index.fields == [field], f"{index_name} must cover {field}"
+
+
+def test_observable_data_icontains_has_a_trigram_gin_index() -> None:
+    """The slow `UPPER(data::text) LIKE` predicate needs pg_trgm to use an index."""
+    observable = apps.get_model("observables", "Observable")
+    index = next(
+        (i for i in observable._meta.indexes if i.name == "obs_data_upper_trgm_idx"),
+        None,
+    )
+    assert isinstance(index, GinIndex), "trigram index must be a Postgres GinIndex"
+    assert len(index.expressions) == 1
+    assert isinstance(index.expressions[0], OpClass)
+    assert index.expressions[0].extra["name"] == "gin_trgm_ops"
 
 
 @pytest.mark.django_db
@@ -327,6 +361,10 @@ def test_every_declared_index_exists_in_the_database() -> None:
     for _, model in own_models():
         present = set(indexes(model._meta.db_table).values())
         for entry in model._meta.indexes:
+            # Postgres-only indexes are intentionally no-ops on SQLite: CREATE INDEX
+            # ... USING gin is not valid DDL there, and pg_trgm is not installed.
+            if connection.vendor != "postgresql" and isinstance(entry, GinIndex):
+                continue
             cols = _declared_columns(model, entry)
             if cols not in present:
                 missing.append(f"{model._meta.db_table}.{entry.name}{cols}")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.contrib.postgres.indexes import GinIndex
 from django.db import models, router
 from django.db.models import Q
 from django.utils import timezone
@@ -158,12 +159,7 @@ class Case(UUIDModel, TimeStampedModel):
             models.Index(fields=["-severity"], name="case_severity_idx"),
             models.Index(fields=["-created_at"], name="case_created_at_idx"),
             # GIN index on ingestion_warnings for efficient JSON querying (Postgres only)
-            models.Index(
-                fields=["ingestion_warnings"],
-                name="case_ingestion_warnings_gin",
-                condition=None,
-                opclasses=["gin_jsonb_ops"],
-            ),
+            GinIndex(fields=["ingestion_warnings"], name="case_ingestion_warnings_gin"),
         ]
         constraints = [
             in_range("case_severity_range", "severity", SEVERITY_MIN, SEVERITY_MAX),

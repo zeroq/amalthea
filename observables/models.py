@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from django.conf import settings
+from django.contrib.postgres.indexes import GinIndex, OpClass
 from django.db import models, transaction
+from django.db.models import TextField
+from django.db.models.functions import Cast, Upper
 
 from core.enums import (
     PAP_CHOICES,
@@ -128,11 +131,12 @@ class Observable(UUIDModel, TimeStampedModel):
             models.Index(fields=["-created_at"], name="obs_created_at_idx"),
             models.Index(fields=["owner_org", "-created_at"], name="obs_org_created_idx"),
             # GIN index on enrichment_data for efficient JSON querying (Postgres only)
-            models.Index(
-                fields=["enrichment_data"],
-                name="obs_enrichment_data_gin",
-                condition=None,
-                opclasses=["gin_jsonb_ops"],
+            GinIndex(fields=["enrichment_data"], name="obs_enrichment_data_gin"),
+            # icontains on the JSONField compiles to `UPPER(data::text) LIKE ...`;
+            # pg_trgm is the only GIN opclass that can serve that predicate.
+            GinIndex(
+                OpClass(Upper(Cast("data", TextField())), name="gin_trgm_ops"),
+                name="obs_data_upper_trgm_idx",
             ),
         ]
 

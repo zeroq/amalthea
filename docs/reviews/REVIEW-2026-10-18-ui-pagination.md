@@ -134,13 +134,13 @@ Maximum shares = number of organisations − 1 (owner org excluded). SuperAdmin 
 
 ---
 
-## Open Items (Unchanged)
+## Open Items (O1 resolved 2026-11-26)
 
 ### O1: `observable_list` `data__icontains` COUNT performance unmeasured (Plan §11 Q7)
-**Location:** `ui/views.py:2662-2663`, `2670` (`queryset.filter(data__icontains=query)`)  
-**Status:** No measurement evidence in tree (no benchmark, no GIN/trigram index on `Observable.data`).  
-**Risk:** With 100k+ observables, two `icontains` scans per request (page + count) plus third for `filtered_from` when filter active could be slow.  
-**Deferred to:** Postgres wave (indexing/migration). **Explicitly not resolved in this wave.**
+**Location:** `ui/views/observables.py` (`queryset.filter(data__icontains=query)`), `observables/models.py`, `observables/migrations/0015_observable_data_upper_trgm.py`.
+**Status:** **Resolved.** `VERIFY-2026-11-26-observable-count-performance.md` records a 100k-row Postgres benchmark, before/after plans, and a final p95 under 500 ms for every case.
+**Resolution:** Added `obs_data_upper_trgm_idx` on `UPPER(data::text)` with `gin_trgm_ops`; the planner uses it for selective `icontains` matches. Common-marker scans remain but are below threshold.
+**Original risk:** With 100k+ observables, two `icontains` scans per request (page + count) plus third for `filtered_from` when filter active could be slow. Measured and mitigated rather than assumed.
 
 ### O2: Rails have no "View all" link — accepted deviation
 **Location:** Plan §11 Q4 amendment, §13 "Accepted deviation"  
@@ -176,7 +176,7 @@ Coverage includes: slice correctness, summary truth, hostile `page` (9 values), 
 
 ## Verdict
 
-**PASS — ALL MATERIAL FINDINGS ADDRESSED.** M1 fixed; L1/L2 accepted with evidence; new `per_page` selector verified safe; S2/S4 re-confirmed across parallel agent changes. O1 (unmeasured `icontains` COUNT) remains an explicit open item for the Postgres wave.
+**PASS — ALL MATERIAL FINDINGS ADDRESSED.** M1 fixed; L1/L2 accepted with evidence; new `per_page` selector verified safe; S2/S4 re-confirmed across parallel agent changes. O1 (unmeasured `icontains` COUNT) was resolved on 2026-11-26 by the Postgres measurement and `pg_trgm` index recorded in `VERIFY-2026-11-26-observable-count-performance.md`.
 
 --- 
 

@@ -193,7 +193,12 @@ def observable_list(request: HttpRequest) -> HttpResponse:
         .prefetch_related("case_observables__case")
         .filter(org_q("owner_org", request.user))
     )
-    unfiltered_count = base_queryset.count()
+
+    # The unfiltered total is only needed for the honest "(filtered from N)" disclosure.
+    # Computing it on every request doubles the COUNT work for the common unfiltered
+    # list view; TODO §12.1-fu1 keeps that cost measured and out of the hot path.
+    has_filter = bool(query or type_filter)
+    unfiltered_count = base_queryset.count() if has_filter else None
 
     queryset = base_queryset
     if query:
@@ -202,7 +207,6 @@ def observable_list(request: HttpRequest) -> HttpResponse:
         queryset = queryset.filter(data_type_id=type_filter)
 
     # Pagination for the observables list (primary list P)
-    has_filter = bool(query or type_filter)
     page_obj = paginate(request, queryset.order_by("-created_at"))
     filtered_from = (
         unfiltered_count if has_filter and unfiltered_count > page_obj.paginator.count else None

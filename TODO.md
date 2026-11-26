@@ -2,10 +2,12 @@
 
 Open work only. Shipped work and closed-item history live in [`COMPLETED.md`](./COMPLETED.md).
 Last updated: 2026-11-26 — moved every completed item out of this tracker into
-[`COMPLETED.md`](./COMPLETED.md) and pruned stale priority rows. The user-owned full-suite log is green:
-**4282 passed, 3 skipped, 15 warnings, 2 subtests passed in 1188.41s** (`/tmp/amalthea-full-pytest.log`).
-The static gate is green after `c14b8311`; staged/tracked secret scans are clean. The priority table below
-is the source of truth for open work.
+[`COMPLETED.md`](./COMPLETED.md), pruned stale priority rows, and recorded the source mapping editor tab
+work as shipped in commit `7995b31b`. The latest full-suite log (`/tmp/amalthea-full-pytest.log`) is stale:
+it reports **1 failed, 4312 passed, 3 skipped, 15 warnings, 2 subtests passed in 988.01s**; the failure was
+the CSP inline `onchange` issue, fixed after that run. Post-fix targeted verification is green
+(**844 passed** across inline-assets/source-submapping/source-detail suites), static gates/hooks/secret scans
+pass, and a fresh full-suite run remains pending. The priority table below is the source of truth for open work.
 
 ---
 
@@ -17,18 +19,17 @@ to its narrow follow-up on 2026-11-13 (see `COMPLETED.md`).
 
 | Priority | Item | Description | Impact |
 |----------|------|-------------|--------|
-| **1** | **§12.3-fu1 — Automatic ingest-time bundling** | `correlation_key` is derived/indexed but only the manual Similar/attach path consumes it. Auto-bundle was deferred (Q1b). Depends on §12.1-fu1. | **High** — the orchestration promise of Modules B+C. |
+| **1** | **§12.3-fu1 — Automatic ingest-time bundling** | `correlation_key` is derived/indexed but only the manual Similar/attach path consumes it. Auto-bundle was deferred (Q1b). The §12.1-fu1 measurement prerequisite is complete. | **High** — the orchestration promise of Modules B+C. |
 | **2** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; ledger already syncs. |
 | **3** | **S3 + S5 (+ M3 residual)** | **S3** per-account lockout on the API login + stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. M3 shipped; residual same-org cleartext secrets. | **Medium (security)** |
-| **4** | **§12.1-fu1 — Measure filtered-list `COUNT` on Postgres** | Unmeasured `COUNT` on 12 paginated lists; prerequisite for auto-bundling. | **Medium** — pager truthfulness at scale. |
-| **5** | **§7.4 + §8.5 + §11.4-L1/I1 — Quality-gate remainder** | Tailwind source/artifact split; mutation coverage scope; unaudited procedure attaches; pre-existing leaky flash messages. | **None** — engineering hygiene. |
-| **6** | **§10.12-fu1 / fu2 / fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, test gaps. `fu3` (admin paused-state display) is complete. | **Low–Medium.** |
-| **7** | **§14.3 / 14.4 / 14.6 / 14.7 / 14.8 / 14.12 — Alert tag follow-ups** | Parity, update-vs-delete scope decision, query cleanup, tag-swap-file purge, and remaining polish. `14.1`, `14.2`, `14.9`–`14.11` are complete. | **Low.** |
-| **8** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
-| **9** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
-| **10** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
-| **11** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. `13.21` is complete. | **None** — hygiene. |
-| **12** | **§6.16 P6-fu1 — Postgres search measurement** | Search shipped (`6427beeb`); verification and T6 security review are complete (PASS). Remaining: run `EXPLAIN` on seeded Postgres before deciding on a trigram index. | **Medium** — closes the last evidence gap; no user-facing feature is missing. |
+| **4** | **§7.4 + §8.5 + §11.4-L1/I1 — Quality-gate remainder** | Tailwind source/artifact split; mutation coverage scope; unaudited procedure attaches; pre-existing leaky flash messages. | **None** — engineering hygiene. |
+| **5** | **§10.12-fu1 / fu2 / fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, test gaps. `fu3` (admin paused-state display) is complete. | **Low–Medium.** |
+| **6** | **§14.3 / 14.4 / 14.6 / 14.7 / 14.8 / 14.12 — Alert tag follow-ups** | Parity, update-vs-delete scope decision, query cleanup, tag-swap-file purge, and remaining polish. `14.1`, `14.2`, `14.9`–`14.11` are complete. | **Low.** |
+| **7** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
+| **8** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
+| **9** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
+| **10** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. `13.21` is complete. | **None** — hygiene. |
+| **11** | **§6.16 P6-fu1 — Postgres search measurement** | Search shipped (`6427beeb`); verification and T6 security review are complete (PASS). Remaining: run `EXPLAIN` on seeded Postgres before deciding on a trigram index. | **Medium** — closes the last evidence gap; no user-facing feature is missing. |
 ---
 
 ## 3. Open decisions
@@ -237,15 +238,26 @@ attach path — **automatic** ingest-time bundling was deliberately deferred (se
 (search) shipped 2026-11-02 (`6427beeb`) after the §12.1 pager fix; its remaining verification/security/
 Postgres work is §6.16-fu1. §6.16 P7 (realtime) remains in its own plan.
 
-- [ ] **12.1-fu1 — Measure the filtered-list `COUNT` on Postgres before trusting it (plan §11 Q7).**
-  `observable_list`'s `q` filter is `data__icontains` over a JSONB column with no supporting index; pagination
-  adds a `COUNT` per filtered request (plus the unfiltered-base `COUNT` for the "filtered from N" disclosure).
-  On SQLite this is unanswerable, so the measurement was **honestly deferred** rather than assumed — the
-  verification report records it as the sole unmet AC (`docs/verification/VERIFY-2026-10-18-ui-pagination.md`),
-  and the security review keeps it as open item O1. Do it when the Postgres suite lands (§3.1): seed ~100k
-  observables, `EXPLAIN (ANALYZE, BUFFERS)` a filtered list request, and if the plan or the latency is
-  unacceptable add a GIN/`pg_trgm` index (or move to a `search_vector`) — recording the before/after plan in
-  the plan doc. Low risk of *correctness* failure; a real risk of a slow list on a large instance.
+- [x] **12.1-fu1 — Measure the filtered-list `COUNT` on Postgres before trusting it (plan §11 Q7).**
+  Closed 2026-11-26 with `docs/verification/VERIFY-2026-11-26-observable-count-performance.md`.
+  `observable_list`'s `q` filter is `data__icontains` over `Observable.data`; the original measurement
+  was deferred because SQLite cannot answer the planner question. It has now been run against a real
+  PostgreSQL endpoint with 100,000 observables.
+  - [x] Added `benchmark_observable_count` Postgres-only harness (deterministic ~100k seed, repeat timings,
+    `EXPLAIN (ANALYZE, BUFFERS)` JSON, 500 ms p95 decision rule). Default `--repeat` is 10 so p95 is not
+    just the single worst sample.
+  - [x] `observable_list` no longer computes the unfiltered `COUNT` unless a filter is active; pinned by the
+    pagination edge-case suite.
+  - [x] Baseline (`index-candidate`) and post-index plans/timings recorded. The slow page cases crossed
+    500 ms before indexing; after adding `obs_data_upper_trgm_idx` on `UPPER(data::text)` with
+    `gin_trgm_ops`, every final p95 is under threshold and the planner uses the trigram index for
+    selective `icontains` matches. Common-marker scans remain but are under threshold.
+  - [x] Fixed the JSONB GIN migrations that emitted invalid btree DDL (`gin_jsonb_ops` opclass) so
+    PostgreSQL applies actual GIN indexes while SQLite remains migration-compatible.
+  - [x] Updated `VERIFY-2026-10-18-ui-pagination.md` Q7 and `REVIEW-2026-10-18-ui-pagination.md` O1
+    from deferred/open to resolved.
+  - [ ] Full pytest remains unrun per the standing user instruction; focused gates passed
+    (`make check`; `127 passed, 1 skipped` across index + pagination suites).
 - [ ] **12.12 — Fuzzy-similarity follow-ups (security FIND-05/03/06/07/11 + one discovered bug), 2026-10-21.**
   From `docs/security/AUDIT-2026-10-20-alert-fuzzy-similarity.md` and Phase E verification:
   - [x] **12.12-fu1 (High, by design — FIND-05) — RESOLVED 2026-11-13 (Option B title gate).** Decision (A)
@@ -290,8 +302,8 @@ Postgres work is §6.16-fu1. §6.16 P7 (realtime) remains in its own plan.
   AGENTS.md's example — "identical destination IP within a 10-minute window" — is exactly this rule.
   Hard requirements when it lands: it must **never** be silent (ledger entry naming the key + window, plus
   an `AuditLog` row — the machinery now exists as `cases/correlation.py::record_alert_bundled`); it must
-  never choose a **closed** case; and the §12.1-fu1 Postgres measurement should land first, since the rule
-  adds a query to the hot ingest path. Source: §12.3 decision 2026-10-18.
+  never choose a **closed** case; §12.1-fu1 landed 2026-11-26 and its indexed plans/timings are the
+  baseline for deciding whether the ingest-time candidate query is acceptable. Source: §12.3 decision 2026-10-18.
 ---
 
 ## 13. Maintainability — oversized modules (added 2026-11-04)
@@ -381,8 +393,8 @@ the full `pytest` suite green; record any deviation in the plan.
   Split only when adding a new extraction stage. Source: §13 audit 2026-11-04.
 - [ ] **13.15 — `cases/correlation.py` (518 lines).** Cohesive correlation algorithms; leave unless correlation
   features expand. Source: §13 audit 2026-11-04.
-- [ ] **13.16 — `ui/views/ingestion_sources.py` (525 lines).** Mapping-editor UI; split preview/apply from source
-  detail only if it grows. Source: §13 audit 2026-11-04.
+- [ ] **13.16 — `ui/views/ingestion_sources.py` (1,172 lines).** Mapping-editor UI including the four source-detail
+  tabs and submapping editor; split preview/apply from source detail when next touched. Source: §13 audit 2026-11-04.
 - [ ] **13.17 — `observables/views.py` (488 lines).** Observable-type CRUD plus the suggestion workflow; split
   `types.py` and `suggestions.py` when touched. Source: §13 audit 2026-11-04.
 - [ ] **13.18 — `identity/services.py` (471 lines).** Organisation/user services with shared locking logic;

@@ -2212,6 +2212,24 @@ historical plans and verification reports still cite the TODO IDs recorded here.
 - Verification `docs/planning/VERIFICATION-2026-11-25-source-mapping-submappings.md` (full pytest Met;
   MAP-10a and shallow-copy/strip deviations recorded); security `docs/security/SECURITY-2026-11-25-submappings.md` PASS (7/7).
 
+### §12.1-fu1 — Observable list COUNT performance measured on Postgres
+- Closed 2026-11-26. `docs/verification/VERIFY-2026-11-26-observable-count-performance.md` records a
+  100k-row benchmark against the user-provided PostgreSQL 14.24 endpoint, with baseline and post-index
+  `EXPLAIN (ANALYZE, BUFFERS)` plans.
+- Added `benchmark_observable_count` (`observables/management/commands/benchmark_observable_count.py`)
+  and tightened `observable_list` so the unfiltered `COUNT` is computed only when a filter is active;
+  pagination edge-case tests pin both query shapes.
+- Baseline decision was `index-candidate` (three page cases above the 500 ms p95 threshold). Added
+  `obs_data_upper_trgm_idx` on `UPPER(data::text)` with `gin_trgm_ops` plus a Postgres-only migration;
+  final p95 is below threshold for every case and the planner uses the trigram index for selective
+  `icontains` matches.
+- Also corrected the historical JSONB GIN migrations, which emitted invalid btree DDL with
+  `gin_jsonb_ops`, while keeping SQLite migration-compatible.
+- Gates: `make check` passed; `127 passed, 1 skipped` across index and pagination suites. Full pytest
+  was not run per the standing user instruction. `VERIFY-2026-10-18-ui-pagination.md` Q7 and
+  `REVIEW-2026-10-18-ui-pagination.md` O1 are updated to resolved.
+
 ### Stale priority rows removed
-- §10.1 role-scoped user management (record already in the 2026-10-20 COMPLETED entry), §12.4, §6.13,
-  §10.9, §10.11, §12.9, §22, §23, §24, and §25. §10.12-fu3 and §14 subitems were closed individually.
+- §10.1 role-scoped user management (record already in the 2026-10-20 COMPLETED entry), §12.1-fu1,
+  §12.4, §6.13, §10.9, §10.11, §12.9, §22, §23, §24, and §25. §10.12-fu3 and §14 subitems were closed
+  individually.
