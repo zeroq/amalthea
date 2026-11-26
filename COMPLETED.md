@@ -2277,7 +2277,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
 - Accepted deviations: **W63-16** (Postgres chose equivalent indexes instead of the two plan-named
   indexes) and **W63-17** (verifier/QA/security agents unavailable; work done manually and labelled).
   **W63-18** is resolved via `POSTGRES_TEST_DB_NAME` + `--reuse-db` in the dev database.
-  **W63-19** records that the plan’s commit-hash evidence is deferred because no commit was requested.
+  **W63-19** is resolved by implementation commit `72c52e6f`, which supplies the plan’s commit-hash evidence.
 - Full-suite guard failures found during verification (enum/FK inventories, UI route inventories,
   `fa-link` subset CSS) were remediated. The dashboard layout regression introduced by `235bc004`
   was also repaired while preserving the live chip and HTMX partial refresh, with DOM-structure and

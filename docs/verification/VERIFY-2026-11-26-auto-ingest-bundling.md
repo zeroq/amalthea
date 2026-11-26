@@ -23,7 +23,7 @@
 
 ## AC grading
 
-Statuses: **23 met**, **6 deviated**, **0 not met** (29 total). Deviations W63-16 and W63-17 were accepted by the user on 2026-11-26; W63-19 records the deferred commit hash.
+Statuses: **24 met**, **5 deviated**, **0 not met** (29 total). Deviations W63-16 and W63-17 were accepted by the user on 2026-11-26; implementation commit `72c52e6f` satisfies AC-P7.5.
 
 ### P1 — Config model and migration
 
@@ -87,7 +87,7 @@ Statuses: **23 met**, **6 deviated**, **0 not met** (29 total). Deviations W63-1
 | **AC-P7.2** independent verifier | **Deviated** | This report is a manual project-lead verification because the verifier agent was unavailable; W63-17 records it. |
 | **AC-P7.3** security review | **Deviated** | Manual security review written to `docs/reviews/REVIEW-2026-11-26-auto-ingest-bundling.md`; W63-17 records the unavailable agent. No High/Medium findings remain. |
 | **AC-P7.4** QA confirmation | **Deviated** | Manual conformance tests cover the ingest → bundle → ledger → audit → realtime loop and replay; qa-tester agent unavailable. |
-| **AC-P7.5** tracker closeout | **Deviated** | §12.3-fu1 moved to `COMPLETED.md` after the user accepted W63-16 and W63-17 on 2026-11-26, and the user-owned full `pytest` gate is green (`4441 passed, 3 skipped`). No commit was requested, so the plan’s commit-hash evidence is deferred and recorded as W63-19. |
+| **AC-P7.5** tracker closeout | **Met** | §12.3-fu1 moved to `COMPLETED.md` after the user accepted W63-16 and W63-17 on 2026-11-26, the user-owned full `pytest` gate is green (`4441 passed, 3 skipped`), and the implementation is committed as `72c52e6f`. |
 
 ## Deviations and residual risk
 
@@ -96,11 +96,11 @@ Statuses: **23 met**, **6 deviated**, **0 not met** (29 total). Deviations W63-1
 - W63-16 records the measured Postgres benchmark, the equivalent-index deviation and the decision to keep the feature disabled by default. Accepted by the user 2026-11-26.
 - W63-17 records the manual substitute for unavailable verifier/QA/security agents. Accepted by the user 2026-11-26.
 - W63-18 is resolved: `POSTGRES_TEST_DB_NAME=amalthea` plus `--reuse-db` allowed the Postgres-focused suite to run in the dev database without altering server auth or dropping/recreating the DB.
-- W63-19 records that AC-P7.5’s commit-hash evidence is deferred because no commit was requested; the closeout entry is written and all other evidence is attached.
+- W63-19 is resolved by implementation commit `72c52e6f`; the requested commit-hash evidence is now attached to AC-P7.5.
 - The first user-run full `pytest` log recorded `8 failed, 4431 passed, 3 skipped`; all failures were guard inventories/assets introduced by this feature (enum CHECK inventory, FK/on_delete inventory including one-to-one handling, UI route inventories, `fa-link` Font Awesome subset CSS). They were remediated (`114 passed`) and the final user-run full suite is green: `4441 passed, 3 skipped`.
 - No new database index is added without planner evidence.
 - No secrets were introduced; no raw payload or exception text is exposed by the new webhook response.
 
 ## Final verdict
 
-Implementation, SQLite conformance, static gates, `.env`-backed Postgres benchmark, Postgres-focused conformance suites, dashboard repair targeted suites, and the user-run full `pytest` (`4441 passed, 3 skipped`) are green. The earlier 8 guard failures were remediated; the full-suite CSS-token warning still listed `live-chip`, so dashboard-specific confirmation rests on the post-repair targeted suites. Deviations W63-16 and W63-17 were accepted by the user on 2026-11-26, and `TODO.md` §12.3-fu1 is closed in `COMPLETED.md`; W63-19 notes that the commit hash is deferred until a commit is explicitly requested.
+Implementation, SQLite conformance, static gates, `.env`-backed Postgres benchmark, Postgres-focused conformance suites, dashboard repair targeted suites, and the user-run full `pytest` (`4441 passed, 3 skipped`) are green. The earlier 8 guard failures were remediated; the full-suite CSS-token warning still listed `live-chip`, so dashboard-specific confirmation rests on the post-repair targeted suites. Deviations W63-16 and W63-17 were accepted by the user on 2026-11-26, `TODO.md` §12.3-fu1 is closed in `COMPLETED.md`, and implementation commit `72c52e6f` supplies the AC-P7.5 commit-hash evidence.
