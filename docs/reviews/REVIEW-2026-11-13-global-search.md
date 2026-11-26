@@ -101,9 +101,9 @@ No other accepted residuals from the prior audit are relevant to the global sear
 
 ---
 
-## 4. Open Items (Postgres measurement)
-- **Postgres measurement:** The plan (§4.4, §5.6) defers `pg_trgm`/`tsvector` full-text index until there is a measured query plan on representative data. This is the only remaining follow-up item, not a blocker.
-- **EXPLAIN on representative volume:** No new index added; sequential scan with `icontains` is accepted for MVP scale until the measurement is run.
+## 4. Follow-up status (Postgres measurement, updated 2026-11-26)
+- **Postgres measurement:** **Resolved.** See `docs/verification/VERIFY-2026-11-26-global-search-performance.md` for 100000 rows/entity, 18 measured shapes, and full `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` artifacts.
+- **EXPLAIN on representative volume:** Per-field `pg_trgm` GIN indexes were added after earlier benchmark runs triggered the `index-candidate` path. Final realistic p95 values are all below 500 ms; residual stress breaches and the adoption deviation are documented in `docs/spec/deviations.md`.
 - **Full test suite:** **Run 2026-11-13** — `3673 passed, 3 skipped, 2 subtests passed` (18m16s; 15 pre-existing warnings). The minimal gate was the plan's original instruction; the full suite was subsequently run to close the collateral-damage risk. CI remains red (§12.11).
 
 ---

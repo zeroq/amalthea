@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.indexes import GinIndex, OpClass
 from django.db import models, router
-from django.db.models import Q
+from django.db.models import Q, TextField
+from django.db.models.functions import Cast, Upper
 from django.utils import timezone
 
 from core.enums import (
@@ -23,6 +24,7 @@ from core.enums import (
     in_range,
     in_values,
 )
+from core.indexes import PostgresExpressionGinIndex
 from core.models import TimeStampedModel, UUIDModel
 from identity.models import Organisation, User
 
@@ -136,7 +138,12 @@ class Case(UUIDModel, TimeStampedModel):
     closed_date = models.DateTimeField(null=True, blank=True)
     # Mandatory tenant (ADR-004): a case always belongs to an organisation. PROTECT — deleting a
     # tenant must not silently orphan its cases; remove or reassign the data first.
-    owner_org = models.ForeignKey(Organisation, on_delete=models.PROTECT, related_name="cases")
+    owner_org = models.ForeignKey(
+        Organisation,
+        on_delete=models.PROTECT,
+        related_name="cases",
+        db_index=False,  # case_search_order_idx covers this lookup as its left prefix.
+    )
     ingestion_warnings = models.JSONField(blank=True, default=dict)
     # Provenance for the template that seeded this case. SET_NULL: deleting a template must not be
     # blocked by the cases it seeded — the cases keep their already-applied defaults, they just lose
@@ -158,8 +165,24 @@ class Case(UUIDModel, TimeStampedModel):
             models.Index(fields=["status", "-start_date"], name="case_status_start_idx"),
             models.Index(fields=["-severity"], name="case_severity_idx"),
             models.Index(fields=["-created_at"], name="case_created_at_idx"),
+            models.Index(
+                fields=["owner_org", "-severity", "-start_date", "-id"],
+                name="case_search_order_idx",
+            ),
             # GIN index on ingestion_warnings for efficient JSON querying (Postgres only)
             GinIndex(fields=["ingestion_warnings"], name="case_ingestion_warnings_gin"),
+            PostgresExpressionGinIndex(
+                OpClass(Upper(Cast("title", TextField())), name="gin_trgm_ops"),
+                name="case_title_upper_trgm_idx",
+            ),
+            PostgresExpressionGinIndex(
+                OpClass(Upper(Cast("description", TextField())), name="gin_trgm_ops"),
+                name="case_desc_upper_trgm_idx",
+            ),
+            PostgresExpressionGinIndex(
+                OpClass(Upper(Cast("summary", TextField())), name="gin_trgm_ops"),
+                name="case_summary_upper_trgm_idx",
+            ),
         ]
         constraints = [
             in_range("case_severity_range", "severity", SEVERITY_MIN, SEVERITY_MAX),

@@ -526,5 +526,5 @@ If a shared helper changed (e.g. `keys.js` or `base.html`), add the smallest dir
   `tests/conformance/test_search_api.py` and `test_ui_search.py`. Focused search suites **34 passed**; adjacent
   tenant/nav/URL/inline suites **779 passed**; `make check` green. Full suite on 2026-11-14:
   **3699 passed, 3 skipped, 2 subtests passed** (16m01s; 15 pre-existing warnings). Independent
-  verification and the T6 security review are complete (PASS); the Postgres measurement remains
-  open in TODO §6.16-fu1.
+  verification and the T6 security review are complete (PASS); the Postgres measurement was closed
+  2026-11-26 under TODO §6.16-fu1. See `VERIFY-2026-11-26-global-search-performance.md`.

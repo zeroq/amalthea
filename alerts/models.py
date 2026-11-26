@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from django.conf import settings
-from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.indexes import GinIndex, OpClass
 from django.db import models
+from django.db.models import TextField
+from django.db.models.functions import Cast, Upper
 from django.utils import timezone
 
 from core.enums import (
@@ -19,6 +21,7 @@ from core.enums import (
     TLP_MIN,
     in_range,
 )
+from core.indexes import PostgresExpressionGinIndex
 from core.models import TimeStampedModel, UUIDModel
 from identity.models import Organisation, User
 from ingest.models import IngestionSource
@@ -128,6 +131,7 @@ class Alert(UUIDModel, TimeStampedModel):
         Organisation,
         on_delete=models.PROTECT,
         related_name="alerts",
+        db_index=False,  # alert_search_order_idx covers this lookup as its left prefix.
     )
 
     class Meta:
@@ -136,10 +140,26 @@ class Alert(UUIDModel, TimeStampedModel):
             models.Index(fields=["status", "-date"], name="alert_status_date_idx"),
             models.Index(fields=["correlation_key", "date"], name="alert_corrkey_date_idx"),
             models.Index(fields=["-created_at"], name="alert_created_at_idx"),
+            models.Index(
+                fields=["owner_org", "-severity", "-date", "-id"],
+                name="alert_search_order_idx",
+            ),
             # GIN index on raw_payload for efficient JSON querying (Postgres only)
             GinIndex(fields=["raw_payload"], name="alert_raw_payload_gin"),
             # GIN index on ingestion_warnings for efficient JSON querying (Postgres only)
             GinIndex(fields=["ingestion_warnings"], name="alert_ingestion_warnings_gin"),
+            PostgresExpressionGinIndex(
+                OpClass(Upper(Cast("title", TextField())), name="gin_trgm_ops"),
+                name="alert_title_upper_trgm_idx",
+            ),
+            PostgresExpressionGinIndex(
+                OpClass(Upper(Cast("description", TextField())), name="gin_trgm_ops"),
+                name="alert_desc_upper_trgm_idx",
+            ),
+            PostgresExpressionGinIndex(
+                OpClass(Upper(Cast("summary", TextField())), name="gin_trgm_ops"),
+                name="alert_summary_upper_trgm_idx",
+            ),
         ]
         constraints = [
             models.UniqueConstraint(

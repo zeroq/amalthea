@@ -1,12 +1,17 @@
 """Reproducible Postgres benchmark for the observable-list COUNT follow-up.
 
-TODO §12.1-fu1 / PLAN-2026-10-18 Q7 deferred because SQLite cannot answer the
+TODO "12.1-fu1 / PLAN-2026-10-18 Q7 deferred because SQLite cannot answer the
 question. This command seeds deterministic observables, measures the exact count
 and page query shapes used by ``ui.views.observables.observable_list``, and emits
 JSON containing timings plus ``EXPLAIN (ANALYZE, BUFFERS)`` plans.
 
 It refuses to run on non-Postgres engines: the whole point is to measure the
 planner against a realistic JSON/table scan.
+
+The benchmark logic has been refactored to share ``core.db_benchmark`` helpers
+(_count_case, _page_case, _timings, _explain, _node_types) so that the global
+search benchmark can use the same measurement primitives.  The JSON output
+schema is identical to the pre-refactor version.
 
 Example::
 
@@ -19,19 +24,16 @@ Example::
 from __future__ import annotations
 
 import json
-import math
 import os
-import statistics
-import time
+from argparse import ArgumentParser
 from pathlib import Path
 from typing import Any
 
-from django.core.management.base import BaseCommand, CommandError, CommandParser
+from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
-from django.db.models import QuerySet
-from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
+from core.db_benchmark import measure_count, measure_page
 from identity.models import Organisation
 from observables.models import Observable, ObservableType
 from ui.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
@@ -45,7 +47,7 @@ class Command(BaseCommand):
 
     help = "Benchmark observable_list COUNT/EXPLAIN plans on Postgres."
 
-    def add_arguments(self, parser: CommandParser) -> None:
+    def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument("--count", type=int, default=100_000)
         parser.add_argument("--batch-size", type=int, default=2_000)
         parser.add_argument("--repeat", type=int, default=10)
@@ -92,15 +94,15 @@ class Command(BaseCommand):
         common_by_type = common.filter(data_type=otype)
 
         cases: list[dict[str, Any]] = [
-            self._count_case("unfiltered_count", base, repeat),
-            self._count_case("q_common_count", common, repeat),
-            self._count_case("q_rare_count", rare, repeat),
-            self._count_case("type_count", by_type, repeat),
-            self._count_case("q_common_and_type_count", common_by_type, repeat),
-            self._page_case("q_common_page", common, repeat, DEFAULT_PAGE_SIZE, 1),
-            self._page_case("q_rare_page", rare, repeat, DEFAULT_PAGE_SIZE, 1),
-            self._page_case("q_common_page_200", common, repeat, MAX_PAGE_SIZE, 1),
-            self._page_case("q_common_deep_page", common, repeat, DEFAULT_PAGE_SIZE, 100),
+            measure_count("unfiltered_count", base, repeat),
+            measure_count("q_common_count", common, repeat),
+            measure_count("q_rare_count", rare, repeat),
+            measure_count("type_count", by_type, repeat),
+            measure_count("q_common_and_type_count", common_by_type, repeat),
+            measure_page("q_common_page", common, repeat, DEFAULT_PAGE_SIZE, 1),
+            measure_page("q_rare_page", rare, repeat, DEFAULT_PAGE_SIZE, 1),
+            measure_page("q_common_page_200", common, repeat, MAX_PAGE_SIZE, 1),
+            measure_page("q_common_deep_page", common, repeat, DEFAULT_PAGE_SIZE, 100),
         ]
 
         slow = [case["name"] for case in cases if float(case["p95_ms"]) > threshold_ms]
@@ -138,13 +140,7 @@ class Command(BaseCommand):
         )
         return org, otype
 
-    def _seed(
-        self,
-        org: Organisation,
-        otype: ObservableType,
-        target: int,
-        batch_size: int,
-    ) -> int:
+    def _seed(self, org: Organisation, otype: ObservableType, target: int, batch_size: int) -> int:
         existing = Observable.objects.filter(
             owner_org=org,
             data_type=otype,
@@ -189,99 +185,3 @@ class Command(BaseCommand):
             cursor.execute("SHOW server_version")
             row = cursor.fetchone()
         return str(row[0]) if row else "unknown"
-
-    def _count_case(self, name: str, queryset: QuerySet[Observable], repeat: int) -> dict[str, Any]:
-        with CaptureQueriesContext(connection) as captured:
-            queryset.count()
-        if len(captured.captured_queries) != 1:
-            raise CommandError(
-                f"{name}: expected one COUNT query, saw {len(captured.captured_queries)}"
-            )
-        query = captured.captured_queries[0]
-        sql = query["sql"]
-        plan = self._explain(sql, None)
-        timings = self._timings(lambda: queryset.count(), repeat)
-        return {
-            "name": name,
-            "kind": "count",
-            "sql": sql,
-            "plan": plan["plan"],
-            "node_types": self._node_types(plan["plan"]),
-            "explain_execution_time_ms": plan["execution_time_ms"],
-            **timings,
-        }
-
-    def _page_case(
-        self,
-        name: str,
-        queryset: QuerySet[Observable],
-        repeat: int,
-        page_size: int,
-        page_number: int,
-    ) -> dict[str, Any]:
-        offset = (page_number - 1) * page_size
-        page_qs = queryset.order_by("-created_at")[offset : offset + page_size]
-        sql, params = page_qs.query.sql_with_params()
-        plan = self._explain(sql, tuple(params))
-        # `.all()` re-chains the queryset so each sample executes SQL; evaluating the
-        # same queryset repeatedly would hit Django's result cache after the first run.
-        timings = self._timings(lambda: list(page_qs.all()), repeat)
-        return {
-            "name": name,
-            "kind": "page",
-            "page_size": page_size,
-            "page_number": page_number,
-            "sql": sql,
-            "plan": plan["plan"],
-            "node_types": self._node_types(plan["plan"]),
-            "explain_execution_time_ms": plan["execution_time_ms"],
-            **timings,
-        }
-
-    def _explain(self, sql: str, params: tuple[Any, ...] | None) -> dict[str, Any]:
-        statement = f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {sql}"
-        with connection.cursor() as cursor:
-            if params is None:
-                # Captured count SQL is already rendered; passing an empty params tuple
-                # would make psycopg3 reprocess literal '%' characters in LIKE clauses.
-                cursor.execute(statement)
-            else:
-                cursor.execute(statement, params)
-            row = cursor.fetchone()
-        if not row:
-            raise CommandError("EXPLAIN returned no rows")
-        parsed: Any = row[0]
-        if isinstance(parsed, str):
-            parsed = json.loads(parsed)
-        if isinstance(parsed, list) and parsed:
-            parsed = parsed[0]
-        if not isinstance(parsed, dict):
-            raise CommandError("EXPLAIN returned an unexpected payload")
-        return {
-            "plan": parsed.get("Plan", {}),
-            "execution_time_ms": parsed.get("Execution Time"),
-        }
-
-    def _timings(self, operation: Any, repeat: int) -> dict[str, Any]:
-        samples_ms: list[float] = []
-        for _ in range(repeat):
-            started = time.perf_counter()
-            operation()
-            samples_ms.append((time.perf_counter() - started) * 1_000)
-        ordered = sorted(samples_ms)
-        p95_index = max(0, math.ceil(0.95 * len(ordered)) - 1)
-        return {
-            "runs_ms": [round(value, 3) for value in samples_ms],
-            "min_ms": round(ordered[0], 3),
-            "median_ms": round(statistics.median(ordered), 3),
-            "p95_ms": round(ordered[p95_index], 3),
-        }
-
-    def _node_types(self, plan: dict[str, Any]) -> list[str]:
-        found = [str(plan.get("Node Type", "unknown"))]
-        children = plan.get("Plans", [])
-        if isinstance(children, list):
-            for child in children:
-                if isinstance(child, dict):
-                    found.extend(self._node_types(child))
-        return found

@@ -33,7 +33,7 @@ from django.utils import timezone
 from cases.models import Case, TimelineEvent
 from core.serializers import timeline_event_json
 from identity.models import User
-from realtime.publisher import publish_case_event
+from realtime.publisher import publish_case_event, publish_org_event
 
 
 def append_timeline_event(
@@ -74,6 +74,8 @@ def append_timeline_event(
         actor=actor,
         metadata=metadata or {},
     )
+    # The case room is the authoritative live ledger (PLAN AC7.1); dropping this publish
+    # silently breaks every case tab while the org-room refresh below would still look healthy.
     transaction.on_commit(
         partial(
             publish_case_event,
@@ -82,6 +84,32 @@ def append_timeline_event(
             {"event": timeline_event_json(event)},
         )
     )
+    # Map the timeline kind to a refresh reason for org broadcasts.
+    # Only the canonical kinds emit org events; custom events do not carry bodies.
+    reason_map = {
+        "comment": "case-updated",
+        "status-changed": "case-updated",
+        "status-change": "case-updated",
+        "verdict-changed": "case-updated",
+        "automation-run": "case-updated",
+        "alert-imported": "case-updated",
+        "alert-merged": "case-updated",
+    }
+    reason = reason_map.get(kind)
+    if reason is not None:
+        transaction.on_commit(
+            partial(
+                publish_org_event,
+                str(case.owner_org_id),
+                "refresh",
+                {
+                    "surface": "cases",
+                    "reason": reason,
+                    "object_id": str(case.id),
+                    "occurred_at": timezone.now().isoformat(),
+                },
+            )
+        )
     return event
 
 

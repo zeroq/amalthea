@@ -23,6 +23,21 @@ def _validate_identifier(value: str) -> str:
     return value
 
 
+def ensure_trgm_extension_operation() -> migrations.RunPython:
+    """Return a Postgres-only ``CREATE EXTENSION IF NOT EXISTS pg_trgm`` operation.
+
+    The reverse is a no-op: dropping the extension would break other apps'
+    trigram indexes if only one migration is rolled back.
+    """
+
+    def create(apps: Any, schema_editor: Any) -> None:
+        if schema_editor.connection.vendor != "postgresql":
+            return
+        schema_editor.execute('CREATE EXTENSION IF NOT EXISTS "pg_trgm"')
+
+    return migrations.RunPython(create, migrations.RunPython.noop)
+
+
 def gin_index_operation(table: str, name: str, column: str) -> migrations.RunPython:
     """Return a Postgres-only ``RunPython`` operation that creates/drops a GIN index."""
     safe_table = _validate_identifier(table)

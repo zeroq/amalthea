@@ -1,0 +1,18 @@
+{% load ui_tags %}
+{% if page_obj.object_list %}
+  {% for obs in page_obj.object_list %}
+  <tr>
+    <td><input type="checkbox" name="ids" value="{{ obs.id }}" aria-label="Select observable {{ obs.data }}" data-bulk-item="observable-bulk-form"></td>
+    <td>{{ obs.data_type.name }}</td>
+    <td class="mono break">
+      <a href="{% url 'ui-observable-detail' obs.id %}">{{ obs.data }}</a>
+    </td>
+    <td>{{ obs.case_observables.count }}</td>
+    <td>{{ obs.created_at|date:"Y-m-d H:i" }}</td>
+    <td>{{ obs.updated_at|default:obs.created_at|date:"Y-m-d H:i" }}</td>
+    <td><a class="icon-link" href="{% url 'ui-observable-detail' obs.id %}" aria-label="View observable {{ obs.data }}"><i class="fa-regular fa-eye" aria-hidden="true"></i></a></td>
+  </tr>
+  {% endfor %}
+{% else %}
+  <tr><td colspan="7" class="empty">No observables match your filters.</td></tr>
+{% endif %}

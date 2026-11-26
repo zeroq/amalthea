@@ -5,7 +5,9 @@
 
 {% block content %}
 <div class="card">
-  <form method="get" class="filter-bar" aria-label="Alert filters">
+  <span id="live-chip-alert-list" data-ws-url="{% if request.user.org %}{% if request.is_secure %}wss{% else %}ws{% endif %}://{{ request.get_host }}/ws/org/{{ request.user.org.id }}/{% endif %}" data-live-page="alert-list" class="live-chip" role="status" aria-live="polite">Offline</span>
+  <form method="get" hx-get="{% url 'ui-alert-list' %}" hx-target="#alert-list-rows" hx-push-url class="filter-bar" aria-label="Alert filters">
+    <input type="hidden" name="partial" value="rows">
     <div class="control-row">
       <label class="sr-only" for="f-alert-scope">Scope</label>
       <select id="f-alert-scope" name="scope" class="filter-type">
@@ -107,7 +109,7 @@
           {% endif %}
         </tr>
       </thead>
-      <tbody>
+<tbody id="alert-list-rows">
         {% for alert in page_obj.object_list %}
           <tr>
             <td><input type="checkbox" name="ids" value="{{ alert.id }}" aria-label="Select alert {{ alert.title }}" data-bulk-item="alert-bulk-form"></td>
@@ -126,19 +128,25 @@
               <button type="button" class="btn btn-ghost btn-sm" data-modal-open="delete-alert-{{ alert.id }}" aria-label="Delete alert {{ alert.title }}">
                 <i class="fa-solid fa-trash" aria-hidden="true"></i>
               </button>
-              {% url 'ui-alert-delete' alert.id as alert_delete_url %}
-              {% with alert_oid=alert.id|stringformat:"s" %}
-              {% include "ui/_modal.html" with modal_id="delete-alert-"|add:alert_oid title="Delete alert?" body="This will permanently delete the alert. This action cannot be undone." confirm_text="Delete" confirm_class="btn-err" form_action=alert_delete_url size="sm" %}
-              {% endwith %}
             </td>
             {% endif %}
           </tr>
+        {% empty %}
+        <tr><td colspan="8" class="empty">No alerts match your filters.</td></tr>
         {% endfor %}
       </tbody>
     </table>
     </div>
   </form>
   {% include "ui/_modal.html" with modal_id="alert-bulk-confirm-modal" title="Apply bulk action?" body_template="ui/_alert_bulk_modal_body.html" confirm_form="alert-bulk-form" confirm_text="Apply" confirm_class="btn-primary" size="sm" %}
+  {% for alert in page_obj.object_list %}
+    {% if can_delete_alerts %}
+      {% url 'ui-alert-delete' alert.id as alert_delete_url %}
+      {% with alert_oid=alert.id|stringformat:"s" %}
+      {% include "ui/_modal.html" with modal_id="delete-alert-"|add:alert_oid title="Delete alert?" body="This will permanently delete the alert. This action cannot be undone." confirm_text="Delete" confirm_class="btn-err" form_action=alert_delete_url size="sm" %}
+      {% endwith %}
+    {% endif %}
+  {% endfor %}
   {% else %}
     <div class="table-wrap">
     <table class="data-table alert-table">
@@ -164,7 +172,7 @@
           {% endif %}
         </tr>
       </thead>
-      <tbody>
+<tbody id="alert-list-rows">
         {% for alert in page_obj.object_list %}
           <tr>
             <td><span class="sev sev-{{ alert.severity|sev_class }}">{{ alert.severity|sev_label }}</span></td>

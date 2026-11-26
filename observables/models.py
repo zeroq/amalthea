@@ -17,6 +17,7 @@ from core.enums import (
     TLP_MIN,
     in_range,
 )
+from core.indexes import PostgresExpressionGinIndex
 from core.models import TimeStampedModel, UUIDModel
 
 from .hashing import DataHashField
@@ -134,7 +135,7 @@ class Observable(UUIDModel, TimeStampedModel):
             GinIndex(fields=["enrichment_data"], name="obs_enrichment_data_gin"),
             # icontains on the JSONField compiles to `UPPER(data::text) LIKE ...`;
             # pg_trgm is the only GIN opclass that can serve that predicate.
-            GinIndex(
+            PostgresExpressionGinIndex(
                 OpClass(Upper(Cast("data", TextField())), name="gin_trgm_ops"),
                 name="obs_data_upper_trgm_idx",
             ),

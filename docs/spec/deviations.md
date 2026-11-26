@@ -632,6 +632,22 @@ still pending.
 | **MCP2-5** | 90-day invocation/proposal retention; 24-hour proposal expiry | Terminal proposals are retained (no delete path); pending/approved rows expire after 24 hours and are denied by the state machine | Retention is implemented as retain-by-default; there is no automated purge job in this phase, so rows are kept at least 90 days. `mcp_server/models.py::McpActionProposal.is_expired`, `mcp_server/services/proposals.py::transition_allowed`. |
 
 
+## Wave §6.16 final — global search measurement + realtime/HTMX breadth (2026-11-26)
+
+Per `PLAN-2026-11-26-section6-realtime-and-search.md`. Verification:
+`docs/verification/VERIFY-2026-11-26-section6-realtime-and-search.md` and
+`docs/verification/VERIFY-2026-11-26-global-search-performance.md`. Security:
+`docs/reviews/REVIEW-2026-11-26-section6-realtime-and-search.md`.
+
+| ID | Plan said | Implemented | Why · Code pointer · Evidence |
+|---|---|---|---|
+| **W616-F-1** | Add trigram indexes only if the final benchmark decision is `index-candidate` (OQ-5 / AC-P1-4.1). | Initial and stress benchmark runs were `index-candidate`, so per-field `gin_trgm_ops` indexes were added for alert/case text fields. The later realistic 10% dataset returned `accept-no-index` both with and without the indexes; the indexes were retained because earlier breach evidence was real and selective-query p95s improved by 82-96%. | `alerts/models.py`, `cases/models.py`, `alerts/migrations/0020_alert_upper_trgm.py`, `alerts/migrations/0021_alert_search_order_idx.py`, `cases/migrations/0026_case_upper_trgm.py`, `cases/migrations/0027_case_search_order_idx.py`; evidence: `VERIFY-2026-11-26-global-search-performance.md` and `/tmp/global-search-{benchmark,baseline,final,stress-final}.json`. |
+| **W616-F-2** | Final p95 values all below threshold (AC-P1-4.4) with no residual slow shapes. | Final realistic dataset has all 18 p95 values below 500 ms, but `/tmp/global-search-stress-final.json` retains three case-page breaches (`518.3`, `616.8`, `616.1` ms). | Recorded as residual risk instead of changing the dataset after measurement. Common search terms remain within threshold on the final dataset but can approach it at higher match density. |
+| **W616-P7-1** | Alert create/update/triage emits one org refresh with `surface=alerts|dashboard` (AC-P2-2.2), and bulk operations emit at most one refresh per request (AC-P2-2.3). | Alert **create** emits `alerts/alert-created`; a comment on a linked alert emits `cases/case-updated`; canonical case ledger events emit `cases/case-updated`. Generic alert update/triage and `PATCH /alert/_bulk` do **not** emit org refresh frames. | The org room still refreshes alert lists on ingestion and case lists/dashboard on case changes. Extending refresh emission to every triage/bulk mutation requires an owner-org decision for bulk requests spanning multiple orgs (superAdmin), so it is deferred rather than emitting from user-supplied org context. `alerts/views.py`, `cases/ledger.py`, `realtime/publisher.py`; spec: `docs/spec/realtime.md`. |
+| **W616-P7-2** | Presence HMAC always uses `SECRET_KEY`. | `realtime/presence.py::_presence_member` falls back to `amalthea-dev-only` when `SECRET_KEY` is missing in dev/test. | Accepted Low in `REVIEW-2026-11-26-section6-realtime-and-search.md`: the member is server-side and count-only, and `amalthea/settings/prod.py` fails closed without a strong `DJANGO_SECRET_KEY`. Production never uses the fallback. |
+
+**Not a deviation, recorded for clarity:** the org room is server-push only; any client frame closes `4000`. That is narrower than the case room but matches the approved protocol in the plan. Presence joins no longer broadcast a frame; only `presence_ping` and disconnect broadcast counts, which prevents a newly connected socket from receiving an unsolicited presence frame before its ledger sync.
+
 ## Evidence index
 
 - `docs/planning/PLAN-2026-10-03-thehive-compatible-mvp.md` §13 — full P7/P8/P10/P11 records

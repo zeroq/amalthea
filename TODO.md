@@ -20,16 +20,14 @@ to its narrow follow-up on 2026-11-13 (see `COMPLETED.md`).
 | Priority | Item | Description | Impact |
 |----------|------|-------------|--------|
 | **1** | **§12.3-fu1 — Automatic ingest-time bundling** | `correlation_key` is derived/indexed but only the manual Similar/attach path consumes it. Auto-bundle was deferred (Q1b). The §12.1-fu1 measurement prerequisite is complete. | **High** — the orchestration promise of Modules B+C. |
-| **2** | **§6.16 P7 — Per-org realtime breadth + presence** | Scoped HTMX adoption (D4/D5), broader live events, presence. | **Medium** — collaboration polish; ledger already syncs. |
-| **3** | **S3 + S5 (+ M3 residual)** | **S3** per-account lockout on the API login + stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. M3 shipped; residual same-org cleartext secrets. | **Medium (security)** |
-| **4** | **§7.4 + §8.5 + §11.4-L1/I1 — Quality-gate remainder** | Tailwind source/artifact split; mutation coverage scope; unaudited procedure attaches; pre-existing leaky flash messages. | **None** — engineering hygiene. |
-| **5** | **§10.12-fu1 / fu2 / fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, test gaps. `fu3` (admin paused-state display) is complete. | **Low–Medium.** |
-| **6** | **§14.3 / 14.4 / 14.6 / 14.7 / 14.8 / 14.12 — Alert tag follow-ups** | Parity, update-vs-delete scope decision, query cleanup, tag-swap-file purge, and remaining polish. `14.1`, `14.2`, `14.9`–`14.11` are complete. | **Low.** |
-| **7** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
-| **8** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
-| **9** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
-| **10** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. `13.21` is complete. | **None** — hygiene. |
-| **11** | **§6.16 P6-fu1 — Postgres search measurement** | Search shipped (`6427beeb`); verification and T6 security review are complete (PASS). Remaining: run `EXPLAIN` on seeded Postgres before deciding on a trigram index. | **Medium** — closes the last evidence gap; no user-facing feature is missing. |
+| **2** | **S3 + S5 (+ M3 residual)** | **S3** per-account lockout on the API login + stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. M3 shipped; residual same-org cleartext secrets. | **Medium (security)** |
+| **3** | **§7.4 + §8.5 + §11.4-L1/I1 — Quality-gate remainder** | Tailwind source/artifact split; mutation coverage scope; unaudited procedure attaches; pre-existing leaky flash messages. | **None** — engineering hygiene. |
+| **4** | **§10.12-fu1 / fu2 / fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, test gaps. `fu3` (admin paused-state display) is complete. | **Low–Medium.** |
+| **5** | **§14.3 / 14.4 / 14.6 / 14.7 / 14.8 / 14.12 — Alert tag follow-ups** | Parity, update-vs-delete scope decision, query cleanup, tag-swap-file purge, and remaining polish. `14.1`, `14.2`, `14.9`–`14.11` are complete. | **Low.** |
+| **6** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
+| **7** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
+| **8** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
+| **9** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. `13.21` is complete. | **None** — hygiene. |
 ---
 
 ## 3. Open decisions
@@ -52,24 +50,26 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
 
 ## 6. Deferred scope (committed, not yet scheduled)
 
-- [~] **6.16 — UI completeness wave (all 24 gaps)** Plan `PLAN-2026-10-11-ui-completeness.md`. Restores the analyst loop and
+- [x] **6.16 — UI completeness wave (all 24 gaps)** Plan `PLAN-2026-10-11-ui-completeness.md`. Restores the analyst loop and
   completes the entity surface: **P1** wire up built-but-unreachable features (attachments, merge, export,
   apply-template, taxonomy) + rail entries for Observables/Tags/Case-templates/Taxonomy + tenant indicator +
   case-template edit + password change + 500/403 pages + cheat-sheet as a server-rendered `<dialog>` + Font Awesome
   + keyboard coverage; **P2** alert triage, case edit, observable edit/delete; **P3** procedures/TTP UI; **P4**
   Settings→Ingestion tokens + Audit log (pulls §6.13 forward) — **token lifecycle + audit-log viewer shipped; see COMPLETED.md §6.13** (audit log at `ui-settings-audit-log`, offset pagination/filterable; plan named `ui-settings-audit`/keyset — deviation recorded there); **P5** playbook action round-trip + sanitized
   Markdown; **P6** global search — **SHIPPED 2026-11-02** (`6427beeb`; see §6.16-fu1 and `COMPLETED.md`);
-  **P7** per-org realtime + presence + scoped HTMX adoption. Open questions Q1 (Markdown dependency) gate
+  **P7** per-org realtime + presence + scoped HTMX adoption — **SHIPPED/VERIFIED 2026-11-26** (see `COMPLETED.md` and `VERIFY-2026-11-26-section6-realtime-and-search.md`). Open questions Q1 (Markdown dependency) gate
   P5 and Q2 (bulk stub) gates P1 — **Q2 resolved**: bulk UI shipped under §12.4 (`ui-case-bulk`/`ui-alert-bulk`/`ui-observable-bulk`/`ui-task-bulk`; case/alert/task use per-item loops, observable uses `compat/bulk.py bulk_patch`). Source: post-§6.15 UI audit (user decision "everything", 2026-10-11).
-- [ ] **6.16-fu1 — Global search follow-up: Postgres measurement.**
+- [x] **6.16-fu1 — Global search follow-up: Postgres measurement.**
   P6 shipped 2026-11-02 (`6427beeb`): `/search` + `GET /api/v1/search`, shared `query/search.py`, org
   scoping, highlighting, paging, and tests.
   - [x] **Independent verification** — `docs/verification/VERIFY-2026-11-01-global-search.md`: **PASS**
     (34/35 ACs met, 1 superseded, 0 deviations).
   - [x] **T6 security review** — `docs/reviews/REVIEW-2026-11-13-global-search.md`: no new High/Medium
     findings; residuals documented.
-  - [ ] **Postgres measurement** — run `EXPLAIN (ANALYZE, BUFFERS)` on seeded Postgres for filtered
-    case/alert/observable searches and add a trigram index only if the measurement warrants it.
+  - [x] **Postgres measurement** — **DONE 2026-11-26**: 100k rows/entity, 18 measured shapes, full
+    `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` artifacts. Final realistic run passed all p95 values
+    under 500 ms; index adoption and residual stress breaches are documented in
+    `VERIFY-2026-11-26-global-search-performance.md` and `docs/spec/deviations.md`.
   Full suite is green (2026-11-14: **3699 passed, 3 skipped, 2 subtests**); CI itself remains red
   (§12.11). The header-search ACs in `PLAN-2026-10-11-ui-completeness.md` are superseded by
   `PLAN-2026-11-02-search-page-rail-entry.md`; do not re-add a global header search form.
@@ -235,8 +235,9 @@ Recommended: one small plan (`PLAN-…-analyst-ergonomics`) covering **§12.1 + 
 they share the list-view plumbing and are cheap. **§10.7/Q-D4 is now settled**: §12.3's "Similar" surface was
 re-opened and shipped 2026-10-18 as a read-only, correlation-ranked panel plus a correlation-ranked, audited
 attach path — **automatic** ingest-time bundling was deliberately deferred (see §12.3 and §12.3-fu1). §6.16 P6
-(search) shipped 2026-11-02 (`6427beeb`) after the §12.1 pager fix; its remaining verification/security/
-Postgres work is §6.16-fu1. §6.16 P7 (realtime) remains in its own plan.
+(search) shipped 2026-11-02 (`6427beeb`) after the §12.1 pager fix; its verification/security/Postgres
+follow-up was §6.16-fu1 and completed 2026-11-26. §6.16 P7 (realtime) shipped and verified 2026-11-26 in
+`PLAN-2026-11-26-section6-realtime-and-search.md`.
 
 - [ ] **12.12 — Fuzzy-similarity follow-ups (security FIND-05/03/06/07/11 + one discovered bug), 2026-10-21.**
   From `docs/security/AUDIT-2026-10-20-alert-fuzzy-similarity.md` and Phase E verification:

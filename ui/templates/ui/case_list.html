@@ -5,7 +5,9 @@
 
 {% block content %}
 <div class="card">
-  <form method="get" class="filter-bar" aria-label="Case filters">
+  <span id="live-chip-case-list" data-ws-url="{% if request.user.org %}{% if request.is_secure %}wss{% else %}ws{% endif %}://{{ request.get_host }}/ws/org/{{ request.user.org.id }}/{% endif %}" data-live-page="case-list" class="live-chip" role="status" aria-live="polite">Offline</span>
+  <form method="get" hx-get="{% url 'ui-case-list' %}" hx-target="#case-list-rows" hx-push-url class="filter-bar" aria-label="Case filters">
+    <input type="hidden" name="partial" value="rows">
     <div class="control-row">
       <label class="sr-only" for="f-case-scope">Scope</label>
       <select id="f-case-scope" name="scope" class="filter-type">
@@ -93,7 +95,7 @@
             {% endif %}
           </tr>
         </thead>
-        <tbody>
+<tbody id="case-list-rows">
           {% for case in page_obj.object_list %}
             <tr>
               <td><input type="checkbox" name="ids" value="{{ case.id }}" aria-label="Select case {{ case.title }}" data-bulk-item="case-bulk-form"></td>
@@ -105,14 +107,9 @@
               <td class="mono dim">{{ case.start_date|date:"Y-m-d H:i" }}</td>
               {% if can_delete_any_case or can_delete_cases and case.owner_org_id == request.user.org_id %}
               <td>
-                <button type="button" class="btn btn-ghost btn-sm" data-modal-open="delete-case-{{ case.id }}"
-                        aria-label="Delete case {{ case.title }}">
+                <button type="button" class="btn btn-ghost btn-sm" data-modal-open="delete-case-{{ case.id }}" aria-label="Delete case {{ case.title }}">
                   <i class="fa-solid fa-trash" aria-hidden="true"></i>
                 </button>
-                {% url 'ui-case-delete' case.id as case_delete_url %}
-                {% with case_oid=case.id|stringformat:"s" %}
-                {% include "ui/_modal.html" with modal_id="delete-case-"|add:case_oid title="Delete case?" body="This will permanently delete the case and all its children (tasks, timeline, observables, attachments). Alerts linked to this case will be unlinked but preserved. This action cannot be undone." confirm_text="Delete" confirm_class="btn-err" form_action=case_delete_url size="sm" %}
-                {% endwith %}
               </td>
               {% endif %}
             </tr>
@@ -122,6 +119,14 @@
       </div>
     </form>
     {% include "ui/_modal.html" with modal_id="case-bulk-confirm-modal" title="Apply bulk action?" body_template="ui/_case_bulk_modal_body.html" confirm_form="case-bulk-form" confirm_text="Apply" confirm_class="btn-primary" size="sm" %}
+    {% for case in page_obj.object_list %}
+      {% if can_delete_any_case or can_delete_cases and case.owner_org_id == request.user.org_id %}
+        {% url 'ui-case-delete' case.id as case_delete_url %}
+        {% with case_oid=case.id|stringformat:"s" %}
+        {% include "ui/_modal.html" with modal_id="delete-case-"|add:case_oid title="Delete case?" body="This will permanently delete the case and all its children (tasks, timeline, observables, attachments). Alerts linked to this case will be unlinked but preserved. This action cannot be undone." confirm_text="Delete" confirm_class="btn-err" form_action=case_delete_url size="sm" %}
+        {% endwith %}
+      {% endif %}
+    {% endfor %}
     {% else %}
     <div class="table-wrap">
     <table class="data-table case-table">
@@ -135,7 +140,7 @@
           {% endif %}
         </tr>
       </thead>
-      <tbody>
+      <tbody id="case-list-rows">
         {% for case in page_obj.object_list %}
           <tr>
             <td><a class="mono" href="{% url 'ui-case-detail' case.number %}">#{{ case.number }}</a></td>

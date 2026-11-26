@@ -54,6 +54,50 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         .values("severity")
         .annotate(n=Count("id"))
     }
+    partial = request.GET.get("partial")
+    if request.headers.get("HX-Request") and partial == "stats":
+        # Build minimal context for stats partial
+        counts = {
+            "alerts_unlinked": Alert.objects.filter(
+                org_q("owner_org", request.user), case__isnull=True, status__stage="New"
+            ).count(),
+            "cases_open": Case.objects.filter(
+                case_visible_q(request.user), closed_date__isnull=True
+            ).count(),
+            "cases_total": Case.objects.filter(case_visible_q(request.user)).count(),
+            "runs_total": AutomationRun.objects.filter(
+                case__in=Case.objects.filter(case_visible_q(request.user))
+            ).count(),
+            "runs_failed": AutomationRun.objects.filter(
+                case__in=Case.objects.filter(case_visible_q(request.user)), status="Failed"
+            ).count(),
+        }
+        by_severity = {}
+        return render(
+            request,
+            "ui/_dashboard_stats.html",
+            {
+                "counts": counts,
+                "by_severity": by_severity,
+            },
+        )
+
+    if request.headers.get("HX-Request") and partial == "recent-alerts":
+        recent_alerts = list(
+            Alert.objects.select_related("status", "owner_org")
+            .filter(org_q("owner_org", request.user), case__isnull=True, status__stage="New")
+            .order_by("-date")[:10]
+        )
+        return render(request, "ui/_dashboard_recent_alerts.html", {"recent_alerts": recent_alerts})
+
+    if request.headers.get("HX-Request") and partial == "recent-cases":
+        open_cases = list(
+            Case.objects.select_related("status", "assignee", "owner_org")
+            .filter(case_visible_q(request.user), closed_date__isnull=True)
+            .order_by("-severity", "-start_date")[:10]
+        )
+        return render(request, "ui/_dashboard_recent_cases.html", {"open_cases": open_cases})
+
     return render(
         request,
         "ui/dashboard.html",

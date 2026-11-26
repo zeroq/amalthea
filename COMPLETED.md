@@ -1866,8 +1866,9 @@ Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
   adjacent tenant/nav/URL/inline suites: **779 passed**; `make check` green. Full suite on 2026-11-14:
   **3699 passed, 3 skipped, 2 subtests passed** (16m01s; 15 pre-existing warnings). Independent
   verification (`docs/verification/VERIFY-2026-11-01-global-search.md`) and T6 security review
-  (`docs/reviews/REVIEW-2026-11-13-global-search.md`) are **PASS**. **Still open:** Postgres
-  `EXPLAIN`/optional trigram index — tracked in TODO §6.16-fu1.
+  (`docs/reviews/REVIEW-2026-11-13-global-search.md`) are **PASS**. Postgres
+  `EXPLAIN`/trigram-index follow-up closed 2026-11-26 in
+  `docs/verification/VERIFY-2026-11-26-global-search-performance.md`.
 - **Adjacent test classification** — `test_tenant_scoping.py` and `test_ui_urls_smoke.py` now classify
   `ui-playbook-scripts` as admin-only; the route shipped in `481a6225` and made those enumerators fail
   for analysts. Test-only fix; no behavior change.
@@ -1905,7 +1906,7 @@ Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
 
 ### Other closed checkbox items (title index)
 
-- **6.16 P6 — Global search — implemented 2026-11-02; verification and security review PASS; Postgres measurement pending (TODO §6.16-fu1).**
+- **6.16 P6 — Global search — implemented 2026-11-02; verification and security review PASS; Postgres measurement closed 2026-11-26 (§6.16-fu1).**
 - **12.12-fu1 — Alert fuzzy title gate (FIND-05) — RESOLVED 2026-11-13 (Option B; verified PASS).**
 - **1.1 — `Case.save()` number allocation**
 - **1.2 — `manage.py` default settings module**
@@ -2228,6 +2229,32 @@ historical plans and verification reports still cite the TODO IDs recorded here.
 - Gates: `make check` passed; `127 passed, 1 skipped` across index and pagination suites. Full pytest
   was not run per the standing user instruction. `VERIFY-2026-10-18-ui-pagination.md` Q7 and
   `REVIEW-2026-10-18-ui-pagination.md` O1 are updated to resolved.
+
+### §6.16-fu1 + §6.16 P7 — Global search measurement and realtime/HTMX breadth
+- Closed 2026-11-26. Plan: `docs/planning/PLAN-2026-11-26-section6-realtime-and-search.md`.
+- **Search measurement:** `query/management/commands/benchmark_global_search.py` plus shared helpers in
+  `core/db_benchmark.py` measure 18 count/page shapes at 100k rows/entity on PostgreSQL 14.24 with
+  `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`. Evidence:
+  `docs/verification/VERIFY-2026-11-26-global-search-performance.md` and `/tmp/global-search-*.json`.
+  Final realistic p95 values are all below the 500 ms threshold. Earlier runs justified per-field
+  trigram indexes; the adoption deviation and residual stress breaches are recorded in
+  `docs/spec/deviations.md`.
+- **Realtime:** added `/ws/org/<org_id>/` with server-side owner-org publish, auth before accept,
+  `4401/4404/4000` close codes, cross-org superAdmin audit, and count-only case presence with Redis
+  HMAC members. Spec: `docs/spec/realtime.md`.
+- **HTMX:** scoped partials for alert/case/observable lists, dashboard fragments, and selected
+  case-detail mutations; plain GET/POST fallback and CSRF preserved.
+- **Regressions fixed:** case timeline publishes and `insertBefore` pins restored in `live.js`;
+  presence ping/disconnect frames no longer fire on join; dev/test presence store shared per process.
+  A user-run full suite later exposed 17 failures, all remediated: SQLite-safe expression GIN DDL,
+  seed-safe migration dependencies, restored delete modals in bulk list branches, canonical HTMX
+  filter URLs, restored full index-audit tests, and `db_index=False` on search-order FK left prefixes.
+- Evidence: `docs/verification/VERIFY-2026-11-26-section6-realtime-and-search.md` (§1.1 records the
+  full-suite failure and remediation) and `docs/reviews/REVIEW-2026-11-26-section6-realtime-and-search.md`
+  (no new High/Medium; one accepted Low dev-secret HMAC fallback).
+- Gates: `make check` green (`151 source files`); post-remediation regression suite `291 passed,
+  1 skipped`; user's final full pytest run green (`4390 passed, 3 skipped, 15 warnings, 2 subtests
+  passed`). The implementation agent did not run full pytest.
 
 ### Stale priority rows removed
 - §10.1 role-scoped user management (record already in the 2026-10-20 COMPLETED entry), §12.1-fu1,

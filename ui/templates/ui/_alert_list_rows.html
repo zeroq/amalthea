@@ -1,0 +1,10 @@
+{% if page_obj.object_list %}
+  {% for alert in page_obj.object_list %}
+  <tr>
+    <td>{{ alert.id }}</td>
+    <td>{{ alert.title }}</td>
+  </tr>
+  {% endfor %}
+{% else %}
+  <tr><td colspan="8" class="empty">No alerts match your filters.</td></tr>
+{% endif %}

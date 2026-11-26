@@ -5,7 +5,8 @@
 
 {% block content %}
 <div class="card">
-  <form method="get" class="inline-form filter-bar">
+  <form method="get" hx-get="{% url 'ui-observable-list' %}" hx-target="#observable-list-rows" hx-push-url class="inline-form filter-bar">
+    <input type="hidden" name="partial" value="rows">
     <input type="text" name="q" value="{{ query|default:'' }}" placeholder="Filter by value..." class="filter-q">
     <select name="type" class="filter-type">
       <option value="">All types</option>
@@ -74,7 +75,7 @@
             <th scope="col">Actions</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="observable-list-rows">
           {% for obs in page_obj.object_list %}
           <tr>
             <td><input type="checkbox" name="ids" value="{{ obs.id }}" aria-label="Select observable {{ obs.data }}" data-bulk-item="observable-bulk-form"></td>
@@ -107,7 +108,7 @@
           <th scope="col">Actions</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="observable-list-rows">
         {% for obs in page_obj.object_list %}
         <tr>
           <td>{{ obs.data_type.name }}</td>

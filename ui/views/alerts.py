@@ -125,6 +125,17 @@ def alert_list(request: HttpRequest) -> HttpResponse:
     alert_assignees = User.objects.filter(org_q("org", request.user), is_active=True).order_by(
         "login"
     )[:200]
+    partial = request.GET.get("partial")
+    if request.headers.get("HX-Request") and partial == "rows":
+        return render(
+            request,
+            "ui/_alert_list_rows.html",
+            {
+                "page_obj": page_obj,
+                "can_delete_alerts": is_admin(request.user),
+            },
+        )
+
     return render(
         request,
         "ui/alert_list.html",

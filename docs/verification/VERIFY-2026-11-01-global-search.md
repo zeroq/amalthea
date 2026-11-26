@@ -119,7 +119,7 @@
 - **Status:** **Met**
 - **Evidence:**
   - `ui/static/ui/keys.js` lines 108-117: `/` key handler focuses `document.getElementById("global-search-q")` if present, otherwise falls back to `document.querySelector("main input:not([type=hidden]), main textarea")`
-  - `ROUTES` object line 44: `s: "/search"` 
+  - `ROUTES` object line 44: `s: "/search"`
   - `CHEATSHEET` array line 26: `{ key: "s", label: "Search" }`
 - **Notes:** `isTyping` logic (line 55-66) prevents shortcuts from firing while user is typing; `isModified` check (line 68-70) prevents activation on meta/ctrl/alt key combinations.
 
@@ -181,7 +181,7 @@
 ### T6: `security-auditor`: review scoping, query cap, highlighting/XSS, CSP, viewer, superAdmin/API audit.
 - **Status:** **Met**
 - **Evidence:** `docs/reviews/REVIEW-2026-11-13-global-search.md` (commit `3e31a65d`) — **no new High/Medium findings**. Tenant/org scoping, superAdmin API audit, query caps, highlight/XSS, CSP, viewer access, logging, and the digit-only change were all reviewed; accepted residuals are carried forward and documented.
-- **Notes:** Postgres `EXPLAIN` measurement remains open (see residuals); it is not part of T6.
+- **Notes:** Postgres `EXPLAIN` measurement was completed on 2026-11-26; see `VERIFY-2026-11-26-global-search-performance.md`. Security review scope was unchanged.
 
 ### T7: `verifier`: check every AC against the diff; write `docs/planning/VERIFY-2026-11-01-global-search.md`.
 - **Status:** **Met** (this report)
@@ -210,15 +210,16 @@
 ---
 
 ## Deviations
-- **0 deviations** from the approved plan's acceptance criteria and decisions.
+- **0 deviations** from the original approved plan's acceptance criteria and decisions.
 - The only "non-met" item is **F1** (header search form), which is formally **Superseded** by `PLAN-2026-11-02-search-page-rail-entry.md` per the approved decision plan and the 2026-11-13 decisions log entry.
 - No code deviations: all implementation matches the approved `query/search.py`, `query/search_views.py`, `ui/search.py`, `ui/urls.py`, `ui/templates/ui/search.html`, `ui/templatetags/ui_tags.py`, `ui/static/ui/keys.js`, `ui/static/ui/app.src.css`, `docs/spec/ui-style.md`, `docs/spec/api.md`, and the test suites.
+- A later 2026-11-26 follow-up (`PLAN-2026-11-26-section6-realtime-and-search.md`) records one new deviation for benchmark-gated index adoption; see `docs/spec/deviations.md`.
 
 ---
 
 ## Residual Risks / Gaps
 - **T6: Security review** — **Closed.** `docs/reviews/REVIEW-2026-11-13-global-search.md` reports no new High/Medium findings; accepted residuals are carried forward.
-- **Postgres measurement** — **Open.** Per the plan (§4.4, §5.4, §11 Risks), `icontains` on `Case.title/description/summary` and `Alert.title/description/summary` is a sequential scan on Postgres. No full-text search engine (`pg_trgm`, `tsvector`) was added; a follow-up `EXPLAIN (ANALYZE, BUFFERS)` measurement on seeded Postgres data is needed before deciding on a trigram index. This is deferred, not failed, and is now the only open §6.16-fu1 item.
+- **Postgres measurement** — **Resolved 2026-11-26.** See `VERIFY-2026-11-26-global-search-performance.md`: real Postgres, 100000 rows per entity, 18 measured shapes, full `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` artifacts, and final p95 values all below 500 ms. Per-field `pg_trgm` GIN indexes were added after earlier benchmark runs triggered the `index-candidate` path; the adoption deviation and residual stress breaches are documented.
 - **Full suite** — **Run 2026-11-13:** **3673 passed, 3 skipped, 2 subtests passed** (18m16s; 15 pre-existing warnings). The minimal gate was the plan's original instruction; the full suite was subsequently run to close the collateral-damage risk. CI remains red (§12.11).
 
 ---
@@ -241,7 +242,7 @@ make css-check                                                           ✓ css
 ## Recommendations
 - No code changes required. The implementation fully conforms to the approved plan's ACs, decisions, and non-goals.
 - T6 is complete: `docs/reviews/REVIEW-2026-11-13-global-search.md` reports no new High/Medium findings.
-- When the Postgres harness is available, run `EXPLAIN (ANALYZE, BUFFERS)` on representative search queries to decide on a trigram index addition. This is the only remaining §6.16-fu1 item.
+- Postgres measurement is complete; rerun `benchmark_global_search` from `VERIFY-2026-11-26-global-search-performance.md` if the dataset changes materially.
 - Do not re-add a global header search form; the form lives on `/search` with a rail entry per the superseding plan.
 - CI still needs to run and enforce the suite (§12.11), independent of the local green full-suite result.
 

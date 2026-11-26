@@ -9,7 +9,9 @@
 {% endblock %}
 
 {% block content %}
-<section class="stats" aria-label="Counts">
+<span id="live-chip-dashboard" data-ws-url="{% if request.user.org %}{% if request.is_secure %}wss{% else %}ws{% endif %}://{{ request.get_host }}/ws/org/{{ request.user.org.id }}/{% endif %}" data-live-page="dashboard" class="live-chip" role="status" aria-live="polite">Offline</span>
+
+<div id="dashboard-stats" class="stats" aria-label="Counts">
   <a class="stat" href="{% url 'ui-alert-list' %}">
     <span class="stat-n">{{ counts.alerts_unlinked }}</span>
     <span class="stat-l">Alerts waiting</span>
@@ -33,7 +35,7 @@
 <section class="card" aria-labelledby="h-alerts">
     <h2 id="h-alerts">Newest alerts awaiting triage</h2>
     {% if recent_alerts %}
-      <div class="table-wrap">
+      <div id="dashboard-recent-alerts" class="table-wrap">
       <table class="data-table">
         <caption class="sr-only">Recent alerts awaiting triage</caption>
         <thead>
@@ -62,7 +64,7 @@
   <section class="card" aria-labelledby="h-cases">
     <h2 id="h-cases">Open cases by severity</h2>
     {% if open_cases %}
-      <div class="table-wrap">
+      <div id="dashboard-recent-cases" class="table-wrap">
       <table class="data-table">
         <caption class="sr-only">Open cases by severity</caption>
         <thead>

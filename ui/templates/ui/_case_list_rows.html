@@ -1,0 +1,23 @@
+{% load ui_tags %}
+{% if page_obj.object_list %}
+  {% for case in page_obj.object_list %}
+  <tr>
+    <td><input type="checkbox" name="ids" value="{{ case.id }}" aria-label="Select case {{ case.title }}" data-bulk-item="case-bulk-form"></td>
+    <td><a class="mono" href="{% url 'ui-case-detail' case.number %}">#{{ case.number }}</a></td>
+    <td><span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span></td>
+    <td>{{ case.status.display_label }}</td>
+    <td><a href="{% url 'ui-case-detail' case.number %}">{{ case.title }}</a></td>
+    <td>{{ case.assignee.login|default:"—" }}</td>
+    <td class="mono dim">{{ case.start_date|date:"Y-m-d H:i" }}</td>
+    {% if can_delete_any_case or can_delete_cases and case.owner_org_id == request.user.org_id %}
+    <td>
+      <button type="button" class="btn btn-ghost btn-sm" data-modal-open="delete-case-{{ case.id }}" aria-label="Delete case {{ case.title }}">
+        <i class="fa-solid fa-trash" aria-hidden="true"></i>
+      </button>
+    </td>
+    {% endif %}
+  </tr>
+  {% endfor %}
+{% else %}
+  <tr><td colspan="8" class="empty">No cases match your filters.</td></tr>
+{% endif %}

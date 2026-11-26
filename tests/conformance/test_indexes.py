@@ -17,14 +17,24 @@ message so a regression is self-explanatory.
 
 Review items: H1 (vacuous test), M1 (redundant indexes), C1 (case number), C2 (pending-run
 dispatch), C4 (correlation key), M5 (observable fan-out), M9 (timeline keyset).
+
+Later sections add §6.16-fu1 search index guards.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from django.apps import apps
 from django.contrib.postgres.indexes import GinIndex, OpClass
 from django.db import connection
+from django.db.models.functions import Upper
+
+from alerts.models import Alert
+from cases.models import Case
+from core.indexes import PostgresExpressionGinIndex
 
 from ._schema import (
     index_ddl,
@@ -499,3 +509,86 @@ def test_the_postgres_planner_picks_the_pending_run_index() -> None:
     assert "ar_pending_idx" not in other, (
         f"a non-Pending status must not be answered from a Pending-only index: {other}"
     )
+
+
+# ---------------------------------------------------------------------------------------
+# §6.16-fu1 — global-search Postgres indexes and their SQLite-safe migration shape.
+# ---------------------------------------------------------------------------------------
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+ALERT_TRGM = {
+    "alert_title_upper_trgm_idx",
+    "alert_desc_upper_trgm_idx",
+    "alert_summary_upper_trgm_idx",
+}
+CASE_TRGM = {
+    "case_title_upper_trgm_idx",
+    "case_desc_upper_trgm_idx",
+    "case_summary_upper_trgm_idx",
+}
+
+
+def _named_indexes(model: type, names: set[str]) -> dict[str, object]:
+    found = {index.name: index for index in model._meta.indexes if index.name in names}
+    assert set(found) == names
+    return found
+
+
+def test_case_and_alert_trigram_indexes_are_model_declared() -> None:
+    for model, names in ((Alert, ALERT_TRGM), (Case, CASE_TRGM)):
+        indexes_by_name = _named_indexes(model, names)
+        for index in indexes_by_name.values():
+            assert isinstance(index, GinIndex)
+            assert isinstance(index, PostgresExpressionGinIndex)
+            assert len(index.expressions) == 1
+            expression = index.expressions[0]
+            assert isinstance(expression, OpClass)
+            assert expression.extra["name"] == "gin_trgm_ops"
+            assert isinstance(expression.source_expressions[0], Upper)
+
+
+def test_expression_gin_index_is_a_noop_on_sqlite() -> None:
+    """SQLite table rebuilds must not emit Postgres opclass expressions."""
+    index = next(i for i in Alert._meta.indexes if i.name == "alert_title_upper_trgm_idx")
+    editor = SimpleNamespace(connection=SimpleNamespace(vendor="sqlite"))
+    assert index.create_sql(Alert, editor).startswith("-- skipped postgres-only index")
+    assert index.remove_sql(Alert, editor).startswith("-- skipped postgres-only index")
+
+
+def test_search_order_indexes_match_the_shipped_order_by() -> None:
+    alert = next(i for i in Alert._meta.indexes if i.name == "alert_search_order_idx")
+    case = next(i for i in Case._meta.indexes if i.name == "case_search_order_idx")
+    assert [str(field) for field in alert.fields] == ["owner_org", "-severity", "-date", "-id"]
+    assert [str(field) for field in case.fields] == [
+        "owner_org",
+        "-severity",
+        "-start_date",
+        "-id",
+    ]
+
+
+def test_trigram_migrations_are_postgres_only_expression_indexes() -> None:
+    paths = [
+        REPO_ROOT / "alerts" / "migrations" / "0020_alert_upper_trgm.py",
+        REPO_ROOT / "cases" / "migrations" / "0026_case_upper_trgm.py",
+    ]
+    for path in paths:
+        source = path.read_text(encoding="utf-8")
+        assert "gin_expression_index_operation" in source
+        assert "ensure_trgm_extension_operation" in source
+        assert "PostgresExpressionGinIndex" in source
+        assert "gin_trgm_ops" in source
+        assert "SeparateDatabaseAndState" in source
+        assert '("observables", "0015_observable_data_upper_trgm")' not in source
+        assert "CreateExtension" not in source  # extension creation is reverse-noop.
+
+
+def test_order_index_migrations_are_reversible() -> None:
+    for path in (
+        REPO_ROOT / "alerts" / "migrations" / "0021_alert_search_order_idx.py",
+        REPO_ROOT / "cases" / "migrations" / "0027_case_search_order_idx.py",
+    ):
+        source = path.read_text(encoding="utf-8")
+        assert "migrations.AddIndex" in source
+        assert "CREATE INDEX" not in source  # Django owns the vendor-neutral DDL.

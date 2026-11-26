@@ -11,6 +11,10 @@
     Cross-org ({{ case.owner_org.name }})
   </span>
   {% endif %}
+  <span id="case-presence" aria-live="polite" data-ws-url="{% if request.user.org %}{% if request.is_secure %}wss{% else %}ws{% endif %}://{{ request.get_host }}/ws/case/{{ case.id }}/{% endif %}">
+    <i class="fa-solid fa-users" aria-hidden="true"></i>
+    <span data-presence-text>Live updates unavailable</span>
+  </span>
 {% endblock %}
 
 {% block actions %}

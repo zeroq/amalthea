@@ -1,0 +1,25 @@
+{% load ui_tags %}
+{% if open_cases %}
+<div class="table-wrap">
+<table class="data-table">
+  <caption class="sr-only">Open cases by severity</caption>
+  <thead>
+    <tr>
+      <th scope="col">Case</th><th scope="col">Severity</th>
+      <th scope="col">Status</th><th scope="col">Assignee</th>
+    </thead>
+    <tbody>
+      {% for case in open_cases %}
+      <tr>
+        <td><a href="{% url 'ui-case-detail' case.number %}">#{{ case.number }}</a> {{ case.title }}</td>
+        <td><span class="sev sev-{{ case.severity|sev_class }}">{{ case.severity|sev_label }}</span></td>
+        <td>{{ case.status.display_label }}</td>
+        <td>{{ case.assignee.login|default:"—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="empty">No open cases.</p>
+{% endif %}

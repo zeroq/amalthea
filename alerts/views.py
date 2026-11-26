@@ -16,6 +16,7 @@ from typing import Any
 from uuid import UUID
 
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, renderer_classes
 from rest_framework.renderers import JSONRenderer
@@ -54,7 +55,7 @@ from core.taxonomy import (
 from identity.audit import maybe_record_cross_org_read, record_taxonomy_change
 from observables.extractor import resolve_observable
 from observables.models import ObservableType
-from realtime.publisher import publish_case_event
+from realtime.publisher import publish_case_event, publish_org_event
 
 
 def _actor(request: Request) -> Any:
@@ -347,6 +348,19 @@ def _create_alert(request: Request) -> Response:
         if date_value is not None:
             alert.date = datetime.fromtimestamp(int(date_value) / 1000, tz=UTC)
             alert.save(update_fields=["date"])
+        # Emit org refresh event after commit so a rolled-back create leaves no live signal.
+        transaction.on_commit(
+            lambda: publish_org_event(
+                str(alert.owner_org_id),
+                "refresh",
+                {
+                    "surface": "alerts",
+                    "reason": "alert-created",
+                    "object_id": str(alert.id),
+                    "occurred_at": timezone.now().isoformat(),
+                },
+            )
+        )
     payload_warnings = {
         name: value
         for name, value in payload.items()
@@ -839,12 +853,26 @@ def alert_comment_list(request: Request, alert_id: str) -> Response:
         return _bad("message is required", {"message": ["required"]})
     comment = Comment.objects.create(alert=alert, message=message, created_by=_actor(request))
     if alert.case_id:
+        # Publish case timeline event (existing behavior)
         transaction.on_commit(
             partial(
                 publish_case_event,
                 str(alert.case_id),
                 "comment",
                 {"event": comment_json(comment)},
+            )
+        )
+        # Also emit an org refresh event so the case list/dashboard updates
+        transaction.on_commit(
+            lambda: publish_org_event(
+                str(alert.owner_org_id),
+                "refresh",
+                {
+                    "surface": "cases",
+                    "reason": "case-updated",
+                    "object_id": str(alert.case_id),
+                    "occurred_at": timezone.now().isoformat(),
+                },
             )
         )
     return Response(comment_json(comment), status=status.HTTP_201_CREATED)

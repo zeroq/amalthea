@@ -28,7 +28,7 @@ from typing import Any, Literal
 from django.db.models import Case as DjangoCase
 from django.db.models import IntegerField, Q, QuerySet, Value, When
 
-from identity.scoping import case_visible_q, org_q
+from identity.scoping import _is_superadmin, _user_org_id, org_q
 
 MAX_QUERY_LENGTH = 200
 MAX_TERMS = 8
@@ -165,15 +165,27 @@ def _all_terms(builder: Callable[[str], Q], terms: tuple[str, ...]) -> Q:
 
 def case_queryset(query: SearchQuery, user: Any) -> QuerySet[Any]:
     """Case results in display order, org/share-scoped."""
-    from cases.models import Case
+    from cases.models import Case, Share
 
     if query.is_empty:
         return Case.objects.none()
 
-    qs: QuerySet[Any] = Case.objects.filter(
-        case_visible_q(user) & _all_terms(_term_case_q, query.terms)
+    if _is_superadmin(user):
+        visible_q = Q()
+    else:
+        org_id = _user_org_id(user)
+        if org_id is None:
+            return Case.objects.none()
+        # A subquery keeps OR-scoped shares from turning a text-search count into a
+        # LEFT JOIN over every case row (and duplicate rows for multiple shares).
+        visible_q = Q(owner_org_id=org_id) | Q(
+            pk__in=Share.objects.filter(organisation_id=org_id).values("case_id")
+        )
+
+    qs: QuerySet[Any] = Case.objects.filter(visible_q & _all_terms(_term_case_q, query.terms))
+    qs = qs.select_related("owner_org", "status", "assignee").defer(
+        "description", "summary", "ingestion_warnings", "source_template"
     )
-    qs = qs.select_related("owner_org", "status", "assignee")
     if query.case_number is not None:
         qs = qs.annotate(
             _search_exact=DjangoCase(
@@ -197,6 +209,14 @@ def alert_queryset(query: SearchQuery, user: Any) -> QuerySet[Any]:
     return (
         Alert.objects.filter(org_q("owner_org", user) & _all_terms(_term_alert_q, query.terms))
         .select_related("owner_org", "status")
+        .defer(
+            "description",
+            "summary",
+            "raw_payload",
+            "ingestion_warnings",
+            "correlation_key",
+            "payload_ssdeep",
+        )
         .order_by("-severity", "-date", "-id")
     )
 

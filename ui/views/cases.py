@@ -420,6 +420,10 @@ def _render_case_list(
             _case_create_form_context(post_data, status_options, assignees, request=request)
         )
 
+    partial = request.GET.get("partial")
+    if request.headers.get("HX-Request") and partial == "rows":
+        return render(request, "ui/_case_list_rows.html", context)
+
     return render(request, "ui/case_list.html", _base_context(request, **context))
 
 

@@ -4,9 +4,11 @@ from . import consumers, views
 
 websocket_urlpatterns = [
     re_path(r"ws/case/(?P<case_id>[^/]+)/$", consumers.CaseConsumer.as_asgi()),
+    re_path(r"ws/org/(?P<org_id>[^/]+)/$", consumers.OrgConsumer.as_asgi()),
 ]
 
 # HTTP fallback for WebSocket endpoints - returns helpful error instead of 404
 http_fallback_urlpatterns = [
     path("ws/case/<str:case_id>/", views.websocket_fallback, name="ws-case-fallback"),
+    path("ws/org/<str:org_id>/", views.websocket_fallback, name="ws-org-fallback"),
 ]

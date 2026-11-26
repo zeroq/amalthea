@@ -10,7 +10,7 @@ from django.views.decorators.http import require_GET
 
 
 @require_GET
-def websocket_fallback(request: HttpRequest, case_id: str) -> HttpResponse:
+def websocket_fallback(request: HttpRequest, **kwargs: str) -> HttpResponse:
     """Friendly fallback for WebSocket endpoint accessed via HTTP.
 
     Returns a helpful error message explaining that this endpoint requires

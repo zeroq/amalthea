@@ -1,10 +1,10 @@
-from django.contrib.postgres.indexes import GinIndex, OpClass
-from django.contrib.postgres.operations import CreateExtension
+from django.contrib.postgres.indexes import OpClass
 from django.db import migrations
 from django.db.models import TextField
 from django.db.models.functions import Cast, Upper
 
-from core.pg_indexes import gin_expression_index_operation
+from core.indexes import PostgresExpressionGinIndex
+from core.pg_indexes import ensure_trgm_extension_operation, gin_expression_index_operation
 
 
 class Migration(migrations.Migration):
@@ -14,9 +14,9 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        CreateExtension('pg_trgm'),
         migrations.SeparateDatabaseAndState(
             database_operations=[
+                ensure_trgm_extension_operation(),
                 gin_expression_index_operation(
                     'observable',
                     'obs_data_upper_trgm_idx',
@@ -27,7 +27,7 @@ class Migration(migrations.Migration):
             state_operations=[
                 migrations.AddIndex(
                     model_name='observable',
-                    index=GinIndex(
+                    index=PostgresExpressionGinIndex(
                         OpClass(
                             Upper(Cast('data', TextField())), name='gin_trgm_ops'
                         ),

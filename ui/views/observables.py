@@ -223,6 +223,21 @@ def observable_list(request: HttpRequest) -> HttpResponse:
     if next_params:
         next_url = f"{request.path}?{urlencode(next_params)}"
 
+    partial = request.GET.get("partial")
+    if request.headers.get("HX-Request") and partial == "rows":
+        return render(
+            request,
+            "ui/_observable_list_rows.html",
+            {
+                "page_obj": page_obj,
+                "query": query,
+                "type_filter": type_filter,
+                "observable_types": ObservableType.objects.order_by("name"),
+                "tlp_choices": TLP_CHOICES,
+                "pap_choices": PAP_CHOICES,
+            },
+        )
+
     return render(
         request,
         "ui/observable_list.html",
