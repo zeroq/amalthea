@@ -830,14 +830,17 @@ class TestApplyingTheMappingToExistingAlerts(_FeedFixture):
         _, admin, source = feed
         return _ui_client(admin), source
 
-    def test_both_cards_offer_the_apply_button(self, feed) -> None:
-        client, source = feed and self._client(feed)
+    def test_both_mapping_cards_offer_the_apply_button(self, feed) -> None:
+        client, source = self._client(feed)
 
-        body = client.get(self._url(source)).content.decode()
+        mapping_body = client.get(self._url(source)).content.decode()
+        observable_body = client.get(self._url(source) + "?tab=observable-mapping").content.decode()
 
-        assert body.count('name="intent" value="apply"') == 3, (
-            "one per mapping writer (table, JSON) plus the observable card"
+        assert mapping_body.count('name="intent" value="apply"') == 2, (
+            "one per mapping writer (table, JSON); observable rules have their own tab"
         )
+        assert "Observable extraction" not in mapping_body
+        assert observable_body.count('name="intent" value="apply"') == 1
 
     def test_the_apply_intent_writes_nothing_at_all(self, feed) -> None:
         """AC20 — the first step validates and *counts*. No mapping, no alerts, no audit."""

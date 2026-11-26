@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
+from urllib.parse import quote
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -11,6 +13,7 @@ from django.db import transaction
 from django.db.models import Count, Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods
 
 from alerts.models import Alert
@@ -30,6 +33,29 @@ from .common import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _detail_url(source_id, *, tab: str | None = None, submapping: str | None = None) -> str:
+    """Source-detail URL with an optional tab/submapping selection, safely quoted."""
+    url = reverse("ui-settings-source-detail", kwargs={"source_id": source_id})
+    params: list[str] = []
+    if tab:
+        params.append(f"tab={quote(tab)}")
+    if submapping is not None:
+        params.append(f"submapping={quote(submapping)}")
+    return f"{url}?{'&'.join(params)}" if params else url
+
+
+def _raw_type_from_payload(payload: object) -> str | None:
+    """Best-effort raw top-level `type`, distinct from the mapped Alert.type."""
+    try:
+        value = json.loads(payload) if isinstance(payload, str) else payload
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(value, dict):
+        return None
+    raw = value.get("type")
+    return raw if isinstance(raw, str) and raw.strip() else None
 
 
 @login_required
@@ -152,28 +178,21 @@ def settings_source_detail(request: HttpRequest, source_id) -> HttpResponse:
     )
 
     active_tab = request.GET.get("tab", "mapping")
-    if active_tab not in ("mapping", "raw-data"):
+    if active_tab not in ("mapping", "observable-mapping", "submappings", "raw-data"):
         active_tab = "mapping"
 
     latest_alert: Alert | None = None
     latest_raw_payload: str | None = None
     raw_type: str | None = None
-    if active_tab == "raw-data":
+    if active_tab in ("raw-data", "submappings"):
         latest_alert = (
             Alert.objects.filter(ingestion_source=source).order_by("-date", "-created_at").first()
         )
         if latest_alert is not None:
-            latest_raw_payload = json.dumps(latest_alert.raw_payload, indent=2, sort_keys=True)
-            # Extract raw top-level type for submapping selection display
-            try:
-                payload = latest_alert.raw_payload
-                if isinstance(payload, dict):
-                    raw_type = payload.get("type")
-                elif isinstance(payload, str):
-                    payload = json.loads(payload)
-                    raw_type = payload.get("type")
-            except Exception:
-                raw_type = None
+            if active_tab == "raw-data":
+                latest_raw_payload = json.dumps(latest_alert.raw_payload, indent=2, sort_keys=True)
+            # Extract raw top-level type for submapping key prefill/display.
+            raw_type = _raw_type_from_payload(latest_alert.raw_payload)
 
     return render(
         request,
@@ -187,6 +206,8 @@ def settings_source_detail(request: HttpRequest, source_id) -> HttpResponse:
                 latest_alert=latest_alert,
                 latest_raw_payload=latest_raw_payload,
                 raw_type=raw_type,
+                submapping_key=request.GET.get("submapping", ""),
+                submapping_prefill=request.GET.get("submapping_prefill", ""),
             ),
         ),
     )
@@ -210,6 +231,11 @@ def _source_detail_context(
     latest_alert: Alert | None = None,
     latest_raw_payload: str | None = None,
     raw_type: str | None = None,
+    submapping_key: str = "",
+    submapping_prefill: str = "",
+    submapping_submitted: Mapping[str, Mapping[str, str]] | None = None,
+    submapping_add_errors: tuple[str, ...] = (),
+    submapping_delete_key: str | None = None,
 ) -> dict:
     """Everything the source page renders, for both the GET and a rejected POST.
 
@@ -225,6 +251,11 @@ def _source_detail_context(
     from ingest.mapping import TARGETS, config_shape, read_rules, submapping_count
     from ingest.observable_editor import observable_editor_rows
     from ingest.remap import MAX_REMAP_ALERTS, REMAP_FIELDS, mapping_health
+    from ingest.submapping_editor import (
+        submapping_config,
+        submapping_editor_rows,
+        submapping_keys,
+    )
     from observables.models import ObservableType
     from ui.json_tree import is_valid_jsonpath
 
@@ -251,28 +282,53 @@ def _source_detail_context(
         errors=observable_errors,
     )
 
+    keys = submapping_keys(source.mapping_config)
+    selected_key = submapping_key if submapping_key in keys else (keys[0] if keys else "")
+    selected_config = submapping_config(source.mapping_config, selected_key) or {}
+    sub_rows = (
+        submapping_editor_rows(
+            source.mapping_config,
+            selected_key,
+            submitted=submapping_submitted,
+            errors=errors if active_tab == "submappings" else None,
+        )
+        if selected_key
+        else []
+    )
+    sub_obs_rows = (
+        observable_editor_rows(
+            selected_config,
+            observable_types,
+            submitted=observable_submitted if active_tab == "submappings" else None,
+            errors=observable_errors if active_tab == "submappings" else None,
+        )
+        if selected_key
+        else []
+    )
+
     # --- Raw-data click-to-map prefill (TODO §17) --------------------------------
     # A GET from the raw-data tab asks to add one JSONPath to a mapping row. It is a
     # *prefill* only: the path lands in the unsaved textarea, and the existing Save POST
     # remains the sole writer. Invalid input is ignored rather than raising.
     prefilled: dict[str, str] | None = None
-    if active_tab == "mapping":
-        map_target = request.GET.get("map_target", "")
-        map_path = request.GET.get("map_path", "")
-        map_observable_type = request.GET.get("map_observable_type", "")
-        if is_valid_jsonpath(map_path):
-            if map_target in TARGET_LABELS:
-                prefilled = {"target": map_target, "observable_type": "", "path": map_path}
-                _prefill_row(erows, "target", map_target, map_path)
-            elif map_target == "observable" and map_observable_type in {
-                ot.name for ot in observable_types
-            }:
-                prefilled = {
-                    "target": "observable",
-                    "observable_type": map_observable_type,
-                    "path": map_path,
-                }
-                _prefill_row(obs_rows, "type", map_observable_type, map_path)
+    map_target = request.GET.get("map_target", "")
+    map_path = request.GET.get("map_path", "")
+    map_observable_type = request.GET.get("map_observable_type", "")
+    if is_valid_jsonpath(map_path):
+        if active_tab == "mapping" and map_target in TARGET_LABELS:
+            prefilled = {"target": map_target, "observable_type": "", "path": map_path}
+            _prefill_row(erows, "target", map_target, map_path)
+        elif (
+            active_tab == "observable-mapping"
+            and map_target == "observable"
+            and (map_observable_type in {ot.name for ot in observable_types})
+        ):
+            prefilled = {
+                "target": "observable",
+                "observable_type": map_observable_type,
+                "path": map_path,
+            }
+            _prefill_row(obs_rows, "type", map_observable_type, map_path)
 
     return {
         "source": source,
@@ -321,7 +377,15 @@ def _source_detail_context(
         # --- P7: the "apply to existing alerts" confirmation dialog -------------------------------
         "apply_pending": apply_pending,
         "apply_confirm_fields": (
-            {"intent": "apply_confirmed", "pending_config": pending_config_json or "{}"}
+            {
+                "intent": "apply_confirmed",
+                "pending_config": pending_config_json or "{}",
+                **(
+                    {"form": "submappings", "submapping_key": selected_key}
+                    if active_tab == "submappings"
+                    else {}
+                ),
+            }
             if apply_pending is not None
             else None
         ),
@@ -349,6 +413,23 @@ def _source_detail_context(
         "latest_alert": latest_alert,
         "latest_raw_payload": latest_raw_payload,
         "raw_type": raw_type,
+        # Submappings tab: keys are sorted and the selected one drives the editor rows.
+        "submapping_keys": keys,
+        "submapping_selected": selected_key,
+        "submapping_rows": sub_rows,
+        "submapping_observable_rows": sub_obs_rows,
+        "submapping_prefill": submapping_prefill,
+        "submapping_add_errors": submapping_add_errors,
+        "submapping_delete_key": submapping_delete_key,
+        "submapping_delete_confirm_fields": (
+            {
+                "form": "submappings",
+                "intent": "delete_confirmed",
+                "submapping_key": submapping_delete_key,
+            }
+            if submapping_delete_key
+            else None
+        ),
         # Raw-data click-to-map (TODO §17): the parsed payload feeds the JSON tree; the
         # raw `<pre>` above stays as the no-JS fallback.
         "latest_raw_data": latest_alert.raw_payload if latest_alert is not None else None,
@@ -389,6 +470,8 @@ def _source_mapping_post(request: HttpRequest, source) -> HttpResponse:
     `intent` is the discriminator, and its default is the *old* behaviour: the Save buttons carry no
     `intent` at all, so every existing submission lands on the save path unchanged.
     """
+    if request.POST.get("form") == "submappings":
+        return _submappings_post(request, source)
     if request.POST.get("form") == "observables":
         intent = request.POST.get("intent") or "save"
         if intent == "apply":
@@ -403,6 +486,201 @@ def _source_mapping_post(request: HttpRequest, source) -> HttpResponse:
     if intent == "apply_confirmed":
         return _apply_mapping_to_alerts(request, source)
     return _save_source_mapping(request, source)
+
+
+def _submappings_post(request: HttpRequest, source) -> HttpResponse:
+    """Route the structured submapping editor's POST to add/save/delete/apply."""
+    intent = request.POST.get("intent") or "save"
+    key = request.POST.get("submapping_key", "")
+    if intent == "add":
+        return _add_submapping(request, source)
+    if intent == "delete":
+        return _confirm_submapping_delete(request, source, key)
+    if intent == "delete_confirmed":
+        return _delete_submapping(request, source, key)
+    if intent == "apply":
+        return _confirm_submapping_apply(request, source)
+    if intent == "apply_confirmed":
+        return _apply_mapping_to_alerts(
+            request, source, active_tab="submappings", submapping_key=key
+        )
+    return _save_submapping(request, source)
+
+
+def _submapping_rows_from_post(request: HttpRequest) -> dict[str, dict[str, str]]:
+    """The selected submapping's field table, in the shape `build_table_config` expects."""
+    from ingest.mapping import TARGETS
+
+    return {
+        target: {
+            "paths": request.POST.get(f"paths__{target}", ""),
+            "transform": request.POST.get(f"transform__{target}", ""),
+            "default": request.POST.get(f"default__{target}", ""),
+        }
+        for target in TARGETS
+    }
+
+
+def _submapping_reject(
+    request: HttpRequest,
+    source,
+    *,
+    result: object,
+    key: str,
+    field_rows: dict[str, dict[str, str]] | None = None,
+    observable_rows: dict[str, str] | None = None,
+) -> HttpResponse:
+    """Re-render the Submappings tab with operator input and correctly placed errors."""
+    from ingest.editor import EditorResult
+    from ingest.mapping import TARGETS
+
+    errors = dict(result.errors or {})
+    add_errors = tuple(errors.pop("submapping_key", ()))
+    field_errors = {name: value for name, value in errors.items() if name == "" or name in TARGETS}
+    observable_errors = {name: value for name, value in errors.items() if name not in field_errors}
+    return _reject_mapping(
+        request,
+        source,
+        which="submappings",
+        submitted=field_rows,
+        result=EditorResult(errors=field_errors),
+        active_tab="submappings",
+        submapping_key=key,
+        submapping_submitted=field_rows,
+        submapping_add_errors=add_errors,
+        observable_submitted=observable_rows,
+        observable_errors=observable_errors,
+    )
+
+
+def _submapping_candidate(
+    request: HttpRequest, source
+) -> tuple[str, dict, dict[str, dict[str, str]], dict[str, str], object]:
+    """Build one candidate whole-config from the selected submapping's two forms."""
+    from ingest.submapping_editor import build_submapping_config
+    from observables.models import ObservableType
+
+    before = source.mapping_config or {}
+    key = request.POST.get("submapping_key", "")
+    field_rows = _submapping_rows_from_post(request)
+    observable_rows = _observable_rows_from_post(request)
+    types = list(ObservableType.objects.order_by("name"))
+    result = build_submapping_config(before, key, field_rows, observable_rows, types)
+    return key, before, field_rows, observable_rows, result
+
+
+def _add_submapping(request: HttpRequest, source) -> HttpResponse:
+    """Add an empty v2 submapping keyed by the submitted raw `type`."""
+    from ingest.submapping_editor import build_submapping_add
+
+    before = source.mapping_config or {}
+    key_text = request.POST.get("submapping_key", "")
+    result = build_submapping_add(before, key_text)
+    if not result.ok:
+        return _submapping_reject(request, source, result=result, key=key_text.strip())
+    with transaction.atomic():
+        _persist_mapping(request, source, before, result.config or {})
+    messages.success(request, "Submapping added. Add field rules below, then save.")
+    return redirect(_detail_url(source.id, tab="submappings", submapping=key_text.strip()))
+
+
+def _confirm_submapping_delete(request: HttpRequest, source, key: str) -> HttpResponse:
+    """Open a custom confirmation dialog; write nothing until `delete_confirmed`."""
+    from ingest.submapping_editor import submapping_config
+
+    if submapping_config(source.mapping_config, key) is None:
+        from ingest.editor import EditorResult
+
+        return _submapping_reject(
+            request,
+            source,
+            result=EditorResult(
+                errors={"submapping_key": (f"No submapping for raw type `{key}`.",)}
+            ),
+            key=key,
+        )
+    return render(
+        request,
+        "ui/source_detail.html",
+        _base_context(
+            request,
+            **_source_detail_context(
+                request,
+                source,
+                active_tab="submappings",
+                submapping_key=key,
+                submapping_delete_key=key,
+            ),
+        ),
+    )
+
+
+def _delete_submapping(request: HttpRequest, source, key: str) -> HttpResponse:
+    """Delete only the selected submapping; master and sibling keys survive."""
+    from ingest.submapping_editor import build_submapping_delete
+
+    before = source.mapping_config or {}
+    result = build_submapping_delete(before, key)
+    if not result.ok:
+        return _submapping_reject(request, source, result=result, key=key)
+    with transaction.atomic():
+        _persist_mapping(request, source, before, result.config or {})
+    messages.success(request, f"Submapping for raw type `{key}` deleted.")
+    return redirect(_detail_url(source.id, tab="submappings"))
+
+
+def _save_submapping(request: HttpRequest, source) -> HttpResponse:
+    """Save only the selected submapping; master and siblings are preserved."""
+    from ingest.editor import is_noop_save
+
+    key, before, field_rows, observable_rows, result = _submapping_candidate(request, source)
+    if not result.ok:
+        return _submapping_reject(
+            request,
+            source,
+            result=result,
+            key=key,
+            field_rows=field_rows,
+            observable_rows=observable_rows,
+        )
+    if is_noop_save(before, result.config):
+        messages.info(request, "No changes to save.")
+        return redirect(_detail_url(source.id, tab="submappings", submapping=key))
+    with transaction.atomic():
+        _persist_mapping(request, source, before, result.config or {})
+    messages.success(request, f"Submapping for raw type `{key}` saved.")
+    return redirect(_detail_url(source.id, tab="submappings", submapping=key))
+
+
+def _confirm_submapping_apply(request: HttpRequest, source) -> HttpResponse:
+    """Preview a whole-config remap from the Submappings tab without writing anything."""
+    from ingest.remap import preview_alerts
+
+    key, _before, field_rows, observable_rows, result = _submapping_candidate(request, source)
+    if not result.ok:
+        return _submapping_reject(
+            request,
+            source,
+            result=result,
+            key=key,
+            field_rows=field_rows,
+            observable_rows=observable_rows,
+        )
+    return render(
+        request,
+        "ui/source_detail.html",
+        _base_context(
+            request,
+            **_source_detail_context(
+                request,
+                source,
+                apply_pending=preview_alerts(source, result.config),
+                pending_config_json=json.dumps(result.config, sort_keys=True),
+                active_tab="submappings",
+                submapping_key=key,
+            ),
+        ),
+    )
 
 
 def _submitted_mapping(request: HttpRequest, before: dict) -> tuple[str, dict | None, object]:
@@ -430,6 +708,12 @@ def _reject_mapping(
     submitted: dict | None,
     result: object,
     json_text: str | None = None,
+    active_tab: str = "mapping",
+    submapping_key: str = "",
+    submapping_submitted: Mapping[str, Mapping[str, str]] | None = None,
+    submapping_add_errors: tuple[str, ...] = (),
+    observable_submitted: dict[str, str] | None = None,
+    observable_errors: dict[str, tuple[str, ...]] | None = None,
 ) -> HttpResponse:
     """The only rejection response: a 200 that re-renders the page *with the operator's input*.
 
@@ -447,6 +731,12 @@ def _reject_mapping(
                 errors=result.errors,
                 failed_form=which,
                 json_text=json_text,
+                active_tab=active_tab,
+                submapping_key=submapping_key,
+                submapping_submitted=submapping_submitted,
+                submapping_add_errors=submapping_add_errors,
+                observable_submitted=observable_submitted,
+                observable_errors=observable_errors,
             ),
         ),
     )
@@ -530,6 +820,7 @@ def _reject_observables(
                 observable_submitted=submitted,
                 observable_errors=result.errors,
                 failed_form="observables",
+                active_tab="observable-mapping",
             ),
         ),
     )
@@ -550,7 +841,7 @@ def _save_observable_rules(request: HttpRequest, source) -> HttpResponse:
 
     if observable_save_is_noop(before, result.config):
         messages.info(request, "No changes to save.")
-        return redirect("ui-settings-source-detail", source_id=source.id)
+        return redirect(_detail_url(source.id, tab="observable-mapping"))
 
     with transaction.atomic():
         _persist_mapping(request, source, before, result.config)
@@ -563,7 +854,7 @@ def _save_observable_rules(request: HttpRequest, source) -> HttpResponse:
         )
     else:
         messages.success(request, "Observable rules cleared.")
-    return redirect("ui-settings-source-detail", source_id=source.id)
+    return redirect(_detail_url(source.id, tab="observable-mapping"))
 
 
 def _confirm_observable_apply(request: HttpRequest, source) -> HttpResponse:
@@ -586,6 +877,7 @@ def _confirm_observable_apply(request: HttpRequest, source) -> HttpResponse:
                 # The page keeps showing stored rules; the dialog carries the candidate config.
                 observable_apply_pending=preview,
                 observable_pending_config_json=json.dumps(result.config, sort_keys=True),
+                active_tab="observable-mapping",
             ),
         ),
     )
@@ -617,7 +909,7 @@ def _apply_observable_rules(request: HttpRequest, source) -> HttpResponse:
             f"Not applied: this feed now has {summary.candidates} unlinked open alerts, over the "
             f"{MAX_REMAP_ALERTS}-per-request limit. Narrow the feed or use the API.",
         )
-        return redirect("ui-settings-source-detail", source_id=source.id)
+        return redirect(_detail_url(source.id, tab="observable-mapping"))
 
     config_changed = not observable_save_is_noop(before, config)
     with transaction.atomic():
@@ -656,7 +948,7 @@ def _apply_observable_rules(request: HttpRequest, source) -> HttpResponse:
             f"Extraction was truncated on {counts.truncated_alerts} alert"
             f"{'' if counts.truncated_alerts == 1 else 's'}.",
         )
-    return redirect("ui-settings-source-detail", source_id=source.id)
+    return redirect(_detail_url(source.id, tab="observable-mapping"))
 
 
 def _persist_mapping(request: HttpRequest, source, before: dict, config: dict) -> None:
@@ -764,7 +1056,13 @@ def _confirm_mapping_apply(request: HttpRequest, source) -> HttpResponse:
     )
 
 
-def _apply_mapping_to_alerts(request: HttpRequest, source) -> HttpResponse:
+def _apply_mapping_to_alerts(
+    request: HttpRequest,
+    source,
+    *,
+    active_tab: str = "mapping",
+    submapping_key: str = "",
+) -> HttpResponse:
     """`intent=apply_confirmed` — save the mapping and re-map the feed's unlinked open alerts (P7).
 
     One transaction for both halves (AC22): the rules that produced the new values and the values
@@ -787,7 +1085,14 @@ def _apply_mapping_to_alerts(request: HttpRequest, source) -> HttpResponse:
     if not result.ok:
         # Tampered or hand-edited between the two steps: same treatment as any rejected submission.
         return _reject_mapping(
-            request, source, which="json", submitted=None, result=result, json_text=pending
+            request,
+            source,
+            which="json",
+            submitted=None,
+            result=result,
+            json_text=pending,
+            active_tab=active_tab,
+            submapping_key=submapping_key,
         )
 
     summary = summarise_candidates(source)
@@ -800,7 +1105,7 @@ def _apply_mapping_to_alerts(request: HttpRequest, source) -> HttpResponse:
             f"Not applied: this feed now has {summary.candidates} unlinked open alerts, over the "
             f"{MAX_REMAP_ALERTS}-per-request limit. Narrow the feed or use the API.",
         )
-        return redirect("ui-settings-source-detail", source_id=source.id)
+        return redirect(_detail_url(source.id, tab=active_tab, submapping=submapping_key or None))
 
     before = source.mapping_config or {}
     with transaction.atomic():
@@ -844,7 +1149,7 @@ def _apply_mapping_to_alerts(request: HttpRequest, source) -> HttpResponse:
             messages.warning(request, line)
     else:
         messages.info(request, "No unlinked open alerts to re-map.")
-    return redirect("ui-settings-source-detail", source_id=source.id)
+    return redirect(_detail_url(source.id, tab=active_tab, submapping=submapping_key or None))
 
 
 def _unresolved_lines(unresolved: dict[str, dict[str, int]], candidates: int) -> list[str]:

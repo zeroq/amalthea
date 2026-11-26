@@ -2,7 +2,7 @@
 
 Finished work, with the evidence that it actually happened. Open items live in
 [`TODO.md`](./TODO.md).
-Last updated: 2026-11-17
+Last updated: 2026-11-26
 
 Items are only listed here once independently verified. Where code exists but an acceptance criterion
 is still unproven, the item says so explicitly and the verification gap is cross-linked in `TODO.md`.
@@ -2070,3 +2070,148 @@ Rewrite `_json_tree.html` as valid, nested markup (no inline JS — CSP):
 
 **Verification:** `tests/conformance/test_rejected_observables_api.py` and
 `tests/conformance/test_rejected_observables_ui.py` pass (30 passed after promoted-not-suppressed regression).
+
+---
+
+## 2026-11-26 — TODO cleanup: completed items moved out
+
+Moved from `TODO.md` so the tracker contains only open work. Original section IDs are preserved:
+historical plans and verification reports still cite the TODO IDs recorded here.
+
+### §2.6 — Restore coverage ≥ 80%
+- Closed 2026-11-23. Settings UI conformance added cross-tenant/role guards, org-delete member handling,
+  and no-JS/plain-POST admin create role/org-pinning guards in `tests/conformance/test_settings_ui.py`;
+  §10.11 nonce-aware token-create tests and observable-list `next_url` sanitization were also updated.
+- Evidence: `make check` green; targeted 170 passed; `/tmp/amalthea-full-pytest.log` **4175 passed,
+  3 skipped, 15 warnings, 2 subtests in 950.47s**; `coverage report --fail-under=80` → **TOTAL 80%**.
+
+### §2.7 — Phase 12 / T2 test hardening
+- Closed 2026-11-23. Added/strengthened guards for delete-reference-then-delete mutations, merge
+  children/provenance/idempotency, attachment boundaries, playbook timeout boundaries, synchronous
+  run-now execution, prod `SESSION_COOKIE_HTTPONLY`, UI login throttle lockout/reset, and Python-only
+  `ui-*` URL smoke coverage.
+- Evidence: `make check` green; targeted 71 passed; `/tmp/amalthea-full-pytest.log` **4175 passed,
+  3 skipped, 15 warnings, 2 subtests in 947.31s**.
+
+### §6.13 — Ingestion tokens + audit-log viewer
+- Done 2026-11-23. Settings → Ingestion tokens ships under Settings → Sources
+  (`ui/views/ingestion_tokens.py`, `ui/templates/ui/settings_sources.html`): per-org
+  create/revoke/deactivate/activate/delete, show-once secret, org scoping, audit rows. Read-only
+  Settings → Audit log added at `ui-settings-audit-log` (`ui/views/audit_log.py`,
+  `ui/templates/ui/settings_audit_log.html`), superAdmin-only, filterable/paginated, no mutation/export.
+- Conformance: `tests/conformance/test_settings_audit_log.py` plus existing token tests; targeted 53 passed.
+  Full suite at the time: **4194 passed, 3 skipped, 15 warnings, 2 subtests**.
+
+### §8.7 — Timestamp-unit wording in plan §7.1
+- Done 2026-11-23. `PLAN-2026-10-03-thehive-compatible-mvp.md` §7.1 now states the P10-2 boundary:
+  input is epoch-ms; entity JSON output is ISO-8601; timeline/event wire output is epoch-ms.
+
+### §10.9 — Human labels for status vocabularies
+- Done 2026-11-23. Added `label`/`display_label` to `CaseStatus`/`AlertStatus` with migrations
+  `cases/0025_add_status_label.py` and `alerts/0019_add_status_label.py`; default labels seeded and
+  stored `value`/`stage` unchanged for automation/compat. API status JSON exposes `label`,
+  taxonomy/API create-update accept `label`, UI renders `status.display_label` / task
+  `get_status_display()`, and `TASK_STATUS_CHOICES` labels are human-readable.
+- Targeted: `test_t2_p1_surface.py -k status` (4 passed). Full suite: **4194 passed, 3 skipped**.
+
+### §10.11 — Reload no longer mints a second ingestion token
+- Fixed 2026-11-23. `settings_token_create` requires a one-shot per-user cache nonce
+  (`ui:token-create-nonce:{user}:{nonce}`, 15-minute TTL) rendered in
+  `_settings_token_create_form.html`; POST claims it atomically via `cache.delete()`. Replay returns
+  409 without minting. Regression: `tests/conformance/test_settings_ingestion_tokens.py::TestTokenCreateNonce`.
+
+### §10.12-fu3 — Paused-token display in Django admin
+- Done 2026-11-23. `identity/admin.py` `IngestionTokenAdmin` includes `deactivated_at` in
+  `list_display`, `list_filter`, and `readonly_fields`. Test: `tests/conformance/test_admin_ingestion_token.py`.
+
+### §11.5-L2 / §11.5-I1 — Viewer admin guard and log-forging sanitization
+- **L2:** viewer role + `is_staff`/`is_superuser` is hard-rejected in `identity/services.py` and
+  `User.clean()`; Django admin `has_permission` denies viewer-role users. Test:
+  `tests/conformance/test_viewer_admin_guard.py`.
+- **I1:** `amalthea/logging.py::SanitizeRequestPathFilter` escapes CR/LF in `django.request`
+  messages/args, wired in `amalthea/settings/base.py`. Test:
+  `tests/conformance/test_logging_sanitization.py`.
+
+### §12.4 — Bulk actions in the UI
+- Shipped. Bulk UI exists for alerts, cases, observables, and case-detail tasks via
+  `compat/bulk.py::bulk_patch`; selection controls are hidden until selection; `<dialog>` confirmation
+  uses `_modal.html` `confirm_form` (no native `confirm()`); `picker.js` skips the assignee filter in
+  `.bulk-action-bar`; alert bulk excludes `Imported`/`Closed`; case bulk blocks `Closed`.
+
+### §12.9 — UI layout/style standardization
+- Fixed 2026-11-23. Added `docs/spec/ui-style.md` with reusable 34px control rows, icon-only action
+  rules with accessible names, list-table/filter-card conventions, no-native-dialog and severity-not-colour-only
+  guidance. Generalized `.action-row` as an alias alongside `.case-actions` in `ui/static/ui/app.css`.
+
+### §12.11 — CI repaired
+- Closed 2026-11-16. `.github/workflows/ci.yml` runs two independent 5-minute jobs: `verify`
+  (`make check-ci`, lock check) and `secrets` (full-history scanner). `make check-ci` is static checks
+  plus a 50-test conformance subset; full suite, Postgres, coverage and pip-audit are local/manual.
+  Secret scanner scans each unique blob once and skips legacy dependency/cache blobs. Evidence:
+  CI run `44158684927` on `f8abbf9f` success in 2m24s; local `make check-ci` 52s / 50 passed,
+  history scan 111s, lock check 105s, `tests/unit/test_secret_scan.py` 20 passed.
+
+### §13.21 — Redundant pagination guards removed
+- Done 2026-11-23. Removed `page_obj.paginator`/`page_obj` wrappers where views always pass a
+  `Page`: `case_list.html`, `observable_list.html`, `automation_list.html`, `case_share_list.html`,
+  `settings_users.html` (admin branch), `tag_list.html`, `sources_list.html`, `playbook_list.html`,
+  `settings_sources.html`, `settings_organisations.html`. SuperAdmin per-organisation card path left intact.
+
+### §14.1 / §14.2 / §14.9–14.11 — Alert-tag follow-ups
+- **14.1:** UI POST contract uses `tags` (names) + `new_tags` (comma string); `existing_tag_ids` and
+  `new_tag_names` removed, so UUID validation is unnecessary.
+- **14.2:** `alerts/views.py::alert_tag_add` rejects non-object JSON bodies with 400
+  `{"type":"BadRequest","message":"Request body must be a JSON object"}` before parsing.
+- **14.9:** truncation message now reads `Showing the first {{ available_tags|length }} tags; type to add others.`
+- **14.10:** picker markup uses `<fieldset><legend>Existing tags</legend>` instead of an orphan label.
+- **14.11:** picker fetches `PICKER_PAGE_SIZE + 1` distinct rows, drops `Count` annotations and the
+  sliced `.count()`, and no longer passes `alert_tags_total`.
+
+### §22 — MCP server for AI agents (Phases 0–4)
+- **22.1–22.3:** plan, Phase 0/1 brief, dependency/ASGI/protocol/CrewAI spikes, read-only gateway,
+  org-bound `McpCredential`, audit/rate limits, tools/resources/prompts, and Settings → Agent access.
+  Security review `docs/security/SECURITY-2026-11-15-mcp-phase1.md` PASS; independent verification
+  READY — PASS (23 ACs Met). Full suite then: **3773 passed, 3 skipped**.
+- **22.4:** proposal-first writes, `McpActionProposal`, `/approvals` inbox, four-eyes/expiry/idempotency,
+  direct labelled `ai-summary` case summaries, rate limits, and UI. Final security re-audit
+  `docs/security/SECURITY-2026-11-19-mcp-phase2-final.md` PASS; independent verification
+  `docs/reviews/VERIFY-2026-11-19-mcp-phase2-final.md` READY — PASS (37/37 ACs). Full suite:
+  **3873 passed, 3 skipped, 15 warnings, 2 subtests**.
+- **22.5:** OAuth 2.1 resource-server profile, protected-resource metadata, binding UI, metadata/challenge,
+  proxy/SSE/multi-worker hardening, ADR/docs. Security `docs/security/SECURITY-2026-11-20-mcp-phase3.md`
+  PASS; verification `docs/planning/VERIFY-2026-11-20-mcp-phase3.md` READY — PASS (55 ACs evaluated).
+- **22.6:** `McpOrgPolicy`, shadow-mode evaluation, low-risk allowlist, kill switch, autonomy UI, no
+  autonomous closure. Focused suite 284 passed; security
+  `docs/reviews/MCP-PHASE4-SECURITY-REVIEW-2026-11-22.md` PASS; verification
+  `docs/planning/VERIFICATION-2026-11-22-mcp-phase4-autonomy-144831.md` PASS (42/42 ACs).
+
+### §23 — Rejected Observables Management
+- Already recorded above as §23. The TODO stub was removed; no duplicate implementation record added.
+
+### §24 — Alert detail Similar tab
+- Implemented 2026-11-25. Lazy Similar tab after Observables and before Raw data, bounded to 20 recently
+  closed alerts from SSDEEP/title-gate plus shared stored observables, with count badge and honest truncation.
+- Backend: `cases/correlation.py::alerts_similar_to_alert()` and `SimilarAlertMatch`; `ui/views/alerts.py`
+  computes the count once, exposes a read-only GET fragment, and shares `_similar_display_rows()` with
+  the inline panel. Route `ui-alert-similar` added.
+- Gates: 20 new tests, 214 targeted tests green, `make check-fast`, Django/migrations and secret scans clean.
+  User-provided full suite on 2026-11-26: **4282 passed, 3 skipped, 15 warnings, 2 subtests in 1188.41s**.
+- Verification `docs/planning/VERIFICATION-2026-11-25-alert-similar-tab.md` (all evaluable ACs Met);
+  security `docs/security/SECURITY-2026-11-25-alert-similar-tab.md` PASS. No Q24 deviations.
+
+### §25 — Source mapping per-type submappings
+- Implemented 2026-11-25. `mapping_config` gains optional v2-only `submappings` keyed by raw top-level
+  `payload["type"]`; exact match fully replaces the master config, master fallback otherwise, no nested
+  submappings, max 50 keys, key length ≤100. MAP-9 preserved.
+- Backend: `ingest/mapping.py::resolve_mapping_config()`, `MappingResolution`, `submapping_count()`,
+  recursive v2 validation; webhook, pipeline, remap/preview, and observable-apply paths use the same
+  effective config. UI/docs show override counts, raw vs mapped type, MAP-10a.
+- Gates: 415 targeted conformance tests green; `make check-fast` green; secret scans clean.
+  User-provided full suite on 2026-11-26: **4282 passed, 3 skipped, 15 warnings, 2 subtests in 1188.41s**.
+  The full static gate was subsequently satisfied in `c14b8311`.
+- Verification `docs/planning/VERIFICATION-2026-11-25-source-mapping-submappings.md` (full pytest Met;
+  MAP-10a and shallow-copy/strip deviations recorded); security `docs/security/SECURITY-2026-11-25-submappings.md` PASS (7/7).
+
+### Stale priority rows removed
+- §10.1 role-scoped user management (record already in the 2026-10-20 COMPLETED entry), §12.4, §6.13,
+  §10.9, §10.11, §12.9, §22, §23, §24, and §25. §10.12-fu3 and §14 subitems were closed individually.

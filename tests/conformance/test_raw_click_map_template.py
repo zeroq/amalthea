@@ -262,18 +262,17 @@ def test_mapping_tab_with_prefill_has_hint_and_data_prefilled(
     )
 
 
-def test_mapping_tab_prefill_observable_type(
+def test_observable_tab_prefill_observable_type(
     client: Client, source: IngestionSource, org: Organisation
 ) -> None:
-    """Mapping tab with ?tab=mapping&map_target=observable&map_observable_type=IP&map_path=$.iocs.ip:
-    contains the prefill hint and data-prefilled="1" on observable_paths__IP."""
+    """Observable Mapping tab with map_target=observable: prefill observable_paths__IP."""
     ObservableType.objects.create(name="IP", is_case_sensitive=False)
     _make_alert(
         source, org, source_ref="ref1", payload={"iocs": {"ip": "1.2.3.4"}}, date="2026-01-01"
     )
     response = client.get(
         _url(source)
-        + "?tab=mapping&map_target=observable&map_observable_type=IP&map_path=$.iocs.ip"
+        + "?tab=observable-mapping&map_target=observable&map_observable_type=IP&map_path=$.iocs.ip"
     )
     body = response.content.decode()
 

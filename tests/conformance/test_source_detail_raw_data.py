@@ -1,7 +1,9 @@
 """Source detail: Mapping and Raw data tabs (PLAN-2026-11-06-source-detail-raw-data).
 
-The source detail page gains a tab strip:
-* Mapping (default) — current mapping rules, observable rules, health card.
+The source detail page gains a tab strip (final order):
+* Mapping (default) — identity, field rules, health, tokens, advanced JSON.
+* Observable Mapping — master observable rules and observable-only apply.
+* Submappings — per-raw-type field and observable overrides.
 * Raw data — the latest stored Alert.raw_payload for that ingestion source.
 
 Raw data is the latest *stored* alert row (replays do not overwrite raw_payload), ordered by

@@ -81,14 +81,17 @@ def _post_preview(user: User, source: IngestionSource):
 
 
 class TestControlsAndModal:
-    def test_the_card_has_a_second_apply_control_and_no_modal_on_get(self, feed) -> None:
+    def test_the_card_has_its_own_apply_control_and_no_modal_on_get(self, feed) -> None:
         admin, source = feed
         client = Client()
         client.force_login(admin)
 
-        body = client.get(_url(source)).content.decode()
+        mapping_body = client.get(_url(source)).content.decode()
+        body = client.get(_url(source) + "?tab=observable-mapping").content.decode()
 
-        assert body.count('name="intent" value="apply"') == 3
+        assert mapping_body.count('name="intent" value="apply"') == 2
+        assert "Observable extraction" not in mapping_body
+        assert body.count('name="intent" value="apply"') == 1
         assert "Apply to unlinked alerts…" in body
         assert "Changing rules does not remove links already extracted." in body
         assert 'id="observable-apply-modal"' not in body

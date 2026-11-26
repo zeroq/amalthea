@@ -1,0 +1,11 @@
+{% comment %}
+Body of the submapping delete modal. Custom <dialog> only (ADR-003); no native confirm().
+{% endcomment %}
+<p class="modal-body-text">
+  Delete the submapping for raw type
+  <span class="mono">{{ submapping_delete_key }}</span>?
+</p>
+<p class="hint">
+  The master mapping and every other type override are left untouched. This only removes the override
+  itself; alerts already mapped keep their stored values.
+</p>

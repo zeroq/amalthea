@@ -11,6 +11,7 @@ document.addEventListener("DOMContentLoaded", function () {
   var pathRadios = modal.querySelectorAll('input[name="map_path"]');
   var observableSelect = modal.querySelector('select[name="map_observable_type"]');
   var observableRadio = modal.querySelector('input[name="map_target"][value="observable"]');
+  var mapTab = document.getElementById("json-map-tab");
   var preview = document.getElementById("path-preview");
   var concreteRadio = pathRadios[0];
   var allItemsRadio = pathRadios[1];
@@ -112,6 +113,11 @@ document.addEventListener("DOMContentLoaded", function () {
     observableRadio.addEventListener("change", function () {
       var on = observableRadio.checked;
       observableSelect.disabled = !on;
+      if (mapTab) {
+        // Observable rules moved to their own tab; the GET must land where the
+        // prefilled textarea is rendered.
+        mapTab.value = on ? "observable-mapping" : "mapping";
+      }
       if (on) {
         observableSelect.focus();
       }
@@ -122,6 +128,9 @@ document.addEventListener("DOMContentLoaded", function () {
     targetRadios[j].addEventListener("change", function () {
       if (observableSelect && (!observableRadio || !observableRadio.checked)) {
         observableSelect.disabled = true;
+      }
+      if (mapTab && (!observableRadio || !observableRadio.checked)) {
+        mapTab.value = "mapping";
       }
     });
   }

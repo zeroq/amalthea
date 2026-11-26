@@ -464,7 +464,7 @@ def test_get_mapping_tab_observable_prefill(
     )
     response = client.get(
         _url(source)
-        + "?tab=mapping&map_target=observable&map_observable_type=IP&map_path=$.iocs.ip"
+        + "?tab=observable-mapping&map_target=observable&map_observable_type=IP&map_path=$.iocs.ip"
     )
     body = response.content.decode()
     assert response.status_code == 200
@@ -489,7 +489,7 @@ def test_get_mapping_tab_observable_prefill_config_unchanged(
     )
     response = client.get(
         _url(source)
-        + "?tab=mapping&map_target=observable&map_observable_type=IP&map_path=$.iocs.ip"
+        + "?tab=observable-mapping&map_target=observable&map_observable_type=IP&map_path=$.iocs.ip"
     )
     assert response.status_code == 200
     source.refresh_from_db()

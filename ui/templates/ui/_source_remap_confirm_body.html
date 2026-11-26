@@ -22,6 +22,14 @@ The dialog reuses `ui/_modal.html` (no new CSS class) and carries no inline scri
   from <span class="mono">{{ source.slug }}</span>.
 </p>
 
+{% if active_tab == "submappings" %}
+  <p class="hint">
+    This applies the <strong>complete mapping</strong> — the master rules and every submapping — using
+    each alert's own raw <span class="mono">type</span> to select its override. It is not limited to the
+    submapping you were editing.
+  </p>
+{% endif %}
+
 {% if apply_pending.over_cap %}
   <p class="msg msg-error">
     This feed has {{ apply_pending.candidates }} unlinked open alerts, which is over the

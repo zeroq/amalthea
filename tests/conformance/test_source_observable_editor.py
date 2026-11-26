@@ -77,7 +77,7 @@ def _table_post(**overrides: tuple[str, str, str]) -> dict[str, str]:
 def test_the_card_renders_one_row_per_vocabulary_type(feed) -> None:
     _org, admin, source = feed
 
-    response = _client(admin).get(_url(source))
+    response = _client(admin).get(_url(source) + "?tab=observable-mapping")
     body = response.content.decode()
 
     assert response.status_code == 200

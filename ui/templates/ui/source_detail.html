@@ -12,6 +12,16 @@
      {% if active_tab == 'mapping' %}aria-current="page"{% endif %}>
     Mapping
   </a>
+  <a class="tab{% if active_tab == 'observable-mapping' %} tab-on{% endif %}"
+     href="?tab=observable-mapping" aria-controls="panel-observable-mapping"
+     {% if active_tab == 'observable-mapping' %}aria-current="page"{% endif %}>
+    Observable Mapping
+  </a>
+  <a class="tab{% if active_tab == 'submappings' %} tab-on{% endif %}"
+     href="?tab=submappings" aria-controls="panel-submappings"
+     {% if active_tab == 'submappings' %}aria-current="page"{% endif %}>
+    Submappings
+  </a>
   <a class="tab{% if active_tab == 'raw-data' %} tab-on{% endif %}"
      href="?tab=raw-data" aria-controls="panel-raw-data"
      {% if active_tab == 'raw-data' %}aria-current="page"{% endif %}>
@@ -137,59 +147,9 @@
 </div>
 
 <div class="card">
-  <h2>Observable extraction</h2>
   <p class="hint">
-    Every matching value becomes an artifact on the alert. Values are normalized and deduplicated by
-    type, and this card owns only the <code>observables</code> section — field rules,
-    <code>value_maps</code> and other settings are left untouched.
+    Observable rules now live on the <a href="?tab=observable-mapping">Observable Mapping</a> tab.
   </p>
-  {% if failed_form == 'observables' %}
-    {% for message in observable_config_errors %}<p class="msg msg-error">{{ message }}</p>{% endfor %}
-  {% endif %}
-  <form method="post" action="{% url 'ui-settings-source-detail' source.id %}">
-    {% csrf_token %}
-    <input type="hidden" name="form" value="observables" />
-    <div class="table-wrap">
-      <table class="data-table">
-        <caption class="sr-only">Observable extraction rules for {{ source.name }}</caption>
-        <thead>
-          <tr>
-            <th scope="col">Type</th>
-            <th scope="col">JSONPath candidates</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in observable_rows %}
-            <tr>
-              <td>
-                <span class="mono">{{ row.type }}</span>
-                {% for message in row.errors %}<p class="field-error">{{ message }}</p>{% endfor %}
-              </td>
-              <td>
-                <label class="sr-only" for="observable_paths__{{ row.type }}">{{ row.type }} paths</label>
-                <textarea id="observable_paths__{{ row.type }}"
-                          name="observable_paths__{{ row.type }}" rows="3"
-                          class="mono" spellcheck="false"
-                          placeholder="$.actor.email"{% if prefilled and prefilled.target == "observable" and prefilled.observable_type == row.type %} data-prefilled="1"{% endif %}>{{ row.paths }}</textarea>
-                <p class="hint">
-                  One JSONPath per line. Every matching value is added to the alert; leave empty for
-                  no rule of this type.
-                </p>
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <div class="control-row">
-      <button class="btn btn-primary" type="submit">Save observable rules</button>
-      <button class="btn" type="submit" name="intent" value="apply">Apply to unlinked alerts…</button>
-      <span class="hint">
-        Rules for types not in the vocabulary are preserved by a save here and remain editable through
-        the advanced JSON below. Changing rules does not remove links already extracted.
-      </span>
-    </div>
-  </form>
 </div>
 
 <div class="card">
@@ -356,14 +316,244 @@ dialog). Writing it as a `<dialog>` rather than a native `confirm()` is the repo
   {% include "ui/_modal.html" with modal_id="mapping-apply-modal" body_template="ui/_source_remap_confirm_body.html" title="Apply this mapping to existing alerts?" confirm_text="Save & re-map" confirm_class="btn-primary" cancel_text="Cancel" form_action=apply_confirm_url extra_fields=apply_confirm_fields confirm_disabled=apply_confirm_disabled autoopen=True size="md" %}
 {% endif %}
 
+{% elif active_tab == "observable-mapping" %}
+<div class="card">
+  <h2>Observable extraction</h2>
+  {% if prefilled %}
+    <p class="hint" role="status">Added <code class="mono">{{ prefilled.path }}</code> from raw data. Save the form to apply.</p>
+  {% endif %}
+  <p class="hint">
+    Every matching value becomes an artifact on the alert. Values are normalized and deduplicated by
+    type, and this card owns only the <code>observables</code> section — field rules,
+    <code>value_maps</code>, <code>submappings</code> and other settings are left untouched by a save
+    here. Type-specific rules for a raw <code>type</code> live on the
+    <a href="?tab=submappings">Submappings</a> tab.
+  </p>
+  {% if failed_form == 'observables' %}
+    {% for message in observable_config_errors %}<p class="msg msg-error">{{ message }}</p>{% endfor %}
+  {% endif %}
+  <form method="post" action="{% url 'ui-settings-source-detail' source.id %}">
+    {% csrf_token %}
+    <input type="hidden" name="form" value="observables" />
+    <div class="table-wrap">
+      <table class="data-table">
+        <caption class="sr-only">Observable extraction rules for {{ source.name }}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Type</th>
+            <th scope="col">JSONPath candidates</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in observable_rows %}
+            <tr>
+              <td>
+                <span class="mono">{{ row.type }}</span>
+                {% for message in row.errors %}<p class="field-error">{{ message }}</p>{% endfor %}
+              </td>
+              <td>
+                <label class="sr-only" for="observable_paths__{{ row.type }}">{{ row.type }} paths</label>
+                <textarea id="observable_paths__{{ row.type }}"
+                          name="observable_paths__{{ row.type }}" rows="3"
+                          class="mono" spellcheck="false"
+                          placeholder="$.actor.email"{% if prefilled and prefilled.target == "observable" and prefilled.observable_type == row.type %} data-prefilled="1"{% endif %}>{{ row.paths }}</textarea>
+                <p class="hint">
+                  One JSONPath per line. Every matching value is added to the alert; leave empty for
+                  no rule of this type.
+                </p>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="control-row">
+      <button class="btn btn-primary" type="submit">Save observable rules</button>
+      <button class="btn" type="submit" name="intent" value="apply">Apply to unlinked alerts…</button>
+      <span class="hint">
+        Changing rules does not remove links already extracted. Rules for types outside the vocabulary
+        are preserved by a save here and remain editable through the advanced JSON on the Mapping tab.
+      </span>
+    </div>
+  </form>
+</div>
+
 {% comment %}
-The observable-only confirmation. The two dialogs are mutually exclusive: the mapping preview carries
-a RemapPreview, this one an ObservableApplyPreview, and the view never sets both.
+The observable-only confirmation is scoped to this tab. The mapping preview carries a RemapPreview;
+this one an ObservableApplyPreview, and the view never sets both.
 {% endcomment %}
 {% if observable_apply_pending %}
   {% url 'ui-settings-source-detail' source.id as observable_apply_url %}
   {% include "ui/_modal.html" with modal_id="observable-apply-modal" body_template="ui/_source_observable_apply_body.html" title="Apply these observable rules to existing alerts?" confirm_text="Save & extract" confirm_class="btn-primary" cancel_text="Cancel" form_action=observable_apply_url extra_fields=observable_apply_confirm_fields confirm_disabled=observable_apply_confirm_disabled autoopen=True size="md" %}
 {% endif %}
+
+{% elif active_tab == "submappings" %}
+<div class="card">
+  <h2>Submappings</h2>
+  <p class="hint">
+    A submapping is an optional, exact case-sensitive override for alerts whose raw JSON has a top-level
+    <code>type</code> field. It fully replaces the master mapping for that type: every field and every
+    observable rule must be set here. Unknown or missing types use the master rules on the
+    <a href="?tab=mapping">Mapping</a> and <a href="?tab=observable-mapping">Observable Mapping</a> tabs.
+  </p>
+  {% if raw_type %}
+    <p class="hint">Raw type: <span class="mono">{{ raw_type }}</span></p>
+  {% endif %}
+  {% if failed_form == 'submappings' %}
+    {% for message in submapping_add_errors %}<p class="msg msg-error">{{ message }}</p>{% endfor %}
+  {% endif %}
+  <form method="post" action="{% url 'ui-settings-source-detail' source.id %}">
+    {% csrf_token %}
+    <input type="hidden" name="form" value="submappings" />
+    <input type="hidden" name="intent" value="add" />
+    <label for="submapping_new_key">Add a type override</label>
+    <div class="control-row">
+      <input id="submapping_new_key" name="submapping_key" class="mono" required
+             placeholder="phishing" value="{{ submapping_prefill }}" />
+      <button class="btn btn-primary" type="submit">Add submapping</button>
+      {% if raw_type %}
+        {% url 'ui-settings-source-detail' source.id as detail_url %}
+        <a class="btn" href="{{ detail_url }}?tab=submappings&amp;submapping_prefill={{ raw_type|urlencode }}">
+          Use latest raw type: <span class="mono">{{ raw_type }}</span>
+        </a>
+      {% endif %}
+    </div>
+  </form>
+  {% if not submapping_keys %}
+    <p class="empty">No submappings yet. Add a raw <code>type</code> above to create one.</p>
+  {% endif %}
+</div>
+
+{% if submapping_keys %}
+<div class="card">
+  <h2>Edit a submapping</h2>
+  <form method="get" action="{% url 'ui-settings-source-detail' source.id %}">
+    <input type="hidden" name="tab" value="submappings" />
+    <label for="submapping_select">Raw <code>type</code></label>
+    <select id="submapping_select" name="submapping">
+      {% for key in submapping_keys %}
+        <option value="{{ key }}"{% if key == submapping_selected %} selected{% endif %}>{{ key }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn" type="submit">Open</button>
+  </form>
+
+  {% if submapping_selected %}
+    <h3>Field rules for <span class="mono">{{ submapping_selected }}</span></h3>
+    {% if config_shape == 'legacy' %}
+      <p class="msg msg-error">
+        The stored config is still in the legacy flat form. Add a submapping first to migrate it to v2.
+      </p>
+    {% else %}
+      {% if failed_form == 'submappings' %}
+        {% for target, messages in editor_errors.items %}
+          {% for message in messages %}<p class="msg msg-error">{{ message }}</p>{% endfor %}
+        {% endfor %}
+      {% endif %}
+      <form method="post" action="{% url 'ui-settings-source-detail' source.id %}">
+        {% csrf_token %}
+        <input type="hidden" name="form" value="submappings" />
+        <input type="hidden" name="submapping_key" value="{{ submapping_selected }}" />
+        <div class="table-wrap">
+          <table class="data-table">
+            <caption class="sr-only">Field rules for submapping {{ submapping_selected }}</caption>
+            <thead>
+              <tr>
+                <th scope="col">Target</th>
+                <th scope="col">Paths</th>
+                <th scope="col">Transform</th>
+                <th scope="col">Default</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in submapping_rows %}
+                <tr>
+                  <td>
+                    {{ row.label }}<br /><span class="mono dim">{{ row.target }}</span>
+                    {% for message in row.errors %}<p class="field-error">{{ message }}</p>{% endfor %}
+                  </td>
+                  <td>
+                    <label class="sr-only" for="sub_paths__{{ submapping_selected }}__{{ row.target }}">{{ row.label }} paths</label>
+                    <textarea id="sub_paths__{{ submapping_selected }}__{{ row.target }}"
+                              name="paths__{{ row.target }}" rows="3" class="mono" spellcheck="false"
+                              placeholder="$.actor.email">{{ row.paths }}</textarea>
+                    <p class="hint">One JSONPath per line; the first path that yields a value wins.</p>
+                  </td>
+                  <td>
+                    <label class="sr-only" for="sub_transform__{{ submapping_selected }}__{{ row.target }}">{{ row.label }} transform</label>
+                    <select id="sub_transform__{{ submapping_selected }}__{{ row.target }}" name="transform__{{ row.target }}">
+                      {% for name, help in transforms %}
+                        <option value="{{ name }}"{% if name == row.transform %} selected{% endif %}>{{ name }}</option>
+                      {% endfor %}
+                    </select>
+                  </td>
+                  <td>
+                    <label class="sr-only" for="sub_default__{{ submapping_selected }}__{{ row.target }}">{{ row.label }} default</label>
+                    <input id="sub_default__{{ submapping_selected }}__{{ row.target }}" type="text"
+                           name="default__{{ row.target }}" value="{{ row.default }}" class="mono" />
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Observable rules for <span class="mono">{{ submapping_selected }}</span></h3>
+        {% if failed_form == 'submappings' %}
+          {% for type, messages in observable_errors.items %}
+            {% for message in messages %}<p class="msg msg-error">{{ message }}</p>{% endfor %}
+          {% endfor %}
+        {% endif %}
+        <div class="table-wrap">
+          <table class="data-table">
+            <caption class="sr-only">Observable rules for submapping {{ submapping_selected }}</caption>
+            <thead><tr><th scope="col">Type</th><th scope="col">JSONPath candidates</th></tr></thead>
+            <tbody>
+              {% for row in submapping_observable_rows %}
+                <tr>
+                  <td>
+                    <span class="mono">{{ row.type }}</span>
+                    {% for message in row.errors %}<p class="field-error">{{ message }}</p>{% endfor %}
+                  </td>
+                  <td>
+                    <label class="sr-only" for="sub_obs__{{ submapping_selected }}__{{ row.type }}">{{ row.type }} paths</label>
+                    <textarea id="sub_obs__{{ submapping_selected }}__{{ row.type }}"
+                              name="observable_paths__{{ row.type }}" rows="3" class="mono" spellcheck="false"
+                              placeholder="$.actor.email">{{ row.paths }}</textarea>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="control-row">
+          <button class="btn btn-primary" type="submit">Save submapping</button>
+          <button class="btn" type="submit" name="intent" value="apply">Apply to unlinked alerts…</button>
+        </div>
+      </form>
+      <form method="post" action="{% url 'ui-settings-source-detail' source.id %}">
+        {% csrf_token %}
+        <input type="hidden" name="form" value="submappings" />
+        <input type="hidden" name="intent" value="delete" />
+        <input type="hidden" name="submapping_key" value="{{ submapping_selected }}" />
+        <button class="btn btn-err" type="submit">Delete submapping</button>
+      </form>
+    {% endif %}
+  {% endif %}
+</div>
+
+{% if apply_pending %}
+  {% url 'ui-settings-source-detail' source.id as apply_confirm_url %}
+  {% include "ui/_modal.html" with modal_id="mapping-apply-modal" body_template="ui/_source_remap_confirm_body.html" title="Apply this mapping to existing alerts?" confirm_text="Save & re-map" confirm_class="btn-primary" cancel_text="Cancel" form_action=apply_confirm_url extra_fields=apply_confirm_fields confirm_disabled=apply_confirm_disabled autoopen=True size="md" %}
+{% endif %}
+
+{% if submapping_delete_key %}
+  {% url 'ui-settings-source-detail' source.id as submapping_delete_url %}
+  {% include "ui/_modal.html" with modal_id="submapping-delete-modal" body_template="ui/_source_submapping_delete_body.html" title="Delete this submapping?" confirm_text="Delete submapping" confirm_class="btn-err" cancel_text="Cancel" form_action=submapping_delete_url extra_fields=submapping_delete_confirm_fields confirm_disabled=False autoopen=True size="md" %}
+{% endif %}
+{% endif %}
+
 {% elif active_tab == "raw-data" %}
 <div class="card">
   <h2>Raw data</h2>
