@@ -72,7 +72,12 @@ make check-fast # lint/format only
 make secrets    # scan tracked files for secrets
 ```
 
-`make check` is the static DoD gate; run pytest separately when needed.
+`make check` is the static DoD gate; run pytest separately when needed. For a full local run across
+multiple CPUs, add `-n auto` (`pytest-xdist` is installed in the dev environment):
+
+```bash
+.venv/bin/pytest -q -n auto
+```
 
 ## Security & production
 

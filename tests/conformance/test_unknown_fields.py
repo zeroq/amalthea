@@ -17,7 +17,7 @@ key that leaked into a column would pass every status-code assertion in this fil
 carries a probe value, and after the write that value is hunted through the response body *and*
 through a read-back of the entity itself. It may not appear anywhere. Its *key* is a different
 matter: `POST /api/v1/alert` deliberately records unknown keys under
-`ingestionWarnings.unmapped_fields` (alerts/views.py), and test F pins that as the honest
+`ingestionWarnings.unmapped_fields` (alerts/views/alerts.py), and test F pins that as the honest
 outcome — recorded as unmapped, rather than dropped as though nothing was sent.
 
 The complementary direction is the *unknown-only* PATCH. Every `PATCH` on this surface is

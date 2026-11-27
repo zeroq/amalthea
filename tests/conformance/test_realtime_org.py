@@ -226,7 +226,7 @@ def test_alert_comment_emits_owner_org_refresh_after_commit(
         case=case,
     )
     publisher = MagicMock()
-    monkeypatch.setattr("alerts.views.publish_org_event", publisher)
+    monkeypatch.setattr("alerts.views.comments.publish_org_event", publisher)
     api = APIClient()
     api.force_authenticate(user=user)
 
@@ -249,7 +249,7 @@ def test_alert_comment_emits_owner_org_refresh_after_commit(
 
 
 def test_alert_create_path_has_org_refresh_signal() -> None:
-    source = (Path(__file__).resolve().parents[2] / "alerts" / "views.py").read_text(
+    source = (Path(__file__).resolve().parents[2] / "alerts" / "views" / "alerts.py").read_text(
         encoding="utf-8"
     )
     assert '"reason": "alert-created"' in source

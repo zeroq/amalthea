@@ -2,7 +2,7 @@
 
 Finished work, with the evidence that it actually happened. Open items live in
 [`TODO.md`](./TODO.md).
-Last updated: 2026-11-26
+Last updated: 2026-11-27
 
 Items are only listed here once independently verified. Where code exists but an acceptance criterion
 is still unproven, the item says so explicitly and the verification gap is cross-linked in `TODO.md`.
@@ -2351,6 +2351,139 @@ historical plans and verification reports still cite the TODO IDs recorded here.
   split; that item remains open. Deviations **D-13.4-1 through D-13.4-6** are recorded in the plan,
   with D-13.4-5 updated to document the required `__all__`.
 - Implementation commit: `a65a3f20`, which supplies each plan’s commit-hash evidence.
+
+### §13.4 — Split `alerts/views.py` into an `alerts/views/` package
+- Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-alerts-views-modularization.md`; implementation
+  brief: `docs/planning/IB-2026-11-27-alerts-views-modularization.md`.
+- Replaced the 782-line module with `_common.py`, `alerts.py`, `observables.py`, `merge.py`, `bulk.py`,
+  `procedures.py`, `statuses.py`, `tags.py`, `comments.py`, and a compatibility `__init__.py`. All 30
+  functions, 15 decorated functions (14 routed handlers), 21 route names and 11 `__all__` entries are
+  preserved; `alerts/urls.py` is unchanged.
+- Guard path/doc updates were limited to `tests/conformance/test_realtime_org.py`,
+  `test_unknown_fields.py` and `test_wire_boundary.py`.
+- Verification: AST comparison showed no missing, extra, decorator-drifted or changed definitions;
+  targeted suites **292 passed in 281.49s**; `make check`, `git diff --check` and secret scan clean.
+  User-provided full pytest log `/tmp/amalthea-full-pytest.log` is green: **4464 passed, 3 skipped,
+  15 warnings, 2 subtests passed in 675.28s**.
+- Implementation commit: pending; changes are not yet committed.
+
+### §13.5 — Split `ingest/mapping.py` into `ingest/mapping/`
+- Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-mapping-engine-modularization.md`;
+  implementation brief: `docs/planning/IB-2026-11-27-mapping-engine-modularization.md`.
+- Replaced the 842-line module with `jsonpath.py`, `values.py`, `config.py`, `apply.py`,
+  `correlation.py`, and a compatibility `__init__.py` exporting 24 names. All original top-level
+  symbols remain available; the 17-name external import surface is unchanged.
+- Added `tests/conformance/test_mapping_engine_characterization.py` (20 tests) before the move and
+  reran it unchanged after the move. Targeted suites **459 passed, 7 warnings in 96.58s**;
+  `make check`, `git diff --check` and secret scan clean. Same green full pytest log applies.
+- Deviations **D-13.5-1 through D-13.5-3** are recorded in the plan: user overrode the §13.4 gate,
+  `__all__` additions are additive, and the characterization test was added.
+- Implementation commit: pending; changes are not yet committed.
+
+### §13.6 — Split `core/serializers.py` by domain
+- Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-serializers-modularization.md`.
+- Replaced the 720-line module with `_common.py`, `alerts.py`, `cases.py`, `observables.py`,
+  `identity.py`, `taxonomy.py`, `automation.py`, and a 30-name compatibility `__init__.py`. AST check
+  showed all 30 functions present with no body changes.
+- `tests/conformance/test_wire_boundary.py` now recognizes `core/serializers/` and asserts
+  `is_wire_boundary("core/serializers/cases.py")`. Targeted suites **513 passed in 250.64s**;
+  `make check`, `git diff --check` and secret scan clean. Same green full pytest log applies.
+- Deviations **D-13.6-1 and D-13.6-2** are recorded in the plan: additive private helper exports and
+  `procedure_json` ownership in `taxonomy.py`.
+- Implementation commit: pending; changes are not yet committed.
+
+### §13.7 — Split `ui/views/automation.py`
+- Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-automation-ui-modularization.md`.
+- Replaced the 688-line module with `playbook_config.py`, `playbooks.py`, and a compatibility
+  `__init__.py` with 12 exports. AST check showed 11/11 functions present with no body changes.
+- Targeted suites **203 passed, 2 subtests passed in 188.64s**; `make check`, `git diff --check`
+  and secret scan clean. Same green full pytest log applies.
+- Deviation **D-13.7-1** is recorded in the plan: explicit additive `__all__`.
+- Implementation commit: pending; changes are not yet committed.
+
+### §13.8 — Split `identity/views.py` into organisation and user views
+- Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-identity-views-modularization.md`.
+- Replaced the 617-line module with `common.py`, `organisations.py`, `users.py`, and a compatibility
+  `__init__.py` with 19 exports. AST check showed 18/18 functions present with no body changes.
+- Targeted suites **492 passed in 227.67s** plus tenant org/user subset **44 passed, 59 deselected**;
+  `make check`, `git diff --check` and secret scan clean. Same green full pytest log applies.
+- Deviation **D-13.8-1** is recorded in the plan: additive `__all__` expansion.
+- Implementation commit: pending; changes are not yet committed.
+
+### §13.9 — Split `ui/views/observables.py`
+- Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-observable-ui-modularization.md`.
+- Replaced the 726-line module with `observables.py`, `case_observables.py`, and a compatibility
+  `__init__.py` with 12 exports. AST check showed 11/11 functions present with no body changes.
+- Targeted suites **281 passed in 348.69s** plus tenant observable subset **7 passed, 96 deselected**;
+  `make check`, `git diff --check` and secret scan clean. Same green full pytest log applies.
+- Deviation **D-13.9-1** is recorded in the plan: explicit additive `__all__`.
+- Implementation commit: pending; changes are not yet committed.
+
+### §13.10 — Split `ui/views/settings.py`
+- Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-settings-ui-modularization.md`.
+- Replaced the 594-line module with `settings_home.py`, `settings_orgs.py`, `settings_users.py`, and a
+  compatibility `__init__.py` with 9 exports. AST check showed 8/8 functions present with no body changes.
+- Targeted settings/identity suites **322 passed**, tenant settings subset **44 passed, 59 deselected**,
+  and URL/viewer/fk smoke suites **65 passed**; `make check`, `git diff --check` and secret scan clean.
+  Same green full pytest log applies.
+- Deviation **D-13.10-1** is recorded in the plan: explicit additive `__all__`.
+- Implementation commit: pending; changes are not yet committed.
+
+### §13.11 — Decision not to split `query/engine.py`
+- Closed 2026-11-27. Current file is **759 lines** but cohesive: field specs, Q building, sorting and
+  execution around a stable public `QueryEngine` surface.
+- No DSL growth or new public surface justifies the move risk. Target modules (`fields.py`,
+  `filters.py`, `execution.py`) remain documented only if the query DSL expands later.
+- No code change, no deviation.
+
+### §13.12 — Split `tests/conformance/test_tenant_scoping.py` by resource
+- Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-tenant-scoping-test-modularization.md`.
+- Replaced the 3,702-line module with `tests/conformance/test_tenant_scoping/` containing
+  `helpers.py`, `test_core.py`, `test_routes.py`, `test_regressions.py`, `test_ui.py`, and `__init__.py`.
+- All shared factories, route allow-lists and discovery helpers moved to `helpers.py`. AST comparison
+  showed 24/24 classes/functions present with no body changes; collection parity is **103 tests**.
+- Full package run **103 passed in 187.90s**; `make check`, `git diff --check` and secret scan clean.
+  Same green full pytest log applies.
+- Deviations **D-13.12-1 and D-13.12-2** are recorded in the plan: additive ruff suppressions to keep
+  the original local migration import pair, and no compatibility module at the old test path.
+- Implementation commit: pending; changes are not yet committed.
+
+### §13.15 — Split `cases/correlation.py`
+- Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-correlation-modularization.md`.
+- User-provided final full `pytest` log is green: **4464 passed, 3 skipped, 15 warnings, 2 subtests passed in
+  670.27s (0:11:10)**. The three skips are the known Postgres-only cases; warnings are pre-existing naive-datetime
+  and CSS-token warnings.
+- The P3 trigger was met: auto-bundling grew the audited 518-line module to 1,215 lines. Replaced it with
+  `_constants.py`, `_types.py`, `similarity.py`, `bundling.py`, and a compatibility `__init__.py` exporting
+  all 21 original definitions plus `merge_alert_into_case`.
+- AST comparison against `HEAD:cases/correlation.py` showed **15/15** classes/functions and **5/5** constants
+  present with no body or value changes. Patch-forward smoke confirmed historical `cases.correlation.*`
+  targets still affect the owning submodules.
+- Targeted suites **177 passed in 98.27s** across correlation, fuzzy/similar alerts, auto-bundling, observable
+  linkage and MCP tools; consumer import smoke passed. `make check`, `git diff --check` and secret scan clean.
+- Deviation **D-13.15-1** is recorded in the plan: a `ModuleType` subclass forwards assignments so old
+  `monkeypatch.setattr("cases.correlation.*")` targets remain effective.
+- Implementation commit: pending; changes are not yet committed.
+
+### §13 P3 — reviewed and closed as no-action
+- Closed 2026-11-27 after reassessment. No code changes for these items; their stated triggers were not met.
+- **13.13 `cases/models.py`:** 677 audited lines, 806 current. Model-module splits risk migration/app-registry
+  churn; reopen only if the case domain grows substantially.
+- **13.14 `observables/extractor.py`:** 570 audited lines, 585 current. Extraction/normalization/linking remains
+  cohesive; reopen only when a new extraction stage is added.
+- **13.16 `ui/views/ingestion_sources.py`:** 1,172 audited and current lines; not next touched. Reopen when
+  preview/apply or source-detail work changes this module.
+- **13.17 `observables/views.py`:** 488 audited lines, 555 current. Small growth; reopen when observable-type or
+  suggestion UI work touches it.
+- **13.18 `identity/services.py`:** 471 audited lines, 511 current. Shared locking logic remains cohesive; reopen
+  when next modified.
+- **13.19 `ui/static/ui/app.src.css`:** 1,396 audited lines, 1,591 current. Cohesive Tailwind source; no component
+  CSS churn justifies splitting. Preserve `make css-check` and the `@source` contract.
+- **13.20 templates:** `taxonomy.html` 647 → 726 lines and `_tab_observables.html` 479 → 484 lines. Prefer partials
+  only when those templates are next edited.
+- No deviations for these no-action items. The final full `pytest` after all §13 changes was green:
+  **4464 passed, 3 skipped, 15 warnings, 2 subtests passed in 670.27s (0:11:10)**.
+- Implementation commit: pending; no code changes were made for this closeout.
 
 ### Stale priority rows removed
 - §10.1 role-scoped user management (record already in the 2026-10-20 COMPLETED entry), §12.1-fu1,

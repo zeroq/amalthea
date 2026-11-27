@@ -17,7 +17,7 @@ AC coverage:
   `make check`; run those separately.
 
 Setup mirrors `tests/conformance/test_viewer_affordances.py` (case-detail rendering via the
-Django test `Client`) and `tests/conformance/test_tenant_scoping.py` (cross-org observable
+Django test `Client`) and `tests/conformance/test_tenant_scoping/` (cross-org observable
 linking via `CaseObservable.objects.create`).
 """
 

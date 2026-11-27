@@ -24,7 +24,7 @@ to its narrow follow-up on 2026-11-13 (see `COMPLETED.md`).
 | **5** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
 | **6** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
 | **7** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
-| **8** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; P0 (`13.1`), `13.2`, `13.3`, and `13.21` are complete. `13.4` (`alerts/views.py`) remains next. | **None** — hygiene. |
+| **8** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; P0 (`13.1`), `13.2`, `13.3`, and `13.21` are complete. Actionable P2 implementations `13.4`–`13.10` and `13.12` are complete with green user-owned full `pytest`; `13.11` decided not to split (`query/engine.py` is cohesive and not growing). P3 is closed: `13.15` was triggered by correlation growth and implemented; `13.13`, `13.14`, and `13.16`–`13.20` were reviewed and closed as no-action because their triggers were not met. Final user-owned full `pytest` after all §13 changes is green: 4464 passed, 3 skipped, 15 warnings, 2 subtests passed. | **None** — hygiene. |
 ---
 
 ## 3. Open decisions
@@ -287,9 +287,9 @@ the full `pytest` suite green; record any deviation in the plan.
 
 13.2 (`ui/taxonomy_views.py`), 13.3 (`ui/views/cases.py`), and an extra ledger-package split are
 complete and recorded in `COMPLETED.md`. The ledger split was approved as “§13.4” by mistake;
-the real §13.4 below remains open.
+the real §13.4 below is also complete.
 
-- [ ] **13.4 — Split `alerts/views.py` into an `alerts/views/` package.**
+- [x] **13.4 — Split `alerts/views.py` into an `alerts/views/` package.** Closed 2026-11-27; full `pytest` green.
   Current: **782 lines** mixing alert CRUD, observables, merge/import, bulk update, procedures, statuses, tags
   and comments. Target: `alerts/views/` with `alerts.py`, `observables.py`, `merge.py`, `bulk.py`,
   `procedures.py`, `statuses.py`, `comments.py`; mirror the `cases/views/` layout. Watch: `alerts/urls.py`
@@ -297,61 +297,73 @@ the real §13.4 below remains open.
 
 ### P2 — when touched or before feature work
 
-- [ ] **13.5 — Split `ingest/mapping.py` into a mapping package.**
+- [x] **13.5 — Split `ingest/mapping.py` into a mapping package.** Closed 2026-11-27; full `pytest` green.
   Current: **842 lines** combining JSONPath extraction, value coercion, config normalization, validation,
   transform application and correlation-key logic. Target: `ingest/mapping/` with `jsonpath.py`, `values.py`,
   `config.py`, `apply.py`, `correlation.py`. High regression risk: add/keep characterization tests for every
   public function before moving code. Source: §13 audit 2026-11-04.
-- [ ] **13.6 — Split `core/serializers.py` by domain.**
+- [x] **13.6 — Split `core/serializers.py` by domain.** Closed 2026-11-27; full `pytest` green.
   Current: **720 lines** of mostly independent serializers. Target: `core/serializers/` with `cases.py`,
   `alerts.py`, `observables.py`, `identity.py`, `taxonomy.py`, `automation.py`, plus compatibility re-exports.
   Low risk and a good cleanup when serializers are next changed. Source: §13 audit 2026-11-04.
-- [ ] **13.7 — Split `ui/views/automation.py`.**
+- [x] **13.7 — Split `ui/views/automation.py`.** Closed 2026-11-27; full `pytest` green.
   Current: **688 lines** combining playbook-config parsing with list/detail/create/edit/delete/run views
   (plus the playbook-scripts endpoint added 2026-11-12).
   Target: `playbook_config.py` for parser helpers and `playbooks.py` for views (or an `automation/` package);
   preserve `_parse_playbook_config` / `_get_script_source` compatibility for tests. Source: §13 audit 2026-11-04.
-- [ ] **13.8 — Split `identity/views.py` into organisation and user views.**
+- [x] **13.8 — Split `identity/views.py` into organisation and user views.** Closed 2026-11-27; full `pytest` green.
   Current: **617 lines** covering both admin domains. Target: `identity/views/organisations.py` and
   `identity/views/users.py` (or sibling modules) with compatibility exports. Watch: superadmin guards, audit
   rows and URL names. Source: §13 audit 2026-11-04.
-- [ ] **13.9 — Split `ui/views/observables.py`.**
+- [x] **13.9 — Split `ui/views/observables.py`.** Closed 2026-11-27; full `pytest` green.
   Current: **609 lines** mixing observable list/detail/edit/delete with case link/update/remove actions.
   Target: `observables.py` for CRUD and `case_observables.py` for case-link actions. Watch: cross-case guard
   and `dataType` form contract. Source: §13 audit 2026-11-04.
-- [ ] **13.10 — Split `ui/views/settings.py`.**
+- [x] **13.10 — Split `ui/views/settings.py`.** Closed 2026-11-27; full `pytest` green.
   Current: **594 lines** mixing organisation settings, user settings and the settings home. Target:
   `settings_orgs.py`, `settings_users.py`, `settings_home.py` with compatibility exports. Watch: org-blocker
   helper and superadmin-only paths. Source: §13 audit 2026-11-04.
-- [ ] **13.11 — Split `query/engine.py` only if the query DSL is growing.**
+- [x] **13.11 — Split `query/engine.py` only if the query DSL is growing.** Decision 2026-11-27: do not split.
   Current: **759 lines** but cohesive (field specs, Q building, sorting, execution). Target if needed:
   `fields.py`, `filters.py`, `execution.py`. Do not split purely for line count; preserve the public
-  `QueryEngine` surface. Source: §13 audit 2026-11-04.
-- [ ] **13.12 — Split `tests/conformance/test_tenant_scoping.py` by resource.**
+  `QueryEngine` surface. No DSL growth or new QueryEngine surface justifies the move risk. Source: §13 audit 2026-11-04.
+- [x] **13.12 — Split `tests/conformance/test_tenant_scoping.py` by resource.** Closed 2026-11-27; full `pytest` green.
   Current: **3,649 lines**, the largest test file in the repo. Target: cases, alerts, observables, identity and
   automation tenant-scoping suites (shared fixtures in a conftest/helper). Test-maintainability only; no
   production behaviour change. Source: §13 audit 2026-11-04.
 ### P3 — monitor; do not split for size alone
 
-- [ ] **13.13 — `cases/models.py` (677 lines).** 17 Django models. Do **not** split for line count now: model
-  module moves risk migration/app-registry churn. Revisit only if the case domain grows substantially.
+P3 reassessment 2026-11-27: `cases/correlation.py` grew from 518 to 1,215 lines as auto-bundling was added, so
+`13.15` was triggered and implemented. The other P3 items were reviewed and closed as **no-action** because
+their stated triggers were not met; they should be reopened only when the relevant area is next changed.
+
+- [x] **13.13 — `cases/models.py`.** Closed 2026-11-27: reviewed/no-action. Audit listed 677 lines / 17 models;
+  current file is 806 lines. Model-module moves risk migration/app-registry churn, so do not split for line count.
+  Reopen only if the case domain grows substantially. Source: §13 audit 2026-11-04.
+- [x] **13.14 — `observables/extractor.py`.** Closed 2026-11-27: reviewed/no-action. Audit listed 570 lines;
+  current file is 585 lines. The extraction/normalization/linking pipeline remains cohesive; split only when a new
+  extraction stage is added. Source: §13 audit 2026-11-04.
+- [x] **13.15 — Split `cases/correlation.py`.** Closed 2026-11-27; implementation verified by targeted suites and the final user-owned full `pytest` (4464 passed, 3 skipped, 15 warnings, 2 subtests passed).
+  Audit listed 518 cohesive lines with a "leave unless correlation features expand" trigger. Auto-bundling grew
+  the module to 1,215 lines, so it is now `cases/correlation/` with `_constants.py`, `_types.py`,
+  `similarity.py`, `bundling.py` and a compatibility `__init__.py`. AST check: 15/15 definitions and 5/5
+  constants unchanged; `make check`, `git diff --check` and secret scan clean. Developer deviation
+  **D-13.15-1** records module-class patch forwarding. Source: §13 audit 2026-11-04.
+- [x] **13.16 — `ui/views/ingestion_sources.py`.** Closed 2026-11-27: reviewed/no-action. Audit listed 1,172
+  lines; current file is still 1,172 lines and has not been next touched. Split preview/apply from source-detail
+  logic only when the mapping-editor UI is next changed. Source: §13 audit 2026-11-04.
+- [x] **13.17 — `observables/views.py`.** Closed 2026-11-27: reviewed/no-action. Audit listed 488 lines;
+  current file is 555 lines. Growth is small and the observable-type/suggestion UI has not been touched enough to
+  justify a split. Reopen when that area is next modified. Source: §13 audit 2026-11-04.
+- [x] **13.18 — `identity/services.py`.** Closed 2026-11-27: reviewed/no-action. Audit listed 471 lines;
+  current file is 511 lines. Organisation/user locking logic remains cohesive; reopen when next modified.
   Source: §13 audit 2026-11-04.
-- [ ] **13.14 — `observables/extractor.py` (570 lines).** Cohesive extraction/normalization/linking pipeline.
-  Split only when adding a new extraction stage. Source: §13 audit 2026-11-04.
-- [ ] **13.15 — `cases/correlation.py` (518 lines).** Cohesive correlation algorithms; leave unless correlation
-  features expand. Source: §13 audit 2026-11-04.
-- [ ] **13.16 — `ui/views/ingestion_sources.py` (1,172 lines).** Mapping-editor UI including the four source-detail
-  tabs and submapping editor; split preview/apply from source detail when next touched. Source: §13 audit 2026-11-04.
-- [ ] **13.17 — `observables/views.py` (488 lines).** Observable-type CRUD plus the suggestion workflow; split
-  `types.py` and `suggestions.py` when touched. Source: §13 audit 2026-11-04.
-- [ ] **13.18 — `identity/services.py` (471 lines).** Organisation/user services with shared locking logic;
-  split when next modified. Source: §13 audit 2026-11-04.
-- [ ] **13.19 — `ui/static/ui/app.src.css` (1,396 lines).** Cohesive Tailwind source; split with `@import` only
-  if component CSS churn increases. Preserve `make css-check` and the `@source` scanning contract.
-  Source: §13 audit 2026-11-04.
-- [ ] **13.20 — Large templates: `ui/templates/ui/taxonomy.html` (647) and `_tab_observables.html` (479).**
-  Prefer template partials over Python-style module splits, only when the templates are next edited.
-  Source: §13 audit 2026-11-04.
+- [x] **13.19 — `ui/static/ui/app.src.css`.** Closed 2026-11-27: reviewed/no-action. Audit listed 1,396 lines;
+  current file is 1,591 lines but still cohesive. No component CSS churn justifies `@import` splitting; preserve
+  `make css-check` and the `@source` scanning contract. Source: §13 audit 2026-11-04.
+- [x] **13.20 — Large templates.** Closed 2026-11-27: reviewed/no-action. Audit listed `taxonomy.html` at 647
+  lines and `_tab_observables.html` at 479 lines; current sizes are 726 and 484 lines. Prefer partials only when
+  those templates are next edited. Source: §13 audit 2026-11-04.
 
 ---
 
@@ -387,7 +399,7 @@ Closed follow-ups `14.1`, `14.2`, and `14.9`–`14.11` are recorded in `COMPLETE
   (`alerts/urls.py:28`) is undocumented, unused by the UI (which posts to the UI view), and duplicates
   the existing POST-on-`/tag` semantics. Prefer removing it unless a consumer needs the explicit
   endpoint; if kept, document it and add it to the API/test contract. If removed, update
-  `tests/conformance/test_tenant_scoping.py` route enumeration.
+  `tests/conformance/test_tenant_scoping/` route enumeration.
 
 ### P3 — polish and housekeeping
 

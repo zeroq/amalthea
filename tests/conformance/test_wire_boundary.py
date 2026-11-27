@@ -54,6 +54,9 @@ WIRE_BOUNDARY = (
     "compat/",
     "query/",
     "core/serializers.py",
+    # The serializer package was `core/serializers.py` before the 2026-11-27 split.
+    # It is the same wire boundary with a package path now.
+    "core/serializers/",
     # MCP read tools are an external wire surface: they reuse the TheHive-compatible
     # serializers and add matching safe field names for observables and timeline rows.
     # MCP Phase 2 proposal/summary tools deliberately accept TheHive-shaped camelCase
@@ -75,6 +78,9 @@ WIRE_BOUNDARY = (
     # The API case-view package was `cases/views.py` (matched by `*/views.py`) before the
     # 2026-11-26 split. It is the same presentation boundary with a package path now.
     "cases/views/",
+    # The API alert-view package was `alerts/views.py` (matched by `*/views.py`) before the
+    # 2026-11-27 split. It is the same presentation boundary with a package path now.
+    "alerts/views/",
     # identity/ uses Django field suffixes like `_id` which trigger false positives.
     "identity/",
 )
@@ -158,8 +164,10 @@ def test_the_boundary_matcher() -> None:
     assert is_wire_boundary("compat/enums.py")
     assert is_wire_boundary("query/engine.py")
     assert is_wire_boundary("core/serializers.py")
+    assert is_wire_boundary("core/serializers/cases.py")
     assert is_wire_boundary("cases/views.py")
     assert is_wire_boundary("cases/views/cases.py")
+    assert is_wire_boundary("alerts/views/alerts.py")
     assert is_wire_boundary("cases/urls.py")
     assert is_wire_boundary("ui/views/observables.py")
     assert is_wire_boundary("alerts/export.py")
