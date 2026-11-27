@@ -59,7 +59,7 @@ from identity.models import Organisation, User
 from realtime.consumers import FORBIDDEN, PROTOCOL_ERROR, UNAUTHENTICATED
 from realtime.publisher import publish_case_event
 
-#: The literal the choke-point scan forbids outside `cases/ledger.py`. It lives here as one name so
+#: The literal the choke-point scan forbids outside `cases/ledger/event_log.py`. It lives here as one name so
 #: the scan and its self-test cannot drift apart.
 DIRECT_CREATE = "TimelineEvent.objects.create("
 
@@ -69,7 +69,7 @@ DIRECT_CREATE = "TimelineEvent.objects.create("
 SCANNED_APPS = ("alerts", "cases", "ui", "automation")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-LEDGER = REPO_ROOT / "cases" / "ledger.py"
+LEDGER = REPO_ROOT / "cases" / "ledger" / "event_log.py"
 LIVE_JS = REPO_ROOT / "ui" / "static" / "ui" / "live.js"
 
 
@@ -189,15 +189,15 @@ def test_the_ledger_service_is_the_only_writer_of_timeline_rows() -> None:
     Widening the scope is what makes "every" true rather than hopeful: a new writer in any of them
     fails the build instead of quietly going unpublished.
 
-    The positive half matters as much as the negative: if the literal vanished from `ledger.py` the
-    scan would pass against a service that writes nothing, and every "both tabs saw it" assertion
-    above would fail for a reason unrelated to realtime.
+    The positive half matters as much as the negative: if the literal vanished from
+    `cases/ledger/event_log.py` the scan would pass against a service that writes nothing, and every
+    "both tabs saw it" assertion above would fail for a reason unrelated to realtime.
     """
     assert not _direct_creates(REPO_ROOT, allowed={LEDGER}), (
         "create a TimelineEvent through cases.ledger.append_timeline_event instead"
     )
     assert DIRECT_CREATE in LEDGER.read_text(encoding="utf-8"), (
-        "cases/ledger.py no longer writes TimelineEvent rows"
+        "cases/ledger/event_log.py no longer writes TimelineEvent rows"
     )
 
 
@@ -212,7 +212,9 @@ def test_the_scan_would_fail_a_call_site_reverted_to_a_direct_create(tmp_path: P
     """
     for app in SCANNED_APPS:
         (tmp_path / app).mkdir()
-    ledger = tmp_path / "cases" / "ledger.py"
+    ledger_dir = tmp_path / "cases" / "ledger"
+    ledger_dir.mkdir()
+    ledger = ledger_dir / "event_log.py"
     ledger.write_text("event = TimelineEvent.objects.create(case=case)\n", encoding="utf-8")
 
     escalation = tmp_path / "alerts" / "escalation.py"

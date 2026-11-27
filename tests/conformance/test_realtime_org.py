@@ -186,7 +186,7 @@ def test_ledger_emits_owner_org_refresh_after_commit(
     status, _ = CaseStatus.objects.get_or_create(value="New", defaults={"stage": "New", "order": 1})
     case = Case.objects.create(title="Ledger refresh", status=status, owner_org=org)
     publisher = MagicMock()
-    monkeypatch.setattr("cases.ledger.publish_org_event", publisher)
+    monkeypatch.setattr("cases.ledger.event_log.publish_org_event", publisher)
 
     with django_capture_on_commit_callbacks(execute=True):
         append_timeline_event(case, title="Status changed", kind="status-changed")
