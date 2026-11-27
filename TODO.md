@@ -24,7 +24,7 @@ to its narrow follow-up on 2026-11-13 (see `COMPLETED.md`).
 | **5** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
 | **6** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
 | **7** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
-| **8** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; `cases/views.py` (~2.8k lines) is P0. `13.21` is complete. | **None** — hygiene. |
+| **8** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; P0 (`13.1`), `13.2`, `13.3`, and `13.21` are complete. `13.4` (`alerts/views.py`) remains next. | **None** — hygiene. |
 ---
 
 ## 3. Open decisions
@@ -274,8 +274,9 @@ follow-up was §6.16-fu1 and completed 2026-11-26. §6.16 P7 (realtime) shipped 
 
 Follow-up audit after the `ui/views.py` → `ui/views/` split (`64eef0c`). These are refactor candidates, not
 product features. Priority: **P1** next wave; **P2** when the module is next touched or before adding
-features; **P3** monitor only — do not split purely for line count. The P0 item (§13.1) and the small
-template-hygiene cleanup (§13.21) are complete and recorded in `COMPLETED.md`.
+features; **P3** monitor only — do not split purely for line count. The P0 item (§13.1), §13.2, §13.3,
+the small template-hygiene cleanup (§13.21), and an extra ledger-package split are complete and
+recorded in `COMPLETED.md`.
 
 **Definition of done for every §13 task:** move-only where possible; preserve public imports, URL names/order,
 auth and tenant checks, status codes, request/response bodies, form field names and templates; add compatibility
@@ -284,17 +285,10 @@ the full `pytest` suite green; record any deviation in the plan.
 
 ### P1 — next wave
 
-- [ ] **13.2 — Split `ui/taxonomy_views.py` into taxonomy-view modules.**
-  Current: **787 lines** covering case statuses, alert statuses, observable types and taxonomy terms, with
-  repeated error helpers. Target: `ui/taxonomy_views/` (or a `ui/views/taxonomy/` package) with `_common.py`,
-  `case_statuses.py`, `alert_statuses.py`, `observable_types.py`, `terms.py`; keep URL imports and
-  `ui/views/taxonomy.py` context helpers intact. Source: §13 audit 2026-11-04.
-- [ ] **13.3 — Split `ui/views/cases.py` further.**
-  Current: **1,002 lines** — the largest module left by the recent split — mixing case list/create/edit, status,
-  close, tags, comments, custom fields, export, shares and merge. Target: `case_list.py`, `case_edit.py`,
-  `case_actions.py`, `case_shares.py` (package or siblings; keep `ui/views/cases.py` as a compatibility shim).
-  Watch: template/HTMX partial names and any tests that import or monkeypatch `ui.views.cases.*`.
-  Source: §13 audit 2026-11-04.
+13.2 (`ui/taxonomy_views.py`), 13.3 (`ui/views/cases.py`), and an extra ledger-package split are
+complete and recorded in `COMPLETED.md`. The ledger split was approved as “§13.4” by mistake;
+the real §13.4 below remains open.
+
 - [ ] **13.4 — Split `alerts/views.py` into an `alerts/views/` package.**
   Current: **782 lines** mixing alert CRUD, observables, merge/import, bulk update, procedures, statuses, tags
   and comments. Target: `alerts/views/` with `alerts.py`, `observables.py`, `merge.py`, `bulk.py`,

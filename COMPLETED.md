@@ -2305,6 +2305,53 @@ historical plans and verification reports still cite the TODO IDs recorded here.
 - Deviations **D-13.1-1 through D-13.1-5** are recorded in the approved plan; no new deviation.
 - Implementation commit: `14e108b8`, which supplies the plan’s commit-hash evidence.
 
+### §13.2 — Split `ui/taxonomy_views.py` into taxonomy-view modules
+- Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-taxonomy-views-modularization.md`; implementation
+  brief: `docs/planning/IB-2026-11-27-taxonomy-views-modularization.md`.
+- Converted the 787-line module into `ui/taxonomy_views/` with `_common.py`, `case_statuses.py`,
+  `alert_statuses.py`, `observable_types.py`, `terms.py`, and a compatibility-only `__init__.py`.
+  All 20 functions, 3 constants, 12 decorated handlers, and 12 route names are preserved;
+  `ui/urls.py`, `ui/views/taxonomy.py`, and `ui/views/__init__.py` remain byte-identical.
+- No test edits were needed. Verification: AST comparison showed no missing, extra, changed, or
+  decorator-drifted definitions; targeted suites **241 passed**; `make check` passed; secret scan and
+  `git diff --check` clean. User-provided full pytest log `/tmp/amalthea-full-pytest.log` is green:
+  **4444 passed, 3 skipped, 15 warnings, 2 subtests passed in 675.92s**.
+- Deviations **D-13.2-1 through D-13.2-4** are recorded in the approved plan; no new deviation.
+- Implementation commit: `a65a3f20`, which supplies each plan’s commit-hash evidence.
+
+### §13.3 — Split `ui/views/cases.py` into sibling modules
+- Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-ui-case-views-modularization.md`; implementation
+  brief: `docs/planning/IB-2026-11-27-ui-case-views-modularization.md`.
+- Split the 1,274-line module into `case_list.py`, `case_edit.py`, `case_actions.py`, and
+  `case_shares.py`; `ui/views/cases.py` is now a compatibility re-export shim. All 24 functions,
+  `logger`, and 18 `ui-case-*` routes are preserved; `ui/urls.py` and `ui/views/__init__.py` remain
+  byte-identical.
+- No test edits were needed. Verification: AST comparison showed no missing, extra, changed, or
+  decorator-drifted definitions; route resolution confirmed all 18 handlers; targeted suites
+  **553 passed**; `make check` passed; secret scan and `git diff --check` clean. User-provided full
+  pytest log `/tmp/amalthea-full-pytest.log` is green: **4444 passed, 3 skipped, 15 warnings, 2
+  subtests passed in 675.92s**.
+- Deviations **D-13.3-1 through D-13.3-6** are recorded in the approved plan; D-13.3-5 and D-13.3-6
+  were discovered during implementation.
+- Implementation commit: `a65a3f20`, which supplies each plan’s commit-hash evidence.
+
+### Extra — Case ledger modularization (approved as “§13.4”)
+- Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-ledger-modularization.md`; implementation
+  brief: `docs/planning/IB-2026-11-27-ledger-modularization.md`.
+- Replaced `cases/ledger.py` with `cases/ledger/` containing `event_log.py` (`append_timeline_event`),
+  `read.py` (`events_after`), and a compatibility `__init__.py` with `__all__`. The direct-create
+  choke point now lives at `cases/ledger/event_log.py`; the two guard tests were updated to the new
+  writer path and publisher module.
+- Verification: AST comparison showed both functions unchanged; direct-create literal occurs only in
+  the new writer file; targeted suites **246 passed**; post-`__all__` guard recheck **3 passed**;
+  `make check` passed (mypy over 170 files); secret scan and `git diff --check` clean. User-provided
+  full pytest log `/tmp/amalthea-full-pytest.log` is green: **4444 passed, 3 skipped, 15 warnings, 2
+  subtests passed in 675.92s**.
+- Numbering correction: this work was approved as §13.4, but `TODO.md` §13.4 is the `alerts/views.py`
+  split; that item remains open. Deviations **D-13.4-1 through D-13.4-6** are recorded in the plan,
+  with D-13.4-5 updated to document the required `__all__`.
+- Implementation commit: `a65a3f20`, which supplies each plan’s commit-hash evidence.
+
 ### Stale priority rows removed
 - §10.1 role-scoped user management (record already in the 2026-10-20 COMPLETED entry), §12.1-fu1,
   §12.4, §6.13, §10.9, §10.11, §12.9, §22, §23, §24, and §25. §10.12-fu3 and §14 subitems were closed
