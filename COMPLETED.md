@@ -2365,7 +2365,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
   targeted suites **292 passed in 281.49s**; `make check`, `git diff --check` and secret scan clean.
   User-provided full pytest log `/tmp/amalthea-full-pytest.log` is green: **4464 passed, 3 skipped,
   15 warnings, 2 subtests passed in 675.28s**.
-- Implementation commit: pending; changes are not yet committed.
+- Implementation commit: `6b47c4be` (`refactor: complete section 13 modularization backlog`).
 
 ### §13.5 — Split `ingest/mapping.py` into `ingest/mapping/`
 - Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-mapping-engine-modularization.md`;
@@ -2378,7 +2378,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
   `make check`, `git diff --check` and secret scan clean. Same green full pytest log applies.
 - Deviations **D-13.5-1 through D-13.5-3** are recorded in the plan: user overrode the §13.4 gate,
   `__all__` additions are additive, and the characterization test was added.
-- Implementation commit: pending; changes are not yet committed.
+- Implementation commit: `6b47c4be` (`refactor: complete section 13 modularization backlog`).
 
 ### §13.6 — Split `core/serializers.py` by domain
 - Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-serializers-modularization.md`.
@@ -2390,7 +2390,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
   `make check`, `git diff --check` and secret scan clean. Same green full pytest log applies.
 - Deviations **D-13.6-1 and D-13.6-2** are recorded in the plan: additive private helper exports and
   `procedure_json` ownership in `taxonomy.py`.
-- Implementation commit: pending; changes are not yet committed.
+- Implementation commit: `6b47c4be` (`refactor: complete section 13 modularization backlog`).
 
 ### §13.7 — Split `ui/views/automation.py`
 - Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-automation-ui-modularization.md`.
@@ -2399,7 +2399,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
 - Targeted suites **203 passed, 2 subtests passed in 188.64s**; `make check`, `git diff --check`
   and secret scan clean. Same green full pytest log applies.
 - Deviation **D-13.7-1** is recorded in the plan: explicit additive `__all__`.
-- Implementation commit: pending; changes are not yet committed.
+- Implementation commit: `6b47c4be` (`refactor: complete section 13 modularization backlog`).
 
 ### §13.8 — Split `identity/views.py` into organisation and user views
 - Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-identity-views-modularization.md`.
@@ -2408,7 +2408,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
 - Targeted suites **492 passed in 227.67s** plus tenant org/user subset **44 passed, 59 deselected**;
   `make check`, `git diff --check` and secret scan clean. Same green full pytest log applies.
 - Deviation **D-13.8-1** is recorded in the plan: additive `__all__` expansion.
-- Implementation commit: pending; changes are not yet committed.
+- Implementation commit: `6b47c4be` (`refactor: complete section 13 modularization backlog`).
 
 ### §13.9 — Split `ui/views/observables.py`
 - Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-observable-ui-modularization.md`.
@@ -2417,7 +2417,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
 - Targeted suites **281 passed in 348.69s** plus tenant observable subset **7 passed, 96 deselected**;
   `make check`, `git diff --check` and secret scan clean. Same green full pytest log applies.
 - Deviation **D-13.9-1** is recorded in the plan: explicit additive `__all__`.
-- Implementation commit: pending; changes are not yet committed.
+- Implementation commit: `6b47c4be` (`refactor: complete section 13 modularization backlog`).
 
 ### §13.10 — Split `ui/views/settings.py`
 - Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-settings-ui-modularization.md`.
@@ -2427,7 +2427,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
   and URL/viewer/fk smoke suites **65 passed**; `make check`, `git diff --check` and secret scan clean.
   Same green full pytest log applies.
 - Deviation **D-13.10-1** is recorded in the plan: explicit additive `__all__`.
-- Implementation commit: pending; changes are not yet committed.
+- Implementation commit: `6b47c4be` (`refactor: complete section 13 modularization backlog`).
 
 ### §13.11 — Decision not to split `query/engine.py`
 - Closed 2026-11-27. Current file is **759 lines** but cohesive: field specs, Q building, sorting and
@@ -2446,7 +2446,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
   Same green full pytest log applies.
 - Deviations **D-13.12-1 and D-13.12-2** are recorded in the plan: additive ruff suppressions to keep
   the original local migration import pair, and no compatibility module at the old test path.
-- Implementation commit: pending; changes are not yet committed.
+- Implementation commit: `6b47c4be` (`refactor: complete section 13 modularization backlog`).
 
 ### §13.15 — Split `cases/correlation.py`
 - Closed 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-correlation-modularization.md`.
@@ -2463,7 +2463,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
   linkage and MCP tools; consumer import smoke passed. `make check`, `git diff --check` and secret scan clean.
 - Deviation **D-13.15-1** is recorded in the plan: a `ModuleType` subclass forwards assignments so old
   `monkeypatch.setattr("cases.correlation.*")` targets remain effective.
-- Implementation commit: pending; changes are not yet committed.
+- Implementation commit: `6b47c4be` (`refactor: complete section 13 modularization backlog`).
 
 ### §13 P3 — reviewed and closed as no-action
 - Closed 2026-11-27 after reassessment. No code changes for these items; their stated triggers were not met.
@@ -2483,7 +2483,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
   only when those templates are next edited.
 - No deviations for these no-action items. The final full `pytest` after all §13 changes was green:
   **4464 passed, 3 skipped, 15 warnings, 2 subtests passed in 670.27s (0:11:10)**.
-- Implementation commit: pending; no code changes were made for this closeout.
+- Commit: `6b47c4be` (docs closeout only for these no-action items).
 
 ### Stale priority rows removed
 - §10.1 role-scoped user management (record already in the 2026-10-20 COMPLETED entry), §12.1-fu1,

@@ -130,4 +130,4 @@ No UI changes. Templates consume the same dictionaries through the same call sit
 - Wire boundary guard updated to recognize `core/serializers/`.
 - `make check`, `git diff --check`, and secret scan clean.
 - Targeted consumer suites: **513 passed** in 250.64s.
-- Closed 2026-11-27: user-provided full `pytest` log `/tmp/amalthea-full-pytest.log` is green — **4464 passed, 3 skipped, 15 warnings, 2 subtests passed in 675.28s**. Commit hash pending because changes are not yet committed.
+- Closed 2026-11-27: user-provided full `pytest` log `/tmp/amalthea-full-pytest.log` is green — **4464 passed, 3 skipped, 15 warnings, 2 subtests passed in 675.28s**. Committed as `6b47c4be` (`refactor: complete section 13 modularization backlog`).

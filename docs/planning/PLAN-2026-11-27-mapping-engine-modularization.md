@@ -145,4 +145,4 @@ No UI changes. Wording constants (`REASON_LABELS`), warning reasons and form fie
 - Structural verification: no old top-level symbol is missing; additive `__all__` declarations only; explicit shim exports 24 names covering the 17 external imports and the broader public surface.
 - `make check`, `git diff --check`, and secret scan clean.
 - Targeted suites from T2.2: **459 passed**, 7 pre-existing naive-datetime warnings, in 96.58s.
-- Closed 2026-11-27: user-provided full `pytest` log `/tmp/amalthea-full-pytest.log` is green — **4464 passed, 3 skipped, 15 warnings, 2 subtests passed in 675.28s**. Commit hash pending because changes are not yet committed.
+- Closed 2026-11-27: user-provided full `pytest` log `/tmp/amalthea-full-pytest.log` is green — **4464 passed, 3 skipped, 15 warnings, 2 subtests passed in 675.28s**. Committed as `6b47c4be` (`refactor: complete section 13 modularization backlog`).

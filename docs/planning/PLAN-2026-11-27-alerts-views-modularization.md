@@ -167,4 +167,4 @@ No UI changes. Dark theme, keyboard shortcuts, modals and accessible icon rules 
 - Structural verification: 30 functions, 15 decorated functions (14 routed handlers), 21 route names, 11 `__all__` entries; no duplicates; `alerts/urls.py` unchanged.
 - `make check`, `git diff --check`, and `scripts/secret-scan.sh --files` clean.
 - Targeted conformance suites from T3.2: **292 passed** in 281.49s.
-- Closed 2026-11-27: user-provided full `pytest` log `/tmp/amalthea-full-pytest.log` is green — **4464 passed, 3 skipped, 15 warnings, 2 subtests passed in 675.28s**. Commit hash pending because changes are not yet committed.
+- Closed 2026-11-27: user-provided full `pytest` log `/tmp/amalthea-full-pytest.log` is green — **4464 passed, 3 skipped, 15 warnings, 2 subtests passed in 675.28s**. Committed as `6b47c4be` (`refactor: complete section 13 modularization backlog`).

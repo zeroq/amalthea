@@ -1,6 +1,7 @@
 # PLAN-2026-11-27 — Correlation modularization (§13.15)
 
 **Status:** Implemented and verified; final user-owned full `pytest` is green.
+**Commit:** `6b47c4be` (`refactor: complete section 13 modularization backlog`).
 **Owner:** Main agent; no subagents.
 **Source:** `TODO.md` §13.15, §13 audit 2026-11-04.
 
