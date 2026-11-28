@@ -2498,7 +2498,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
 - Targeted suites **859 passed in 412.55s**; `make check`, `git diff --check` and secret scan clean.
 - Deviation **D-15.1** records the additive fingerprint key while retaining the historical key.
 - User-owned full `pytest` for this change is green: **4470 passed, 3 skipped, 15 warnings, 2 subtests passed in 630.05s (0:10:30)**; skips and warnings are the known pre-existing Postgres-only and naive-datetime/CSS-token cases.
-- Implementation commit: pending; changes are not yet committed.
+- Implementation commit: `76e1e4e3`.
 
 ### §11.4 — Procedure audit and flash-message hygiene
 - Implemented 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-section-11-4-procedure-audit-and-flash-hygiene.md`.
@@ -2510,7 +2510,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
   details go to logs and the analyst sees stable messages. User-facing domain validation messages were
   deliberately preserved.
 - Targeted suites **331 passed in 482.71s** plus **97 passed in 87.49s**; `make check` green.
-- Full user `pytest` remains pending for this change; implementation commit pending.
+- Final user-run full `pytest` is green: **4511 passed, 3 skipped, 15 warnings, 2 subtests passed in 718.65s**; implementation commit `76e1e4e3`.
 
 ### §12.12 — Fuzzy-similarity follow-ups
 - Implemented 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-section-12-12-fuzzy-followups.md`.
@@ -2526,7 +2526,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
   was run here.
 - **fu6:** cross-org merge refusal feedback is pinned to an error message, never a success banner.
 - Targeted suites **89 passed in 74.87s**; broader integration selection **415 passed in 309.49s**; `make check`, `git diff --check`, secret scan clean.
-- Full user `pytest` remains pending for this change; implementation commit pending.
+- Final user-run full `pytest` is green: **4511 passed, 3 skipped, 15 warnings, 2 subtests passed in 718.65s**; implementation commit `76e1e4e3`.
 
 ### §10 — Open follow-ups (custom fields, webhook pre-auth, token hardening)
 - Implemented 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-section-10-open-followups.md`.
@@ -2552,7 +2552,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
 - The first user-run full suite found only a wire-boundary leak in the new service; decoding was
   moved to the serializer boundary and the final full suite is green.
 - Deferred: a real Postgres concurrency harness for the M1 race (SQLite cannot exercise
-  `select_for_update`); implementation commit pending.
+  `select_for_update`); implementation commit `76e1e4e3`.
 
 ### Stale priority rows removed
 - §10.1 role-scoped user management (record already in the 2026-10-20 COMPLETED entry), §12.1-fu1,
