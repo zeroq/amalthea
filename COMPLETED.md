@@ -2554,6 +2554,29 @@ historical plans and verification reports still cite the TODO IDs recorded here.
 - Deferred: a real Postgres concurrency harness for the M1 race (SQLite cannot exercise
   `select_for_update`); implementation commit `76e1e4e3`.
 
+### §7 — Delivery workflow and CSS pipeline closeout
+- Implemented 2026-11-28. Plan: `docs/planning/PLAN-2026-11-28-section-7-delivery-standards.md`.
+- **7.1 / R11:** `AGENTS.md §7` and `docs/spec/delivery-standards.md` require every AC to record its
+  failure mode and the probe/mutation that proves the evidence can fail. The existing
+  `tests/conformance/_mutation.py` / `test_mutation_standard.py` mechanism remains the enforcement
+  backbone.
+- **7.2:** delivery standard adds a domain-expert gate table for plan, implementation, verification,
+  and handoff, with reviewer, decision and residual risk per phase.
+- **7.3:** subagent report contract added: the final message must contain the promised report; a task
+  id or bare “done” is insufficient and the planner must resume the same task to request it.
+- **7.4:** verified the already-shipped Tailwind split from
+  `PLAN-2026-10-19-ui-layout-standardization.md`: `app.src.css` is the sole input, `make css`
+  regenerates `app.css`, `css-check` byte-compares to a temp file, and `source(none)` plus explicit
+  `@source` declarations prevent repo-wide phantom utilities. ADR-003 and deviation W63B-3 now mark
+  the original limitation superseded.
+- **7.5:** base-commit reproduction procedure added for “pre-existing/unrelated” claims; otherwise
+  the claim is “unverified”. Full suite is the final gate; targeted subsets are diagnostics only.
+- Evidence: `tests/conformance/test_delivery_standards.py` pins all rules and the CSS invariants with
+  synthetic negative controls; focused suite **216 passed in 33.97s**; final user-run full suite
+  **4528 passed, 3 skipped, 15 warnings, 2 subtests passed in 696.86s**. Overall verification:
+  `docs/verification/VERIFY-2026-11-28-section-7-delivery-standards.md`.
+- Implementation commit pending.
+
 ### Stale priority rows removed
 - §10.1 role-scoped user management (record already in the 2026-10-20 COMPLETED entry), §12.1-fu1,
   §12.4, §6.13, §10.9, §10.11, §12.9, §22, §23, §24, and §25. §10.12-fu3 and §14 subitems were closed

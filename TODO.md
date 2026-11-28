@@ -18,7 +18,7 @@ to its narrow follow-up on 2026-11-13 (see `COMPLETED.md`).
 | Priority | Item | Description | Impact |
 |----------|------|-------------|--------|
 | **1** | **S3 + S5 (+ M3 residual)** | **S3** per-account lockout on the API login + stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. M3 shipped; residual same-org cleartext secrets. | **Medium (security)** |
-| **2** | **§7.4 + §8.5 — Quality-gate remainder** | Tailwind source/artifact split; mutation coverage scope. `§11.4-L1/I1` closed 2026-11-27. | **None** — engineering hygiene. |
+| **2** | **§8.5 — Mutation coverage scope** | Mutation coverage scope remains undefined. §7.4 Tailwind split closed 2026-11-28; `§11.4-L1/I1` closed 2026-11-27. | **None** — engineering hygiene. |
 | **3** | **§10.12-fu1 / fu2 / fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, test gaps. `fu3` (admin paused-state display) is complete. | **Low–Medium.** |
 | **4** | **§14.3 / 14.4 / 14.6 / 14.7 / 14.8 / 14.12 — Alert tag follow-ups** | Parity, update-vs-delete scope decision, query cleanup, tag-swap-file purge, and remaining polish. `14.1`, `14.2`, `14.9`–`14.11` are complete. | **Low.** |
 | **5** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
@@ -74,15 +74,18 @@ commit `e3a94d8` (2026-10-07, §5.7). This section is now fully historical.
 
 ## 7. Process improvements identified
 
-- [ ] **7.1 — Demonstrate failure modes for every AC** `R11`
-- [ ] **7.2 — Keep the domain-expert gate on every phase, not just Phase 3**
-- [ ] **7.3 — Require subagents to deliver the report they promise**
-- [ ] **7.4 — Split the Tailwind source from the committed artifact** `ADR-003` — Today
-  `ui/static/ui/app.css` is both the Tailwind input and the committed output, so `make css` is not
-  idempotent and `make css-check` only proves the input compiles (it cannot detect drift). Introduce
-  `ui/static/ui/app.src.css`, generate `app.css` from it, and make `css-check` fail when the tree's
-  artifact is stale. Visual-regression risk: verify the tokens before switching the pipeline.
-- [ ] **7.5 — Never accept a "pre-existing/unrelated" claim without a baseline; gate on the FULL suite.** Found
+- [x] **7.1 — Demonstrate failure modes for every AC** `R11` — Closed 2026-11-28: binding rule in
+  `AGENTS.md §7` and `docs/spec/delivery-standards.md`, pinned by
+  `tests/conformance/test_delivery_standards.py`.
+- [x] **7.2 — Keep the domain-expert gate on every phase, not just Phase 3** — Closed 2026-11-28 with
+  a four-phase gate template in the delivery standard and a recorded gate in the verification report.
+- [x] **7.3 — Require subagents to deliver the report they promise** — Closed 2026-11-28: final-report
+  contract and resume-the-task rule in the delivery standard, pinned by the conformance guard.
+- [x] **7.4 — Split the Tailwind source from the committed artifact** `ADR-003` — Closed 2026-11-28:
+  implemented earlier by `PLAN-2026-10-19-ui-layout-standardization.md`; verified current
+  `app.src.css` sole input, byte-compare `css-check`, `source(none)` and explicit `@source`. Visual
+  regression and drift failure were demonstrated in the original plan and re-pinned by the guard.
+- [x] **7.5 — Never accept a "pre-existing/unrelated" claim without a baseline; gate on the FULL suite.** Closed 2026-11-28: base-commit reproduction procedure and full-suite gate in the delivery standard, pinned by the conformance guard. Found
   2026-10-15: a subagent reported `test_ui_markdown.py::…::test_case_description_renders_as_markdown` as
   "pre-existing/unrelated". It was neither — that same task's template refactor had deleted the case
   **description** *and* the **ingestion-warnings** block from `ui/templates/ui/_tab_general.html`, and it

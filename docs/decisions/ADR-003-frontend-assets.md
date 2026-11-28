@@ -51,25 +51,24 @@ The repo previously shipped:
 ## Consequences
 
 - **Added files**: `scripts/tailwindcss` (binary), `ui/static/vendor/htmx/htmx.min.js`, `ui/static/vendor/fontawesome/webfonts/*.woff2`, `ui/static/vendor/fontawesome/css/fontawesome-subset.min.css`, `tailwind.config.js`, `THIRD-PARTY.md`, `docs/decisions/ADR-003-frontend-assets.md`.
-- **Modified files**: `ui/templates/ui/base.html` (asset includes), `Makefile` (`css`/`css-check` targets), `amalthea/settings/prod.py` (CSP), `ui/static/ui/app.css` (Tailwind source — and the committed compiled artifact: the **same** file).
-- **CI** runs `make css-check` as part of `make check`. That is a compile check; it does **not** detect drift.
-- **Developers** run `make css` after modifying `ui/static/ui/app.css` (Tailwind source).
+- **Modified files**: `ui/templates/ui/base.html` (asset includes), `Makefile` (`css`/`css-check` targets), `amalthea/settings/prod.py` (CSP), `ui/static/ui/app.css` (generated artifact), `ui/static/ui/app.src.css` (only Tailwind input; added by §7.4).
+- **CI** runs `make css-check` as part of `make check`. Since §7.4 it is a byte-compare drift gate, not merely a compile check.
+- **Developers** run `make css` after modifying `ui/static/ui/app.src.css`. Generated `app.css` must not be hand-edited.
 - **No Node.js** in repo, CI, or production.
 
-### Known limitation — the pipeline is not yet reproducible
+### Superseded limitation — original non-reproducible pipeline (closed by §7.4)
 
-`ui/static/ui/app.css` is both the Tailwind **input** and the committed **output**. `make css`
-(`-i app.css -o app.css`) therefore rewrites the file it just read: compiling it in place is **not
-idempotent**, and `make css-check` (which compiles the input to `/dev/null`) proves only that the
-input still parses — it **cannot** prove the committed artifact is current. Splitting the source
-(`ui/static/ui/app.src.css`) from the committed artifact, with a drift check that fails when the
-two diverge, is tracked as **TODO §7.4**. Until then, treat this ADR as describing a compile-checked
-toolchain, not a reproducible build.
+The original ADR described `ui/static/ui/app.css` as both Tailwind input and committed output, so
+`make css` rewrote the file it read and `css-check` could not detect drift. TODO §7.4 closed this
+in `PLAN-2026-10-19-ui-layout-standardization.md`: `app.src.css` is now the sole input, `app.css`
+is regenerated from it, and `css-check` compiles to a temp file and byte-compares. Automatic source
+detection is disabled (`source(none)`) with explicit `@source` entries for templates and UI JS so
+unrelated docs/tests cannot change the artifact.
 
 ## Verification
 
 - `make css` compiles cleanly
-- `make css-check` passes in CI (`make check`) — a compile check, **not** a drift check
+- `make css-check` passes in CI (`make check`) — since §7.4, a byte-compare drift check
 - CSP headers present in prod (`scripts/secret-scan.sh --tracked` clean)
 - `make check` passes (ruff, mypy, tests, migrations, css compile)
 - Font Awesome license recorded in `THIRD-PARTY.md`
