@@ -2,7 +2,7 @@
 
 Date: 2026-11-28
 Closes: TODO §7.1, §7.2, §7.3, §7.4, §7.5
-Status: Implemented and verified 2026-11-28; user-run full suite green. Uncommitted until requested.
+Status: Implemented and verified 2026-11-28; user-run full suite green. Implementation commit `d79ee587`.
 
 ## 1. Summary
 

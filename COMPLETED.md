@@ -2575,7 +2575,7 @@ historical plans and verification reports still cite the TODO IDs recorded here.
   synthetic negative controls; focused suite **216 passed in 33.97s**; final user-run full suite
   **4528 passed, 3 skipped, 15 warnings, 2 subtests passed in 696.86s**. Overall verification:
   `docs/verification/VERIFY-2026-11-28-section-7-delivery-standards.md`.
-- Implementation commit pending.
+- Implementation commit: `d79ee587`.
 
 ### Stale priority rows removed
 - §10.1 role-scoped user management (record already in the 2026-10-20 COMPLETED entry), §12.1-fu1,

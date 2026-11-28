@@ -94,7 +94,7 @@ Status: Pass. Final full suite is green.
 | Plan | planner | Pass | §7.4 was already implemented; closing rather than rebuilding avoids visual-regression risk. |
 | Implementation | planner | Pass with note | Only process docs, ADR/deviation closeout, TODO/COMPLETED and a doc/CSS guard changed; no app behaviour changed. |
 | Verification | planner | Pass | Failure-mode demonstrations are in this report; full suite remains user-owned. |
-| Handoff/commit | planner | Pass pending commit | Docs and guard are consistent; no secrets in changed files; commit not yet created. |
+| Handoff/commit | planner | Pass | Docs and guard are consistent; no secrets in changed files; implementation commit `d79ee587`. |
 
 ## Failure claims
 
