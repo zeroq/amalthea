@@ -18,13 +18,12 @@ to its narrow follow-up on 2026-11-13 (see `COMPLETED.md`).
 | Priority | Item | Description | Impact |
 |----------|------|-------------|--------|
 | **1** | **S3 + S5 (+ M3 residual)** | **S3** per-account lockout on the API login + stop trusting client `XFF`. **S5** attachment aggregate caps + extension-from-content-type. M3 shipped; residual same-org cleartext secrets. | **Medium (security)** |
-| **2** | **§7.4 + §8.5 + §11.4-L1/I1 — Quality-gate remainder** | Tailwind source/artifact split; mutation coverage scope; unaudited procedure attaches; pre-existing leaky flash messages. | **None** — engineering hygiene. |
+| **2** | **§7.4 + §8.5 — Quality-gate remainder** | Tailwind source/artifact split; mutation coverage scope. `§11.4-L1/I1` closed 2026-11-27. | **None** — engineering hygiene. |
 | **3** | **§10.12-fu1 / fu2 / fu4 — Token follow-ups** | Postgres reap race (Medium), prefix/throttle collision, test gaps. `fu3` (admin paused-state display) is complete. | **Low–Medium.** |
 | **4** | **§14.3 / 14.4 / 14.6 / 14.7 / 14.8 / 14.12 — Alert tag follow-ups** | Parity, update-vs-delete scope decision, query cleanup, tag-swap-file purge, and remaining polish. `14.1`, `14.2`, `14.9`–`14.11` are complete. | **Low.** |
-| **5** | **§15.7/15.8/15.10 — Observables follow-ups** | API parity (Q6), per-link provenance decision (Q7), redact raw values from mapping warnings (Medium residual). | **Low.** |
-| **6** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
-| **7** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
-| **8** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; P0 (`13.1`), `13.2`, `13.3`, and `13.21` are complete. Actionable P2 implementations `13.4`–`13.10` and `13.12` are complete with green user-owned full `pytest`; `13.11` decided not to split (`query/engine.py` is cohesive and not growing). P3 is closed: `13.15` was triggered by correlation growth and implemented; `13.13`, `13.14`, and `13.16`–`13.20` were reviewed and closed as no-action because their triggers were not met. Final user-owned full `pytest` after all §13 changes is green: 4464 passed, 3 skipped, 15 warnings, 2 subtests passed. | **None** — hygiene. |
+| **5** | **§16.6 — Empty-payload edge** | `{}` renders instead of "No raw data yet." | **Low.** |
+| **6** | **Orphaned routes** | `ui-case-attachment-list` (+ dead template) and `ui-case-attachment-detail` (405) are URL-only. | **Low** — dead surface. |
+| **7** | **§13 — Oversized-module maintainability backlog** | 20 candidates after the `ui/views.py` split; P0 (`13.1`), `13.2`, `13.3`, and `13.21` are complete. Actionable P2 implementations `13.4`–`13.10` and `13.12` are complete with green user-owned full `pytest`; `13.11` decided not to split (`query/engine.py` is cohesive and not growing). P3 is closed: `13.15` was triggered by correlation growth and implemented; `13.13`, `13.14`, and `13.16`–`13.20` were reviewed and closed as no-action because their triggers were not met. Final user-owned full `pytest` after all §13 changes is green: 4464 passed, 3 skipped, 15 warnings, 2 subtests passed. | **None** — hygiene. |
 ---
 
 ## 3. Open decisions
@@ -139,36 +138,46 @@ backlog once the analyst-visible classification fields (10.3–10.6) are designe
   `GET /api/v1/case/{id}` now returns ordered `customFields`. Plan:
   [`PLAN-2026-11-02-case-custom-fields-tab.md`](./docs/planning/PLAN-2026-11-02-case-custom-fields-tab.md);
   65 targeted tests and `make check` green. Full suite green on the worktree at `4bab358`: 3305 passed,
-  3 skipped. Open: independent verification (the TODO evidence rule) and the API write half below.
-- [ ] **10.7-fu1 — Custom-field API write parity and independent verification.** `PATCH/PUT
+  3 skipped. Independent verification and the API write half both closed 2026-11-27 below.
+- [x] **10.7-fu1 — Custom-field API write parity and independent verification.** `PATCH/PUT
   /api/v1/case/{id}` still ignores `customFields`; the UI writes through
   `POST /cases/<id>/custom-field`. Route both through one shared service, add API contract tests (invalid
   types, foreign value id, no-op), then run the feature's independent verification. Full suite is already
   green (3305 passed, 3 skipped). Source: custom-fields plan §Non-goals/§Risks.
-- [ ] **10.10 — No pre-auth per-IP throttle on the webhook (requested 2026-10-15, ADR-008).** The
+  **Closed 2026-11-27:** `cases/custom_fields.py` is the shared service; PATCH/PUT accepts
+  `customFields`; verification at `docs/verification/VERIFY-2026-11-27-case-custom-field-api-parity.md`.
+- [x] **10.10 — No pre-auth per-IP throttle on the webhook (requested 2026-10-15, ADR-008).** The
   per-IP bucket (`wh:ip:{ip}`) is consulted only **after** the token verifies, so an unauthenticated
   flood still costs one indexed token lookup + one Argon2 attempt per request. Add a cheap pre-auth
   per-IP limiter ahead of `_authenticate_token` (same `cache.incr` idiom, own bucket/documented limit
   so it cannot mask the post-auth 429), then confirm the budget in `docs/spec/api.md`. Consider a
   fail-closed setting under `amalthea/settings/prod.py` style (mirrors AGENTS.md §5).
-- [ ] **10.12-fu1 — (Medium, real, Postgres-only) the last-token reap can delete a token created concurrently.**
+  **Closed 2026-11-27:** `WEBHOOK_PREAUTH_RATE_IP_PER_MIN` (600/min default, prod fail-closed) adds
+  `wh:preauth:ip:{ip}:{window}` before token lookup; API spec/ADR-008 updated.
+- [x] **10.12-fu1 — (Medium, real, Postgres-only) the last-token reap can delete a token created concurrently.**
   `settings_token_delete` does `source_reaped = not source.tokens.exists()` → `source.delete()`. A concurrent
   `settings_token_create` targeting the same feed is **not** serialised: `exists()` can miss the `get_or_create`
   row, then the feed delete cascades it (`IngestionToken.source` is `CASCADE`) — the new token vanishes with **no
   audit row and no error**. The audit's suggested `select_for_update` is a start but must cover **both** sides:
   locking only the reap path converts silent loss into an FK violation on the loser's INSERT (a 500). Needs a
   Postgres harness to test (folds into §3.1). Source: `docs/reviews/SECURITY-2026-10-19-…` M1.
-- [ ] **10.12-fu2 — The token prefix does double duty (Low + Low).** The 12-char prefix of the plaintext — 72 bits,
+  **Closed 2026-11-27 in code:** `_lock_source()` serialises create and delete on the parent feed row in
+  Postgres; SQLite-safe call-site guards added. A real Postgres harness remains open under §3.1.
+- [x] **10.12-fu2 — The token prefix does double duty (Low + Low).** The 12-char prefix of the plaintext — 72 bits,
   and a unique lookup key — is also the webhook throttle bucket (`wh:token:{prefix}:{window}`), while creation
   retries only 3× on collision. Same collision therefore merges two rate-limit buckets. Either hash the cache key
   and widen the prefix (migration), or document the retry window as accepted. Source: security review M2 + L2.
-- [ ] **10.12-fu4 — Three test-quality gaps in the wave's own guards (Low; no grade depends on them).**
+  **Closed 2026-11-27:** cache key is now `wh:token:{sha256(prefix)[:16]}:{window}`; collision retry
+  window documented as accepted in the security-review addendum.
+- [x] **10.12-fu4 — Three test-quality gaps in the wave's own guards (Low; no grade depends on them).**
   (a) `TestTokenActivationLifecycle._mint` passes `slug=` into `_mk_source` for a feed the view never uses — it
   binds via `slugify(source_name)`, so every token in that class lands on one shared feed and the `slug=` row is
   orphaned; the argument does not mean what it reads like (Plan B's `_mint` was fixed, Plan A's was not).
   (b) The **Revoke** affordance on an *active* row is rendered (`settings_sources.html`) but unpinned — the
   state-matrix test asserts only Deactivate/Activate/Delete. (c) The `source.delete()` rollback path (a raise
   mid-transaction must restore the token row) is correct by construction and untested. Source: verifier O1–O3.
+  **Closed 2026-11-27:** the lifecycle helper now names its feed after the slug, the state-matrix test pins
+  Revoke, and rollback/locking/foreign-source tests were added.
 
 **Open design questions (resolve in the plan before coding):**
 
@@ -204,16 +213,18 @@ semantics, so they need a policy call before a fix.
 ### 11.4 — P3 (procedures/TTP UI) review follow-ups (2026-10-12)
 
 From `docs/reviews/REVIEW-2026-10-12-ui-completeness-p3.md` (0 Critical / 0 High; verification
-`docs/verification/VERIFY-2026-10-12-ui-completeness-p3.md` = 5/5 ACs met).
+`docs/verification/VERIFY-2026-10-12-ui-completeness-p3.md` = 5/5 ACs met). Closed 2026-11-27 under
+[`PLAN-2026-11-27-section-11-4-procedure-audit-and-flash-hygiene.md`](docs/planning/PLAN-2026-11-27-section-11-4-procedure-audit-and-flash-hygiene.md);
+targeted suites 331 + 97 passed, `make check` green, user full `pytest` pending.
 
-- [ ] **L1 — procedure attach is unaudited.** Neither the single nor the bulk view writes an `AuditLog`
-  row or a case-ledger event, so an attached procedure does not show up on the case timeline. §9 of the
-  plan did not name procedures and the compat API behaves the same way (parity), so this is "audit it, or
-  accept it explicitly". Decide together with the ledger-event work.
-- [ ] **I1 — pre-existing leaky flash messages.** Seven `except Exception as exc: messages.error(...{exc})`
-  sites reflect internal exception text to the analyst (`ui/views.py:367,985,1167,1228,1579,1959,1990`).
-  P3 introduced no new ones (it logs the detail and flashes a generic string); this is a small mechanical
-  cleanup, best done as one sweep.
+- [x] **L1 — procedure attach is audited.** Case-scoped single/bulk UI and API creates now go through
+  `cases.procedures.attach_case_procedure`, which writes one `AuditLog` row and one
+  `procedure-attached` ledger event per procedure. Audit/ledger metadata contains identifiers and ATT&CK
+  fields only — never the free-text procedure description. Alert-scoped procedures are unchanged.
+- [x] **I1 — leaky flash messages removed from the remaining internal-exception echoes.** Bulk
+  case/task/alert updates and autonomy-policy validation now log exception details and flash stable
+  generic messages; conformance tests inject sentinel exception text and assert it never appears in the
+  response. Intentionally user-facing domain messages remain unchanged.
 - **Fixed in P3 (no action):** the unbounded/quadratic bulk item loop (now `MAX_BULK_PROCEDURES = 100` +
   hoisted `getlist`, Low L2); the undefined CSS tokens (Low→fixed, now guarded by
   `tests/conformance/test_ui_css_tokens.py`); the per-item savepoint bug in bulk create.
@@ -236,8 +247,10 @@ attach path — **automatic** ingest-time bundling shipped 2026-11-26 as §12.3-
 follow-up was §6.16-fu1 and completed 2026-11-26. §6.16 P7 (realtime) shipped and verified 2026-11-26 in
 `PLAN-2026-11-26-section6-realtime-and-search.md`.
 
-- [ ] **12.12 — Fuzzy-similarity follow-ups (security FIND-05/03/06/07/11 + one discovered bug), 2026-10-21.**
-  From `docs/security/AUDIT-2026-10-20-alert-fuzzy-similarity.md` and Phase E verification:
+- [x] **12.12 — Fuzzy-similarity follow-ups (security FIND-05/03/06/07/11 + one discovered bug), 2026-10-21.**
+  From `docs/security/AUDIT-2026-10-20-alert-fuzzy-similarity.md` and Phase E verification. Closed 2026-11-27
+  under [`PLAN-2026-11-27-section-12-12-fuzzy-followups.md`](docs/planning/PLAN-2026-11-27-section-12-12-fuzzy-followups.md);
+  targeted suites 89 passed; broader integration selection 415 passed; `make check` green, user full `pytest` pending.
   - [x] **12.12-fu1 (High, by design — FIND-05) — RESOLVED 2026-11-13 (Option B title gate).** Decision (A)
     still excludes `title` from the payload hash, but the Similar-alerts helper now requires payload SSDEEP
     similarity **and** normalized-title Jaccard similarity against the **same** case alert. Defaults: payload
@@ -246,28 +259,25 @@ follow-up was §6.16-fu1 and completed 2026-11-26. §6.16 P7 (realtime) shipped 
     brief `IMPL-2026-11-13-alert-fuzzy-title-gate.md`, runbook `docs/runbook.md`, verification
     `VERIFY-2026-11-13-alert-fuzzy-title-gate.md` (PASS). Focused suites: 46 + 35 passed; `make check-fast`
     green. Full suite remains the standing CI gap (§12.11).
-  - [ ] **12.12-fu2 (Medium — FIND-03).** `ppdeep.hash/compare` CPU is unbounded on large canonical text
-    (5 MiB body × 500 candidates). Add `ALERT_FUZZY_MAX_TEXT_SIZE` truncation and/or lower the `case_hashes`
-    cap; **measure on Postgres** (ties to risk R5, blocked on a Postgres harness). Consider async/cached
-    computation for the Similar tab.
-  - [ ] **12.12-fu3 (Medium — FIND-06).** `VOLATILE_KEYS` is a static list and may miss vendor-specific keys
-    (`flow_id`, `session_id`, `correlation_id`, …), causing **false negatives**. Add
-    `ALERT_FUZZY_EXTRA_VOLATILE_KEYS` (settings-extensible) and/or a value-pattern heuristic (UUID/timestamp).
-  - [ ] **12.12-fu4 (Low — FIND-07/FIND-12).** Document that `backfill --force` skips when recomputation
-    yields `""` (does not blank) and that scalar-list sorting collapses order-significant arrays (false-positive
-    risk); consider a `--clear-on-failure` flag and per-source list-sort config later.
-  - [ ] **12.12-fu5 (Low — FIND-11).** `ppdeep`'s hash was hand-added to `requirements/base.txt`; there is no
-    `make lock` recipe (empty `.PHONY` target). Implement `pip-compile --generate-hashes` locking to prevent
-    drift (overlaps the existing `make lock`/`make hooks` follow-up).
-  - [ ] **12.12-fu6 (bug, pre-existing, out of scope).** `ui/views.py::case_alert_link` shows a false
-    **success** banner on a refused cross-org merge: `record_alert_bundled` raises
-    `PermissionDenied("Cross-org alert bundle refused")` for **every** role (superAdmin included), but the
-    view's `messages.success(...)` runs **after** the `except PermissionDenied` branch, so the user is told
-    "Alert linked to case N." while the transaction rolled back. The invariant is correct (cross-org bundling
-    is refused regardless of role) — only the feedback is wrong. Fix: return/relay the error message instead
-    of success when the merge is refused. Pinned by
-    `test_alert_fuzzy_similarity.py::TestCrossOrgIsolation::test_superadmin_cross_org_link_is_refused_and_not_persisted`.
-    **Not part of the fuzzy feature.**
+  - [x] **12.12-fu2 (Medium — FIND-03) — bounded.** `ALERT_FUZZY_MAX_TEXT_SIZE` (default 256 KiB, env
+    `AMALTHEA_ALERT_FUZZY_MAX_TEXT_SIZE`) truncates text before `ppdeep.hash`; `ALERT_FUZZY_MAX_CASE_SIGNALS`
+    (default 50) caps the case side of Similar-tab comparisons at `50 × MAX_FUZZY_COMPARISONS (500) = 25,000`.
+    Postgres timing and async/cached computation remain explicitly deferred (no harness here).
+  - [x] **12.12-fu3 (Medium — FIND-06) — extensible.** `ALERT_FUZZY_EXTRA_VOLATILE_KEYS` adds vendor keys via
+    env, and `ALERT_FUZZY_VOLATILE_VALUE_PATTERNS` (default on) drops UUID/ISO-timestamp/epoch-looking scalar
+    strings. Set the latter to `false` for key-only behavior. Canonicalization changes require a
+    `backfill_alert_ssdeep --force` run.
+  - [x] **12.12-fu4 (Low — FIND-07/FIND-12) — documented + opt-in.** Command help and `docs/runbook.md` now
+    state that `--force` preserves a stale hash when recomputation yields `""` (does not blank) and that
+    scalar-list sorting can collapse order-significant arrays. `--clear-on-failure` explicitly blanks such
+    hashes; per-source list-sort config remains a future decision.
+  - [x] **12.12-fu5 (Low — FIND-11) — wired.** `make lock` and `make lock-check` now delegate to
+    `scripts/lock.sh`, which already generated hash-pinned `requirements/{base,dev}.txt` via
+    `pip-compile --generate-hashes`. No regeneration was run during this change.
+  - [x] **12.12-fu6 (bug, pre-existing, out of scope) — pinned.** `case_alert_link` now relays the cross-org
+    refusal as an error and returns before `messages.success`. The superAdmin test asserts the response
+    contains a cross-org refusal message and never "Alert linked to case". Persistence/audit invariants are
+    unchanged.
 ---
 
 ## 13. Maintainability — oversized modules (added 2026-11-04)
@@ -414,17 +424,24 @@ Closed follow-ups `14.1`, `14.2`, and `14.9`–`14.11` are recorded in `COMPLETE
 Plan: [`PLAN-2026-11-06-alert-observables.md`](docs/planning/PLAN-2026-11-06-alert-observables.md)
 (APPROVED; decisions §14; 28 ACs). This is the P6 candidate from
 `PLAN-2026-10-16-source-field-mapping.md`. Status: 15.1–15.6/15.9 shipped 2026-11-06 (28/28 ACs
-verified; residual risk §15.10).
+verified). Follow-ups closed 2026-11-27 under
+[`PLAN-2026-11-27-alert-observables-followups.md`](docs/planning/PLAN-2026-11-27-alert-observables-followups.md);
+targeted suites 859 passed, `make check`/secret scan clean, final user full `pytest` green: 4470 passed, 3 skipped,
+15 warnings, 2 subtests passed.
 
-- [ ] **15.7 — Deferred API parity (Q6).** A future `GET /api/v1/alert/{alertId}/observable` read
-  endpoint is intentionally omitted until a client needs it.
-- [ ] **15.8 — Deferred provenance decision (Q7).** Explain and decide the trade-off for a per-link
-  `AlertObservable.source_path` column before a migration-backed provenance wave.
-- [ ] **15.10 — Security follow-up: redact raw values from mapping warnings.** The AC28 review found
-  that `FieldWarning.value_any` can store raw payload values (emails, IPs) in
-  `Alert.ingestion_warnings`. This is pre-existing (not introduced by §15) and not a blocker, but the
-  warning text should redact or hash sensitive values. Source: `SECURITY-2026-11-06-alert-observables.md`
-  §7 (Medium residual).
+- [x] **15.7 — Deferred API parity (Q6).** Closed 2026-11-27. `GET /api/v1/alert/{alertId}/observable`
+  now reuses the scoped POST view and returns 200 with the same `OutputObservable[]` shape; POST behavior
+  is unchanged. API spec, authz matrix, tenant route discovery and a conformance test were updated.
+- [x] **15.8 — Provenance decision (Q7).** Closed 2026-11-27: **no `AlertObservable.source_path` column**.
+  The link already identifies the source alert; `Alert.raw_payload` stays canonical, and paths can be
+  derived from the mapping config when needed. A column would require backfill, go stale on remap/replay,
+  and duplicate reconstructible state. Reopen only for a migration-backed provenance wave with a concrete
+  consumer.
+- [x] **15.10 — Security follow-up: redact raw values from mapping warnings.** Closed 2026-11-27.
+  `FieldWarning.as_dict()` now emits `value_preview: "[redacted]"` plus a one-way
+  `value_fingerprint: sha256:<16>`; `as_text()` uses the fingerprint instead of the raw value. UI, API spec,
+  data model, deviations and the security review were updated. Deviation **D-15.1** records the additive
+  fingerprint key. Source: `SECURITY-2026-11-06-alert-observables.md` §7 (Medium residual, now closed).
 
 ---
 

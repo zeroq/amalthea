@@ -73,6 +73,7 @@ def append_timeline_event(
         "automation-run": "case-updated",
         "alert-imported": "case-updated",
         "alert-merged": "case-updated",
+        "procedure-attached": "case-updated",
     }
     reason = reason_map.get(kind)
     if reason is not None:

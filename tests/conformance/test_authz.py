@@ -58,6 +58,7 @@ READ: list[Endpoint] = [
     Endpoint("alert-list", "GET", "/api/v1/alert", False),
     Endpoint("alert-detail", "GET", "/api/v1/alert/{alert}", False),
     Endpoint("alert-raw", "GET", "/api/v1/alert/{alert}/raw", False),
+    Endpoint("alert-observable-list", "GET", "/api/v1/alert/{alert}/observable", False),
     Endpoint("case-list", "GET", "/api/v1/case", False),
     Endpoint("case-detail", "GET", "/api/v1/case/{case}", False),
     Endpoint("case-task-list", "GET", "/api/v1/case/{case}/task", False),

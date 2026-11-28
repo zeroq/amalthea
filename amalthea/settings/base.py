@@ -197,11 +197,42 @@ WEBHOOK_MAX_DEPTH = int(os.getenv("AMALTHEA_MAX_WEBHOOK_DEPTH", "30"))
 # itself on these instead.
 WEBHOOK_RATE_SOURCE_PER_MIN = int(os.getenv("AMALTHEA_WEBHOOK_RATE_SOURCE", "60"))
 WEBHOOK_RATE_IP_PER_MIN = int(os.getenv("AMALTHEA_WEBHOOK_RATE_IP", "300"))
+# A separate budget for requests that have not presented a valid credential yet. It bounds the
+# indexed token lookup / Argon2 work an anonymous caller can cause without letting bad secrets
+# consume the authenticated per-IP budget. Production refuses to disable it.
+WEBHOOK_PREAUTH_RATE_IP_PER_MIN = int(os.getenv("AMALTHEA_WEBHOOK_PREAUTH_IP", "600"))
 
 # --- Alert fuzzy similarity (Plan-2026-10-20) ------------------------------
 # SSDEEP similarity threshold (0-100) for the "Similar alerts" card.
 # The shipped default is 60. Override with AMALTHEA_ALERT_FUZZY_THRESHOLD env var.
 ALERT_FUZZY_SIMILARITY_THRESHOLD = int(os.getenv("AMALTHEA_ALERT_FUZZY_THRESHOLD", "60"))
+
+# SSDEEP hashing is O(n) with a large constant. Truncate the canonical text before hashing
+# so a 5 MiB webhook body cannot dominate ingest CPU (FIND-03). <= 0 disables hashing.
+ALERT_FUZZY_MAX_TEXT_SIZE = int(os.getenv("AMALTHEA_ALERT_FUZZY_MAX_TEXT_SIZE", str(256 * 1024)))
+
+# A Similar-tab render compares each candidate against each attached case alert. Keep the
+# case side small; the candidate side remains MAX_FUZZY_COMPARISONS (500).
+ALERT_FUZZY_MAX_CASE_SIGNALS = int(os.getenv("AMALTHEA_ALERT_FUZZY_MAX_CASE_SIGNALS", "50"))
+
+# Vendor-specific fields that change per event but not event identity. Operator-overridable
+# via AMALTHEA_ALERT_FUZZY_EXTRA_VOLATILE_KEYS (comma-separated); defaults cover the common
+# FIND-06 examples. Keys are matched case-insensitively after _/hyphen normalization.
+ALERT_FUZZY_EXTRA_VOLATILE_KEYS: tuple[str, ...] = tuple(
+    key.strip().casefold()
+    for key in os.getenv(
+        "AMALTHEA_ALERT_FUZZY_EXTRA_VOLATILE_KEYS",
+        "flow_id,session_id,transaction_id,correlation_id,message_id,log_id,"
+        "sequence,epoch,clock,uptime,counter,nonce,token,session",
+    ).split(",")
+    if key.strip()
+)
+
+# Drop scalar string values that look like UUIDs, ISO timestamps, or 10-13 digit epochs,
+# regardless of key name. Set false to restore key-only volatile handling.
+ALERT_FUZZY_VOLATILE_VALUE_PATTERNS = (
+    os.getenv("AMALTHEA_ALERT_FUZZY_VOLATILE_VALUE_PATTERNS", "true").lower() == "true"
+)
 
 # --- Alert fuzzy title gate -----------------------------------------------
 # Title gate: require both payload and normalized-title similarity.

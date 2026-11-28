@@ -8,6 +8,9 @@ mode, not because the code is shaped that way:
   nothing and rejects the bulk of oversized traffic without materialising a body. The body is then
   re-checked because a client controls that header: lying about it (or using chunked encoding, where
   it is absent) must not get past the cap.
+* **Anonymous callers have their own budget.** A pre-auth per-IP counter bounds token-lookup work
+  before any credential is resolved, while a separate post-auth budget keeps bad secrets from
+  starving a legitimate sender. Neither counter can spend the other's quota.
 * **The body must be a JSON *object*.** `[1, 2]` and `"a string"` are valid JSON, but an alert has
   fields, and a `payload.get(...)` on them raises `AttributeError` — a 500 for what is really a bad
   request from an untrusted sender. The receiver refuses non-objects up front.
@@ -35,6 +38,7 @@ always** (closes the open-source hole).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -135,6 +139,34 @@ def _authenticate_token(request: HttpRequest) -> tuple[IngestionToken | None, Ht
     return token, None
 
 
+def _consume_budget(key: str, limit: int) -> bool:
+    """Atomically spend one unit of *key*; return True when the request is over budget."""
+    if limit <= 0:
+        return False
+    try:
+        if not cache.add(key, 1, timeout=120):
+            if cache.incr(key) > limit:
+                return True
+    except ValueError:
+        cache.set(key, 1, timeout=120)
+    except Exception:
+        # A cache outage must not turn into an ingest outage: fail open on the throttle path.
+        return False
+    return False
+
+
+def _preauth_throttled(request: HttpRequest) -> bool:
+    """Whether this anonymous request has exhausted the per-IP pre-auth budget.
+
+    This runs before the token lookup, so a caller with no credential can still be bounded. It is
+    deliberately a distinct key and budget: bad secrets must not starve a legitimate sender's
+    post-auth IP quota.
+    """
+    ip = request.META.get("REMOTE_ADDR") or "unknown"
+    window = int(time.time() // 60)
+    return _consume_budget(f"wh:preauth:ip:{ip}:{window}", settings.WEBHOOK_PREAUTH_RATE_IP_PER_MIN)
+
+
 def _throttled(
     request: HttpRequest, source: IngestionSource, token: IngestionToken | None = None
 ) -> bool:
@@ -146,19 +178,14 @@ def _throttled(
         (f"wh:ip:{ip}:{window}", settings.WEBHOOK_RATE_IP_PER_MIN),
     ]
     if token:
-        keys.append((f"wh:token:{token.prefix}:{window}", settings.WEBHOOK_RATE_SOURCE_PER_MIN))
+        # The prefix is a lookup identity, not a safe cache-key component. Hashing it keeps the
+        # bucket keyed by the same credential without leaking the token into cache diagnostics.
+        token_key = hashlib.sha256(token.prefix.encode("utf-8")).hexdigest()[:16]
+        keys.append((f"wh:token:{token_key}:{window}", settings.WEBHOOK_RATE_SOURCE_PER_MIN))
 
     for key, limit in keys:
-        if limit <= 0:
-            continue
-        try:
-            if not cache.add(key, 1, timeout=120):
-                if cache.incr(key) > limit:
-                    return True
-        except ValueError:
-            cache.set(key, 1, timeout=120)
-        except Exception:
-            return False
+        if _consume_budget(key, limit):
+            return True
     return False
 
 
@@ -189,6 +216,11 @@ def webhook_alerts(request: HttpRequest) -> HttpResponse:
             f"Unsupported Media Type: {content_type}",
             type_="unsupportedMediaType",
         )
+
+    # Bound anonymous token-lookup work before touching the token table. This is a separate
+    # budget from the authenticated limits below, so junk traffic cannot starve a real feed.
+    if _preauth_throttled(request):
+        return _error(429, "Webhook rate limit exceeded", type_="rateLimitExceeded")
 
     # The credential is the only routing fact: it resolves both the feed and the tenant.
     token, denied = _authenticate_token(request)

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
+from uuid import UUID
 
 from automation.models import AutomationRun
 from cases.models import (
@@ -138,6 +140,46 @@ def custom_field_value_json(value: CaseCustomFieldValue) -> dict[str, Any]:
         "value": value.value,
         "order": value.order,
     }
+
+
+class CustomFieldWireError(ValueError):
+    """A malformed TheHive custom-field write payload."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+def custom_field_updates_from_wire(
+    payload: Mapping[str, Any],
+) -> list[dict[str, Any]] | None:
+    """Decode the writable subset of TheHive's ``customFields`` into internal rows.
+
+    Returning `None` means the key was absent. Shape errors are raised here, at the wire
+    boundary, so services never see the external `_id` spelling. Read-only wire fields echoed by
+    GET (`name`, `type`, `order`) are ignored by construction.
+    """
+    if "customFields" not in payload:
+        return None
+    raw_items = payload.get("customFields")
+    if not isinstance(raw_items, list):
+        raise CustomFieldWireError("customFields must be a list")
+
+    rows: list[dict[str, Any]] = []
+    seen_ids: set[UUID] = set()
+    for index, item in enumerate(raw_items):
+        if not isinstance(item, Mapping) or "_id" not in item or "value" not in item:
+            raise CustomFieldWireError(f"customFields[{index}] requires _id and value")
+        try:
+            value_id = UUID(str(item["_id"]))
+        except (TypeError, ValueError) as exc:
+            message = f"customFields[{index}] has an invalid _id"
+            raise CustomFieldWireError(message) from exc
+        if value_id in seen_ids:
+            raise CustomFieldWireError(f"customFields[{index}] repeats a value id")
+        seen_ids.add(value_id)
+        rows.append({"id": value_id, "value": item["value"]})
+    return rows
 
 
 def case_json(

@@ -315,8 +315,11 @@ def update_agent_autonomy(request: HttpRequest, organisation_id) -> HttpResponse
 
     try:
         policy.full_clean()
-    except Exception as exc:
-        messages.error(request, f"Invalid input: {exc}")
+    except Exception:
+        logger.exception(
+            "autonomy policy validation failed", extra={"org_id": str(organisation.id)}
+        )
+        messages.error(request, "Invalid autonomy policy; check the submitted values.")
         # Redirect back without partial mutation — re-render the form with errors
         context = _autonomy_context(
             request,

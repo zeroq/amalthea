@@ -1177,7 +1177,8 @@ UNRESOLVED_SEVERITY_RECORD: dict = {
             "field": "severity",
             "reason": "bad_type",
             "paths": ["$.severity"],
-            "value_preview": "70",
+            "value_preview": "[redacted]",
+            "value_fingerprint": "sha256:ff5a1ae012afa5d4",
         }
     ]
 }

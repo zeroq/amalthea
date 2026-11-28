@@ -119,8 +119,11 @@ def task_bulk(request: HttpRequest) -> HttpResponse:
                     )
                     continue
                 task.save(update_fields=[*fields, "updated_at"])
-        except Exception as exc:
-            results.append({"id": str(raw), "status": 400, "message": str(exc)[:200]})
+        except Exception:
+            logger.exception("task bulk update failed", extra={"task_id": str(raw)})
+            results.append(
+                {"id": str(raw), "status": 400, "message": "Could not update this task."}
+            )
             continue
         results.append({"id": str(task.id), "status": 200})
         updated += 1

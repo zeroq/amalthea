@@ -117,6 +117,19 @@ def test_a_strong_secret_key_with_a_host_imports() -> None:
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.parametrize("budget", ["0", "-1"])
+def test_the_pre_auth_webhook_budget_cannot_be_disabled(budget: str) -> None:
+    """§10.10 — production must keep the only throttle that runs before token lookup."""
+    _assert_refused(
+        _import_prod(
+            DJANGO_SECRET_KEY=STRONG_KEY,
+            DJANGO_ALLOWED_HOSTS="amalthea.example.com",
+            AMALTHEA_WEBHOOK_PREAUTH_IP=budget,
+        ),
+        "AMALTHEA_WEBHOOK_PREAUTH_IP",
+    )
+
+
 # --- AC1: DJANGO_ALLOWED_HOSTS -------------------------------------------------------
 
 

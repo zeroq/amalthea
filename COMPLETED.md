@@ -2485,6 +2485,75 @@ historical plans and verification reports still cite the TODO IDs recorded here.
   **4464 passed, 3 skipped, 15 warnings, 2 subtests passed in 670.27s (0:11:10)**.
 - Commit: `6b47c4be` (docs closeout only for these no-action items).
 
+### §15 — Alert observables follow-ups
+- Implemented 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-alert-observables-followups.md`.
+- **15.7:** `alerts/views/observables.py` now serves GET and POST on `alert/<id>/observable`; GET returns
+  200 with the existing `observable_json` list, tenant-scoped by `_resolve_alert_scoped`. API spec, authz
+  matrix and tenant route discovery were updated.
+- **15.8:** decided not to add `AlertObservable.source_path`; no migration. The link plus canonical
+  `raw_payload` and mapping config are sufficient until a concrete migration-backed provenance wave exists.
+- **15.10:** `FieldWarning` no longer stores/renders raw warning values. Structured warnings use
+  `value_preview: "[redacted]"` and `value_fingerprint: sha256:<16>`; free text uses the fingerprint. UI,
+  API/data-model specs, deviations and the security review were updated.
+- Targeted suites **859 passed in 412.55s**; `make check`, `git diff --check` and secret scan clean.
+- Deviation **D-15.1** records the additive fingerprint key while retaining the historical key.
+- User-owned full `pytest` for this change is green: **4470 passed, 3 skipped, 15 warnings, 2 subtests passed in 630.05s (0:10:30)**; skips and warnings are the known pre-existing Postgres-only and naive-datetime/CSS-token cases.
+- Implementation commit: pending; changes are not yet committed.
+
+### §11.4 — Procedure audit and flash-message hygiene
+- Implemented 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-section-11-4-procedure-audit-and-flash-hygiene.md`.
+- **L1:** case-scoped procedure attachment now goes through `cases.procedures.attach_case_procedure` for
+  both the UI and API, single and bulk. Each created procedure writes one `AuditLog` row via
+  `identity.audit.record_procedure_change` and one `procedure-attached` case ledger entry via
+  `cases.ledger.append_timeline_event`. Audit and ledger metadata contain only ids and ATT&CK fields.
+- **I1:** bulk case/task/alert updates and autonomy-policy validation no longer flash raw exception text;
+  details go to logs and the analyst sees stable messages. User-facing domain validation messages were
+  deliberately preserved.
+- Targeted suites **331 passed in 482.71s** plus **97 passed in 87.49s**; `make check` green.
+- Full user `pytest` remains pending for this change; implementation commit pending.
+
+### §12.12 — Fuzzy-similarity follow-ups
+- Implemented 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-section-12-12-fuzzy-followups.md`.
+- **fu2:** `ALERT_FUZZY_MAX_TEXT_SIZE` (default 256 KiB) truncates text before `ppdeep.hash`;
+  `ALERT_FUZZY_MAX_CASE_SIGNALS` (default 50) caps Similar-tab case signals, reducing the worst case
+  to 25,000 comparisons. Async/cached computation and Postgres timing remain deferred.
+- **fu3:** `ALERT_FUZZY_EXTRA_VOLATILE_KEYS` plus an opt-out UUID/timestamp/epoch scalar-value heuristic
+  removes vendor-specific noise. Changing canonicalization settings requires `--force` backfill.
+- **fu4:** command help and runbook document that `--force` preserves stale hashes on recomputation
+  failure, list sorting can collapse order-significant arrays, and `--clear-on-failure` is the explicit
+  opt-in to blank such hashes.
+- **fu5:** `make lock` / `make lock-check` now delegate to the existing `scripts/lock.sh`; no regeneration
+  was run here.
+- **fu6:** cross-org merge refusal feedback is pinned to an error message, never a success banner.
+- Targeted suites **89 passed in 74.87s**; broader integration selection **415 passed in 309.49s**; `make check`, `git diff --check`, secret scan clean.
+- Full user `pytest` remains pending for this change; implementation commit pending.
+
+### §10 — Open follow-ups (custom fields, webhook pre-auth, token hardening)
+- Implemented 2026-11-27. Plan: `docs/planning/PLAN-2026-11-27-section-10-open-followups.md`.
+- **10.7-fu1:** `cases/custom_fields.py` is now the single coercion/update service for the UI and
+  `PATCH|PUT /api/v1/case/{id}`; the wire decoder lives at the boundary in
+  `core/serializers/cases.py`, so services see internal keys only. API writes validate existing
+  case-scoped value ids, reject invalid types/foreign ids/malformed items as 400, and emit the same
+  `custom-field-updated` ledger event.
+
+  Independent record: `docs/verification/VERIFY-2026-11-27-case-custom-field-api-parity.md`.
+- **10.10:** `WEBHOOK_PREAUTH_RATE_IP_PER_MIN` (`AMALTHEA_WEBHOOK_PREAUTH_IP`, 600/min default,
+  fail-closed in production) adds `wh:preauth:ip:{ip}:{window}` before token lookup. The post-auth
+  source/IP/token budgets are unchanged, so bad secrets cannot starve a legitimate sender.
+- **10.12-fu1/fu2:** token creation and last-token deletion lock the parent `IngestionSource` row
+  inside their transactions; the per-token webhook bucket hashes the prefix. The 12-char prefix is
+  unchanged (no migration) and its 3-retry collision window is accepted/documented.
+- **10.12-fu4:** the lifecycle helper no longer orphans feed rows, the active-state Revoke action is
+  pinned, and foreign-source creation plus mid-transaction rollback are tested.
+- Evidence: focused combined suites **156 passed in 84.69s**; final user-run full suite **4511 passed,
+  3 skipped, 15 warnings, 2 subtests passed in 718.65s**; `make check`, `git diff --check` and secret
+  scan clean. Overall verification:
+  `docs/verification/VERIFY-2026-11-27-section-10-followups.md`.
+- The first user-run full suite found only a wire-boundary leak in the new service; decoding was
+  moved to the serializer boundary and the final full suite is green.
+- Deferred: a real Postgres concurrency harness for the M1 race (SQLite cannot exercise
+  `select_for_update`); implementation commit pending.
+
 ### Stale priority rows removed
 - §10.1 role-scoped user management (record already in the 2026-10-20 COMPLETED entry), §12.1-fu1,
   §12.4, §6.13, §10.9, §10.11, §12.9, §22, §23, §24, and §25. §10.12-fu3 and §14 subitems were closed

@@ -215,8 +215,13 @@ The feature is fundamentally sound with proper tenant isolation, bounded resourc
 |----|---------|-------------|--------|
 | FIND-05 | Title exclusion → false positives | **Resolved (2026-11-13)** — Option B title gate; see `PLAN-2026-11-13-alert-fuzzy-title-gate.md` and `docs/runbook.md` | Done |
 | FIND-02 | Recursive depth check | Replace `_depth` with iterative `_json_depth`; add depth guard in `_canonicalize` | Next sprint |
-| FIND-03 | `ppdeep` CPU on large inputs | Add `ALERT_FUZZY_MAX_TEXT_SIZE` truncation; lower `case_hashes` cap; consider async | Next sprint |
-| FIND-06 | Volatile key list incomplete | Add `ALERT_FUZZY_EXTRA_VOLATILE_KEYS` setting; consider regex heuristic | Next sprint |
+| FIND-03 | `ppdeep` CPU on large inputs | **Resolved (2026-11-27)** — `ALERT_FUZZY_MAX_TEXT_SIZE` truncation and `ALERT_FUZZY_MAX_CASE_SIGNALS=50` cap; async cache deferred, see `PLAN-2026-11-27-section-12-12-fuzzy-followups.md` | Done |
+| FIND-06 | Volatile key list incomplete | **Resolved (2026-11-27)** — `ALERT_FUZZY_EXTRA_VOLATILE_KEYS` plus opt-out UUID/timestamp/epoch value heuristic | Done |
+
+Low findings also closed or pinned under the same plan: **FIND-07** (`--clear-on-failure` plus runbook
+warning), **FIND-11** (`make lock` delegates to `scripts/lock.sh`), **FIND-12** (list-sort caveat
+documented; per-source control deferred), and the cross-org merge feedback bug (response message
+pinned as an error, never success). FIND-02 was already resolved earlier by the iterative depth probe.
 
 ---
 

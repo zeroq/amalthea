@@ -6,6 +6,8 @@ They are behavior snapshots: no test reaches into a module-private helper or a f
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from ingest.mapping import (
@@ -49,8 +51,27 @@ def test_field_warning_renders_structured_and_text_forms() -> None:
     assert warning.as_text() == "severity_unmapped: nothing at $.severity"
 
     preview = FieldWarning("severity", "unknown_value", ("$.severity",), "urgent")
-    assert preview.as_dict()["value_preview"] == "urgent"
-    assert preview.as_text() == "severity_unknown_value: $.severity held 'urgent'"
+    fingerprint = "sha256:" + hashlib.sha256(b"urgent").hexdigest()[:16]
+    assert preview.as_dict()["value_preview"] == "[redacted]"
+    assert preview.as_dict()["value_fingerprint"] == fingerprint
+    assert (
+        preview.as_text() == f"severity_unknown_value: $.severity held [redacted] ({fingerprint})"
+    )
+
+
+def test_field_warning_never_embeds_raw_payload_values() -> None:
+    raw = "alice@example.com at 203.0.113.10"
+    warning = FieldWarning("severity", "unknown_value", ("$.severity",), raw)
+    structured = warning.as_dict()
+    rendered = warning.as_text()
+    assert warning.reason == "unknown_value"
+    assert warning.paths == ("$.severity",)
+    assert "alice@example.com" not in rendered
+    assert "203.0.113.10" not in rendered
+    assert "alice@example.com" not in repr(structured)
+    assert "203.0.113.10" not in repr(structured)
+    assert structured["value_preview"] == "[redacted]"
+    assert structured["value_fingerprint"].startswith("sha256:")
 
 
 def test_alert_draft_defaults_are_pure_data() -> None:

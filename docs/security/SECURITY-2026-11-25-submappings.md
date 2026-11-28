@@ -50,7 +50,7 @@
 
 ### 4. Webhook auth, throttling, body limits, SSRF
 - **Auth** unchanged: `_authenticate_token` (`views.py:101-134`) — same Argon2 verification, same uniform 401 for missing/invalid/revoked tokens. No existence oracle (all failures map to same 401).
-- **Throttling** unchanged: `_throttled()` (`views.py:137-161`) — per-source (`wh:src:{slug}:{window}`), per-IP (`wh:ip:{ip}:{window}`), per-token (`wh:token:{prefix}:{window}`) buckets. No new buckets for submappings.
+- **Throttling** updated 2026-11-27 (§10.10/§10.12-fu2): `_preauth_throttled()` adds a distinct `wh:preauth:ip:{ip}:{window}` budget before token lookup; `_throttled()` keeps per-source (`wh:src:{slug}:{window}`) and per-IP (`wh:ip:{ip}:{window}`) buckets and hashes the token component (`wh:token:{sha256(prefix)[:16]}:{window}`). No new buckets for submappings.
 - **Body limits** unchanged: `CONTENT_LENGTH` check first (cheap, rejects bulk), then actual `len(raw_body)` re-check (`views.py:176-206`). `WEBHOOK_MAX_BODY_SIZE` and `WEBHOOK_MAX_DEPTH` from settings.
 - **SSRF**: No new network surface. Submappings are pure JSON config; no DNS lookups, no outbound HTTP, no external data source. The payload is already accepted before mapping resolution runs.
 

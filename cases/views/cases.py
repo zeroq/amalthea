@@ -21,6 +21,8 @@ from cases.models import (
     TimelineEvent,
 )
 from cases.update import (
+    CUSTOM_FIELD_ERROR_FIELD,
+    CUSTOM_FIELD_UPDATES_PAYLOAD_KEY,
     CaseUpdateError,
     apply_case_update,
 )
@@ -29,10 +31,12 @@ from core.enums import (
     SUPER_ADMIN_ROLE,
 )
 from core.serializers import (
+    CustomFieldWireError,
     alert_json,
     case_json,
     custom_event_json,
     custom_field_json,
+    custom_field_updates_from_wire,
     observable_json,
     task_json,
 )
@@ -180,8 +184,9 @@ def _update_case(request: Request, case: Case) -> Response:
     # QueryDict.dict() returns last-value-per-key; plain dict is already fine.
     from django.http import QueryDict
 
+    payload: dict[str, Any]
     if isinstance(request.data, QueryDict):
-        payload = request.data.dict()
+        payload = dict(request.data.dict())
     elif isinstance(request.data, dict):
         payload = dict(request.data)
     else:
@@ -191,6 +196,21 @@ def _update_case(request: Request, case: Case) -> Response:
         payload["case_type"] = payload.pop("caseType")
     if "dataClassification" in payload:
         payload["data_classification"] = payload.pop("dataClassification")
+    # Decode external custom-field names here; services receive only internal keys.
+    try:
+        custom_field_updates = custom_field_updates_from_wire(payload)
+    except CustomFieldWireError as exc:
+        return Response(
+            {
+                "type": "BadRequest",
+                "message": exc.message,
+                "fields": {"customFields": [exc.message]},
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if custom_field_updates is not None:
+        payload.pop("customFields")
+        payload[CUSTOM_FIELD_UPDATES_PAYLOAD_KEY] = custom_field_updates
     try:
         apply_case_update(case, payload, actor=_actor(request))
     except CaseUpdateError as exc:
@@ -199,7 +219,12 @@ def _update_case(request: Request, case: Case) -> Response:
                 {"type": exc.error_type, "message": exc.message},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        return Response(exc.to_response_payload(), status=status.HTTP_400_BAD_REQUEST)
+        response_payload = exc.to_response_payload()
+        if CUSTOM_FIELD_ERROR_FIELD in response_payload["fields"]:
+            response_payload["fields"]["customFields"] = response_payload["fields"].pop(
+                CUSTOM_FIELD_ERROR_FIELD
+            )
+        return Response(response_payload, status=status.HTTP_400_BAD_REQUEST)
     return Response(case_json(case, detail=True))
 
 

@@ -11,17 +11,20 @@ oversized and unauthenticated must be refused on size, because the body is never
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
+from unittest import mock
 
 import pytest
-from django.test import Client
+from django.core.cache import cache
+from django.test import Client, RequestFactory
 from django.urls import reverse
 
 from alerts.models import Alert
 from identity.models import IngestionToken, Organisation
 from ingest.models import IngestionSource
-from ingest.views import webhook_alerts
+from ingest.views import _throttled, webhook_alerts
 
 PHISHING = {
     "title": "Suspicious inbox rule",
@@ -492,6 +495,72 @@ def test_throttling_is_per_ip_not_global(
         ).status_code
         == 201
     ), "one address exhausting its limit blocked a different address"
+    cache.clear()
+
+
+def test_preauth_budget_bounds_unauthenticated_floods(
+    source: IngestionSource, source_token: str, settings: Any
+) -> None:
+    """Junk secrets get their own cheap budget before the token table is consulted."""
+    cache.clear()
+    settings.WEBHOOK_PREAUTH_RATE_IP_PER_MIN = 2
+    settings.WEBHOOK_RATE_IP_PER_MIN = 0
+
+    noisy = Client()
+    codes = [
+        _post(noisy, {"title": "junk"}, HTTP_AUTHORIZATION="Bearer wrong").status_code
+        for _ in range(4)
+    ]
+    assert codes == [401, 401, 429, 429], f"the pre-auth limit did not engage: {codes}"
+    assert Alert.objects.count() == 0, "a throttled request still wrote an alert"
+
+    other = Client(REMOTE_ADDR="203.0.113.78")
+    assert (
+        _post(other, {"title": "real"}, HTTP_AUTHORIZATION=f"Bearer {source_token}").status_code
+        == 201
+    ), "one address exhausting the pre-auth budget blocked a different address"
+    cache.clear()
+
+
+def test_bad_secrets_do_not_spend_the_post_auth_ip_budget(
+    source: IngestionSource, source_token: str, settings: Any
+) -> None:
+    """The pre-auth budget is distinct: anonymous noise cannot starve a real sender."""
+    cache.clear()
+    settings.WEBHOOK_PREAUTH_RATE_IP_PER_MIN = 0  # isolate the post-auth counter
+    settings.WEBHOOK_RATE_SOURCE_PER_MIN = 0
+    settings.WEBHOOK_RATE_IP_PER_MIN = 2
+
+    client = Client()
+    for _ in range(10):
+        assert _post(client, {"title": "x"}, HTTP_AUTHORIZATION="Bearer wrong").status_code == 401
+
+    assert (
+        _post(client, {"title": "real"}, HTTP_AUTHORIZATION=f"Bearer {source_token}").status_code
+        == 201
+    )
+    cache.clear()
+
+
+def test_the_token_throttle_key_does_not_contain_the_prefix(
+    source: IngestionSource, source_token: str, default_org: Organisation
+) -> None:
+    """The token prefix is a lookup identity, not a cache-key component."""
+    from django.core.cache import cache
+
+    cache.clear()
+    token = IngestionToken.objects.get(source=source)
+    request = RequestFactory().post(
+        "/api/v1/alerts/webhook/", HTTP_AUTHORIZATION=f"Bearer {source_token}"
+    )
+    with mock.patch("ingest.views.cache.add", wraps=cache.add) as add:
+        _throttled(request, source, token)
+
+    keys = [str(call.args[0]) for call in add.call_args_list]
+    assert keys, "no throttle bucket was touched"
+    assert all(token.prefix not in key for key in keys)
+    digest = hashlib.sha256(token.prefix.encode("utf-8")).hexdigest()[:16]
+    assert any(f"wh:token:{digest}:" in key for key in keys)
     cache.clear()
 
 

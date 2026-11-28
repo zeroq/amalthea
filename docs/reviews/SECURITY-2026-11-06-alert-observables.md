@@ -57,7 +57,7 @@
 | Severity | File:Line | Finding | Recommendation |
 |----------|-----------|---------|----------------|
 | Info | `alert_detail.html:214` | `{{ item.observable.data }}` — Django auto-escaping is active by default. No `|safe` or `marksafe` used. Href uses `{% url 'ui-observable-detail' item.observable.id %}` with UUID, not value. | No change needed. |
-| Info | `_mapping_resolution.html:30` | `{{ warning.value_preview }}` — limited to 80 chars via `FieldWarning.as_dict()`, auto-escaped. Rendered as `saw "{{ warning.value_preview }}"` within double quotes. | No change needed. |
+| Info | `_mapping_resolution.html:30` | `{{ warning.value_fingerprint }}` — `sha256:<16 hex chars>` via `FieldWarning.as_dict()`, auto-escaped. Rendered as `saw [redacted] (<fingerprint>)`. | Resolved by §15.10; raw values are no longer stored in previews. |
 | None | N/A | No raw JSON/html construction or `safe` marks observed in observable rendering pipelines. | Maintain current auto-escaping discipline. |
 
 **Exploitability:** Values rendered in templates are auto-escaped. No path for JS injection via observable `data` or mapping warnings. Href construction uses UUID primary key, not user-controlled values.
@@ -98,13 +98,13 @@
 
 | Severity | File:Line | Finding | Recommendation |
 |----------|-----------|---------|----------------|
-| Medium | `ingest/mapping.py:321-328` `641-647` | `FieldWarning.value_any` can contain raw payload values (e.g., `alice@example.com`, `203.0.113.10`) stored in `Alert.ingestion_warnings`. `FieldWarning.as_text()` renders them unredacted: `f"{self.target}_unknown_value: {paths} held {self.value_any!r}"`. | **Recommendation:** Redact sensitive values from warning messages, or store only a hash/preview (max 80 chars as already done for `value_preview`). |
+| Medium | `ingest/mapping.py:321-328` `641-647` | `FieldWarning.value_any` could contain raw payload values (e.g., `alice@example.com`, `203.0.113.10`) stored in `Alert.ingestion_warnings`. `FieldWarning.as_text()` rendered them unredacted. | **Resolved by §15.10:** `value_preview` is now `[redacted]` and a one-way `value_fingerprint` (`sha256:<16>`) is stored instead; `as_text()` uses the fingerprint. |
 | Low | `ingest/observable_rules.py:174-183` | `_as_candidate_value` truncates at `MAX_OBSERVABLE_VALUE_CHARS=2048`; unknown types are skipped with generic warning `observable_type_unknown: skipped N value(s) ...`. No raw payload values in caps notes. | No change needed. |
 | Info | `alert_sync.py:113-116` | Warning `f"observable_type_unknown: skipped {skipped_unknown} value(s) for unknown observable type(s): {names}"` — generic, no payload values. | No change needed. |
 
 **Exploitability:** While Django auto-escapes template rendering of `ingestion_warnings.warnings`, the raw values could contain PII or secrets stored in the database. Visible in UI via `_mapping_resolution.html` and `alert_detail.html` warning lists. Low risk if warnings are only ever viewed by analysts who already have the payload, but defense-in-depth is warranted.
 
-**Verdict:** PASS with residual medium risk — consider redacting sensitive values from `FieldWarning.value_any` or limiting what is stored in ingestion warnings.
+**Verdict:** PASS — §15.10 redacted mapping warning values; the residual medium risk is closed.
 
 ---
 
@@ -120,11 +120,10 @@ The security review confirms no new injection, tenant, or authorization regressi
 4. No stored XSS; Django auto-escaping protects all rendered values.
 5. Only `proposed` suggestions are reconciled; analyst decisions preserved.
 6. Automation dispatch is exactly-once via `get_or_create` + `created` flag.
-7. Medium-residual risk: `FieldWarning.value_any` may contain raw payload values in ingestion warnings — recommend redaction.
+7. The former medium-residual risk was closed by §15.10; ingestion warnings now store a redacted preview and one-way fingerprint.
 
 **Residual Risks:**
-- Medium: Raw payload values (emails, IPs, etc.) may appear in `ingestion_warnings` mapping entries. Recommend redacting sensitive data from warning messages.
-- Low: No other residual risks identified.
+- Low: Mapping-warning values are stored only as one-way fingerprints; no other residual risks identified.
 
 ---
 *Report generated per AC28 of docs/planning/PLAN-2026-11-06-alert-observables.md. Read-only review; no code modifications performed.*

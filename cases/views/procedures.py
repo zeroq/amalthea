@@ -16,7 +16,7 @@ from cases.models import (
     Case,
     Procedure,
 )
-from cases.procedures import create_procedure
+from cases.procedures import attach_case_procedure, create_procedure
 from compat.procedures import parse_procedure
 from compat.time import parse_timestamp
 from core.serializers import (
@@ -61,7 +61,9 @@ def case_procedure_create(request: Request, case_id: str) -> Response:
     kwargs = _parse_procedure_payload(request.data, case=case)
     if isinstance(kwargs, Response):
         return kwargs
-    return Response(procedure_json(create_procedure(**kwargs)), status=status.HTTP_201_CREATED)
+    kwargs.pop("case", None)
+    procedure = attach_case_procedure(request=request, actor=request.user, case=case, **kwargs)
+    return Response(procedure_json(procedure), status=status.HTTP_201_CREATED)
 
 
 @api_view(["POST"])
@@ -87,7 +89,15 @@ def _create_procedures(
             kwargs = _parse_procedure_payload(spec, case=case, alert=alert)
             if isinstance(kwargs, Response):
                 return kwargs
-            created.append(procedure_json(create_procedure(**kwargs)))
+            kwargs.pop("case", None)
+            kwargs.pop("alert", None)
+            if case is not None:
+                procedure = attach_case_procedure(
+                    request=request, actor=request.user, case=case, **kwargs
+                )
+            else:
+                procedure = create_procedure(alert=alert, **kwargs)
+            created.append(procedure_json(procedure))
     return Response(created, status=status.HTTP_201_CREATED)
 
 

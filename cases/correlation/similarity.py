@@ -302,8 +302,10 @@ def alerts_fuzzy_similar_to_case(
     Candidates: unlinked alerts in the same org with non-empty `payload_ssdeep`.
 
     Scoring: for each candidate, compute the maximum `ppdeep.compare(candidate_hash, h)`
-    over all case alert hashes. Keep candidates where at least one case alert passes
-    both the payload threshold and the title-similarity gate.
+    over the case alert hashes. Keep candidates where at least one case alert passes
+    both the payload threshold and the title-similarity gate. The case side is capped
+    at `ALERT_FUZZY_MAX_CASE_SIGNALS` (default 50), so the worst-case comparison count
+    is `ALERT_FUZZY_MAX_CASE_SIGNALS x MAX_FUZZY_COMPARISONS`.
 
     The title gate is on by default (`ALERT_FUZZY_TITLE_GATE_ENABLED=True`) and can be
     disabled via that setting or the `AMALTHEA_ALERT_FUZZY_TITLE_GATE=false` env var.
@@ -325,6 +327,9 @@ def alerts_fuzzy_similar_to_case(
     )
     title_threshold = getattr(settings, "ALERT_FUZZY_TITLE_SIMILARITY_THRESHOLD", 70)
     title_gate_enabled = getattr(settings, "ALERT_FUZZY_TITLE_GATE_ENABLED", True)
+    max_case_signals = int(getattr(settings, "ALERT_FUZZY_MAX_CASE_SIGNALS", 50))
+    if max_case_signals <= 0:
+        return [], 0
 
     # 1. Collect case signal hashes AND titles from attached alerts
     from alerts.models import Alert
@@ -333,7 +338,7 @@ def alerts_fuzzy_similar_to_case(
     case_alerts = (
         Alert.objects.filter(case=case)
         .exclude(payload_ssdeep="")
-        .values_list("payload_ssdeep", "title")[:MAX_CORRELATION_OBS]
+        .values_list("payload_ssdeep", "title")[:max_case_signals]
     )
 
     # Precompute title tokens once per case signal.

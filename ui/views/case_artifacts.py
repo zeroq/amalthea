@@ -230,7 +230,7 @@ def case_procedure_create(request: HttpRequest, case_id: str) -> HttpResponse:
     The API endpoint is POST-only and returns JSON; the UI performs the creation directly
     so a browser form gets a proper redirect + messages instead of a JSON blob.
     """
-    from cases.procedures import create_procedure
+    from cases.procedures import attach_case_procedure
     from compat.procedures import parse_procedure
 
     case = resolve_case(request.user, case_id, write=True)
@@ -260,7 +260,7 @@ def case_procedure_create(request: HttpRequest, case_id: str) -> HttpResponse:
 
     try:
         with transaction.atomic():
-            create_procedure(case=case, **kwargs)
+            attach_case_procedure(request=request, actor=request.user, case=case, **kwargs)
     except Exception:  # pragma: no cover - defensive
         # The exception text can carry schema/SQL detail; keep it in the log, not in the flash.
         logger.exception("procedure create failed", extra={"case_id": str(case.id)})
@@ -281,7 +281,7 @@ def case_procedures_create(request: HttpRequest, case_id: str) -> HttpResponse:
     or indexed pattern_id_<i>) and reuses parse_procedure/create_procedure in a transaction.
     Reports a per-item count via messages; never returns JSON, never 500s on bad input.
     """
-    from cases.procedures import create_procedure
+    from cases.procedures import attach_case_procedure
     from compat.procedures import parse_procedure
 
     case = resolve_case(request.user, case_id, write=True)
@@ -377,7 +377,9 @@ def case_procedures_create(request: HttpRequest, case_id: str) -> HttpResponse:
                 # with `TransactionManagementError` — one bad row would silently become N.
                 try:
                     with transaction.atomic():
-                        create_procedure(case=case, **kwargs)
+                        attach_case_procedure(
+                            request=request, actor=request.user, case=case, **kwargs
+                        )
                 except Exception:  # pragma: no cover - defensive
                     logger.exception(
                         "procedure create failed",

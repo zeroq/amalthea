@@ -19,12 +19,14 @@ from observables.models import ObservableType
 from ._common import _actor, _bad, _not_found_alert, _resolve_alert_scoped
 
 
-@api_view(["POST"])
+@api_view(["GET", "POST"])
 @renderer_classes([JSONRenderer])
 def alert_observable_add(request: Request, alert_id: str) -> Response:
-    """`POST /api/v1/alert/{alertId}/observable` — attach artifacts to the alert itself (201).
+    """`/api/v1/alert/{alertId}/observable` — read or attach artifacts on the alert.
 
-    Two decisions worth the docstring, both recorded as deviations:
+    GET is the deferred read parity from §15.7: it returns `200` with the same `OutputObservable[]`
+    shape POST returns, including the alert's full link list in the same order. POST decisions worth
+    the docstring, both recorded as deviations:
 
     * **No automation dispatch (P10-b).** `dispatch_observable_linked` needs a case, and an
       alert-only observable has none: it is a *candidate* artifact TheHive records against the
@@ -35,12 +37,16 @@ def alert_observable_add(request: Request, alert_id: str) -> Response:
       (Module C), so patching a shared artifact from one alert's payload would mutate evidence
       three other cases are reading. An unchanged value is reported honestly by the response.
 
-    The body follows `InputCreateObservable`: `data` is a string or an array of strings; both
+    The POST body follows `InputCreateObservable`: `data` is a string or an array of strings; both
     spellings produce the same array-shaped 201, which is what `OutputObservable[]` promises.
     """
     alert = _resolve_alert_scoped(request, alert_id)
     if alert is None:
         return _not_found_alert("Alert")
+
+    links = alert.alert_observables.select_related("observable__data_type").order_by("-created_at")
+    if request.method == "GET":
+        return Response([observable_json(link) for link in links], status=status.HTTP_200_OK)
 
     payload = request.data if isinstance(request.data, dict) else {}
     type_name = str(payload.get("dataType") or "")
@@ -100,5 +106,4 @@ def alert_observable_add(request: Request, alert_id: str) -> Response:
                 alert=alert, observable=observable, defaults={"added_by": _actor(request)}
             )
 
-    links = alert.alert_observables.select_related("observable__data_type").order_by("-created_at")
     return Response([observable_json(link) for link in links], status=status.HTTP_201_CREATED)

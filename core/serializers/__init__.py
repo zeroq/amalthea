@@ -21,12 +21,14 @@ from ._common import _iso, _username
 from .alerts import alert_json
 from .automation import automation_run_json, playbook_json
 from .cases import (
+    CustomFieldWireError,
     attachment_json,
     case_json,
     case_template_json,
     comment_json,
     custom_event_json,
     custom_field_json,
+    custom_field_updates_from_wire,
     custom_field_value_json,
     page_json,
     share_json,
@@ -55,6 +57,7 @@ from .taxonomy import (
 )
 
 __all__ = [
+    "CustomFieldWireError",
     "_iso",
     "_status_json",
     "_username",
@@ -68,6 +71,7 @@ __all__ = [
     "comment_json",
     "custom_event_json",
     "custom_field_json",
+    "custom_field_updates_from_wire",
     "custom_field_value_json",
     "observable_json",
     "observable_suggestion_json",

@@ -37,6 +37,17 @@ def _token_create_nonce_key(user, nonce: str) -> str:
     return f"ui:token-create-nonce:{user_id}:{nonce}"
 
 
+def _lock_source(source: IngestionSource) -> IngestionSource:
+    """Re-fetch *source* for update inside the caller's transaction.
+
+    Token creation and last-token deletion are the two writers of a feed's token set. Serialising
+    both on the parent row is what stops a delete from reaping a feed while a token for it is being
+    minted. SQLite treats `select_for_update()` as a no-op; the Postgres path is the one that
+    actually blocks.
+    """
+    return IngestionSource.objects.select_for_update().get(pk=source.pk)
+
+
 def _settings_sources_context(request: HttpRequest) -> dict:
     """Page context for Sources: the token list plus the create-modal lookups.
 
@@ -226,6 +237,9 @@ def settings_token_create(request: HttpRequest) -> HttpResponse:
     for attempt in range(max_retries):
         try:
             with transaction.atomic():
+                # Lock the parent feed so a concurrent last-token delete cannot reap it while
+                # this token is being added.
+                source = _lock_source(source)
                 token, plaintext = IngestionToken.create_token(
                     source=source,
                     organisation=organisation,
@@ -432,6 +446,9 @@ def settings_token_delete(request: HttpRequest, token_id: str) -> HttpResponse:
     source_slug = source.slug
 
     with transaction.atomic():
+        # Lock the parent feed first: a concurrent token create must wait until the emptiness
+        # check below has decided whether this feed is reaped.
+        source = _lock_source(source)
         record_ingestion_token_change(
             request,
             actor=request.user,

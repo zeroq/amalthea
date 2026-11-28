@@ -939,7 +939,7 @@ def test_the_alert_page_explains_why_a_mapped_field_fell_back(
     `severity_defaulted` line is in the log forever (it was true when written), and the alert's severity
     never moved because the feed's rule produced the wrong type. Showing only the log meant the page said
     the same thing before and after the rule was fixed; showing the record is what makes the difference
-    visible — including the value the transform actually saw.
+        visible — including a one-way fingerprint of the value the transform actually saw.
     """
     alert = _create_alert_directly(default_org)
     alert.ingestion_warnings = {
@@ -948,7 +948,8 @@ def test_the_alert_page_explains_why_a_mapped_field_fell_back(
                 "field": "severity",
                 "reason": "bad_type",
                 "paths": ["$.severity"],
-                "value_preview": "70",
+                "value_preview": "[redacted]",
+                "value_fingerprint": "sha256:ff5a1ae012afa5d4",
             }
         ],
         "warnings": ["severity_defaulted: no severity mapping; defaulted to 2"],
@@ -960,7 +961,7 @@ def test_the_alert_page_explains_why_a_mapped_field_fell_back(
     assert "Mapping resolution" in body
     assert "a value of the wrong type" in body
     assert "$.severity" in body
-    assert "70" in body
+    assert "sha256:ff5a1ae012afa5d4" in body
     assert "severity_defaulted: no severity mapping; defaulted to 2" in body
 
 

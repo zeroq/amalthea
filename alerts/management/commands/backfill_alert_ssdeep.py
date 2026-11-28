@@ -19,7 +19,11 @@ from identity.models import Organisation
 class Command(BaseCommand):
     """Backfill SSDEEP fuzzy hashes for alert payloads."""
 
-    help = "Compute and store payload_ssdeep for alerts missing the hash."
+    help = (
+        "Compute and store payload_ssdeep for alerts missing the hash. "
+        "With --force, a recomputation that yields no hash preserves the old hash unless "
+        "--clear-on-failure is supplied."
+    )
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
@@ -43,12 +47,21 @@ class Command(BaseCommand):
             action="store_true",
             help="Recompute hashes for all alerts (including those already populated)",
         )
+        parser.add_argument(
+            "--clear-on-failure",
+            action="store_true",
+            help=(
+                "With --force, blank an existing hash when recomputation yields no hash "
+                "(default: preserve it)"
+            ),
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         batch_size = options["batch_size"]
         org_spec = options["org"]
         dry_run = options["dry_run"]
         force = options["force"]
+        clear_on_failure = options["clear_on_failure"]
 
         if batch_size <= 0:
             raise CommandError("--batch-size must be a positive integer")
@@ -85,6 +98,7 @@ class Command(BaseCommand):
         processed = 0
         updated = 0
         skipped = 0
+        cleared = 0
 
         # Use iterator to avoid loading all objects into memory
         for alert in qs.iterator(chunk_size=batch_size):
@@ -104,13 +118,21 @@ class Command(BaseCommand):
                 else:
                     skipped += 1
             else:
-                # Hash could not be computed (empty, oversize, exception)
-                skipped += 1
+                # Hash could not be computed (empty, oversize, exception). The historical
+                # behavior preserves any existing hash; explicit opt-in clears it.
+                if force and clear_on_failure and alert.payload_ssdeep:
+                    alert.payload_ssdeep = ""
+                    if not dry_run:
+                        alert.save(update_fields=["payload_ssdeep", "updated_at"])
+                    cleared += 1
+                else:
+                    skipped += 1
 
             # Progress reporting
             if processed % batch_size == 0 or processed == total:
                 self.stdout.write(
-                    f"  Processed {processed}/{total} — updated: {updated}, skipped: {skipped}"
+                    f"  Processed {processed}/{total} — updated: {updated}, "
+                    f"cleared: {cleared}, skipped: {skipped}"
                 )
 
         # Bulk update would be more efficient but we need to compute per-row
@@ -120,4 +142,5 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("Backfill complete."))
         self.stdout.write(f"  Processed: {processed}")
         self.stdout.write(f"  Updated:   {updated}")
+        self.stdout.write(f"  Cleared:   {cleared}")
         self.stdout.write(f"  Skipped:   {skipped}")

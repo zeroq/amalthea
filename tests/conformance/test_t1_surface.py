@@ -705,6 +705,25 @@ def test_alert_observable_accepts_an_array_of_artifacts(
     assert all(isinstance(entry, dict) and "_id" in entry for entry in body)
 
 
+def test_alert_observable_get_returns_the_same_list_shape(
+    api: APIClient, ids: dict[str, str]
+) -> None:
+    """§15.7 — GET mirrors the POST response body without mutating the alert."""
+    created = api.post(
+        f"/api/v1/alert/{ids['alert']}/observable",
+        {"dataType": "ip", "data": "198.51.100.9"},
+        format="json",
+    )
+    assert created.status_code == 201, created.content
+
+    response = api.get(f"/api/v1/alert/{ids['alert']}/observable")
+    assert response.status_code == 200, response.content
+    body = response.json()
+    assert isinstance(body, list)
+    assert {entry["data"] for entry in body} >= {"198.51.100.9"}
+    assert all(isinstance(entry, dict) and "_id" in entry for entry in body)
+
+
 # --- AC-A5 — observable blast radius (TODO 6.5) ---------------------------
 
 

@@ -40,14 +40,19 @@ ADR-008: the path names no source. The credential is the only routing fact — i
 - `@csrf_exempt`, `@require_POST`. Checks in order: `Content-Length` vs
   `settings.WEBHOOK_MAX_BODY_SIZE` (default 5 MiB) → **413** `entityTooLarge`; content-type must
   start with `application/json` / `application/cloudevents+json` / `application/problem+json` →
-  **415** `unsupportedMediaType`; the presented secret (`X-Webhook-Secret` || `X-Api-Key` ||
-  `Authorization: Bearer`) is looked up by its unique 12-char prefix and verified against the Argon2
-  hash — missing, unknown, wrong, **or revoked** ⇒ **401** `unauthorized` (strict since 2026-10-10,
-  ADR-004; uniform since 2026-10-15, ADR-008 — there is no 404 and no existence oracle left); the
-  matched token's `organisation` is what stamps the alert's `owner_org`; throttle (cache keys
-  `wh:src:{slug}:{window}` + `wh:ip:{ip}:{window}` + `wh:token:{prefix}:{window}`,
-  per-source 60/min, per-IP 300/min defaults) → **429**
+  **415** `unsupportedMediaType`; a **pre-auth per-IP budget** (cache key
+  `wh:preauth:ip:{ip}:{window}`, `AMALTHEA_WEBHOOK_PREAUTH_IP` / 600 per minute default) → **429**
+  `rateLimitExceeded` before any token table lookup; the presented secret (`X-Webhook-Secret` ||
+  `X-Api-Key` || `Authorization: Bearer`) is looked up by its unique 12-char prefix and verified
+  against the Argon2 hash — missing, unknown, wrong, revoked, **or deactivated** ⇒ **401**
+  `unauthorized` (strict since 2026-10-10, ADR-004; uniform since 2026-10-15, ADR-008 — there is no
+  404 and no existence oracle left); the matched token's `organisation` is what stamps the alert's
+  `owner_org`; post-auth throttle (cache keys `wh:src:{slug}:{window}` + `wh:ip:{ip}:{window}` +
+  `wh:token:{sha256(prefix)[:16]}:{window}`, per-source 60/min, per-IP 300/min defaults) → **429**
   `rateLimitExceeded`; then `json.loads` + object check + depth ≤ `WEBHOOK_MAX_DEPTH` (30) → **400**.
+  The pre-auth and post-auth budgets are distinct: bad secrets cannot spend an authenticated
+  sender's IP quota, and an anonymous flood cannot consume a feed's source/token quota. Production
+  refuses to boot with the pre-auth budget disabled.
 - Mapping (`ingest/mapping.py::apply_mapping` — pure, no ORM/HTTP): one pass over the payload after
   the guards, before persistence. `IngestionSource.mapping_config` is either **v2** —
   `{"version": 2, "fields": {<target>: {"paths": [JSONPath…], "transform": <name>, "default"?,
@@ -77,12 +82,13 @@ ADR-008: the path names no source. The credential is the only routing fact — i
   are never rewritten during remap. Max 50 submappings, keys ≤100 chars. See MAP-10a in
   [`deviations.md`](./deviations.md) for full details.
 - Mapping warnings: nothing silently defaults. `Alert.ingestion_warnings["mapping"]` is a list of
-  `{"field", "reason", "paths"?, "value_preview"?}` entries describing how the **current** fields
+  `{"field", "reason", "paths"?, "value_preview"?, "value_fingerprint"?}` entries describing how the **current** fields
   were resolved — a later mapping pass replaces it — while `ingestion_warnings["warnings"]` is the
   append-only event log (a re-map appends one `remapped:` line). `reason` is a stable token:
   `not_found`, `unknown_value`, `bad_type`, `bad_transform`, `truncated`; the first four are
   `UNRESOLVED_REASONS` = "the rule produced no value". The full split is documented in
-  [`data-model.md`](./data-model.md) (MAP-2b) rather than repeated here.
+  [`data-model.md`](./data-model.md) (MAP-2b) rather than repeated here. Values are never stored raw:
+  `value_preview` is the constant `[redacted]` and `value_fingerprint` is `sha256:<16 hex chars>`.
 - Persistence: `store_ingested_alert` **requires** an `owner_org` (the token's) and dedupes on the
   per-org unique quad `(owner_org, source, type, source_ref)` (ADR-004);
   missing `sourceRef` ⇒ synthesised `sha256:` of the canonical payload (content-based replay dedupe).
@@ -125,7 +131,7 @@ Simple, org-scoped substring search across cases, alerts and observables. It sha
 | `alert`, `alert/` | GET, POST | `alert_list` |
 | `alert/<id>/raw` | GET | `alert_raw` |
 | `alert/<id>/import` | POST | `alert_import` |
-| `alert/<id>/observable` | POST | `alert_observable_add` |
+| `alert/<id>/observable` | GET, POST | `alert_observable_add` |
 | `alert/<id>/merge/<case_id>` | POST | `alert_merge` |
 | `alert/<id>/import/<case_id>` | POST | `alert_merge` (same view) |
 | `alert/<id>` | GET, PATCH, PUT, DELETE | `alert_detail` |
@@ -139,6 +145,8 @@ Simple, org-scoped substring search across cases, alerts and observables. It sha
 - `alert_detail` PATCH/PUT: updatable fields only from `title,description,summary,severity,tlp,pap,
   flag,follow,status` (only-present); none supplied ⇒ 400; DELETE ⇒ **204**.
 - `alert/raw` returns `raw_payload` verbatim (never inlined elsewhere).
+- `alert/{id}/observable` GET: 200 = full `alert.alert_observables` list in the same `OutputObservable[]`
+  shape as POST (§15.7).
 - `alert/{id}/observable` POST: `data` string-or-array; unknown `dataType` ⇒ 400; create-time-only
   `tlp/pap/ioc/sighted/message`; response 201 = full `alert.alert_observables` list; **no automation
   dispatch** (P10-4).

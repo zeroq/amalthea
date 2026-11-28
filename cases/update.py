@@ -29,6 +29,11 @@ from identity.scoping import is_admin
 
 #: Scalar/enum fields the update surface accepts. One definition shared by the single PATCH
 #: (`_update_case`), the bulk PATCH (`_bulk_update_cases`) and the UI (`ui-case-edit`).
+#: Wire decoding happens in the serializer/view boundary. The service layer receives only this
+#: internal key, so TheHive field-name literals cannot leak back into domain services (TODO 2.3).
+CUSTOM_FIELD_UPDATES_PAYLOAD_KEY = "custom_field_updates"
+CUSTOM_FIELD_ERROR_FIELD = "custom_field"
+
 CASE_SCALAR_FIELDS = (
     "title",
     "description",
@@ -293,9 +298,10 @@ def propagate_close_to_alerts(case: Case, verdict: str, *, actor: Any) -> int:
 def apply_case_update(case: Case, payload: Mapping[str, Any], *, actor: Any) -> list[str]:
     """Apply a case update from a plain mapping (API `request.data` or a UI POST dict).
 
-    The single source of truth for the updatable field set, tag handling, the timeline events
-    (`status-changed`, `assigned`/`Unassigned`, `classification-changed`, `verdict-changed`,
-    `severity-changed`, `tags-changed`) and the "no updatable field" error.
+    The single source of truth for the updatable field set, tag handling, custom-field value
+    updates, the timeline events (`status-changed`, `assigned`/`Unassigned`,
+    `classification-changed`, `verdict-changed`, `severity-changed`, `tags-changed`,
+    `custom-field-updated`) and the "no updatable field" error.
     """
     previous_status = case.status.value if case.status_id else None
     previous_stage = case.status.stage if case.status_id else ""
@@ -316,7 +322,16 @@ def apply_case_update(case: Case, payload: Mapping[str, Any], *, actor: Any) -> 
     if tags_touched:
         _apply_case_tags(case, payload)
 
-    if not fields and not tags_touched:
+    # Custom-field writes go through the same helper as the UI edit endpoint. The wire view has
+    # already decoded the external shape into this internal key; lazily imported because the
+    # helper raises this module's CaseUpdateError and the UI imports us first.
+    custom_fields_touched = CUSTOM_FIELD_UPDATES_PAYLOAD_KEY in payload
+    if custom_fields_touched:
+        from cases.custom_fields import apply_custom_field_updates
+
+        apply_custom_field_updates(case, payload[CUSTOM_FIELD_UPDATES_PAYLOAD_KEY], actor=actor)
+
+    if not fields and not tags_touched and not custom_fields_touched:
         raise CaseUpdateError("BadRequest", "No updatable field supplied", {})
 
     closing = previous_stage != "Closed" and case.status.stage == "Closed"

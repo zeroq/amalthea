@@ -128,10 +128,12 @@ Constraint/index **names** are quoted verbatim — they are asserted by conforma
   second case is a write with no field change and no log line, reported as `refreshed` (**MAP-12**).
   Re-apply lives in `ingest/remap.py` (`REMAP_FIELDS` = title, description, summary, severity, date —
   see MAP-9/MAP-10) and *does* move `updated_at` (`auto_now` is named in `update_fields`).
-  Each entry is a `FieldWarning` (`{"field", "reason", "paths"?, "value_preview"?}`) whose `reason` is a
-  stable token — `not_found`/`unknown_value`/`bad_type`/`bad_transform`/`truncated` — with the first four
-  meaning "no value was produced" (`ingest.mapping.UNRESOLVED_REASONS`). That distinction is what makes
-  the page and the re-map dialog able to say *why* a field fell back, which the append-only log cannot.
+  Each entry is a `FieldWarning` (`{"field", "reason", "paths"?, "value_preview"?, "value_fingerprint"?}`)
+  whose `reason` is a stable token — `not_found`/`unknown_value`/`bad_type`/`bad_transform`/`truncated` —
+  with the first four meaning "no value was produced" (`ingest.mapping.UNRESOLVED_REASONS`). Values are
+  redacted: `value_preview` is `[redacted]` and `value_fingerprint` is `sha256:<16 hex chars>`. That
+  distinction is what makes the page and the re-map dialog able to say *why* a field fell back, which the
+  append-only log cannot.
 - Indexes: `alert_status_date_idx ("status","-date")`, `alert_corrkey_date_idx
   ("correlation_key","date")`, `alert_created_at_idx ("-created_at")`.
 - Constraints: `uniq_alert_source_type_ref (owner_org,source,type,source_ref)` — per-org dedupe

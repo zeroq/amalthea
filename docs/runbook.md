@@ -19,6 +19,15 @@ titles score highly.
   SIEM/EDR titles commonly embed per-event tokens (timestamps, IDs, UUIDs) that collapse
   the score far below the threshold for the "same event, different noise" case the feature
   exists to catch.
+- **Bounded text:** The summary + canonical payload text is truncated at
+  `ALERT_FUZZY_MAX_TEXT_SIZE` (default 256 KiB) before `ppdeep.hash`. A non-positive limit
+  disables hashing entirely. This caps SSDEEP CPU independently of the 5 MiB webhook body limit.
+- **Volatile noise:** In addition to the built-in key list, operator-configured keys and narrow
+  UUID/timestamp/epoch-looking scalar strings are dropped. Changing these settings changes hashes —
+  run `manage.py backfill_alert_ssdeep --force` after a configuration change.
+- **Scalar list ordering:** Lists whose elements are all scalars are sorted before hashing. Arrays
+  where order is semantically significant (e.g. attack-chain steps) can therefore hash identically
+  in different orders. Per-source list-sort configuration is a future decision.
 - **Empty hash:** If the payload cannot be hashed (oversize, overdeep, exception), the hash
   is stored as `""` and the alert is excluded from the fuzzy candidate set.
 - **Backfill:** A one-time `manage.py backfill_alert_ssdeep` command populates empty hashes
@@ -71,6 +80,33 @@ export AMALTHEA_ALERT_FUZZY_TITLE_GATE=false
 ```
 
 After changing any setting, restart the application (Django settings are read at startup).
+
+### CPU and canonicalization controls
+
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| `ALERT_FUZZY_MAX_TEXT_SIZE` | `AMALTHEA_ALERT_FUZZY_MAX_TEXT_SIZE` | **262144** | Maximum characters passed to `ppdeep.hash`; `<= 0` disables hashing. |
+| `ALERT_FUZZY_MAX_CASE_SIGNALS` | `AMALTHEA_ALERT_FUZZY_MAX_CASE_SIGNALS` | **50** | Maximum attached-alert hashes used as case signals. Worst-case Similar-tab comparisons: `50 × MAX_FUZZY_COMPARISONS (500) = 25,000`. |
+| `ALERT_FUZZY_EXTRA_VOLATILE_KEYS` | `AMALTHEA_ALERT_FUZZY_EXTRA_VOLATILE_KEYS` | see `base.py` | Comma-separated vendor-specific volatile keys. Keys are casefolded and `_`/`-` normalized. |
+| `ALERT_FUZZY_VOLATILE_VALUE_PATTERNS` | `AMALTHEA_ALERT_FUZZY_VOLATILE_VALUE_PATTERNS` | **true** | Drop scalar strings that look like UUIDs, ISO timestamps, or 10–13 digit epochs. Set `false` to restore key-only behavior. |
+
+Moving Similar-tab computation to a Celery task with cached results remains a deferred follow-up;
+the bounded synchronous path above is the current mitigation. Postgres timing measurement is also
+deferred until a dedicated harness is available.
+
+### Backfill safety
+
+`backfill_alert_ssdeep --force` recomputes every hash. If recomputation yields `""` (e.g. a payload
+became oversize), the existing hash is **preserved** by default. To explicitly blank such hashes —
+making those alerts non-comparable rather than stale — use:
+
+```bash
+.venv/bin/python manage.py backfill_alert_ssdeep --force --clear-on-failure
+```
+
+Without `--force`, `--clear-on-failure` has no practical effect because only empty-hash rows are
+selected. Changing any canonicalization setting requires a `--force` backfill to keep stored hashes
+consistent.
 
 ### No backfill required
 

@@ -409,14 +409,15 @@ UNREADABLE_SEVERITY: dict = {
 #: What `UNREADABLE_SEVERITY` leaves *stored* on an alert: the structured record, in the form a re-map
 #: replaces and the feed page's health card reads. Written by hand rather than by running a pass, so the
 #: health tests assert the reader against the shape ingest actually stores (the field is `field`, not
-#: `target`, and `value_preview` is display-only).
+#: `target`, and `value_preview`/`value_fingerprint` are display-only).
 UNREADABLE_SEVERITY_WARNINGS: dict = {
     "mapping": [
         {
             "field": "severity",
             "reason": "bad_type",
             "paths": ["$.severity"],
-            "value_preview": "70",
+            "value_preview": "[redacted]",
+            "value_fingerprint": "sha256:ff5a1ae012afa5d4",
         }
     ]
 }
@@ -667,7 +668,12 @@ class TestTheMappingHealth:
             source_ref="shortened",
             warnings={
                 "mapping": [
-                    {"field": "title", "reason": "truncated", "value_preview": "a very long title"},
+                    {
+                        "field": "title",
+                        "reason": "truncated",
+                        "value_preview": "[redacted]",
+                        "value_fingerprint": "sha256:49df6e1330593f41",
+                    },
                 ]
             },
         )

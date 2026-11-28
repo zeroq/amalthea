@@ -212,7 +212,6 @@ _WRITE_ONLY_ROUTES: set[str] = {
     "alert-import",
     "alert-import-into",
     "alert-merge",
-    "alert-observable-add",
     "alert-tag-link",
     "alert-procedure-create",
     "alert-procedures-create",

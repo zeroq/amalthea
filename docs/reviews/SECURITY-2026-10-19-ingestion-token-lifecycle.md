@@ -33,6 +33,13 @@
 | **Low** | **2** |
 | **Info** | **2** |
 
+### 2026-11-27 resolution addendum
+
+- **M1 (resolved in code):** `ui/views/ingestion_tokens.py::_lock_source` now takes a Postgres row lock on `IngestionSource` inside both the token-create retry transaction and the last-token delete/reap transaction. SQLite treats the lock as a no-op; the real concurrency harness remains a separate follow-up.
+- **M2 (accepted with mitigation):** the prefix stays 12 chars (no migration), but the webhook throttle bucket now hashes the prefix (`wh:token:{sha256(prefix)[:16]}:{window}`), so a collision no longer merges rate-limit buckets. Creation still retries three times; the remaining collision window is accepted and documented.
+- **L1 (resolved earlier):** `identity/admin.py` exposes `deactivated_at` in `list_display`/`list_filter`/`readonly_fields`.
+- **L2 (resolved):** the raw token prefix no longer appears in any webhook cache key.
+
 ---
 
 ## Findings

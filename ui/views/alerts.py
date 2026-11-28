@@ -661,8 +661,11 @@ def alert_bulk(request: HttpRequest) -> HttpResponse:
                     )
                     continue
                 alert.save(update_fields=[*fields, "updated_at"])
-        except Exception as exc:
-            results.append({"id": str(raw), "status": 400, "message": str(exc)[:200]})
+        except Exception:
+            logger.exception("alert bulk update failed", extra={"alert_id": str(raw)})
+            results.append(
+                {"id": str(raw), "status": 400, "message": "Could not update this alert."}
+            )
             continue
         results.append({"id": str(alert.id), "status": 200})
         updated += 1

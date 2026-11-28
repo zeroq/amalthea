@@ -13,6 +13,7 @@ receiver are marked `django_db` explicitly.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 
 import pytest
@@ -411,7 +412,9 @@ def test_structured_warnings_preview_the_offending_value() -> None:
     draft = apply_mapping(config, {"level": "high-severity"}, default_severity=2)
     assert draft.severity == 2
     (warning,) = [w for w in draft.field_warnings if w.reason == "unknown_value"]
-    assert warning.as_dict()["value_preview"] == "high-severity"
+    fingerprint = "sha256:" + hashlib.sha256(b"high-severity").hexdigest()[:16]
+    assert warning.as_dict()["value_preview"] == "[redacted]"
+    assert warning.as_dict()["value_fingerprint"] == fingerprint
 
 
 def test_an_unconfigured_field_is_not_a_warning() -> None:

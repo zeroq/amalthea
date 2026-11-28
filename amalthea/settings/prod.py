@@ -26,6 +26,12 @@ ALLOWED_HOSTS = [host for host in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",
 if not ALLOWED_HOSTS:
     raise ImproperlyConfigured("DJANGO_ALLOWED_HOSTS must list at least one host in production.")
 
+if WEBHOOK_PREAUTH_RATE_IP_PER_MIN <= 0:  # noqa: F405
+    raise ImproperlyConfigured(
+        "AMALTHEA_WEBHOOK_PREAUTH_IP must be positive in production; the pre-auth webhook "
+        "budget is the only throttle before an unauthenticated token lookup."
+    )
+
 # The MCP endpoint is fail-closed, but once enabled it must advertise a real
 # HTTPS resource identifier and have an explicit Host allowlist.  Refusing at
 # boot is safer than starting with localhost defaults in production.

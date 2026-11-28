@@ -139,6 +139,7 @@ class TestRouteEnumerationConformance:
             "alert-list",
             "alert-detail",
             "alert-raw",
+            "alert-observable-add",
             "alert-comment-list",
             "case-task-list",
             "case-observable-list",
@@ -324,6 +325,7 @@ class TestRouteEnumerationConformance:
             "alert-list": {},
             "alert-detail": {"alert_id": str(self.alert1.id)},
             "alert-raw": {"alert_id": str(self.alert1.id)},
+            "alert-observable-add": {"alert_id": str(self.alert1.id)},
             "alert-comment-list": {"alert_id": str(self.alert1.id)},
             "case-task-list": {"case_id": str(self.case1.id)},
             "case-observable-list": {"case_id": str(self.case1.id)},
@@ -945,7 +947,7 @@ class TestWriteRouteEnumerationConformance:
             "alert-import",  # POST (no slash variant)
             "alert-import-into",  # POST (no slash variant)
             "alert-merge",  # POST (no slash variant)
-            "alert-observable-add",  # POST (no slash variant)
+            "alert-observable-add",  # GET/POST (no slash variant)
             "alert-procedure-create",  # POST (no slash variant)
             "alert-procedures-create",  # POST (no slash variant)
             "alert-tag-add",  # POST (no slash variant)

@@ -37,10 +37,12 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from django.conf import settings
 from django.core.cache import cache
+from django.db import connection
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
@@ -48,6 +50,7 @@ from django.utils import timezone
 from alerts.models import Alert
 from identity.models import AuditLog, IngestionToken, Organisation, User
 from ingest.models import IngestionSource
+from ui.views.ingestion_tokens import _lock_source
 
 # The show-once modal renders `<code id="token-plaintext">{{ plaintext }}</code>`.
 _PLAINTEXT_RE = re.compile(r'id="token-plaintext">([^<]+)<')
@@ -377,6 +380,24 @@ class TestAdminOrgBinding:
         token = IngestionToken.objects.get(name="prod")
         assert token.organisation_id == org_a.id, "an admin minted a token for another tenant"
 
+    def test_an_admin_cannot_bind_a_token_to_another_orgs_feed(self, db: None) -> None:
+        """AC-11 / §10.12-fu4 — a foreign feed name must not produce a foreign-bound token."""
+        org_a, org_b = _mk_org("Org A"), _mk_org("Org B")
+        admin_a = _mk_user("admin-a", org_a, role="admin")
+        foreign_source = _mk_source(slug="foreign", name="Foreign Feed", organisation=org_b)
+
+        resp = _create_token_via_ui(
+            _ui_client(admin_a), source=foreign_source, name="prod", organisation=org_b
+        )
+
+        assert resp.status_code == 200
+        token = IngestionToken.objects.get(name="prod")
+        foreign_source.refresh_from_db()
+        assert token.organisation_id == org_a.id
+        assert token.source.organisation_id == org_a.id
+        assert token.source_id != foreign_source.id
+        assert not IngestionToken.objects.filter(source=foreign_source).exists()
+
 
 class TestEndToEnd:
     """AC-9/AC-15 — mint in the UI, use it on the webhook, revoke it, and watch it fail."""
@@ -420,10 +441,15 @@ class TestTokenActivationLifecycle:
     """
 
     def _mint(self, org: Organisation, admin: User, *, slug: str, name: str = "prod"):
-        """Mint through the UI and return `(client, token, plaintext)`."""
+        """Mint through the UI and return `(client, token, plaintext)`.
+
+        The posted source name must equal the seeded slug: the create form binds by
+        `slugify(source_name)`, so a generic name like "Source" would be shadowed by a
+        freshly-provisioned feed and leave the slug-named row orphaned.
+        """
         client = _ui_client(admin)
         resp = _create_token_via_ui(
-            client, source=_mk_source(slug=slug, organisation=org), name=name
+            client, source=_mk_source(slug=slug, name=slug, organisation=org), name=name
         )
         assert resp.status_code == 200
         return client, IngestionToken.objects.get(name=name), _plaintext_from(resp)
@@ -547,6 +573,7 @@ class TestTokenActivationLifecycle:
 
         active = client.get(reverse("ui-settings-sources")).content.decode()
         assert 'data-modal-open="deactivate-token-' in active
+        assert 'data-modal-open="revoke-token-' in active
         assert 'data-modal-open="delete-token-' not in active, "an active token is not deletable"
 
         client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": token.id}))
@@ -555,11 +582,13 @@ class TestTokenActivationLifecycle:
         assert reverse("ui-settings-token-activate", kwargs={"token_id": token.id}) in paused
         assert 'data-modal-open="delete-token-' in paused
         assert 'data-modal-open="deactivate-token-' not in paused
+        assert 'data-modal-open="revoke-token-' not in paused
 
         client.post(reverse("ui-settings-token-revoke", kwargs={"token_id": token.id}))
         revoked = client.get(reverse("ui-settings-sources")).content.decode()
         assert "Revoked" in revoked
         assert 'data-modal-open="delete-token-' in revoked
+        assert 'data-modal-open="revoke-token-' not in revoked
         assert reverse("ui-settings-token-activate", kwargs={"token_id": token.id}) not in revoked
 
 
@@ -753,6 +782,94 @@ class TestFeedReapedWithLastToken:
         body = client.get(reverse("ui-settings-sources")).content.decode()
         assert "This is the last token for feed" in body
         assert "warn-src" in body
+
+    def test_deleting_one_of_two_tokens_keeps_the_sibling_live(self, db: None) -> None:
+        """A shared feed is not reaped while another credential can still present to it."""
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client = _ui_client(admin)
+        source = _mk_source(slug="shared-src", name="shared-src", organisation=org)
+        first, _first_plaintext = IngestionToken.create_token(
+            source=source, organisation=org, name="first"
+        )
+        _second, second_plaintext = IngestionToken.create_token(
+            source=source, organisation=org, name="second"
+        )
+
+        client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": first.id}))
+        client.post(reverse("ui-settings-token-delete", kwargs={"token_id": first.id}))
+
+        assert IngestionSource.objects.filter(pk=source.pk).exists()
+        assert IngestionToken.objects.filter(source=source, name="first").exists() is False
+        assert IngestionToken.objects.filter(source=source, name="second").exists()
+        assert (
+            _localhost_webhook(client, second_plaintext, source_ref="sibling-live").status_code
+            == 201
+        )
+
+    def test_a_raise_before_source_deletion_rolls_back_the_token(self, db: None) -> None:
+        """The reap is atomic: a failed audit must not leave a deleted credential behind."""
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client, token, _plaintext = self._mint(org, admin, slug="rollback-src")
+        source_id = token.source_id
+        token_id = token.id
+        client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": token_id}))
+
+        with mock.patch(
+            "identity.audit.record_ingestion_source_deleted", side_effect=RuntimeError("boom")
+        ):
+            with pytest.raises(RuntimeError):
+                client.post(reverse("ui-settings-token-delete", kwargs={"token_id": token_id}))
+
+        assert IngestionToken.objects.filter(pk=token_id).exists()
+        assert IngestionSource.objects.filter(pk=source_id).exists()
+
+
+class TestTokenSourceLocking:
+    """§10.12-fu1 — create and delete serialize on the parent feed row."""
+
+    @staticmethod
+    def _spy(captured: list[bool]):
+        def _locked(source: IngestionSource) -> IngestionSource:
+            captured.append(connection.in_atomic_block)
+            return _lock_source(source)
+
+        return _locked
+
+    def test_create_locks_the_source_inside_the_transaction(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client = _ui_client(admin)
+        source = _mk_source(slug="lock-create", name="lock-create", organisation=org)
+        captured: list[bool] = []
+
+        with mock.patch(
+            "ui.views.ingestion_tokens._lock_source", side_effect=self._spy(captured)
+        ) as lock:
+            resp = _create_token_via_ui(client, source=source, name="prod")
+
+        assert resp.status_code == 200
+        assert lock.call_count == 1
+        assert captured == [True]
+
+    def test_delete_locks_the_source_inside_the_transaction(self, db: None) -> None:
+        org = _mk_org("Org1")
+        admin = _mk_user("admin", org, role="admin")
+        client = _ui_client(admin)
+        source = _mk_source(slug="lock-delete", name="lock-delete", organisation=org)
+        token, _ = IngestionToken.create_token(source=source, organisation=org, name="prod")
+        client.post(reverse("ui-settings-token-deactivate", kwargs={"token_id": token.id}))
+        captured: list[bool] = []
+
+        with mock.patch(
+            "ui.views.ingestion_tokens._lock_source", side_effect=self._spy(captured)
+        ) as lock:
+            resp = client.post(reverse("ui-settings-token-delete", kwargs={"token_id": token.id}))
+
+        assert resp.status_code == 302
+        assert lock.call_count == 1
+        assert captured == [True]
 
 
 class TestSourceDetailTokenStatus:

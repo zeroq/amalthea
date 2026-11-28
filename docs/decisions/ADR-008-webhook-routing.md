@@ -69,10 +69,12 @@ org stamp.
   single secret; the org-stamp rule (`owner_org` from the token, never the body) is now the *only* trust
   input on ingest; the mapping profile is decoupled from the URL, so renaming a feed no longer breaks
   integrations.
-- **Negative / accepted:** an unauthenticated request costs one indexed lookup + one Argon2 verify before
-  it is rejected, so a pre-auth per-IP throttle is still owed (tracked in `TODO.md` §10.10). Operators with
-  existing `/webhook/<slug>/` clients must repoint them at the bare URL — a breaking API change, taken
-  deliberately while the surface has no external consumers.
+- **Negative / accepted:** an unauthenticated request costs one indexed lookup + (on a prefix hit) one
+  Argon2 verify before it is rejected; §10.10 now bounds that work with a separate pre-auth per-IP
+  budget (`AMALTHEA_WEBHOOK_PREAUTH_IP`, 600/min default, fail-closed in production) that cannot spend
+  an authenticated sender's quota. Operators with existing `/webhook/<slug>/` clients must repoint
+  them at the bare URL — a breaking API change, taken deliberately while the surface has no external
+  consumers.
 - **Documentation:** `AGENTS.md` §2 (Module A) was corrected to the bare path — `AGENTS.md` §4 already
   specified it, so no spec change was needed beyond removing the contradiction. `docs/spec/api.md`,
   `docs/spec/identity-auth.md`, `docs/spec/data-model.md`, `README.md` and ADR-002's endpoint table were

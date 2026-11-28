@@ -18,7 +18,7 @@ CI_SMOKE_TESTS := \
 	tests/conformance/test_mcp_asgi.py
 
 .DEFAULT_GOAL := help
-.PHONY: help check check-fast check-ci quality tests typing migrations coverage audit lock hooks secrets clean css css-check
+.PHONY: help check check-fast check-ci quality tests typing migrations coverage audit lock lock-check hooks secrets clean css css-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -65,3 +65,9 @@ css-check: ## Byte-compare committed app.css against fresh compile from app.src.
 	  echo "⚠ css-check SKIPPED (not a pass): $(TAILWIND) cannot run on this host ($(shell uname -sm))"; \
 	  echo "   Override with TAILWIND=/path/to/tailwindcss if you have a compatible binary."; \
 	fi
+
+lock: ## Regenerate requirements/{base,dev}.txt with all-platform hashes
+	@bash scripts/lock.sh
+
+lock-check: ## Fail if committed requirements differ from the lock output
+	@bash scripts/lock.sh --check

@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from cases.ledger import append_timeline_event
 from cases.models import TTP, Procedure
+from identity.audit import record_procedure_change
 
 
 def create_procedure(
@@ -43,4 +45,40 @@ def create_procedure(
     )
 
 
-__all__ = ["create_procedure"]
+def attach_case_procedure(
+    *,
+    request: Any,
+    actor: Any,
+    case: Any,
+    **kwargs: Any,
+) -> Procedure:
+    """Create a case procedure and record the two side effects callers must not forget.
+
+    `create_procedure` stays a plain row writer for alert-scoped procedures and import paths. The
+    case UI and case API both go through this wrapper so an attached TTP is auditable and visible
+    on the case timeline regardless of which surface an analyst used.
+    """
+    procedure = create_procedure(case=case, **kwargs)
+    record_procedure_change(request, actor=actor, case=case, procedure=procedure)
+    label = procedure.pattern_id or procedure.pattern_name or "procedure"
+    append_timeline_event(
+        case,
+        title=f"Procedure attached: {label}",
+        kind="procedure-attached",
+        description=(
+            f"ATT&CK pattern {label}"
+            + (f" — {procedure.pattern_name}" if procedure.pattern_name else "")
+        ),
+        actor=actor,
+        metadata={
+            "procedure_id": str(procedure.id),
+            "pattern_id": procedure.pattern_id,
+            "pattern_name": procedure.pattern_name,
+            "tactic": procedure.tactic,
+            "ttp_id": str(procedure.ttp_id) if procedure.ttp_id else None,
+        },
+    )
+    return procedure
+
+
+__all__ = ["attach_case_procedure", "create_procedure"]

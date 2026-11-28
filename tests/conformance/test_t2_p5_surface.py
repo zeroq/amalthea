@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from rest_framework.test import APIClient
 
-from cases.models import TTP, Procedure
-from identity.models import Organisation, User
+from cases.models import TTP, Procedure, TimelineEvent
+from identity.models import AuditLog, Organisation, User
 
 from ._t1_seed import _alert, _api_key_client, _case
 
@@ -43,6 +43,12 @@ def test_a_procedure_round_trips_on_a_case(api: APIClient, analyst: User) -> Non
     assert body["occurDate"] is not None
     assert Procedure.objects.get(pk=pid).case_id == case.id
 
+    audit = AuditLog.objects.get(action="procedure.created", target_type="Procedure", target_id=pid)
+    assert audit.actor == analyst
+    assert audit.target_org == case.owner_org
+    event = TimelineEvent.objects.get(case=case, kind="procedure-attached")
+    assert event.metadata["procedure_id"] == pid
+
     fetched = api.get(f"/api/v1/procedure/{pid}")
     assert fetched.status_code == 200, fetched.content
 
@@ -65,6 +71,9 @@ def test_procedures_can_be_attached_in_bulk(api: APIClient, analyst: User) -> No
     assert created.status_code == 201, created.content
     assert [p["patternId"] for p in created.json()] == ["T1001", "T1002"]
     assert case.procedures.count() == 2
+    audits = AuditLog.objects.filter(action="procedure.created", target_type="Procedure")
+    assert audits.count() == 2
+    assert TimelineEvent.objects.filter(case=case, kind="procedure-attached").count() == 2
 
 
 def test_a_procedure_attaches_to_an_alert(api: APIClient, analyst: User) -> None:

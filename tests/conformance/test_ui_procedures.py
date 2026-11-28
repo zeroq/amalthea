@@ -20,8 +20,8 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from cases.models import TTP, Case, CaseStatus, Procedure
-from identity.models import Organisation, User
+from cases.models import TTP, Case, CaseStatus, Procedure, TimelineEvent
+from identity.models import AuditLog, Organisation, User
 
 # --------------------------------------------------------------------------
 # Fixtures
@@ -221,7 +221,7 @@ def test_case_detail_procedures_empty_state(browser: Client, case: Case, ttps: l
 
 
 def test_procedure_create_post_valid_redirects_and_creates(
-    browser: Client, case: Case, ttps: list[TTP]
+    browser: Client, analyst: User, case: Case, ttps: list[TTP]
 ) -> None:
     """P3: valid POST creates Procedure and redirects to case detail."""
     url = reverse("ui-case-procedure-create", kwargs={"case_id": case.number})
@@ -250,6 +250,20 @@ def test_procedure_create_post_valid_redirects_and_creates(
     assert proc.description == "Saw powershell execution in logs."
     assert proc.ttp_id == ttp.id
     assert proc.occur_date is not None
+
+    audit = AuditLog.objects.get(
+        action="procedure.created", target_type="Procedure", target_id=str(proc.id)
+    )
+    assert audit.actor == analyst
+    assert audit.target_org == case.owner_org
+    assert audit.details["case_id"] == str(case.id)
+    assert audit.details["pattern_id"] == "T1059.001"
+    assert "description" not in audit.details
+
+    event = TimelineEvent.objects.get(case=case, kind="procedure-attached")
+    assert event.actor == analyst
+    assert event.metadata["procedure_id"] == str(proc.id)
+    assert event.metadata["pattern_id"] == "T1059.001"
 
 
 def test_procedure_create_post_without_ttp_works(browser: Client, case: Case) -> None:
@@ -423,7 +437,7 @@ def test_procedure_create_post_only_no_get(browser: Client, case: Case) -> None:
 
 
 def test_procedures_bulk_create_valid_creates_multiple(
-    browser: Client, case: Case, ttps: list[TTP]
+    browser: Client, analyst: User, case: Case, ttps: list[TTP]
 ) -> None:
     """P3: bulk POST creates multiple procedures and reports count."""
     url = reverse("ui-case-procedures-create", kwargs={"case_id": case.number})
@@ -454,6 +468,13 @@ def test_procedures_bulk_create_valid_creates_multiple(
     assert pattern_ids == {"T1059.001", "T1105"}
     ttp_ids = {p.ttp_id for p in procs}
     assert ttp_ids == {ttp1.id, ttp2.id}
+
+    audits = AuditLog.objects.filter(action="procedure.created", target_type="Procedure")
+    assert {a.target_id for a in audits} == {str(p.id) for p in procs}
+    assert all(a.actor == analyst and a.target_org == case.owner_org for a in audits)
+
+    events = TimelineEvent.objects.filter(case=case, kind="procedure-attached")
+    assert {e.metadata["procedure_id"] for e in events} == {str(p.id) for p in procs}
 
 
 def test_procedures_bulk_create_with_list_style_fields(browser: Client, case: Case) -> None:

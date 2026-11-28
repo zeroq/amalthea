@@ -41,6 +41,7 @@ from unittest import mock
 import ppdeep
 import pytest
 from django.conf import settings
+from django.contrib.messages import get_messages
 from django.core.management import call_command
 from django.test import Client, override_settings
 from django.urls import reverse
@@ -432,8 +433,13 @@ class TestCrossOrgIsolation:
             _link_url(case), {"alert_id": str(cross_org.id), "tab": "similar"}
         )
 
-        # Redirect happens either way (success or error banner) — the invariant is persistence.
+        # Redirect happens either way — the invariant is persistence plus honest feedback.
         assert resp.status_code == 302
+        messages = [str(message) for message in get_messages(resp.wsgi_request)]
+        assert any("Cross-org" in message and "refused" in message for message in messages), (
+            messages
+        )
+        assert not any("Alert linked to case" in message for message in messages)
         cross_org.refresh_from_db()
         assert cross_org.case_id is None
         assert TimelineEvent.objects.filter(case=case).count() == 0

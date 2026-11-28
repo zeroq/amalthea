@@ -554,3 +554,36 @@ def record_mcp_oauth_binding_change(
         target_id=str(getattr(binding, "id", "")),
         ip=_get_client_ip(request),
     )
+
+
+def record_procedure_change(
+    request: HttpRequest,
+    *,
+    actor: User,
+    case: object,
+    procedure: object,
+    action: str = "procedure.created",
+) -> None:
+    """Record a case-procedure attachment.
+
+    Only identifiers and ATT&CK metadata are stored. A procedure's free-text
+    ``description`` is incident content and must never enter the audit table.
+    """
+    from identity.models import AuditLog
+
+    AuditLog.objects.create(
+        actor=actor,
+        actor_org=getattr(actor, "org", None),
+        target_org=getattr(case, "owner_org", None),
+        action=action,
+        target_type="Procedure",
+        target_id=str(getattr(procedure, "id", "")),
+        details={
+            "case_id": str(getattr(case, "id", "")),
+            "pattern_id": getattr(procedure, "pattern_id", ""),
+            "pattern_name": getattr(procedure, "pattern_name", ""),
+            "tactic": getattr(procedure, "tactic", ""),
+            "ttp_id": str(getattr(procedure, "ttp_id", "") or "") or None,
+        },
+        ip=_get_client_ip(request),
+    )

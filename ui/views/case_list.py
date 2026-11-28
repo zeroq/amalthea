@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from django.contrib import messages
@@ -36,6 +37,8 @@ from .common import (
     _base_context,
     not_viewer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _case_bulk_redirect(request: HttpRequest) -> HttpResponse:
@@ -118,8 +121,11 @@ def case_bulk(request: HttpRequest) -> HttpResponse:
                     )
                     continue
                 case.save(update_fields=[*fields, "updated_at"])
-        except Exception as exc:
-            results.append({"id": str(raw), "status": 400, "message": str(exc)[:200]})
+        except Exception:
+            logger.exception("case bulk update failed", extra={"case_id": str(raw)})
+            results.append(
+                {"id": str(raw), "status": 400, "message": "Could not update this case."}
+            )
             continue
         results.append({"id": str(case.id), "status": 200})
         updated += 1

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Final
@@ -15,6 +16,12 @@ from .values import (
     _severity_from_name,
     _severity_from_score,
 )
+
+
+def _value_fingerprint(value: Any) -> str:
+    """One-way, bounded identifier for a warning value; never include the raw value."""
+    digest = hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:16]
+    return f"sha256:{digest}"
 
 
 @dataclass(frozen=True)
@@ -36,7 +43,8 @@ class FieldWarning:
         if self.paths:
             out["paths"] = list(self.paths)
         if self.value_any is not None:
-            out["value_preview"] = str(self.value_any)[:80]
+            out["value_preview"] = "[redacted]"
+            out["value_fingerprint"] = _value_fingerprint(self.value_any)
         return out
 
     def as_text(self) -> str:
@@ -44,7 +52,8 @@ class FieldWarning:
         if self.reason == "not_found":
             return f"{self.target}_unmapped: nothing at {paths}"
         if self.reason == "unknown_value":
-            return f"{self.target}_unknown_value: {paths} held {self.value_any!r}"
+            fingerprint = _value_fingerprint(self.value_any)
+            return f"{self.target}_unknown_value: {paths} held [redacted] ({fingerprint})"
         return f"{self.target}_{self.reason}: {paths}"
 
 
